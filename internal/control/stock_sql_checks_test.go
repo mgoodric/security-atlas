@@ -113,8 +113,13 @@ func TestStockSQLChecksGuardTimestampCasts(t *testing.T) {
 			if q.Language != "sql" {
 				continue
 			}
-			for _, field := range eval.SQLUnguardedTimestampCasts(q.Expression) {
-				t.Errorf("%s / %s: casts payload->>'%s' without the full guard; match it against eval.RFC3339Pattern AND pg_input_is_valid(payload->>'%s', 'timestamptz') first (docs/spec/control-bundle.md, \"Reading a payload timestamp\")", name, q.ID, field, field)
+			unguarded, err := eval.SQLUnguardedTimestampCasts(q.Expression)
+			if err != nil {
+				t.Errorf("%s / %s: %v", name, q.ID, err)
+				continue
+			}
+			for _, v := range unguarded {
+				t.Errorf("%s / %s: converts %s to a time outside the full guard; put the conversion in the THEN branch of a CASE WHEN that matches %s against eval.RFC3339Pattern AND pg_input_is_valid(%s, 'timestamptz') (docs/spec/control-bundle.md, \"Reading a payload timestamp\")", name, q.ID, v, v, v)
 			}
 		}
 	})

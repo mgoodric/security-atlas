@@ -20,8 +20,18 @@ import (
 var boundKinds = []string{
 	"access_review.completion.v1",
 	"manual.upload.v1",
-	"sast.scan_result.v1",
 	"security_awareness.training_completion.v1",
+}
+
+// without returns kinds minus drop, in order.
+func without(kinds []string, drop ...string) []string {
+	out := []string{}
+	for _, k := range kinds {
+		if !slices.Contains(drop, k) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func TestKindReportsTheList(t *testing.T) {
@@ -70,9 +80,17 @@ func TestKindsReturnsACopy(t *testing.T) {
 	}
 }
 
+// testCutovers puts sast's own cutover a day after the first.
+func testCutovers() (Cutovers, time.Time, time.Time) {
+	first := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	sast := first.Add(24 * time.Hour)
+	return Cutovers{First: first, Late: map[string]time.Time{"sast.scan_result.v1": sast}}, first, sast
+}
+
 func TestKindsAsOfPinsReadsAnchoredBeforeCutover(t *testing.T) {
 	t.Parallel()
-	cut := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	c, cut, sastCut := testCutovers()
+	firstOnly := append(unbound.Kinds(), without(Kinds(), "sast.scan_result.v1")...)
 	for _, tc := range []struct {
 		name   string
 		anchor time.Time
@@ -80,10 +98,14 @@ func TestKindsAsOfPinsReadsAnchoredBeforeCutover(t *testing.T) {
 	}{
 		{"unanchored (open period, live read)", time.Time{}, ControlFreeKinds()},
 		{"before the cutover", cut.Add(-time.Nanosecond), unbound.Kinds()},
-		{"at the cutover", cut, ControlFreeKinds()},
-		{"after the cutover", cut.Add(time.Hour), ControlFreeKinds()},
+		{"at the cutover", cut, firstOnly},
+		{"after the cutover", cut.Add(time.Hour), firstOnly},
+		// #2973: a late-routed kind joins only at its own cutover.
+		{"just before sast's cutover", sastCut.Add(-time.Nanosecond), firstOnly},
+		{"at sast's cutover", sastCut, ControlFreeKinds()},
+		{"after sast's cutover", sastCut.Add(time.Hour), ControlFreeKinds()},
 	} {
-		if got := KindsAsOf(cut, tc.anchor); !slices.Equal(got, tc.want) {
+		if got := KindsAsOf(c, tc.anchor); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: KindsAsOf = %v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -91,7 +113,8 @@ func TestKindsAsOfPinsReadsAnchoredBeforeCutover(t *testing.T) {
 
 func TestPopulationKindsAtAnchorsOnTheEarlierOfCreatedAndFrozen(t *testing.T) {
 	t.Parallel()
-	cut := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	c, cut, sastCut := testCutovers()
+	firstOnly := append(unbound.Kinds(), without(Kinds(), "sast.scan_result.v1")...)
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 	for _, tc := range []struct {
 		name string
@@ -99,14 +122,77 @@ func TestPopulationKindsAtAnchorsOnTheEarlierOfCreatedAndFrozen(t *testing.T) {
 		want []string
 	}{
 		{"created before, never frozen", dbx.Population{CreatedAt: ts(cut.Add(-time.Hour))}, unbound.Kinds()},
-		{"created after, never frozen", dbx.Population{CreatedAt: ts(cut.Add(time.Hour))}, ControlFreeKinds()},
+		{"created after, never frozen", dbx.Population{CreatedAt: ts(cut.Add(time.Hour))}, firstOnly},
 		{"created after, frozen before (attached to an old period)",
 			dbx.Population{CreatedAt: ts(cut.Add(time.Hour)), FrozenAt: ts(cut.Add(-time.Hour))}, unbound.Kinds()},
-		{"created after, frozen after", dbx.Population{CreatedAt: ts(cut.Add(time.Hour)), FrozenAt: ts(cut.Add(2 * time.Hour))}, ControlFreeKinds()},
+		{"created after, frozen after", dbx.Population{CreatedAt: ts(cut.Add(time.Hour)), FrozenAt: ts(cut.Add(2 * time.Hour))}, firstOnly},
+		{"created after sast's cutover", dbx.Population{CreatedAt: ts(sastCut.Add(time.Hour))}, ControlFreeKinds()},
+		{"created after sast's cutover, frozen between the two",
+			dbx.Population{CreatedAt: ts(sastCut.Add(time.Hour)), FrozenAt: ts(cut.Add(time.Hour))}, firstOnly},
 	} {
-		if got := PopulationKindsAt(cut, tc.pop); !slices.Equal(got, tc.want) {
+		if got := PopulationKindsAt(c, tc.pop); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: PopulationKindsAt = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// #2973 review: every routed kind resolves through Cutovers.For, given the
+// rows the migrations write (one per late kind). A kind routed from its
+// first record, such as one a later connector adds, needs no row and reads
+// the first cutover; only a kind in lateKinds reads its own.
+func TestEveryRoutedKindResolvesItsCutover(t *testing.T) {
+	t.Parallel()
+	first := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	late := first.Add(48 * time.Hour)
+	var rows []dbx.EvidenceRoutingKindCutover
+	for _, k := range lateKinds {
+		rows = append(rows, dbx.EvidenceRoutingKindCutover{EvidenceKind: k, CutAt: pgtype.Timestamptz{Time: late, Valid: true}})
+	}
+	c, err := cutoversFrom(first, rows)
+	if err != nil {
+		t.Fatalf("cutoversFrom with a row per late kind: %v", err)
+	}
+	for _, k := range Kinds() {
+		want := first
+		if slices.Contains(lateKinds, k) {
+			want = late
+		}
+		if got := c.For(k); got.IsZero() || !got.Equal(want) {
+			t.Errorf("For(%q) = %s, want %s", k, got, want)
+		}
+	}
+}
+
+// #2973: every late kind is routed, and Cutover refuses a late kind with no
+// row of its own rather than reading it at the first cutover.
+func TestLateKindsNeedTheirOwnCutover(t *testing.T) {
+	t.Parallel()
+	for _, k := range lateKinds {
+		if !Kind(k) {
+			t.Errorf("late kind %q is not routed", k)
+		}
+	}
+	first := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	if _, err := cutoversFrom(first, nil); err == nil {
+		t.Error("cutoversFrom with no rows: want an error naming the late kind, got nil")
+	}
+	if _, err := cutoversFrom(first, []dbx.EvidenceRoutingKindCutover{{EvidenceKind: "sast.scan_result.v1"}}); err == nil {
+		t.Error("cutoversFrom with a NULL cut_at: want an error, got nil")
+	}
+	late := first.Add(time.Hour)
+	c, err := cutoversFrom(first, []dbx.EvidenceRoutingKindCutover{
+		{EvidenceKind: "sast.scan_result.v1", CutAt: ts(late)},
+		{EvidenceKind: "github.repo_protection.v2", CutAt: ts(late)}, // not late in Go: ignored
+	})
+	if err != nil {
+		t.Fatalf("cutoversFrom: %v", err)
+	}
+	if got := c.For("sast.scan_result.v1"); !got.Equal(late) {
+		t.Errorf("For(sast) = %s, want %s", got, late)
+	}
+	if got := c.For("github.repo_protection.v2"); !got.Equal(first) {
+		t.Errorf("For(github.repo_protection.v2) = %s, want the first cutover %s", got, first)
 	}
 }
 
@@ -162,5 +248,11 @@ func TestWithin(t *testing.T) {
 	}
 	if got := Within(ControlFreeKinds()); !slices.Equal(got, Kinds()) {
 		t.Fatalf("Within(ControlFreeKinds()) = %v, want Kinds() %v", got, Kinds())
+	}
+	// #2973: a read pinned between the first cutover and sast's keeps the
+	// control_ref leg open for sast, as it was while sast was bound.
+	c, cut, _ := testCutovers()
+	if got := Within(KindsAsOf(c, cut.Add(time.Hour))); slices.Contains(got, "sast.scan_result.v1") || len(got) != len(Kinds())-1 {
+		t.Fatalf("Within(pinned between the cutovers) = %v, want every routed kind but sast", got)
 	}
 }

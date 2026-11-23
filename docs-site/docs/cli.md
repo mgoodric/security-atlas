@@ -107,13 +107,13 @@ the tables below cover the flags operators reach for most often.
 
 ```sh
 security-atlas-cli evidence push \
-  --kind sast.scan_result.v1 \
+  --kind access_review.completion.v1 \
   --control <control id> \
   --scope '{"environment":"prod"}' \
   --observed-at "$(date -u +%FT%TZ)" \
   --result pass \
-  --payload @./scan-result.json \
-  --idempotency-key "ci-$GITHUB_RUN_ID" \
+  --payload @./access-review.json \
+  --idempotency-key "review-$GITHUB_RUN_ID" \
   --actor-id "github-actions"
 ```
 
@@ -145,17 +145,17 @@ walks the whole path.
 
 No bundled connector emits `sast.scan_result.v1`; a CI job pushes each scan
 itself. Three stock controls read the findings, from schema version 1.1.0
-on (#2831):
+on (#2831); 1.2.0 adds a `cwe` list per finding (#2973):
 
-| Control                              | Fails when the repository's latest scan…                                                                                           |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `soc2_cc7_1_vulnerability_detection` | is 168 hours old or older, or has an unsuppressed `critical` finding                                                               |
-| `soc2_pi1_2_input_completeness`      | has an unsuppressed finding under `injection.sql`, `injection.command`, `deserialization.unsafe` or `input.schema_violation`       |
-| `soc2_pi1_3_processing_validity`     | has an unsuppressed finding under `authz.missing_check`, `authz.idor`, `authz.privilege_escalation` or `authz.broken_object_level` |
+| Control                              | Fails when the repository's latest scan…                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `soc2_cc7_1_vulnerability_detection` | is 168 hours old or older, or has an unsuppressed `critical` finding                                                                                                           |
+| `soc2_pi1_2_input_completeness`      | has an unsuppressed finding under `injection.sql`, `injection.command`, `deserialization.unsafe` or `input.schema_violation`, or one listing CWE-20, CWE-78, CWE-89 or CWE-502 |
+| `soc2_pi1_3_processing_validity`     | has an unsuppressed finding under `authz.missing_check`, `authz.idor`, `authz.privilege_escalation` or `authz.broken_object_level`, or one listing CWE-269, CWE-639 or CWE-862 |
 
 The payload names the `repository` and lists every finding, suppressed ones
 included, as `rule_id`, `severity` (`critical`, `high`, `medium`, `low` or
-`info`) and `suppressed`:
+`info`), `suppressed` and, at 1.2.0, `cwe`:
 
 ```json
 {
@@ -165,7 +165,12 @@ included, as `rule_id`, `severity` (`critical`, `high`, `medium`, `low` or
   "repository": "acme/api",
   "report_uri": "https://ci.example.com/runs/1234/sarif",
   "findings": [
-    { "rule_id": "injection.sql", "severity": "high", "suppressed": false },
+    {
+      "rule_id": "python.lang.security.audit.formatted-sql-query",
+      "severity": "high",
+      "suppressed": false,
+      "cwe": ["CWE-89"]
+    },
     {
       "rule_id": "python.flask.debug-enabled",
       "severity": "low",
@@ -175,38 +180,37 @@ included, as `rule_id`, `severity` (`critical`, `high`, `medium`, `low` or
 }
 ```
 
-- **Rule ids.** pi1_2 and pi1_3 match the platform rule ids above exactly.
-  Your scanner has its own, so the CI job maps the rules you treat as SQL
-  injection, IDOR and so on onto them before pushing. Any other rule id is
-  kept as sent and is read only by cc7_1, for its severity.
+- **Rule ids or CWEs.** pi1_2 and pi1_3 select a finding by either one,
+  matched exactly. Most SARIF producers tag a rule with its CWEs (CodeQL as
+  `external/cwe/cwe-89`, Semgrep as `CWE-89: ...`); write each as `CWE-89`
+  and no rule mapping is needed. Without CWEs, the CI job maps the rules
+  you treat as SQL injection, IDOR and so on onto the platform rule ids.
+  Any other finding is kept as sent and is read only by cc7_1, for its
+  severity.
 - **Severity.** Map the scanner's levels onto the five values. A SARIF
   `error` is not necessarily `critical`; decide which of your levels is.
 - **Every finding.** Send the whole list for each scan: the latest scan of a
   repository replaces the earlier one. An empty `findings` array is a clean
   scan. A scan without `findings` (a 1.0.0 record) leaves all three
   controls inconclusive.
-- **One push per control.** `sast.scan_result.v1` is bound to the control
-  named in `--control`, so a scan reaches only that control. Push the same
-  payload once for each control that should judge it, each with its own
-  idempotency key.
+- **One push per scan.** `sast.scan_result.v1` is routed by evidence type
+  (#2973): one push reaches all three controls, and `--control` is not
+  needed. Before #2973 it was bound, and a scan was pushed once per
+  control; a pipeline that still does that stores three identical scans,
+  each read by all three controls, which gives the same verdict.
 - **Size.** An inline payload is capped at 1 MiB, roughly ten thousand
   findings. Put the full report at `report_uri`.
 
 ```sh
-for control in soc2_cc7_1_vulnerability_detection \
-               soc2_pi1_2_input_completeness \
-               soc2_pi1_3_processing_validity; do
-  security-atlas-cli evidence push \
-    --kind sast.scan_result.v1 \
-    --schema-version 1.1.0 \
-    --control "$control" \
-    --scope '{"environment":"prod"}' \
-    --observed-at "$(date -u +%FT%TZ)" \
-    --result inconclusive \
-    --payload @./scan-result.json \
-    --idempotency-key "sast-$GITHUB_RUN_ID-$control" \
-    --actor-id "github-actions"
-done
+security-atlas-cli evidence push \
+  --kind sast.scan_result.v1 \
+  --schema-version 1.2.0 \
+  --scope '{"environment":"prod"}' \
+  --observed-at "$(date -u +%FT%TZ)" \
+  --result inconclusive \
+  --payload @./scan-result.json \
+  --idempotency-key "sast-$GITHUB_RUN_ID" \
+  --actor-id "github-actions"
 ```
 
 `--result` is still required, but these three controls ignore it and decide

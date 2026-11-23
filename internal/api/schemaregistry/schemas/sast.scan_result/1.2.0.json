@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/sast.scan_result/1.2.0.json",
+  "x-evidence-kind": "sast.scan_result.v1",
+  "x-semver": "1.2.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["VPM-06", "TDA-02"],
+  "title": "SAST scan result",
+  "description": "One static-analysis run from a CI pipeline. 1.1.0 (#2831) adds repository and findings: one entry per finding, with its severity, its rule id and whether it is suppressed. 1.2.0 (#2973) adds an optional cwe list per finding, which pi1_2 and pi1_3 also select by. The stock checks read the latest scan of each repository; a scan without findings is not judged by them, and an empty findings array is a clean scan.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool", "findings_count"],
+  "properties": {
+    "tool": { "type": "string", "minLength": 1 },
+    "tool_version": { "type": "string" },
+    "ruleset": { "type": "string" },
+    "findings_count": { "type": "integer", "minimum": 0 },
+    "scanned_files": { "type": "integer", "minimum": 0 },
+    "scan_duration_seconds": { "type": "number", "minimum": 0 },
+    "report_uri": { "type": "string", "format": "uri" },
+    "repository": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The repository scanned, as one stable name (owner/name, for example). The stock checks key scans by it: the latest scan of each repository decides, and a scan without it is left out."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Every finding of the scan, suppressed ones included. Each finding carries only the fields the stock checks read; the full report belongs at report_uri.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule_id", "severity", "suppressed"],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The rule that matched. The stock checks pi1_2 and pi1_3 select by these platform rule ids, or by cwe; a pusher without CWEs maps its scanner's rules onto them: injection.sql, injection.command, deserialization.unsafe and input.schema_violation (input validation); authz.missing_check, authz.idor, authz.privilege_escalation and authz.broken_object_level (authorisation). Any other rule id is kept as sent."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "info"],
+            "description": "The finding's severity, normalised by the pusher to one of these values."
+          },
+          "suppressed": {
+            "type": "boolean",
+            "description": "true when the finding is suppressed in the scanner (an inline ignore, a baseline, a triaged false positive)."
+          },
+          "cwe": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^CWE-[1-9][0-9]*$" },
+            "description": "The CWE ids the scanner attaches to the rule, each written CWE-<number>: CodeQL's external/cwe/cwe-89 tag and Semgrep's \"CWE-89: ...\" both become CWE-89. pi1_2 counts a finding under CWE-20, CWE-78, CWE-89 or CWE-502; pi1_3 under CWE-269, CWE-639 or CWE-862. Either the rule id or a CWE selects a finding."
+          }
+        }
+      }
+    }
+  }
+}

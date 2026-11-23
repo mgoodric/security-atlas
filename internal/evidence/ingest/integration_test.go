@@ -200,6 +200,27 @@ func record(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
 	return r
 }
 
+// boundRecord is record() as a bound kind. sast.scan_result.v1, record()'s
+// kind, is routed by type since #2973, so a test of bound-kind rules
+// (control_id required, bundle-id linking) uses this instead.
+func boundRecord(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
+	t.Helper()
+	payload, err := structpb.NewStruct(map[string]any{
+		"review_id":      "q4-2026",
+		"completed_by":   "alice@example.com",
+		"reviewer_role":  "security-lead",
+		"users_reviewed": 12,
+	})
+	if err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	return record(t, append([]recordOpt{func(r *evidencev1.EvidenceRecord) {
+		r.EvidenceKind = "access_review.completion.v1"
+		r.SchemaVersion = "1.0.0"
+		r.Payload = payload
+	}}, opts...)...)
+}
+
 func mkCred(tenantID string, kinds []string, scopePred string) credstore.Credential {
 	return credstore.Credential{
 		ID:             "key_" + uuid.NewString()[:8],
@@ -255,7 +276,7 @@ func TestPushMissingFields_AC2(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := record(t, c.opt)
+			rec := boundRecord(t, c.opt)
 			_, decision, err := svc.Process(context.Background(), rec, cred)
 			if !errors.Is(err, ingest.ErrMissingField) {
 				t.Fatalf("err = %v, want ErrMissingField", err)

@@ -70,3 +70,55 @@ func TestSASTScanResult110_Validation(t *testing.T) {
 		})
 	}
 }
+
+// #2973: 1.2.0 adds an optional cwe list per finding and stays additive over
+// 1.1.0, so 1.1.0 and 1.0.0 records stay valid under kind .v1.
+func TestSASTScanResult120_AdditiveOver110(t *testing.T) {
+	t.Parallel()
+	if err := CheckAdditiveOver(readSASTScan(t, "1.1.0"), readSASTScan(t, "1.2.0")); err != nil {
+		t.Fatalf("1.2.0 is not additive over 1.1.0: %v", err)
+	}
+}
+
+func TestSASTScanResult120_Validation(t *testing.T) {
+	t.Parallel()
+	reg, err := NewEmbedded(PlatformSchemasFS())
+	if err != nil {
+		t.Fatalf("NewEmbedded: %v", err)
+	}
+	const tenant = "11111111-1111-1111-1111-111111111111"
+	const base = `"tool":"semgrep","findings_count":1,"repository":"acme/api"`
+	finding := func(cwe string) string {
+		return `{` + base + `,"findings":[{"rule_id":"python.sqli","severity":"high","suppressed":false` + cwe + `}]}`
+	}
+	cases := []struct {
+		name    string
+		version string
+		payload string
+		ok      bool
+	}{
+		{"cwe_list", "1.2.0", finding(`,"cwe":["CWE-89","CWE-20"]`), true},
+		{"empty_cwe_list", "1.2.0", finding(`,"cwe":[]`), true},
+		{"no_cwe", "1.2.0", finding(``), true},
+		{"v110_payload_under_v120", "1.2.0", `{` + base + `,"findings":[{"rule_id":"injection.sql","severity":"critical","suppressed":false}]}`, true},
+		{"cwe_not_array", "1.2.0", finding(`,"cwe":"CWE-89"`), false},
+		{"cwe_lowercase", "1.2.0", finding(`,"cwe":["cwe-89"]`), false},
+		{"cwe_bare_number", "1.2.0", finding(`,"cwe":["89"]`), false},
+		{"cwe_with_title", "1.2.0", finding(`,"cwe":["CWE-89: SQL Injection"]`), false},
+		{"cwe_leading_zero", "1.2.0", finding(`,"cwe":["CWE-089"]`), false},
+		{"cwe_duplicate", "1.2.0", finding(`,"cwe":["CWE-89","CWE-89"]`), false},
+		{"v110_rejects_cwe", "1.1.0", finding(`,"cwe":["CWE-89"]`), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := reg.ValidatePayload(context.Background(), tenant, "sast.scan_result.v1", tc.version, []byte(tc.payload))
+			if tc.ok && err != nil {
+				t.Fatalf("want valid, got %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("want rejected, got valid")
+			}
+		})
+	}
+}
