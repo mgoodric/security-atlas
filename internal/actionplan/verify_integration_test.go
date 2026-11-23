@@ -97,10 +97,13 @@ func (env verifyEnv) seedAdmin(t *testing.T) uuid.UUID {
 	return u
 }
 
-// jwtFor is a sign-in JWT for user u of the env's tenant.
+// jwtFor is a sign-in JWT for user u of the env's tenant. Its admin role
+// claim grants nothing by itself; the live grant from seedAdmin does. It
+// was testjwt.AdminFor, whose SuperAdmin claim passed with no engine
+// attached, so no test here noticed the engine missing (#3008).
 func (env verifyEnv) jwtFor(t *testing.T, u uuid.UUID) string {
 	t.Helper()
-	claims := testjwt.AdminFor(uuid.MustParse(env.tenant))
+	claims := testjwt.OwnerFor(uuid.MustParse(env.tenant), []string{"admin"})
 	claims.Subject = "user:" + u.String()
 	return env.srv.IssueTestJWT(t, claims)
 }
@@ -232,6 +235,23 @@ func TestVerify_RoleAndPersonRequired(t *testing.T) {
 	}
 	if code, body := env.do(t, http.MethodPost, "/v1/action-plans/"+id+"/verify", env.machineJWT, nil); code != http.StatusForbidden {
 		t.Fatalf("machine verify: status %d, want 403: %v", code, body)
+	}
+	if got := env.status(t, id); got != actionplan.StatusCompleted {
+		t.Fatalf("status %q, want completed", got)
+	}
+}
+
+// TestVerify_ViewerRefusedByAuthz: a viewer's verify is refused by the authz
+// engine itself ({"error":"forbidden"}), not by a handler gate, and the plan
+// stays completed. Drop liveroletest.Attach from newVerifyEnv and this
+// fails (#3008).
+func TestVerify_ViewerRefusedByAuthz(t *testing.T) {
+	env := newVerifyEnv(t)
+	id := env.completedPlan(t)
+	viewer := liveroletest.Bearer(t, env.srv, env.tenant, "viewer")
+	code, body := env.do(t, http.MethodPost, "/v1/action-plans/"+id+"/verify", viewer, nil)
+	if code != http.StatusForbidden || body["error"] != "forbidden" {
+		t.Fatalf("viewer verify: %d %v, want 403 forbidden", code, body)
 	}
 	if got := env.status(t, id); got != actionplan.StatusCompleted {
 		t.Fatalf("status %q, want completed", got)
