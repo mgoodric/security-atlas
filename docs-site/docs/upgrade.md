@@ -140,6 +140,14 @@ $COMPOSE run --rm atlas-migrate
 $COMPOSE up -d atlas web
 ```
 
+Run steps 3 and 4 back to back, and freeze no audit period between them.
+Some migrations record a cutover instant that later reads pin against, such
+as evidence routing (`evidence_routing_cutover`, #2924, and
+`evidence_routing_kind_cutover`, #2973). A period frozen after the migration
+but before the new binary serves is read as frozen after the cutover, so it
+can gain records the old binary never showed it. Stopping `atlas` in step 2
+keeps the window closed.
+
 <!-- prettier-ignore-start -->
 !!! note "Migration mechanism — reconciling the guidance"
     The migration runner for the bundle is the dedicated, always-run

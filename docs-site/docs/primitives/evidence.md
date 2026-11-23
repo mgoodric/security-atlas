@@ -108,13 +108,13 @@ export SECURITY_ATLAS_ENDPOINT=atlas.example.com:50051
 export SECURITY_ATLAS_TOKEN="<bearer token>"
 
 security-atlas-cli evidence push \
-  --kind sast.scan_result.v1 \
+  --kind access_review.completion.v1 \
   --control <control id> \
   --scope '{"environment":"prod"}' \
   --observed-at "$(date -u +%FT%TZ)" \
   --result pass \
-  --payload @./scan-result.json \
-  --idempotency-key "ci-$GITHUB_RUN_ID" \
+  --payload @./access-review.json \
+  --idempotency-key "review-$GITHUB_RUN_ID" \
   --actor-id "github-actions"
 ```
 
