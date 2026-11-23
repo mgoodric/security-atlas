@@ -190,6 +190,61 @@ func TestValidateSQLEvidenceQuery_RejectsWritesAndDDL(t *testing.T) {
 	}
 }
 
+// #2973: the guard reads tokens, so a dotted word inside a literal or a
+// comment is not a schema-qualified name, and a real one is still refused
+// however it is spaced, commented, quoted, or wrapped around a literal.
+func TestValidateSQLEvidenceQuery_DottedLiteralsAndRealReferences(t *testing.T) {
+	t.Parallel()
+	for _, q := range []string{
+		"SELECT bool_and(payload->>'rule_id' IN ('injection.sql', 'authz.idor')) FROM evidence",
+		"SELECT bool_and(payload->>'rule_id' = 'it''s public.users') FROM evidence",
+		"SELECT bool_and(payload->>'rule_id' = E'injection\\'s.sql') FROM evidence",
+		"SELECT bool_and(payload->>'rule_id' = $$public.users$$) FROM evidence",
+		"SELECT bool_and(payload->>'rule_id' = $q$pg_catalog.pg_authid$q$) FROM evidence",
+		"SELECT bool_and(payload->>'rule_id' = U&'public.users') FROM evidence",
+		"SELECT result FROM evidence -- reads public.users? no\n",
+		"SELECT result /* pg_catalog.pg_authid /* nested */ */ FROM evidence",
+		"SELECT bool_and(payload->>'f' ~ '^[0-9]+(\\.[0-9]+)?$') FROM evidence",
+		"SELECT bool_and((payload->>'n')::numeric > 1.5) FROM evidence",
+		"SELECT evidence . result FROM evidence",
+		`SELECT evidence."result" FROM evidence`,
+		"SELECT evidence.* FROM evidence",
+		"SELECT \"public.users\" FROM evidence", // one identifier, not a qualified name
+	} {
+		if err := validateSQLEvidenceQuery(q); err != nil {
+			t.Errorf("validateSQLEvidenceQuery(%q) = %v, want nil", q, err)
+		}
+	}
+	for _, q := range []string{
+		"SELECT result FROM public . evidence_records",
+		"SELECT result FROM public/**/.evidence_records",
+		"SELECT result FROM public.\n  evidence_records",
+		`SELECT result FROM "public".evidence_records`,
+		`SELECT result FROM "public"."evidence_records"`,
+		"SELECT result FROM PUBLIC.evidence_records",
+		"SELECT * FROM public.*",
+		// A literal ends where Postgres ends it: under standard strings a
+		// backslash does not escape the quote, so public.users is code.
+		"SELECT 'a\\' FROM public.users --'",
+		// A $ inside an identifier does not start a dollar quote.
+		"SELECT x$a$, public.users, $a$ FROM evidence",
+		"SELECT 'x' || $$y$$, pg_catalog.pg_authid FROM evidence",
+		// A line comment ends at \r as well as \n (scan.l non_newline).
+		"SELECT 1 --\rFROM public.users",
+		"SELECT 1 --x\r, pg_catalog.pg_authid FROM evidence",
+		"SELECT --\r(SELECT count(*) > 0 FROM pg_catalog.pg_authid) FROM evidence",
+		// Unterminated: refused, not guessed at.
+		"SELECT 'public.users FROM evidence",
+		"SELECT $$public.users FROM evidence",
+		"SELECT result FROM evidence /* public.users",
+		`SELECT "public.users FROM evidence`,
+	} {
+		if err := validateSQLEvidenceQuery(q); err == nil {
+			t.Errorf("validateSQLEvidenceQuery(%q) = nil, want rejection", q)
+		}
+	}
+}
+
 // ===== SQL value classification =====
 
 func TestClassifySQLValue(t *testing.T) {

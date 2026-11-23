@@ -12,7 +12,7 @@ import (
 // linked push, or a UUID --control, stays quiet.
 func TestWarnUnlinked(t *testing.T) {
 	const ctrlUUID = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
-	const bound, routedKind = "sast.scan_result.v1", "github.repo_protection.v2"
+	const bound, routedKind = "access_review.completion.v1", "github.repo_protection.v2"
 	cases := []struct {
 		name    string
 		kind    string
@@ -61,7 +61,7 @@ func TestValidatePushFlagsControlRequiredOnlyForBoundKinds(t *testing.T) {
 			resultStr: "pass", payloadRef: "{}", idempotencyKey: "k", actorID: "a",
 		}
 	}
-	f := base("sast.scan_result.v1")
+	f := base("access_review.completion.v1")
 	if err := validatePushFlags(&f); err == nil || !strings.Contains(err.Error(), "--control") {
 		t.Fatalf("bound kind without --control: err = %v, want one naming --control", err)
 	}

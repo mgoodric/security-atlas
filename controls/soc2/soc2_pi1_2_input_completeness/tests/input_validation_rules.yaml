@@ -404,3 +404,204 @@ cases:
     expected_state: inconclusive
     evaluated_at: 2026-11-22T12:00:00Z
     records: []
+
+  # #2973: a finding is selected by its rule id or by a cwe in the
+  # input-validation set (CWE-20, CWE-78, CWE-89, CWE-502), matched exactly.
+  - name: unsuppressed-cwe-20-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: low,
+                  suppressed: false,
+                  cwe: [CWE-1, CWE-20],
+                },
+              ],
+          }
+
+  - name: unsuppressed-cwe-78-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: low,
+                  suppressed: false,
+                  cwe: [CWE-1, CWE-78],
+                },
+              ],
+          }
+
+  - name: unsuppressed-cwe-89-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: low,
+                  suppressed: false,
+                  cwe: [CWE-1, CWE-89],
+                },
+              ],
+          }
+
+  - name: unsuppressed-cwe-502-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: low,
+                  suppressed: false,
+                  cwe: [CWE-1, CWE-502],
+                },
+              ],
+          }
+
+  - name: cwe-matches-exactly
+    description: a longer id, a lowercase id, another CWE and an empty list do not select a finding
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 3,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.a,
+                  severity: high,
+                  suppressed: false,
+                  cwe: [CWE-200, cwe-20],
+                },
+                {
+                  rule_id: scanner.b,
+                  severity: high,
+                  suppressed: false,
+                  cwe: [CWE-79],
+                },
+                {
+                  rule_id: scanner.c,
+                  severity: high,
+                  suppressed: false,
+                  cwe: [],
+                },
+              ],
+          }
+
+  - name: suppressed-cwe-finding-passes
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: critical,
+                  suppressed: true,
+                  cwe: [CWE-502],
+                },
+              ],
+          }
+
+  - name: cwe-selects-without-a-string-rule-id
+    description: a matching cwe decides even when the rule id is unusable
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: 7,
+                  severity: high,
+                  suppressed: false,
+                  cwe: [CWE-502],
+                },
+              ],
+          }
+
+  - name: cwe-not-a-list-is-inconclusive
+    description: a cwe sent as one string (a tenant schema that allows it) may be in the set
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: scanner.rule,
+                  severity: high,
+                  suppressed: false,
+                  cwe: CWE-502,
+                },
+              ],
+          }

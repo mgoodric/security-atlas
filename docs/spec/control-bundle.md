@@ -272,11 +272,21 @@ A NULL then means "not read", and the query decides what that implies. If
 the timestamp is what the check asks about (cc4_1's check-in time), the
 record is inconclusive. If it only orders records (the osquery posture
 checks rank each host's latest record by it), it sorts `NULLS LAST` and the
-checked field decides. A test refuses a payload cast to a date or time type
-in the stock bundles under `controls/` unless both the regex and
-`pg_input_is_valid` guard that field (`eval.SQLUnguardedTimestampCasts`).
-The cap is not linted. Each bundle's tests carry a future-value case
-instead.
+checked field decides. A test refuses a payload conversion to a date or
+time type in the stock bundles under `controls/` that is not guarded this
+way (`eval.SQLUnguardedTimestampCasts`, #2973). It reads tokens, not text,
+and finds `(value)::T`, `CAST(value AS T)`, `to_timestamp(value, …)` and
+`to_date(value, …)`, where the value may be aliased (`e.payload->>'f'`) or
+a path (`payload#>>'{a,b}'`, `payload->'a'->>'b'`). A conversion counts as
+guarded only inside the `THEN` of a `WHEN` that holds both checks on that
+same value, alias included, with no `OR` or `NOT` in the condition. A guard
+in another `CASE`, an `ELSE` branch or a `WHERE` clause does not count. The
+cap is not linted. Each bundle's tests carry a future-value case instead.
+
+The static guard refuses any qualified name but `evidence.<column>`. It
+reads tokens too, so a dotted word inside a string literal
+(`'injection.sql'`), a dollar-quoted string or a comment is not a name, and
+rule ids are written as plain literals (#2973).
 
 A minimal **manual** control:
 

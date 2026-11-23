@@ -2391,6 +2391,11 @@ type EvidenceRoutingCutover struct {
 	CutAt     pgtype.Timestamptz `json:"cut_at"`
 }
 
+type EvidenceRoutingKindCutover struct {
+	EvidenceKind string             `json:"evidence_kind"`
+	CutAt        pgtype.Timestamptz `json:"cut_at"`
+}
+
 type Exception struct {
 	ID                   pgtype.UUID        `json:"id"`
 	TenantID             pgtype.UUID        `json:"tenant_id"`
