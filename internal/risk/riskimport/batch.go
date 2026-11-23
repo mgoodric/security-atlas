@@ -32,6 +32,9 @@ var (
 const (
 	BatchStatusStaged    = "staged"
 	BatchStatusCompleted = "completed"
+	// BatchStatusClosed is a batch an approver closed with pending rows,
+	// which the close rejected (#3002).
+	BatchStatusClosed = "closed"
 
 	RowStatusPending   = "pending"
 	RowStatusApproved  = "approved"
@@ -156,8 +159,13 @@ type Batch struct {
 	CategoryValues []ValueMapping `json:"category_values"`
 	ThemeValues    []ValueMapping `json:"theme_values"`
 	CreatedAt      time.Time      `json:"created_at"`
-	Staged         []BatchRow     `json:"staged"`
-	Rejected       []RejectedRow  `json:"rejected"`
+	// ClosedBy, ClosedAt and CloseReason are set on a closed batch: who
+	// closed it, when, and why (#3002).
+	ClosedBy    string        `json:"closed_by,omitempty"`
+	ClosedAt    *time.Time    `json:"closed_at,omitempty"`
+	CloseReason string        `json:"close_reason,omitempty"`
+	Staged      []BatchRow    `json:"staged"`
+	Rejected    []RejectedRow `json:"rejected"`
 }
 
 // StageInput is one upload to stage.

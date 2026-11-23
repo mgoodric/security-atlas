@@ -98,9 +98,29 @@ and the review page counts it under **Waiting on a parent**. It is
 linked once a row with that ID is approved (or marked duplicate of an
 existing risk), and fails once no pending row carries the ID any more.
 An import has no expiry: a parent row left pending keeps its children
-waiting, so approve or reject it. A link that fails flags the row
-**Parent link failed** with the reason, and the risk is imported
-without it; link it by hand from the parent's **Attach a child**.
+waiting, so approve or reject it, or close its import (below). A link
+that fails flags the row **Parent link failed** with the reason, and the
+risk is imported without it; link it by hand from the parent's
+**Attach a child**.
+
+### Closing an import nobody will finish
+
+**Risks → Import** lists the recent imports with their status
+(**Awaiting review**, **Completed** or **Closed**), their pending rows,
+their rows waiting on a parent, and the rows of any import waiting on
+theirs. An import stays open until every row is decided or an approver
+closes it; nothing closes it on a timer.
+
+An admin or approver who did not upload the import closes it from its
+review page (**Close import**, or
+`POST /v1/risks/imports/{id}/close` with `{"reason": "..."}`). Every
+pending row is rejected with the reason `import closed: <reason>`, and
+each rejection is audited by that person. Rows of any import waiting on
+those rows are then settled as for any rejection: one keeps waiting
+while another pending row carries the parent's ID, and otherwise fails
+its parent link. The closed import's own rows that still wait on an ID
+no pending row carries fail too. A closed import takes no further
+decision or mapping.
 
 ### Text in a score column
 

@@ -78,9 +78,12 @@ func TestLinkAudit(t *testing.T) {
 
 func TestStrandedParent(t *testing.T) {
 	t.Parallel()
-	got := strandedParent("R-1", unknownParent("R-1"))
+	got := strandedParent("R-1", "completed", unknownParent("R-1"))
 	if !strings.Contains(got, `"R-1" when this import completed`) || !strings.Contains(got, "no pending row of any import") {
 		t.Errorf("strandedParent = %q", got)
+	}
+	if got := strandedParent("R-1", "was closed", "x"); got != `still waiting on parent risk ID "R-1" when this import was closed: x` {
+		t.Errorf("strandedParent closed = %q", got)
 	}
 }
 

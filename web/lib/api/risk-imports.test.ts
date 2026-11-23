@@ -5,11 +5,18 @@ import { describe, expect, it } from "vitest";
 import {
   type BatchRow,
   type RiskImportBatch,
+  type RiskImportSummary,
+  NO_EXPIRY_TEXT,
   NO_FILTER,
   approveAllMessage,
   approveAllWarning,
   batchPath,
   batchProgress,
+  batchStatusLabel,
+  batchStatusVariant,
+  canClose,
+  closeMessage,
+  summaryCounts,
   emptyRowsMessage,
   filterRows,
   flagLabel,
@@ -480,6 +487,82 @@ describe("unmapped values (#2844)", () => {
         skipped: [],
       }),
     ).toBe("Approved 1 row; 1 rejected (unmapped value)");
+  });
+});
+
+describe("batch close and the import list (#3002)", () => {
+  const summary = (over: Partial<RiskImportSummary>): RiskImportSummary => ({
+    id: "b",
+    source_filename: "register.csv",
+    source_format: "csv",
+    methodology: "nist_800_30",
+    uploaded_by: "user:u",
+    status: "staged",
+    total_rows: 4,
+    staged_count: 4,
+    rejected_count: 0,
+    pending_count: 3,
+    waiting_count: 0,
+    children_waiting_count: 0,
+    created_at: "2026-11-21T00:00:00Z",
+    ...over,
+  });
+
+  it("labels the three batch statuses", () => {
+    expect(batchStatusLabel("staged")).toBe("Awaiting review");
+    expect(batchStatusLabel("completed")).toBe("Completed");
+    expect(batchStatusLabel("closed")).toBe("Closed");
+    expect(batchStatusLabel("other")).toBe("other");
+    expect(batchStatusVariant("closed")).toBe("secondary");
+    expect(batchStatusVariant("completed")).toBe("pass");
+    expect(batchStatusVariant("staged")).toBe("info");
+  });
+
+  it("counts pending rows and leaves zero waiting counts out", () => {
+    expect(summaryCounts(summary({}))).toBe("3 pending");
+    expect(
+      summaryCounts(
+        summary({
+          pending_count: 1,
+          waiting_count: 2,
+          children_waiting_count: 1,
+        }),
+      ),
+    ).toBe("1 pending · 2 waiting on a parent · 1 row waiting on this import");
+    expect(summaryCounts(summary({ children_waiting_count: 3 }))).toBe(
+      "3 pending · 3 rows waiting on this import",
+    );
+  });
+
+  it("offers close only to a decider on a staged batch", () => {
+    expect(canClose({ can_decide: true, status: "staged" })).toBe(true);
+    expect(canClose({ can_decide: true, status: "completed" })).toBe(false);
+    expect(canClose({ can_decide: true, status: "closed" })).toBe(false);
+    expect(canClose({ can_decide: false, status: "staged" })).toBe(false);
+    expect(canClose(undefined)).toBe(false);
+  });
+
+  it("says imports do not expire", () => {
+    expect(NO_EXPIRY_TEXT).toMatch(/do not expire/);
+  });
+
+  it("summarises a close", () => {
+    expect(closeMessage({ rejected: [] })).toBe(
+      "Closed the import; 0 pending rows rejected",
+    );
+    expect(
+      closeMessage({
+        rejected: [
+          {
+            batch_id: "b",
+            row_id: "r",
+            row_number: 2,
+            status: "rejected",
+            decided_by: "u",
+          },
+        ],
+      }),
+    ).toBe("Closed the import; 1 pending row rejected");
   });
 });
 

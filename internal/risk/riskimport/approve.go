@@ -559,13 +559,8 @@ func recordDecision(ctx context.Context, tx pgx.Tx, rowID, status, approver, ris
 // finishDecision writes the decision's import audit row and completes the
 // batch once no row is pending.
 func finishDecision(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d RowDecision, action, reason string) error {
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO risk_import_audit_log (
-			tenant_id, batch_id, row_id, row_number, external_ref, action, actor, risk_id, reason)
-		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9)
-	`, tenantID, d.BatchID, d.RowID, d.RowNumber, nullable(d.ExternalRef), action, d.DecidedBy,
-		nullable(d.RiskID), nullable(reason)); err != nil {
-		return fmt.Errorf("riskimport: write audit row: %w", err)
+	if err := writeDecisionAudit(ctx, tx, tenantID, d, action, reason); err != nil {
+		return err
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE risk_import_batches
@@ -585,7 +580,20 @@ func finishDecision(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d RowDec
 	if err := lockHierarchy(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	return failStranded(ctx, tx, tenantID, decision{d.DecidedBy, d.BatchID, d.RowID, d.RowNumber})
+	return failStranded(ctx, tx, tenantID, completedBy(decision{d.DecidedBy, d.BatchID, d.RowID, d.RowNumber}))
+}
+
+// writeDecisionAudit writes a row decision's import audit row.
+func writeDecisionAudit(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d RowDecision, action, reason string) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO risk_import_audit_log (
+			tenant_id, batch_id, row_id, row_number, external_ref, action, actor, risk_id, reason)
+		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9)
+	`, tenantID, d.BatchID, d.RowID, d.RowNumber, nullable(d.ExternalRef), action, d.DecidedBy,
+		nullable(d.RiskID), nullable(reason)); err != nil {
+		return fmt.Errorf("riskimport: write audit row: %w", err)
+	}
+	return nil
 }
 
 // settleWaitingOn settles the links of the rows waiting on a row decided

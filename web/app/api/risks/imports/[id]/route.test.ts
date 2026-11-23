@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { POST as approveAll } from "./approve/route";
+import { POST as closeBatch } from "./close/route";
 import { GET as getBatch } from "./route";
 import { POST as approveRow } from "./rows/[row]/approve/route";
 import { POST as rejectRow } from "./rows/[row]/reject/route";
@@ -125,6 +126,38 @@ describe("risk import review BFF routes", () => {
     const { url, init } = call(spy);
     expect(url).toBe(`${UP}/rows/${R}/reject`);
     expect(JSON.parse(String(init.body))).toEqual({ reason: "not ours" });
+  });
+
+  test("close forwards only the reason and passes a 409 through (#3002)", async () => {
+    const spy = upstream(200, { batch_id: B, status: "closed" });
+    const res = await closeBatch(
+      jsonReq(JSON.stringify({ reason: "abandoned", status: "completed" })),
+      batch(),
+    );
+    expect(res.status).toBe(200);
+    const { url, init } = call(spy);
+    expect(url).toBe(`${UP}/close`);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "abandoned" });
+
+    upstream(409, { error: "import batch is already completed or closed" });
+    expect(
+      (await closeBatch(jsonReq(JSON.stringify({ reason: "x" })), batch()))
+        .status,
+    ).toBe(409);
+  });
+
+  test("close refuses a non-UUID and a non-object body before upstream", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    expect(
+      (
+        await closeBatch(jsonReq("{}"), {
+          params: Promise.resolve({ id: ".." }),
+        })
+      ).status,
+    ).toBe(400);
+    expect((await closeBatch(jsonReq("[1]"), batch())).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   test("reject refuses a body that is not a JSON object", async () => {

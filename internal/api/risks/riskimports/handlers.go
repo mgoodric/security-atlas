@@ -4,6 +4,8 @@
 //
 // Routes (appended onto the platform root router):
 //
+//	GET  /v1/risks/imports          the newest batches with their pending
+//	                                and waiting counts (#3002)
 //	POST /v1/risks/imports          multipart upload -> staged import batch
 //	POST /v1/risks/imports/preview  the same upload -> its header mapping
 //	                                and first rows, staging nothing (#2848)
@@ -15,6 +17,9 @@
 //	                                approve one staged row (#2847)
 //	POST /v1/risks/imports/{id}/rows/{row}/reject
 //	                                reject one staged row with a reason
+//	POST /v1/risks/imports/{id}/close
+//	                                close a staged batch, rejecting its
+//	                                pending rows with a reason (#3002)
 //	PUT  /v1/risks/imports/{id}/values
 //	                                map one distinct category or theme value
 //	                                of the batch to an existing category or
@@ -31,7 +36,7 @@
 //	             alias (#2848)
 //
 // Upload is a write on risks at the authz layer, which admin and
-// grc_engineer hold. Approve and reject also require a person who is a
+// grc_engineer hold. Approve, reject and close also require a person who is a
 // tenant admin or holds the approver flag (authz.IsRiskImportDecider): a
 // grc_engineer stages an import and hands it to an approver (#2881, spec
 // #2812), and a machine credential is refused whatever its role. The
@@ -81,10 +86,12 @@ func New(store *riskimport.Store) *Handler { return &Handler{store: store} }
 // literal /v1/risks/imports segments, so register them ahead of the
 // generic /v1/risks/{id} routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/v1/risks/imports", h.List)
 	r.Post("/v1/risks/imports", h.Create)
 	r.Post("/v1/risks/imports/preview", h.Preview)
 	r.Get("/v1/risks/imports/{id}", h.Get)
 	r.Post("/v1/risks/imports/{id}/approve", h.Approve)
+	r.Post("/v1/risks/imports/{id}/close", h.Close)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/approve", h.ApproveRow)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/reject", h.Reject)
 	r.Put("/v1/risks/imports/{id}/values", h.MapValue)
@@ -315,6 +322,55 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, d)
 }
 
+// Close closes a staged batch nobody will finish (#3002): every pending row
+// is rejected with the body's reason ({"reason": "..."}), the rows of any
+// import waiting on them are settled, and the batch is closed. It has the
+// gate of Reject.
+func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
+	approver, ok := decidingPerson(w, r)
+	if !ok {
+		return
+	}
+	var body rejectBody
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxDecisionBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		httpresp.WriteError(w, http.StatusBadRequest, "body must be a JSON object: "+err.Error())
+		return
+	}
+	res, err := h.store.CloseBatch(r.Context(), riskimport.CloseInput{
+		BatchID:  chi.URLParam(r, "id"),
+		Approver: approver,
+		Reason:   body.Reason,
+	})
+	if err != nil {
+		writeDecisionError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, res)
+}
+
+// listResponse is the import list.
+type listResponse struct {
+	Batches []riskimport.BatchSummary `json:"batches"`
+}
+
+// List returns the tenant's newest import batches, at most
+// riskimport.MaxListedBatches, with their pending and waiting counts.
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	batches, err := h.store.List(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "riskimports", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, listResponse{Batches: batches})
+}
+
 // createValueBody is the category or theme to create for a value: slug,
 // name and description for a category; name and description for a theme.
 type createValueBody struct {
@@ -478,7 +534,7 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 		httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
 	case errors.Is(err, riskimport.ErrRowNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "staged row not found in this import batch")
-	case errors.Is(err, riskimport.ErrRowDecided):
+	case errors.Is(err, riskimport.ErrRowDecided), errors.Is(err, riskimport.ErrBatchNotStaged):
 		httpresp.WriteError(w, http.StatusConflict, msg)
 	case errors.Is(err, riskimport.ErrApproverRequired), errors.Is(err, riskimport.ErrSelfDecision):
 		httpresp.WriteError(w, http.StatusForbidden, msg)
