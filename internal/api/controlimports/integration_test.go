@@ -62,6 +62,8 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 type testEnv struct {
 	server *httptest.Server
 	bearer string
+	// viewer is a seeded viewer person, a role the import routes refuse.
+	viewer string
 }
 
 // attachAuthz wires the OPA engine the production binary runs, so every
@@ -108,14 +110,16 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 	attachAuthz(t, srv, app)
-	bearer := personBearer(t, dbtest.NewMigratePool(t), srv, tenant, authz.RoleGRCEngineer)
+	admin := dbtest.NewMigratePool(t)
+	bearer := personBearer(t, admin, srv, tenant, authz.RoleGRCEngineer)
+	viewer := personBearer(t, admin, srv, tenant, authz.RoleViewer)
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, bearer: bearer}
+	return testEnv{server: ts, bearer: bearer, viewer: viewer}
 }
 
 // testCatalog is what seedCatalog wrote: the framework slug, the SCF
@@ -551,6 +555,25 @@ func TestUploadHonoursColumnMap(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(string(raw), "Reference Number") {
 		t.Errorf("bad map = %d %s, want 400 naming the missing header", status, raw)
+	}
+}
+
+// #2971: testServer runs the authz engine. A viewer's upload, one the
+// grc_engineer bearer would stage, is refused at authz and stages nothing.
+// Drop attachAuthz and this fails.
+func TestUploadRefusesViewer(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	status, raw := doUpload(t, env, upload{filename: "controls.csv", payload: fixtureCSV(t), framework: cat.framework, bearer: env.viewer})
+	if status != http.StatusForbidden || strings.TrimSpace(string(raw)) != `{"error":"forbidden"}` {
+		t.Fatalf("viewer upload = %d %s, want 403 forbidden", status, raw)
+	}
+	if n := batchCount(t, admin, tenant); n != 0 {
+		t.Fatalf("batches after refused upload = %d, want 0", n)
 	}
 }
 

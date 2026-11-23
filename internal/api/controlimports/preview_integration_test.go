@@ -33,8 +33,11 @@ func previewServer(t *testing.T, admin, app *pgxpool.Pool, tenant string) (testE
 	attachAuthz(t, srv, app)
 	// Issue the tokens first: the first one attaches the JWT validator the
 	// router is built with.
-	env := testEnv{bearer: personBearer(t, admin, srv, tenant, authz.RoleGRCEngineer)}
-	viewer := personBearer(t, admin, srv, tenant, authz.RoleViewer)
+	env := testEnv{
+		bearer: personBearer(t, admin, srv, tenant, authz.RoleGRCEngineer),
+		viewer: personBearer(t, admin, srv, tenant, authz.RoleViewer),
+	}
+	viewer := env.viewer
 	env.server = httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(env.server.Close)
 	return env, viewer
