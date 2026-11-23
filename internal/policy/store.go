@@ -225,8 +225,15 @@ type Policy struct {
 	// run found absent (#2853): when a run first found it missing. The
 	// policy stays in force.
 	SyncMissingSince *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// SyncUnreadableSince and SyncUnreadableReason are set on a published
+	// synced row whose page the latest sync run carried as unreadable
+	// (#3000): the page is still in its source, but the connector could
+	// not read its body. When a run first carried it so, and the pusher's
+	// reason from the latest one. Nothing else on the row changed.
+	SyncUnreadableSince  *time.Time
+	SyncUnreadableReason *string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // IsImported reports whether p was brought in by Import (#1747).
@@ -1330,6 +1337,11 @@ func policyFromRow(r dbx.Policy) Policy {
 	if r.SyncMissingSince.Valid {
 		t := r.SyncMissingSince.Time
 		out.SyncMissingSince = &t
+	}
+	if r.SyncUnreadableSince.Valid {
+		t := r.SyncUnreadableSince.Time
+		out.SyncUnreadableSince = &t
+		out.SyncUnreadableReason = r.SyncUnreadableReason
 	}
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time

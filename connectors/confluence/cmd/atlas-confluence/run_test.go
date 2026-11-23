@@ -161,10 +161,15 @@ func newFakePlatform(t *testing.T, status int) *fakePlatform {
 			return
 		}
 		rep := map[string]any{"results": []any{}}
-		created, skipped := 0, 0
+		created, skipped, unreadable := 0, 0, 0
 		var results []any
 		for _, p := range req["pages"].([]any) {
 			page := p.(map[string]any)
+			if page["unreadable"] == true {
+				unreadable++
+				results = append(results, map[string]any{"page_id": page["id"], "title": page["title"], "status": "unreadable", "reason": page["unreadable_reason"]})
+				continue
+			}
 			if page["properties"] == nil {
 				skipped++
 				results = append(results, map[string]any{"page_id": page["id"], "title": page["title"], "status": "skipped", "reason": "missing page properties"})
@@ -173,7 +178,7 @@ func newFakePlatform(t *testing.T, status int) *fakePlatform {
 			created++
 			results = append(results, map[string]any{"page_id": page["id"], "title": page["title"], "status": "created", "policy_id": "pol-" + page["id"].(string), "version": "1.0"})
 		}
-		rep["created"], rep["skipped"], rep["results"] = created, skipped, results
+		rep["created"], rep["skipped"], rep["unreadable"], rep["results"] = created, skipped, unreadable, results
 		if fp.warnings != nil {
 			rep["warnings"] = fp.warnings
 		}
@@ -276,7 +281,7 @@ func TestRun_FullSetAcrossPages(t *testing.T) {
 		`page 101 "Access Control Policy": created version=1.0 policy=pol-101`,
 		`page 103 "Unlabelled Template": skipped reason=missing page properties`,
 		`page 102 "Incident Response Policy": unsupported macros: toc x1`,
-		`sync: created=4 new_version=0 taken_over=0 unchanged=0 drift=0 skipped=1 missing=0 skipped_by_connector=0`,
+		`sync: created=4 new_version=0 taken_over=0 unchanged=0 drift=0 skipped=1 missing=0 unreadable=0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n%s", want, out)
@@ -362,9 +367,9 @@ func TestNeedsAttention(t *testing.T) {
 	}{
 		{0, 0, 0, ""},
 		{2, 2, 0, ""},
-		{2, 3, 0, "3 page(s) skipped by connector, more than --max-skipped=2"},
+		{2, 3, 0, "3 page(s) not converted and sent unreadable, more than --max-skipped=2"},
 		{0, 0, 1, "1 platform warning(s)"},
-		{0, 1, 2, "1 page(s) skipped by connector, more than --max-skipped=0; 2 platform warning(s)"},
+		{0, 1, 2, "1 page(s) not converted and sent unreadable, more than --max-skipped=0; 2 platform warning(s)"},
 	} {
 		err := needsAttention(tc.max, tc.skipped, tc.warnings)
 		if tc.want == "" {
@@ -392,7 +397,7 @@ func TestRun_EmptySetPushesNothing(t *testing.T) {
 	}
 }
 
-func TestRun_UnconvertibleBodyIsReportedAndLeftOut(t *testing.T) {
+func TestRun_UnconvertibleBodyIsSentUnreadable(t *testing.T) {
 	deep := strings.Repeat("<div>", 600)
 	fc := newFakeConfluence(t, []fakePage{
 		{ID: "1", Title: "Good", Storage: fullProps + "<p>a</p>"},
@@ -403,15 +408,23 @@ func TestRun_UnconvertibleBodyIsReportedAndLeftOut(t *testing.T) {
 	// The push is accepted, but one skip is over the default
 	// --max-skipped=0, so the run exits ExitNeedsAttention.
 	var ee *exitError
-	if !errors.As(err, &ee) || ee.code != ExitNeedsAttention || !strings.Contains(err.Error(), "1 page(s) skipped by connector") {
-		t.Fatalf("run: err = %v, want exit %d for one skipped page", err, ExitNeedsAttention)
+	if !errors.As(err, &ee) || ee.code != ExitNeedsAttention || !strings.Contains(err.Error(), "1 page(s) not converted and sent unreadable") {
+		t.Fatalf("run: err = %v, want exit %d for one unreadable page", err, ExitNeedsAttention)
 	}
+	// #3000: the deep page is pushed, unreadable, so the platform keeps
+	// its policy present instead of marking it missing.
 	pushes, _ := fp.recorded()
-	if n := len(pushes[0]["pages"].([]any)); n != 1 {
-		t.Errorf("pushed %d pages, want 1", n)
+	pushed := pushes[0]["pages"].([]any)
+	if len(pushed) != 2 {
+		t.Fatalf("pushed %d pages, want 2", len(pushed))
 	}
-	if !strings.Contains(out, `page 2 "Deep": skipped by connector reason=body not converted`) ||
-		!strings.Contains(out, "skipped_by_connector=1") {
+	deepPage := pushed[1].(map[string]any)
+	if deepPage["id"] != "2" || deepPage["unreadable"] != true || deepPage["body_md"] != "" || deepPage["properties"] != nil ||
+		!strings.HasPrefix(deepPage["unreadable_reason"].(string), "body not converted: storagemd: body nested too deeply") {
+		t.Errorf("deep page = %v", deepPage)
+	}
+	if !strings.Contains(out, `page 2 "Deep": unreadable reason=body not converted`) ||
+		!strings.Contains(out, "unreadable=1") || strings.Contains(out, "skipped by connector") {
 		t.Errorf("report:\n%s", out)
 	}
 
