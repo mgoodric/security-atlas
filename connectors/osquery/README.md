@@ -273,13 +273,18 @@ connector finds the report with `GET /api/v1/fleet/hosts/{id}/reports`
 (exact name match, after Fleet's keyword search) and reads its rows with
 `GET /api/v1/fleet/hosts/{id}/reports/{report_id}`:
 
-| Host's report                                         | Record                                     |
-| ----------------------------------------------------- | ------------------------------------------ |
-| one row, column is RFC 3339 with a zone or epoch secs | `antimalware_definitions_updated_at` (UTC) |
-| several rows, every one readable                      | the oldest of them                         |
-| any row missing the column, or not a date             | omitted                                    |
-| no rows, no report of that name, or two of that name  | omitted                                    |
-| the lookup fails (HTTP error)                         | omitted; `reason` names the error          |
+| Host's report                                         | Record                                                |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| one row, column is RFC 3339 with a zone or epoch secs | `antimalware_definitions_updated_at` (UTC)            |
+| several rows                                          | the oldest readable one; `reason` counts skipped rows |
+| a row missing the column, or not a date               | skipped, and named in `reason`                        |
+| a row in epoch milliseconds (over `1e11`)             | skipped, and named in `reason`                        |
+| a row more than 1 h after the connector's pull time   | skipped, and named in `reason`                        |
+| no rows, no report of that name, or two of that name  | omitted; `reason` says which                          |
+| the lookup fails (HTTP error)                         | omitted; `reason` names the error                     |
+
+The reports list is followed through `meta.has_next_results`, up to 50
+pages of 100.
 
 `antimalware_definitions_source` is then `fleet_report:<name>`.
 `soc2_cc6_8_malware_protection` fails a host whose date is more than 168

@@ -302,11 +302,14 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time, pol 
 		fillFromDetail(&row, detail, pol)
 		row.Result, row.Reason = evaluate(row)
 		if pol.DefinitionsReport != "" && pol.DefinitionsColumn != "" {
-			t, err := definitionsUpdatedAt(ctx, api, h.ID, pol.DefinitionsReport, pol.DefinitionsColumn)
-			switch {
-			case err != nil:
-				row.Reason += "; antimalware definitions report: " + err.Error()
-			case !t.IsZero():
+			t, note, err := definitionsUpdatedAt(ctx, api, h.ID, pol.DefinitionsReport, pol.DefinitionsColumn, row.ObservedAt)
+			if err != nil {
+				note = err.Error()
+			}
+			if note != "" {
+				row.Reason += "; antimalware definitions report: " + note
+			}
+			if err == nil && !t.IsZero() {
 				row.AntimalwareDefinitionsUpdatedAt = t
 				row.AntimalwareDefinitionsSource = "fleet_report:" + pol.DefinitionsReport
 			}
@@ -504,16 +507,34 @@ func (c *FleetClient) GetHost(ctx context.Context, id uint64) (*HostDetail, erro
 // ListHostReports calls GET /api/v1/fleet/hosts/{id}/reports with the
 // report name as the `query` search keywords. Fleet's search is not an
 // exact match, so the caller filters by name.
+//
+// It follows `meta.has_next_results` page by page (`page` is 0-based, as in
+// Fleet's other list endpoints; unverified against a live Fleet), and stops
+// with an error after maxReportPages rather than loop on a server that
+// never reports the last page.
 func (c *FleetClient) ListHostReports(ctx context.Context, hostID uint64, name string) ([]HostReportSummary, error) {
-	u := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports?per_page=100&query=" + url.QueryEscape(name)
-	var raw struct {
-		Reports []HostReportSummary `json:"reports"`
+	base := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports?per_page=100&query=" + url.QueryEscape(name)
+	var out []HostReportSummary
+	for page := 0; page < maxReportPages; page++ {
+		var raw struct {
+			Reports []HostReportSummary `json:"reports"`
+			Meta    struct {
+				HasNextResults bool `json:"has_next_results"`
+			} `json:"meta"`
+		}
+		if err := c.getJSON(ctx, base+"&page="+strconv.Itoa(page), &raw); err != nil {
+			return nil, err
+		}
+		out = append(out, raw.Reports...)
+		if !raw.Meta.HasNextResults {
+			return out, nil
+		}
 	}
-	if err := c.getJSON(ctx, u, &raw); err != nil {
-		return nil, err
-	}
-	return raw.Reports, nil
+	return nil, fmt.Errorf("more than %d pages of reports match %q", maxReportPages, name)
 }
+
+// maxReportPages bounds ListHostReports' paging (100 reports a page).
+const maxReportPages = 50
 
 // GetHostReport calls GET /api/v1/fleet/hosts/{id}/reports/{report_id}.
 func (c *FleetClient) GetHostReport(ctx context.Context, hostID, reportID uint64) (*HostReportData, error) {
@@ -681,17 +702,24 @@ func policyResponse(policies []HostPolicy, name string) *bool {
 }
 
 // definitionsUpdatedAt reads the anti-malware definitions date from one
-// column of the operator's named Fleet report for one host. It returns the
-// zero time, unread, when no report has exactly that name, when more than
-// one does, when the host has no result rows, or when any row's column is
-// missing or not a date: a set the connector cannot read whole is not read.
-// When the rows disagree it returns the oldest, so a host with two
-// engines is judged by its most out-of-date one. An API error is returned
-// so the caller can name it in the record's reason.
-func definitionsUpdatedAt(ctx context.Context, api FleetAPI, hostID uint64, report, column string) (time.Time, error) {
+// column of the operator's named Fleet report for one host, and a note for
+// the record's reason whenever something was not read.
+//
+//   - No report of exactly that name, two of that name, or no result rows:
+//     zero time, unread, with a note saying which.
+//   - Several rows: the oldest readable date, so a host with two engines is
+//     judged by its most out-of-date one. Rows whose column is missing, not
+//     a date, in epoch milliseconds, or more than an hour after now are
+//     skipped and counted in the note. They can only make the pushed date
+//     newer than the truth if the skipped row was the oldest, and without
+//     them the host would carry no date and be judged on the policy alone,
+//     which is no stricter (#2936 review).
+//
+// An API error is returned so the caller can name it in the reason.
+func definitionsUpdatedAt(ctx context.Context, api FleetAPI, hostID uint64, report, column string, now time.Time) (time.Time, string, error) {
 	reports, err := api.ListHostReports(ctx, hostID, report)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, "", err
 	}
 	var id uint64
 	matches := 0
@@ -701,50 +729,75 @@ func definitionsUpdatedAt(ctx context.Context, api FleetAPI, hostID uint64, repo
 			matches++
 		}
 	}
-	if matches != 1 {
-		return time.Time{}, nil
+	switch {
+	case matches == 0:
+		return time.Time{}, fmt.Sprintf("no report named %q on this host", report), nil
+	case matches > 1:
+		return time.Time{}, fmt.Sprintf("%d reports named %q; not read", matches, report), nil
 	}
 	data, err := api.GetHostReport(ctx, hostID, id)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, "", err
 	}
 	if data == nil || len(data.Results) == 0 {
-		return time.Time{}, nil
+		return time.Time{}, "no result rows", nil
 	}
 	var oldest time.Time
-	for _, row := range data.Results {
+	var bad []string
+	for i, row := range data.Results {
 		v, _ := row.Columns[column].(string)
-		t := parseDefinitionsTime(v)
-		if t.IsZero() {
-			return time.Time{}, nil
+		t, why := parseDefinitionsTime(v, now)
+		if why != "" {
+			bad = append(bad, fmt.Sprintf("row %d %s", i+1, why))
+			continue
 		}
 		if oldest.IsZero() || t.Before(oldest) {
 			oldest = t
 		}
 	}
-	return oldest, nil
+	var note string
+	if len(bad) > 0 {
+		note = fmt.Sprintf("%d of %d rows unread (%s)", len(bad), len(data.Results), strings.Join(bad, "; "))
+	}
+	return oldest, note, nil
 }
 
-// parseDefinitionsTime reads a report column as a date. osquery returns
-// every column as a string; two shapes are accepted: RFC 3339 (with a zone)
-// and whole Unix epoch seconds, the shape osquery's own time columns use.
-// Zero (the epoch itself), a negative number and anything else are unread.
-func parseDefinitionsTime(s string) time.Time {
+// maxEpochSeconds separates epoch seconds from milliseconds: 1e11 seconds is
+// the year 5138, while a current date in milliseconds is about 1.7e12.
+const maxEpochSeconds = 1e11
+
+// parseDefinitionsTime reads a report column as a date, or says why it
+// could not. osquery returns every column as a string; two shapes are
+// accepted: RFC 3339 (with a zone) and whole Unix epoch seconds, the shape
+// osquery's own time columns use. Zero, a negative number, a number over
+// maxEpochSeconds (milliseconds, most likely) and a date more than an hour
+// after now are unread; so is anything else.
+func parseDefinitionsTime(s string, now time.Time) (time.Time, string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return time.Time{}
+		return time.Time{}, "missing or not a string"
 	}
+	var t time.Time
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-		if n <= 0 {
-			return time.Time{}
+		switch {
+		case n <= 0:
+			return time.Time{}, "not a positive epoch"
+		case n > maxEpochSeconds:
+			return time.Time{}, "epoch over 1e11 (milliseconds?)"
 		}
-		return time.Unix(n, 0).UTC()
+		t = time.Unix(n, 0).UTC()
+	} else {
+		var perr error
+		t, perr = time.Parse(time.RFC3339Nano, s)
+		if perr != nil {
+			return time.Time{}, "not RFC 3339 or epoch seconds"
+		}
+		t = t.UTC()
 	}
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return time.Time{}
+	if t.After(now.Add(time.Hour)) {
+		return time.Time{}, "more than 1 h in the future"
 	}
-	return t.UTC()
+	return t, ""
 }
 
 // mdmEnrolled maps Fleet's mdm.enrollment_status to a boolean. "On (...)"

@@ -677,24 +677,41 @@ func TestPullFromFleet_DefinitionsReportRows(t *testing.T) {
 	row := func(v any) osqueryposture.HostReportRow {
 		return osqueryposture.HostReportRow{Columns: map[string]any{col: v}}
 	}
+	rows := func(vs ...any) []osqueryposture.HostReportRow {
+		out := make([]osqueryposture.HostReportRow, 0, len(vs))
+		for _, v := range vs {
+			out = append(out, row(v))
+		}
+		return out
+	}
+	// pull is the connector's clock for these cases; "now + 1 h" is
+	// 2026-11-22T13:00:00Z.
+	pull := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name    string
 		reports []osqueryposture.HostReportSummary
 		rows    []osqueryposture.HostReportRow
 		want    time.Time
+		reason  string // substring of the record's reason; "" means no report note
 	}{
-		{"epoch_seconds", named, []osqueryposture.HostReportRow{row("1763607600")}, time.Unix(1763607600, 0).UTC()},
-		{"rfc3339_with_offset", named, []osqueryposture.HostReportRow{row("2026-11-20T03:00:00+01:00")}, time.Date(2026, 11, 20, 2, 0, 0, 0, time.UTC)},
-		{"oldest_of_two_rows", named, []osqueryposture.HostReportRow{row("1763607600"), row("1763000000")}, time.Unix(1763000000, 0).UTC()},
-		{"one_unreadable_row_unreads_all", named, []osqueryposture.HostReportRow{row("1763607600"), row("yesterday")}, time.Time{}},
-		{"missing_column", named, []osqueryposture.HostReportRow{{Columns: map[string]any{"other": "1763607600"}}}, time.Time{}},
-		{"json_number_not_converted", named, []osqueryposture.HostReportRow{row(1763607600.0)}, time.Time{}},
-		{"zero_epoch", named, []osqueryposture.HostReportRow{row("0")}, time.Time{}},
-		{"negative_epoch", named, []osqueryposture.HostReportRow{row("-5")}, time.Time{}},
-		{"date_without_zone", named, []osqueryposture.HostReportRow{row("2026-11-20T03:00:00")}, time.Time{}},
-		{"no_rows", named, nil, time.Time{}},
-		{"name_differs_only_by_case", []osqueryposture.HostReportSummary{{ID: 9, Name: "av"}}, []osqueryposture.HostReportRow{row("1763607600")}, time.Time{}},
-		{"two_reports_share_the_name", []osqueryposture.HostReportSummary{{ID: 9, Name: "AV"}, {ID: 10, Name: "AV"}}, []osqueryposture.HostReportRow{row("1763607600")}, time.Time{}},
+		{"epoch_seconds", named, rows("1763607600"), time.Unix(1763607600, 0).UTC(), ""},
+		{"rfc3339_with_offset", named, rows("2026-11-20T03:00:00+01:00"), time.Date(2026, 11, 20, 2, 0, 0, 0, time.UTC), ""},
+		{"oldest_of_two_rows", named, rows("1763607600", "1763000000"), time.Unix(1763000000, 0).UTC(), ""},
+		{"oldest_readable_despite_a_bad_row", named, rows("1763607600", "yesterday", "1763000000"), time.Unix(1763000000, 0).UTC(), "1 of 3 rows unread (row 2 not RFC 3339 or epoch seconds)"},
+		{"missing_column", named, []osqueryposture.HostReportRow{{Columns: map[string]any{"other": "1763607600"}}}, time.Time{}, "row 1 missing or not a string"},
+		{"json_number_not_converted", named, rows(1763607600.0), time.Time{}, "row 1 missing or not a string"},
+		{"zero_epoch", named, rows("0"), time.Time{}, "row 1 not a positive epoch"},
+		{"negative_epoch", named, rows("-5"), time.Time{}, "row 1 not a positive epoch"},
+		{"epoch_milliseconds", named, rows("1763607600000"), time.Time{}, "row 1 epoch over 1e11 (milliseconds?)"},
+		{"epoch_at_1e11_is_still_seconds_but_future", named, rows("100000000000"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"epoch_seconds_in_the_future", named, rows("9999999999"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"rfc3339_just_inside_the_hour", named, rows("2026-11-22T13:00:00Z"), time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC), ""},
+		{"rfc3339_just_past_the_hour", named, rows("2026-11-22T13:00:01Z"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"future_row_skipped_oldest_kept", named, rows("2026-11-23T00:00:00Z", "1763000000"), time.Unix(1763000000, 0).UTC(), "1 of 2 rows unread"},
+		{"date_without_zone", named, rows("2026-11-20T03:00:00"), time.Time{}, "row 1 not RFC 3339 or epoch seconds"},
+		{"no_rows", named, nil, time.Time{}, "antimalware definitions report: no result rows"},
+		{"name_differs_only_by_case", []osqueryposture.HostReportSummary{{ID: 9, Name: "av"}}, rows("1763607600"), time.Time{}, `no report named "AV" on this host`},
+		{"two_reports_share_the_name", []osqueryposture.HostReportSummary{{ID: 9, Name: "AV"}, {ID: 10, Name: "AV"}}, rows("1763607600"), time.Time{}, `2 reports named "AV"; not read`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -706,11 +723,17 @@ func TestPullFromFleet_DefinitionsReportRows(t *testing.T) {
 					{1, 9}: tc.rows, {1, 10}: tc.rows,
 				},
 			}
-			rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil, osqueryposture.FleetPolicies{DefinitionsReport: "AV", DefinitionsColumn: col})
-			if err != nil || len(rows) != 1 {
-				t.Fatalf("PullFromFleet: %v (%d rows)", err, len(rows))
+			out, err := osqueryposture.PullFromFleet(context.Background(), api, func() time.Time { return pull }, osqueryposture.FleetPolicies{DefinitionsReport: "AV", DefinitionsColumn: col})
+			if err != nil || len(out) != 1 {
+				t.Fatalf("PullFromFleet: %v (%d rows)", err, len(out))
 			}
-			got := rows[0]
+			got := out[0]
+			switch {
+			case tc.reason == "" && strings.Contains(got.Reason, "antimalware definitions report"):
+				t.Errorf("reason = %q; want no report note", got.Reason)
+			case tc.reason != "" && !strings.Contains(got.Reason, tc.reason):
+				t.Errorf("reason = %q; want it to contain %q", got.Reason, tc.reason)
+			}
 			if !got.AntimalwareDefinitionsUpdatedAt.Equal(tc.want) {
 				t.Errorf("definitions = %v; want %v", got.AntimalwareDefinitionsUpdatedAt, tc.want)
 			}
@@ -718,6 +741,55 @@ func TestPullFromFleet_DefinitionsReportRows(t *testing.T) {
 				t.Errorf("source = %q; want %q", got.AntimalwareDefinitionsSource, wantSrc)
 			}
 		})
+	}
+}
+
+// #2936 review: the reports list is followed through meta.has_next_results,
+// so a report on page 2 is found.
+func TestFleetClient_ListHostReportsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		switch r.URL.Query().Get("page") {
+		case "0":
+			_, _ = w.Write([]byte(`{"reports": [{"id": 1, "name": "AV definitions old"}], "meta": {"has_next_results": true, "has_previous_results": false}, "count": 2}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"reports": [{"id": 2, "name": "AV definitions"}], "meta": {"has_next_results": false, "has_previous_results": true}, "count": 2}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	creds, _ := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "x"})
+	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
+	got, err := client.ListHostReports(context.Background(), 7, "AV definitions")
+	if err != nil {
+		t.Fatalf("ListHostReports: %v", err)
+	}
+	if len(got) != 2 || got[1].ID != 2 || got[1].Name != "AV definitions" {
+		t.Errorf("reports = %+v; want both pages", got)
+	}
+	if strings.Join(pages, ",") != "0,1" {
+		t.Errorf("pages requested = %v; want 0,1", pages)
+	}
+}
+
+// #2936 review: a server that always reports another page is cut off with
+// an error, not followed forever.
+func TestFleetClient_ListHostReportsBoundsPages(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"reports": [], "meta": {"has_next_results": true}}`))
+	}))
+	t.Cleanup(srv.Close)
+	creds, _ := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "x"})
+	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
+	if _, err := client.ListHostReports(context.Background(), 7, "AV"); err == nil {
+		t.Fatal("expected an error from an endless page sequence")
+	}
+	if calls != 50 {
+		t.Errorf("calls = %d; want 50", calls)
 	}
 }
 
