@@ -41,7 +41,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 )
 
 // openAppPool returns a connection pool for the application role, which
@@ -75,21 +75,24 @@ func openAppPool(t *testing.T) *pgxpool.Pool {
 // A subtest FAILS when:
 //
 //   - The handler returns 5xx (the bug we are preventing)
+//
 //   - The response is not valid JSON (a 200 with a partial body is the
 //     half-broken shape the panel cannot render)
 //
-// A subtest PASSES on 200, 401 (unauth — surface-acceptable for
-// endpoints that gate on a richer cred than the bootstrap owner), or
-// 403 (forbidden — same rationale). 4xx is acceptable because the
-// invariant is "never crash on empty"; an authorization decision is a
-// separate concern.
+//   - The handler returns 401 or 403: the caller is a live tenant admin
+//     on the real engine (#3016), admitted on every path in the set
+//
+// Any other 4xx passes: the invariant is "never crash on empty", and a
+// 400 for a missing required query parameter or a 404 for an unmounted
+// optional route is not a crash.
 func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
 	app := openAppPool(t)
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	tenant := uuid.NewString()
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner", "admin", "approver"}))
+	// #3016: a seeded tenant admin with a live grant, on the real engine.
+	bearer := liveroletest.Bearer(t, srv, tenant, "admin")
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 
@@ -162,6 +165,11 @@ func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
 			if resp.StatusCode >= 500 {
 				t.Fatalf("status = %d, want < 500; body=%s", resp.StatusCode, body)
 			}
+			// #3016: the caller is a live tenant admin, whom the engine
+			// admits on every path here, so a 401 or 403 is a regression.
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				t.Fatalf("status = %d for a live admin; body=%s", resp.StatusCode, body)
+			}
 			if !json.Valid(body) && len(body) > 0 {
 				t.Fatalf("response body is not valid JSON: %s", body)
 			}
@@ -228,4 +236,34 @@ func looksLikeArrayKey(k string) bool {
 		}
 	}
 	return false // conservative — explicit list above is the authority
+}
+
+// #3016: the sweep's harness runs the real engine. A live viewer asking
+// for a tenant-admin surface is refused by it, with its own "forbidden"
+// body, which no handler gate returns.
+func TestEmptyTenant_ViewerRefusedAdminSurfaceByAuthz(t *testing.T) {
+	app := openAppPool(t)
+	srv := api.New(api.Config{})
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
+	viewer := liveroletest.Bearer(t, srv, uuid.NewString(), "viewer")
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+
+	for _, path := range []string{"/v1/admin/users", "/v1/admin/audit-log"} {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+viewer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := readAll(resp)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+			t.Errorf("viewer GET %s = %d %s; want 403 forbidden", path, resp.StatusCode, body)
+		}
+	}
 }

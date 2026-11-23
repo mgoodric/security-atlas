@@ -21,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -41,12 +41,13 @@ func taxServer(t *testing.T, app *pgxpool.Pool, tenant string) taxEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	tid := uuid.MustParse(tenant)
+	liveroletest.Attach(t, srv, app)
+	// #3016: seeded people with live grants, on the real engine.
 	env := taxEnv{
 		tenant: tenant,
-		admin:  srv.IssueTestJWT(t, testjwt.AdminFor(tid)),
-		owner:  srv.IssueTestJWT(t, testjwt.OwnerFor(tid, []string{"control_owner"})),
-		viewer: srv.IssueTestJWT(t, testjwt.ViewerFor(tid)),
+		admin:  liveroletest.Bearer(t, srv, tenant, "admin"),
+		owner:  liveroletest.Bearer(t, srv, tenant, "control_owner"),
+		viewer: liveroletest.Bearer(t, srv, tenant, "viewer"),
 	}
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
@@ -354,9 +355,24 @@ func TestCategoryAdmin_NonAdminRefusedAuditLoggedTenantBUnaffected(t *testing.T)
 		`SELECT count(*) FROM taxonomy_audit_log WHERE tenant_id = $1`, envA.tenant).Scan(&refused); err != nil || refused != 0 {
 		t.Fatalf("audit rows after refused writes = %d (%v), want 0", refused, err)
 	}
-	// Reads stay open to program roles.
-	if status, _ := taxCall(t, envA, http.MethodGet, "/v1/risks/categories", envA.owner, nil); status != http.StatusOK {
-		t.Fatalf("list as control owner: status %d, want 200", status)
+	// Reads stay open to roles that read risks: a viewer lists them. A
+	// control owner reads no risk surface (control_owner.rego; the
+	// calendar keeps risk events from it too, #2130/#2232), so the engine
+	// refuses its list with its own "forbidden" (#3016).
+	if status, _ := taxCall(t, envA, http.MethodGet, "/v1/risks/categories", envA.viewer, nil); status != http.StatusOK {
+		t.Fatalf("list as viewer: status %d, want 200", status)
+	}
+	if status, body := taxCall(t, envA, http.MethodGet, "/v1/risks/categories", envA.owner, nil); status != http.StatusForbidden || body["error"] != "forbidden" {
+		t.Fatalf("list as control owner: status %d (%v), want 403 forbidden", status, body)
+	}
+	// Every refused write above is the engine's refusal: neither role may
+	// write risks, so the handler's IsTenantApprover gate is behind it.
+	for _, w := range writes {
+		for name, bearer := range map[string]string{"control owner": envA.owner, "viewer": envA.viewer} {
+			if _, body := taxCall(t, envA, w.method, w.path, bearer, w.body); body["error"] != "forbidden" {
+				t.Fatalf("%s %s as %s: body %v, want the engine's forbidden", w.method, w.path, name, body)
+			}
+		}
 	}
 
 	for _, w := range writes {

@@ -244,7 +244,7 @@ func TestOverlayImport_RefusesFileTenantRoleAndSize(t *testing.T) {
 
 func exportCSV(t *testing.T, e env, query string) [][]string {
 	t.Helper()
-	status, b, ct := raw(t, e, http.MethodGet, "/v1/mapping-overlays/export"+query, e.viewer, "", nil)
+	status, b, ct := raw(t, e, http.MethodGet, "/v1/mapping-overlays/export"+query, e.admin, "", nil)
 	if status != http.StatusOK || !strings.HasPrefix(ct, "text/csv") {
 		t.Fatalf("export: status %d type %q (%s)", status, ct, b)
 	}
@@ -316,7 +316,7 @@ func TestOverlayExport_EveryColumnOwnTenantOnly(t *testing.T) {
 	if recs := exportCSV(t, f.tenantA, "?status=active"); len(recs) != 2 {
 		t.Errorf("?status=active export has %d edges; want 1", len(recs)-1)
 	}
-	if status, b, _ := raw(t, f.tenantA, http.MethodGet, "/v1/mapping-overlays/export?status=gone", f.tenantA.viewer, "", nil); status != http.StatusBadRequest {
+	if status, b, _ := raw(t, f.tenantA, http.MethodGet, "/v1/mapping-overlays/export?status=gone", f.tenantA.admin, "", nil); status != http.StatusBadRequest {
 		t.Errorf("bad status filter: %d (%s)", status, b)
 	}
 	recsB := exportCSV(t, f.tenantB, "")

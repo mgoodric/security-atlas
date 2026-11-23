@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
@@ -37,8 +38,10 @@ func newExceptionAPI(t *testing.T) (*exceptionAPI, func(bool)) {
 	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
-	srv.AttachDB(dbtest.NewAppPool(t))
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	// Minting a token wires the test signer before the handler is built.
 	_ = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
@@ -46,6 +49,24 @@ func newExceptionAPI(t *testing.T) (*exceptionAPI, func(bool)) {
 	a := &exceptionAPI{t: t, tenant: tenant, ctrl: ctrl, srv: srv, ts: ts}
 	return a, func(allow bool) { setAllowSelfApproval(t, admin, tenant, allow) }
 }
+
+// person seeds a user holding roles, on the real engine (#3016), and
+// returns their id and a bearer for them.
+func (a *exceptionAPI) person(roles ...string) (uuid.UUID, string) {
+	a.t.Helper()
+	return liveroletest.Person(a.t, a.srv, a.tenant, roles...)
+}
+
+// newPerson is a bearer for a fresh live grc_engineer: the operator role,
+// and an approver by role (#2428).
+func (a *exceptionAPI) newPerson() string {
+	a.t.Helper()
+	_, bearer := a.person("grc_engineer")
+	return bearer
+}
+
+// bearer returns a bearer for a non-person credential (a machine subject)
+// with the approver claims; a person comes from newPerson.
 
 func (a *exceptionAPI) bearer(subject string) string {
 	c := testjwt.ApproverFor(uuid.MustParse(a.tenant))
@@ -108,8 +129,9 @@ type approvedException struct {
 
 func TestHTTP_ExceptionApproval_FollowsSelfApprovalSetting(t *testing.T) {
 	a, allowSelf := newExceptionAPI(t)
-	requester := uuid.New()
-	asRequester := func() string { return a.bearer("user:" + requester.String()) }
+	// Each person is a live grc_engineer, an approver by role (#2428).
+	requester, requesterBearer := a.person("grc_engineer")
+	asRequester := func() string { return requesterBearer }
 
 	// Off: the requester, from a second session, is refused.
 	allowSelf(false)
@@ -118,8 +140,8 @@ func TestHTTP_ExceptionApproval_FollowsSelfApprovalSetting(t *testing.T) {
 		t.Fatalf("self-approval with the setting off: status %d (want 403) body=%s", code, raw)
 	}
 	// A second person approves, unflagged.
-	second := uuid.New()
-	code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+id+"/approve", a.bearer("user:"+second.String()), "")
+	second, secondBearer := a.person("grc_engineer")
+	code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+id+"/approve", secondBearer, "")
 	var got approvedException
 	_ = json.Unmarshal(raw, &got)
 	if code != http.StatusOK || got.Exception.ApprovedBy != second.String() || got.Exception.SelfApproved {

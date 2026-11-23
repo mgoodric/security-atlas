@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
@@ -553,16 +554,30 @@ func do(t *testing.T, ts *httptest.Server, method, path, bearer, body string) (i
 	return resp.StatusCode, b
 }
 
+// superAdminBearer seeds a person holding a live admin grant in tenant and
+// returns a session for them carrying the super-admin claim: the platform
+// operator's shape. admin.rego admits the /v1/admin/* platform segments to
+// an admin role on an admin credential (#2503).
+func superAdminBearer(t *testing.T, srv *api.Server, tenant uuid.UUID) string {
+	t.Helper()
+	user, _ := liveroletest.Person(t, srv, tenant.String(), "admin")
+	c := testjwt.AdminFor(tenant)
+	c.Subject = "user:" + user.String()
+	return srv.IssueTestJWT(t, c)
+}
+
 // A tenant admin who is not super-admin is refused every edge-proposal
-// route, and nothing changes; a super-admin lists and decides them.
+// route, and nothing changes; a super-admin lists and decides them. Both
+// are seeded people on the real engine (#3016), and the tenant admin's
+// refusal is the engine's own "forbidden": admin.rego keeps these platform
+// segments off a tenant admin by role.
 func TestEdgeRemapAPI_TenantAdminForbiddenSuperAdminSucceeds(t *testing.T) {
 	admin, app := setupEdgeRemap(t, nil)
 	tenant := uuid.MustParse(dbtest.SeedTenant(t, admin, "scf_remap_decisions", "controls"))
 	srv := edgeServer(t, app)
-	tenantAdmin := testjwt.AdminFor(tenant)
-	tenantAdmin.SuperAdmin = false
-	tenantBearer := srv.IssueTestJWT(t, tenantAdmin)
-	superBearer := srv.IssueTestJWT(t, testjwt.AdminFor(tenant))
+	liveroletest.Attach(t, srv, app)
+	tenantBearer := liveroletest.Bearer(t, srv, tenant.String(), "admin")
+	superBearer := superAdminBearer(t, srv, tenant)
 	// The handler chain is built after the test signer exists.
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
@@ -576,12 +591,12 @@ func TestEdgeRemapAPI_TenantAdminForbiddenSuperAdminSucceeds(t *testing.T) {
 		{base + "/" + props["R-04"].id + "/reject", `{"reason":"no"}`},
 		{base + "/" + props["R-05"].id + "/keep-legacy", `{}`},
 	}
-	if code, body := do(t, ts, http.MethodGet, base, tenantBearer, ""); code != http.StatusForbidden {
-		t.Errorf("tenant admin GET: %d %s; want 403", code, body)
+	if code, body := do(t, ts, http.MethodGet, base, tenantBearer, ""); code != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+		t.Errorf("tenant admin GET: %d %s; want 403 forbidden", code, body)
 	}
 	for _, w := range writes {
-		if code, body := do(t, ts, http.MethodPost, w.path, tenantBearer, w.body); code != http.StatusForbidden {
-			t.Errorf("tenant admin POST %s: %d %s; want 403", w.path, code, body)
+		if code, body := do(t, ts, http.MethodPost, w.path, tenantBearer, w.body); code != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+			t.Errorf("tenant admin POST %s: %d %s; want 403 forbidden", w.path, code, body)
 		}
 	}
 	for code, p := range edgeProposals(t, admin) {
@@ -685,7 +700,9 @@ implementation_type: manual_attested
 			t.Fatalf("upload: %v", err)
 		}
 		srv = edgeServer(t, app)
-		bearer = srv.IssueTestJWT(t, testjwt.AdminFor(tenant))
+		liveroletest.Attach(t, srv, app)
+		// It reads coverage and approves the edge remap, a platform route.
+		bearer = superAdminBearer(t, srv, tenant)
 		ts = httptest.NewServer(srv.HTTPHandlerForTests())
 		t.Cleanup(ts.Close)
 		before = read("")

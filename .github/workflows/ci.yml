@@ -3579,6 +3579,14 @@ jobs:
       - name: Run check-audit-log-subject-module.sh
         run: bash scripts/check-audit-log-subject-module.sh
 
+      # #3016: an integration harness that builds api.New without the authz
+      # engine runs no authz, so its role-claim bearers prove nothing.
+      - name: Run check-harness-engine self-test
+        run: bash scripts/check-harness-engine_test.sh
+
+      - name: Run check-harness-engine.sh
+        run: bash scripts/check-harness-engine.sh
+
       # Slice 461: offline self-test for the seed order-independence guard
       # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in
       # the integration job, which has a live Postgres).

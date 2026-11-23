@@ -70,7 +70,7 @@ func (a *exceptionAPI) countFor(bearer string) int {
 
 func TestHTTP_ExceptionCreate_IdempotencyKeyReplays(t *testing.T) {
 	a, _ := newExceptionAPI(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	key := uuid.New().String()
 	body := a.createBody("vendor blocker")
 	before := a.countFor(requester)
@@ -99,7 +99,7 @@ func TestHTTP_ExceptionCreate_IdempotencyKeyReplays(t *testing.T) {
 	}
 
 	// Another person's key is their own.
-	other := a.bearer("user:" + uuid.New().String())
+	other := a.newPerson()
 	code, replayed, raw = a.postWithKey(other, key, body)
 	if code != http.StatusCreated || replayed != "" {
 		t.Fatalf("other requester, same key: status %d replayed=%q body=%s, want a new exception", code, replayed, raw)
@@ -111,7 +111,7 @@ func TestHTTP_ExceptionCreate_IdempotencyKeyReplays(t *testing.T) {
 
 func TestHTTP_ExceptionCreate_IdempotencyKeyConcurrent(t *testing.T) {
 	a, _ := newExceptionAPI(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	key := uuid.New().String()
 	body := a.createBody("concurrent retry")
 	before := a.countFor(requester)
@@ -149,7 +149,7 @@ func TestHTTP_ExceptionCreate_IdempotencyKeyConcurrent(t *testing.T) {
 
 func TestHTTP_ExceptionCreate_NoKeyFilesEachTime(t *testing.T) {
 	a, _ := newExceptionAPI(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	body := a.createBody("no key")
 	before := a.countFor(requester)
 	for range 2 {

@@ -47,9 +47,9 @@ func TestHTTP_RiskLinkProposals_AreAudited(t *testing.T) {
 			t.Fatalf("confirm %s: %d %s", id, resp.StatusCode, raw)
 		}
 	}
-	// The confirmer is the approver bearer's principal (testjwt.ApproverFor),
-	// not the viewer who filed the proposal.
-	confirmer := "test-approver:" + tenant
+	// The confirmer is the approving person's user id, not the admin who
+	// filed the proposal.
+	confirmer := h.approverID.String()
 	type row struct{ action, actor, child string }
 	auditRows := func(parent uuid.UUID) []row {
 		t.Helper()

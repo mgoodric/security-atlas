@@ -27,11 +27,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/exceptions"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -75,9 +73,9 @@ func (a *exceptionAPI) activeException(requester, approver string) string {
 func TestHTTP_ExceptionRevoke_EndsActiveAndLogs(t *testing.T) {
 	a, allowSelf := newExceptionAPI(t)
 	allowSelf(false)
-	requester := a.bearer("user:" + uuid.New().String())
-	approverID := uuid.New().String()
-	approver := a.bearer("user:" + approverID)
+	requester := a.newPerson()
+	approverUser, approver := a.person("grc_engineer")
+	approverID := approverUser.String()
 	id := a.activeException(requester, approver)
 
 	// A reason is required.
@@ -136,27 +134,20 @@ func TestHTTP_ExceptionRevoke_EndsActiveAndLogs(t *testing.T) {
 func TestHTTP_ExceptionRevoke_NonApproverRefused(t *testing.T) {
 	a, allowSelf := newExceptionAPI(t)
 	allowSelf(false)
-	approver := a.bearer("user:" + uuid.New().String())
-	id := a.activeException(a.bearer("user:"+uuid.New().String()), approver)
+	approver := a.newPerson()
+	id := a.activeException(a.newPerson(), approver)
 
-	tenant := uuid.MustParse(a.tenant)
-	for name, claims := range map[string]func() string{
-		// The authz layer admits grc_engineer to revoke; the handler
-		// still requires the approver flag, which this JWT lacks.
-		"grc_engineer without approver": func() string {
-			c := testjwt.OwnerFor(tenant, []string{"grc_engineer"})
-			c.Subject = "user:" + uuid.New().String()
-			return a.srv.IssueTestJWT(t, c)
-		},
-		"viewer": func() string {
-			c := testjwt.ViewerFor(tenant)
-			c.Subject = "user:" + uuid.New().String()
-			return a.srv.IssueTestJWT(t, c)
-		},
-	} {
-		code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+id+"/revoke", claims(), `{"reason":"not mine to end"}`)
-		if code != http.StatusForbidden {
-			t.Fatalf("%s revoke: status %d (want 403) body=%s", name, code, raw)
+	// The engine admits only admin and grc_engineer to revoke an
+	// exception, and both pass the handler's IsTenantApprover: a live
+	// grc_engineer is an approver by role (#2428). So the refusal is the
+	// engine's own "forbidden" (#3016). This test once had a
+	// "grc_engineer without approver" case, refused only because its role
+	// claim had no live grant.
+	for _, role := range []string{"control_owner", "viewer"} {
+		_, bearer := a.person(role)
+		code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+id+"/revoke", bearer, `{"reason":"not mine to end"}`)
+		if code != http.StatusForbidden || !strings.Contains(string(raw), `"error":"forbidden"`) {
+			t.Fatalf("%s revoke: status %d body=%s; want 403 forbidden", role, code, raw)
 		}
 	}
 
@@ -172,7 +163,7 @@ func TestHTTP_ExceptionRevoke_NonApproverRefused(t *testing.T) {
 
 func TestHTTP_ExceptionCreate_RefusesNullPredicate(t *testing.T) {
 	a, _ := newExceptionAPI(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	expires := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
 	body := func(pred string) string {
 		return fmt.Sprintf(`{"control_id":%q,"scope_cell_predicate":%s,"justification":"vendor blocker","expires_at":%q}`,
@@ -206,7 +197,7 @@ func TestHTTP_ExceptionCreate_RefusesNullPredicate(t *testing.T) {
 // 1 MiB gets 413.
 func TestHTTP_ExceptionCreate_WholeControlAndSizeCaps(t *testing.T) {
 	a, _ := newExceptionAPI(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	expires := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
 	withPred := func(pred string) string {
 		return fmt.Sprintf(`{"control_id":%q,"scope_cell_predicate":%s,"justification":"vendor blocker","expires_at":%q}`,
@@ -244,8 +235,8 @@ func TestHTTP_ExceptionCreate_WholeControlAndSizeCaps(t *testing.T) {
 func TestHTTP_ExceptionLifecycle_MachineCredentialRefused(t *testing.T) {
 	a, allowSelf := newExceptionAPI(t)
 	allowSelf(false)
-	requester := a.bearer("user:" + uuid.New().String())
-	approver := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
+	approver := a.newPerson()
 	// #2600: every machine shape, not only an OAuth client. The OAuth
 	// client and the bootstrap admin reach the router as JWTs whose
 	// subject names them. An unbound API key cannot authenticate on the
