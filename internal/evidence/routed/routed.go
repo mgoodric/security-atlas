@@ -71,7 +71,7 @@ var kinds = []string{
 // control-free records and keeps reading none. A kind routed from its first
 // record needs no entry here.
 var lateKinds = []string{
-	"sast.scan_result.v1", // #2973, migration 20261300000000
+	"sast.scan_result.v1", // #2973, migration 20261301000000
 }
 
 // Kinds returns a copy of the routed kinds, never nil.

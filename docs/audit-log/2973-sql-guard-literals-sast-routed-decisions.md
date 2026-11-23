@@ -141,7 +141,7 @@ set: the `scf:` rows would have appeared in it, and `routed.Within` would
 have closed its `control_ref` leg for sast. Both change a frozen period
 (invariant 10).
 
-- **Migration `20261300000000`** adds `evidence_routing_kind_cutover`
+- **Migration `20261301000000`** adds `evidence_routing_kind_cutover`
   (`evidence_kind` PK, `cut_at` default `now()`), seeded with sast. Global,
   no RLS, `SELECT` to `atlas_app`, the same shape as the first cutover.
 - **`routed.Cutovers`** holds the first cutover and the late kinds' own

@@ -2567,7 +2567,7 @@ type Querier interface {
 	// summarizes FROZEN periods, so in practice the horizon is always set.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	// #2973: the instant each kind routed after the first cutover started
-	// routing (migration 20261300000000). routed.KindsAsOf pins a read anchored
+	// routing (migration 20261301000000). routed.KindsAsOf pins a read anchored
 	// before a kind's own instant to exclude that kind's control-free records.
 	ListEvidenceRoutingKindCutovers(ctx context.Context) ([]EvidenceRoutingKindCutover, error)
 	// #2269: the AR's risk-accepted observations. The latest evaluation per
