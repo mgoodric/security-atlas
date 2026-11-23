@@ -685,6 +685,16 @@ func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID
 	); err != nil {
 		t.Fatalf("seed framework_scope: %v", err)
 	}
+	// wipeTenantState only clears at the start of the next ucfcoverage
+	// test, so the last test's row outlived the package and broke the
+	// setup of a later package sharing the database, such as scfimport
+	// (#3026). Delete it when this test ends.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM framework_scopes WHERE id = $1`, id); err != nil {
+			t.Errorf("cleanup framework_scope %s: %v", id, err)
+		}
+	})
 	return id
 }
 

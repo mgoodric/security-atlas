@@ -126,6 +126,63 @@ assert_contains "$out" "STALE       internal/c/c_test.go: on the backlog but it 
 assert_contains "$out" "STALE       internal/gone/gone_test.go: on the backlog but the file is gone" "stale: gone"
 assert_not_contains "$out" "internal/a/a_test.go" "stale run: live entry not reported"
 
+# 5b. An engine call that appears only in a comment does not count (#3026).
+fresh comments
+harness internal/a/a_test.go 'srv := api.New(api.Config{})' '// liveroletest.Attach(t, srv, app)'
+harness internal/b/b_test.go 'srv := api.New(api.Config{}) // srv.AttachAuthz(engine, nil) later'
+harness internal/c/c_test.go 'srv := api.New(api.Config{})' '/*' 'authz.NewEngine(ctx, r)' '*/'
+harness internal/d/d_test.go 'srv := api.New(api.Config{}) /* attachAuthz(t, srv, app) */'
+run
+assert_eq "$rc" "1" "comment-only engine: exit 1"
+assert_contains "$out" "NO-ENGINE   internal/a/a_test.go" "comment-only: full-line // comment"
+assert_contains "$out" "NO-ENGINE   internal/b/b_test.go" "comment-only: trailing // comment"
+assert_contains "$out" "NO-ENGINE   internal/c/c_test.go" "comment-only: multi-line block comment"
+assert_contains "$out" "NO-ENGINE   internal/d/d_test.go" "comment-only: inline block comment"
+
+# A // or /* inside a string or rune is not a comment: the call after it counts.
+fresh strings
+harness internal/a/a_test.go 'srv := api.New(api.Config{})' 'u := "http://x"; liveroletest.Attach(t, srv, app)'
+# shellcheck disable=SC2016 # the backticks are a Go raw string, not shell
+harness internal/b/b_test.go 'srv := api.New(api.Config{})' 'u := `/* raw`; liveroletest.Attach(t, srv, app)'
+harness internal/c/c_test.go 'srv := api.New(api.Config{})' 'q, s := '"'\\''"', "a\"//"; liveroletest.Attach(t, srv, app)'
+run
+assert_eq "$rc" "0" "comment markers in strings: exit 0 ($out)"
+
+# A backlog entry that the backlog at a base commit lacks is GREW (#3026).
+fresh grew
+harness internal/a/a_test.go 'srv := api.New(api.Config{})'
+printf 'internal/a/a_test.go\n' >"$root/backlog.txt"
+git -C "$root" init -q
+git -C "$root" -c user.name=t -c user.email=t@example.invalid add backlog.txt
+git -C "$root" -c user.name=t -c user.email=t@example.invalid commit -qm base
+base_sha="$(git -C "$root" rev-parse HEAD)"
+set +e
+out="$(HARNESS_ENGINE_BASE="$base_sha" HARNESS_ENGINE_ROOT="$root" HARNESS_ENGINE_BACKLOG="$root/backlog.txt" bash "$SCRIPT" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "unchanged backlog against base: exit 0 ($out)"
+
+harness internal/b/b_test.go 'srv := api.New(api.Config{})'
+printf 'internal/a/a_test.go\ninternal/b/b_test.go\n' >"$root/backlog.txt"
+set +e
+out="$(HARNESS_ENGINE_BASE="$base_sha" HARNESS_ENGINE_ROOT="$root" HARNESS_ENGINE_BACKLOG="$root/backlog.txt" bash "$SCRIPT" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "1" "grown backlog: exit 1"
+assert_contains "$out" "GREW        internal/b/b_test.go" "grown backlog: names the new entry"
+assert_not_contains "$out" "GREW        internal/a/a_test.go" "grown backlog: base entry not reported"
+
+# Without a base the same grown backlog passes: the check is opt-in.
+run
+assert_eq "$rc" "0" "grown backlog, no base: exit 0"
+
+# A base that names no commit is exit 2, not a silent pass.
+set +e
+out="$(HARNESS_ENGINE_BASE=deadbeef HARNESS_ENGINE_ROOT="$root" HARNESS_ENGINE_BACKLOG="$root/backlog.txt" bash "$SCRIPT" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "2" "unknown base: exit 2"
+
 # 6. An unreadable backlog is exit 2.
 fresh nobacklog
 rm "$root/backlog.txt"

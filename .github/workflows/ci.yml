@@ -3584,8 +3584,21 @@ jobs:
       - name: Run check-harness-engine self-test
         run: bash scripts/check-harness-engine_test.sh
 
+      # #3026: the backlog only shrinks. Compare it to the base commit: a PR's
+      # and a queue entry's base on main, a push's previous main head. The
+      # checkout is shallow, so fetch that one commit first. A PR checkout is
+      # the merge ref, so an entry main dropped after the branch was cut is
+      # not reported against the PR.
       - name: Run check-harness-engine.sh
-        run: bash scripts/check-harness-engine.sh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::no base commit for the harness-engine backlog comparison"
+            exit 1
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          HARNESS_ENGINE_BASE="$BASE_SHA" bash scripts/check-harness-engine.sh
 
       # Slice 461: offline self-test for the seed order-independence guard
       # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in

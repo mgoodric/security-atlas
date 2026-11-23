@@ -109,8 +109,9 @@ allow if {
 # /v1/exceptions/{id}/revoke). The path's terminal segment promotes the
 # action to "revoke", which grc_actions does not hold because revoke on
 # other resources (API keys, sessions, grants) stays admin's. This admit
-# is bound to exceptions only. The handler still requires the approver
-# flag, so a grc_engineer without it is refused with 403 there.
+# is bound to exceptions only. The handler gate is IsTenantApprover, which
+# admits the live grc_engineer role (#2428), so it adds no refusal for a
+# grc_engineer; it refuses roles OPA would not admit here anyway.
 allow if {
     has_role("grc_engineer")
     input.action == "revoke"
@@ -119,8 +120,8 @@ allow if {
 
 # #2105: grc_engineer revokes an approved risk acceptance (PATCH
 # /v1/risks/{id}/acceptance/revoke), as it approves one. Bound to risks
-# like the exceptions admit above; the handler still requires the approver
-# flag.
+# like the exceptions admit above; the handler gate is the same
+# IsTenantApprover.
 allow if {
     has_role("grc_engineer")
     input.action == "revoke"
