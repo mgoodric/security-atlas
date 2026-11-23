@@ -77,6 +77,8 @@ Three further facts shape the answer:
 
    Amended by [#2973](https://github.com/mgoodric/security-atlas/issues/2973): `sast.scan_result.v1` moved from bound to routed, so one scan reaches cc7_1 detection, pi1_2 and pi1_3. A kind that was bound, with records already in the ledger, before it was routed gets its own cutover row in `evidence_routing_kind_cutover`, and a pinned read compares against that instant. A period frozen after the first cutover but before the kind was routed keeps reading none of its control-free records. Decisions: `docs/audit-log/2973-sql-guard-literals-sast-routed-decisions.md`.
 
+   Amended by [#3019](https://github.com/mgoodric/security-atlas/issues/3019): every routed kind is in exactly one class. It was routed at the first cutover (#2924), or it is in `lateKinds` with its own cutover row, or it is in `firstRecordKinds`: added after the first cutover but routed from its first record, so no bound record of it predates routing, with a one-line justification. `TestEveryRoutedKindIsClassified` fails on an unclassified kind, so a kind cannot fall back to the first cutover by omission. A row in `evidence_routing_kind_cutover` for a kind not in `lateKinds` makes `routed.Cutover` fail rather than be ignored.
+
 ## The 27 checks, by tier
 
 The 27 Rego queries reduced to a roll-up in #1858 are in 26 bundles; cc1_4 has two. The old expressions are at `bf99aaa5`. #2820's decisions log lists each one with its permalink.
