@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 )
@@ -42,24 +42,23 @@ type fixture struct {
 	requirement map[string]uuid.UUID // code -> id
 }
 
-// env is one tenant's server with an admin bearer and a viewer bearer.
+// env is one tenant's server, running the real authz engine, with the
+// bearers of a seeded admin and a seeded viewer (live user_roles grants).
 type env struct {
-	url    string
-	tenant string
-	admin  string
-	viewer string
+	url      string
+	tenant   string
+	admin    string
+	viewer   string
+	viewerID uuid.UUID
 }
 
 func newEnv(t *testing.T, app *pgxpool.Pool, tenant string) env {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	tid := uuid.MustParse(tenant)
-	e := env{
-		tenant: tenant,
-		admin:  srv.IssueTestJWT(t, testjwt.AdminFor(tid)),
-		viewer: srv.IssueTestJWT(t, testjwt.ViewerFor(tid)),
-	}
+	liveroletest.Attach(t, srv, app)
+	e := env{tenant: tenant, admin: liveroletest.Bearer(t, srv, tenant, "admin")}
+	e.viewerID, e.viewer = liveroletest.Person(t, srv, tenant, "viewer")
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 	e.url = ts.URL
@@ -470,6 +469,55 @@ func TestOverlay_RetireRecordsReasonAndActor(t *testing.T) {
 	}
 	if got := list(t, f.tenantA, ""); len(got) != 2 {
 		t.Fatalf("list after re-add = %d edges; want 2", len(got))
+	}
+}
+
+// The engine, not a handler gate, refuses a viewer (#3016): the body is the
+// authz middleware's own "forbidden", nothing is written, and each refused
+// write leaves its deny row in decision_audit_log. viewer.rego admits no
+// mapping-overlays read either; the read case pins that until #3021
+// decides whether a viewer should read overlays.
+func TestOverlay_ViewerRefusedByAuthz(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	_, body := call(t, f.tenantA, http.MethodPost, "/v1/mapping-overlays", f.tenantA.admin, f.body("C2", "IAC-06"))
+	id := edgeOf(t, body)["id"].(string)
+
+	for _, rt := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/v1/mapping-overlays", f.body("C2", "AST-04")},
+		{"/v1/mapping-overlays/" + id + "/retire", map[string]any{"reason": "viewer"}},
+	} {
+		status, body := call(t, f.tenantA, http.MethodPost, rt.path, f.tenantA.viewer, rt.body)
+		if status != http.StatusForbidden || body["error"] != "forbidden" {
+			t.Errorf("viewer POST %s = %d %v; want 403 forbidden", rt.path, status, body)
+		}
+	}
+	for _, path := range []string{"/v1/mapping-overlays", "/v1/mapping-overlays/audited-under"} {
+		status, body := call(t, f.tenantA, http.MethodGet, path, f.tenantA.viewer, nil)
+		if status != http.StatusForbidden || body["error"] != "forbidden" {
+			t.Errorf("viewer GET %s = %d %v; want 403 forbidden (#3021)", path, status, body)
+		}
+	}
+	if got := list(t, f.tenantA, "?anchor=AST-04"); len(got) != 0 {
+		t.Fatalf("refused create wrote a row: %v", got)
+	}
+	if got := list(t, f.tenantA, "?status=active"); len(got) != 1 {
+		t.Fatalf("active edges after refused retire = %d; want 1", len(got))
+	}
+
+	var denies int
+	if err := f.admin.QueryRow(ctx, `
+		SELECT count(*) FROM decision_audit_log
+		WHERE tenant_id = $1 AND user_id = $2 AND result = 'deny' AND request_method = 'POST'
+		  AND request_path LIKE '/v1/mapping-overlays%'`,
+		f.tenantA.tenant, "user:"+f.tenantA.viewerID.String()).Scan(&denies); err != nil {
+		t.Fatal(err)
+	}
+	if denies != 2 {
+		t.Fatalf("decision_audit_log deny rows for the viewer = %d; want 2", denies)
 	}
 }
 

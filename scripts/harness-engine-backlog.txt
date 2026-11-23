@@ -1,0 +1,34 @@
+# Integration harnesses that build api.New with no authz engine (#3016).
+# The list only shrinks: wire the engine (liveroletest.Attach plus seeded
+# people) and delete the line in the same PR. scripts/check-harness-engine.sh
+# fails on an entry that no longer needs to be here.
+internal/api/adminauditperiods/export_integration_test.go
+internal/api/adminvendors/export_integration_test.go
+internal/api/aggregationrules/integration_test.go
+internal/api/anchors/integration_test.go
+internal/api/anchors/scf_release_integration_test.go
+internal/api/anchors/state_integration_test.go
+internal/api/board/integration_test.go
+internal/api/controlstate/integration_test.go
+internal/api/dashboard/soa_coverage_integration_test.go
+internal/api/freshnessdrift/integration_test.go
+internal/api/legacy_bearer_retirement_test.go
+internal/api/mcpwriteproposals/ingest_integration_test.go
+internal/api/me/hints_integration_test.go
+internal/api/me/profile_integration_test.go
+internal/api/me/subject_prefix_integration_test.go
+internal/api/metrics/caller_user_integration_test.go
+internal/api/policyacks/empty_set_integration_test.go
+internal/api/questionnaires/integration_test.go
+internal/api/risks/review_due_integration_test.go
+internal/api/risks/unified_audit_integration_test.go
+internal/api/scfimport/legacy_integration_test.go
+internal/api/search/integration_test.go
+internal/api/ucfcoverage/benchmark_test.go
+internal/api/vendors/integration_test.go
+internal/api/walkthroughs/integration_test.go
+internal/auth/credpersist_integration_test.go
+internal/control/description_in_place_integration_test.go
+internal/evidence/ingest/integration_test.go
+internal/frameworkscope/workflow_log_integration_test.go
+internal/scope/integration_test.go

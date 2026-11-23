@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
@@ -27,14 +28,16 @@ func TestHTTP_ListExceptions_FiltersByControl(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	ctrlA := seedControl(t, admin, tenant)
 	ctrlB := seedControl(t, admin, tenant)
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
-	srv.AttachDB(dbtest.NewAppPool(t))
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	_ = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 	a := &exceptionAPI{t: t, tenant: tenant, ctrl: ctrlA, srv: srv, ts: ts}
 
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	onA := a.request(requester)
 	a.ctrl = ctrlB
 	onB := a.request(requester)
@@ -43,7 +46,7 @@ func TestHTTP_ListExceptions_FiltersByControl(t *testing.T) {
 	otherTenant := freshTenant(t, admin)
 	otherCtrl := seedControl(t, admin, otherTenant)
 	other := &exceptionAPI{t: t, tenant: otherTenant, ctrl: otherCtrl, srv: srv, ts: ts}
-	onOther := other.request(other.bearer("user:" + uuid.New().String()))
+	onOther := other.request(other.newPerson())
 
 	list := func(query string) []string {
 		t.Helper()

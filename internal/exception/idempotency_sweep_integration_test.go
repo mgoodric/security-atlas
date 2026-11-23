@@ -25,7 +25,7 @@ func TestIdempotencySweeper_DeletesExpiredKeysOnly(t *testing.T) {
 	a, _ := newExceptionAPI(t)
 	admin := dbtest.NewMigratePool(t)
 	ctx := context.Background()
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 
 	oldKey, freshKey := uuid.New().String(), uuid.New().String()
 	for _, key := range []string{oldKey, freshKey} {
@@ -81,7 +81,7 @@ func TestHTTP_ExceptionCreate_LegacyHashedKeyReplays(t *testing.T) {
 	a, _ := newExceptionAPI(t)
 	admin := dbtest.NewMigratePool(t)
 	ctx := context.Background()
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 	key := uuid.New().String()
 	expires := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Hour)
 	body := fmt.Sprintf(`{"control_id":%q,"justification":"legacy","expires_at":%q}`,
@@ -126,7 +126,7 @@ func TestIdempotencySweeper_DeleteIsTenantScoped(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 
 	key := uuid.New().String()
 	if code, _, raw := a.postWithKey(requester, key, a.createBody("scoped "+key)); code != http.StatusCreated {
@@ -161,7 +161,7 @@ func TestIdempotencySweeper_DeleteIsTenantScoped(t *testing.T) {
 func TestIdempotencySweeper_PolicyKeepsKeysInsideTheWindow(t *testing.T) {
 	a, _ := newExceptionAPI(t)
 	app := dbtest.NewAppPool(t)
-	requester := a.bearer("user:" + uuid.New().String())
+	requester := a.newPerson()
 
 	key := uuid.New().String()
 	if code, _, raw := a.postWithKey(requester, key, a.createBody("window "+key)); code != http.StatusCreated {

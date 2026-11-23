@@ -297,6 +297,13 @@ audit-integration-enrolment:
 check-audit-log-subject-module:
     bash scripts/check-audit-log-subject-module.sh
 
+# Assert every integration test that builds api.New attaches the authz
+# engine (liveroletest.Attach), opts out with a reason, or is on the
+# shrinking backlog in scripts/harness-engine-backlog.txt. #3016.
+# Self-test: scripts/check-harness-engine_test.sh
+check-harness-engine:
+    bash scripts/check-harness-engine.sh
+
 # Assert the sharded integration matrix (scripts/integration-shards.txt) is
 # COMPLETE + DISJOINT + correctly pinned: the union of all legs == the
 # integration-tagged package set EXACTLY (no package dropped — T-1), no

@@ -38,7 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -208,9 +208,15 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles) for the
-	// Authorization-header gated routes (/v1/calendar, /v1/calendar/subscription).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	liveroletest.Attach(t, srv, app)
+	// #3016: a seeded grc_engineer with a live grant, on the real engine,
+	// for the Authorization-header gated routes (/v1/calendar,
+	// /v1/calendar/subscription). The engine filters each source by the
+	// caller's reads (#2130, #2232), and these tests list every source, so
+	// the caller reads them all. This harness used a control_owner claim
+	// with no engine, which saw risks, vendors and exceptions that a live
+	// control_owner does not (access_integration_test.go).
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	// Slice 091 path: a separate credstore opaque bearer drives the
 	// `?token=` URL parameter on /v1/calendar.ics. The owner credential
 	// has no calendar scope — the scope-mismatch test relies on that.
@@ -691,5 +697,21 @@ func TestCalendarICS_RejectsNonCalendarScopeToken(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("status=%d want=403 (token wrong scope)", resp.StatusCode)
+	}
+}
+
+// #3016: the harness runs the real engine. calendar.rego admits every
+// role, so the engine's refusal is for a person who holds none (every
+// grant revoked): its own "forbidden" body, which no handler returns.
+func TestCalendar_UngrantedPersonRefusedByAuthz(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	env := testServer(t, app, tenant)
+	env.bearer = liveroletest.Bearer(t, env.srv, tenant)
+	resp, body := get(t, env, "/v1/calendar")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+		t.Fatalf("ungranted GET /v1/calendar: status %d body=%s; want 403 forbidden", resp.StatusCode, body)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
@@ -34,6 +35,7 @@ type selfApprovalHarness struct {
 	fv     uuid.UUID
 	srv    *api.Server
 	ts     *httptest.Server
+	people map[uuid.UUID]bool
 }
 
 func newSelfApprovalHarness(t *testing.T) *selfApprovalHarness {
@@ -42,20 +44,27 @@ func newSelfApprovalHarness(t *testing.T) *selfApprovalHarness {
 	tenant := freshTenant(t, admin)
 	fv := seedFrameworkVersion(t, admin, tenant)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
-	srv.AttachDB(dbtest.NewAppPool(t))
+	app := dbtest.NewAppPool(t)
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	// Minting a token wires the test signer, which the handler must see
 	// when it is built (the setupHTTPServer order).
 	_ = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
-	return &selfApprovalHarness{t: t, admin: admin, tenant: tenant, fv: fv, srv: srv, ts: ts}
+	return &selfApprovalHarness{t: t, admin: admin, tenant: tenant, fv: fv, srv: srv, ts: ts, people: map[uuid.UUID]bool{}}
 }
 
-// person mints an approver JWT in the production subject shape.
+// person returns a new session for user, a live grc_engineer: the
+// operator role, and an approver by role (#2428). The first call seeds
+// the person, on the real engine (#3016).
 func (h *selfApprovalHarness) person(user uuid.UUID) string {
-	c := testjwt.ApproverFor(uuid.MustParse(h.tenant))
-	c.Subject = "user:" + user.String()
-	return h.srv.IssueTestJWT(h.t, c)
+	h.t.Helper()
+	if h.people[user] {
+		return liveroletest.Session(h.t, h.srv, h.tenant, user, "grc_engineer")
+	}
+	h.people[user] = true
+	return liveroletest.PersonAs(h.t, h.srv, h.tenant, user, "grc_engineer")
 }
 
 // machine mints an approver JWT for an OAuth client, which is no person.
@@ -181,5 +190,22 @@ func TestHTTP_Approve_SelfApprovalOptIn(t *testing.T) {
 	got := h.call(http.MethodGet, "/v1/framework-scopes/"+id, h.person(submitter), http.StatusOK)
 	if got["state"] != "draft" || got["self_approved"] != false {
 		t.Fatalf("after predicate edit: %v, want draft and unflagged", got)
+	}
+}
+
+// #3016: the engine refuses a live viewer the approve, with its own
+// "forbidden" body, which no handler gate returns, and the scope stays
+// in review.
+func TestHTTP_Approve_ViewerRefusedByAuthz(t *testing.T) {
+	h := newSelfApprovalHarness(t)
+	id := h.submitted("Viewer scope", h.person(uuid.New()))
+	viewer := liveroletest.Bearer(t, h.srv, h.tenant, "viewer")
+
+	resp, body := doJSON(t, http.MethodPatch, h.ts.URL+"/v1/framework-scopes/"+id+"/approve", viewer, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+		t.Fatalf("viewer approve: status %d body=%s; want 403 forbidden", resp.StatusCode, body)
+	}
+	if got := h.call(http.MethodGet, "/v1/framework-scopes/"+id, h.person(uuid.New()), http.StatusOK); got["state"] != "review" {
+		t.Fatalf("after the viewer's refusal: state %v; want review", got["state"])
 	}
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -449,19 +449,15 @@ func setupHTTPServerWithViewer(t *testing.T, tenant string) (*httptest.Server, s
 	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearers via slice 190 path. The author creates and
-	// submits, which takes admin or grc_engineer (#2664), so it holds the
-	// approver flag too; it still cannot approve what it submitted (the
-	// second-person rule, #2101).
-	authorClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
-	authorClaims.Subject = "user:" + uuid.NewString()
-	bearer := srv.IssueTestJWT(t, authorClaims)
-	// #2101: only a person approves, so the approver carries the production
-	// "user:<uuid>" subject; the author that submits is someone else.
-	approverClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
-	approverClaims.Subject = "user:" + uuid.NewString()
-	approver := srv.IssueTestJWT(t, approverClaims)
-	viewer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
+	liveroletest.Attach(t, srv, app)
+	// #3016: seeded people with live grants, on the real engine. The
+	// author creates and submits, which takes admin or grc_engineer
+	// (#2664); a live grc_engineer is an approver by role (#2428), and it
+	// still cannot approve what it submitted (the second-person rule,
+	// #2101). The approver is a second grc_engineer.
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	approver := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")
@@ -536,10 +532,12 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), frameworkscope.ErrSelfApproval.Error()) {
 		t.Fatalf("approve by its own submitter: status %d body %s; want 403 naming the second-person rule", resp.StatusCode, payload)
 	}
-	// A viewer is refused by role.
+	// A viewer is refused by the engine, with its own "forbidden" (#3016).
+	// The handler's "approver role required" sits behind it: the engine
+	// admits only admin and grc_engineer to approve, both approvers.
 	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", viewer, "")
-	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), "approver role required") {
-		t.Fatalf("approve by a viewer: status %d body %s; want 403 approver role required", resp.StatusCode, payload)
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), `"error":"forbidden"`) {
+		t.Fatalf("approve by a viewer: status %d body %s; want 403 forbidden", resp.StatusCode, payload)
 	}
 	// Approver succeeds.
 	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", approver, "")

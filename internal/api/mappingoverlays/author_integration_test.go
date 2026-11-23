@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
@@ -69,9 +70,20 @@ func TestOverlayAuthor2286_NamedFromOwnTenantOnly(t *testing.T) {
 	keyB := seedAuthorKey(t, f.admin, f.tenantB.tenant)
 
 	// Alice signs in: her session records her users(id), not "jwt:<jti>".
+	// She holds a live admin grant, on the real engine (#3016).
+	if _, err := f.admin.Exec(ctx,
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'admin', 'test')`,
+		f.tenantA.tenant, alice.String()); err != nil {
+		t.Fatalf("grant alice admin: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.admin.Exec(context.Background(), `DELETE FROM user_roles WHERE user_id = $1`, alice.String())
+	})
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{})
-	srv.AttachDB(dbtest.NewAppPool(t))
-	claims := testjwt.AdminFor(uuid.MustParse(f.tenantA.tenant))
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
+	claims := testjwt.OwnerFor(uuid.MustParse(f.tenantA.tenant), []string{"admin"})
 	claims.Subject = "user:" + alice.String()
 	bearer := srv.IssueTestJWT(t, claims)
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())

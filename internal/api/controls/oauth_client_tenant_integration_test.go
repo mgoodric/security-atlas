@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
@@ -64,6 +65,7 @@ func setupOAuthTenantHTTP(t *testing.T) oauthTenantSetup {
 
 	srv := api.New(api.Config{RotationGrace: time.Hour, SchemaRegistry: reg})
 	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	srv.AttachJWTValidator(signer, nil, oauthTenantIssuer, oauthTenantIssuer)
 	oh := oauth.New(ks, oauth.Config{Issuer: oauthTenantIssuer})
 	oh.AttachTokenEndpoint(oauth.NewTokenEndpoint(signer, clients, oauth.TokenEndpointConfig{
@@ -207,7 +209,10 @@ func TestOAuthClientUpload_LandsInBoundTenantAndIsVisible(t *testing.T) {
 	}
 
 	// The tenant's user sees the control through the API.
-	userToken := testjwt.MustMint(t, s.signer, oauthTenantIssuer, oauthTenantIssuer, testjwt.AdminFor(tenant))
+	// #3016: a seeded person with a live admin grant, on the real engine.
+	userClaims := testjwt.OwnerFor(tenant, []string{"admin"})
+	userClaims.Subject = "user:" + liveroletest.Seed(t, tenant.String(), "admin").String()
+	userToken := testjwt.MustMint(t, s.signer, oauthTenantIssuer, oauthTenantIssuer, userClaims)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.server.URL+"/v1/controls?limit=500", nil)
 	req.Header.Set("Authorization", "Bearer "+userToken)
 	resp, err := http.DefaultClient.Do(req)
@@ -258,6 +263,26 @@ func TestOAuthClientUpload_UnboundClientIsRefused(t *testing.T) {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
+		t.Errorf("a refused upload persisted %d control row(s)", n)
+	}
+}
+
+// #3016: the harness runs the real engine. A tenant's live viewer is
+// refused the upload by it, with its own "forbidden" body, and nothing is
+// written.
+func TestOAuthClientUpload_ViewerRefusedByAuthz(t *testing.T) {
+	s := setupOAuthTenantHTTP(t)
+	tenant := seedBoundTenant(t, s.admin)
+	claims := testjwt.OwnerFor(tenant, []string{"viewer"})
+	claims.Subject = "user:" + liveroletest.Seed(t, tenant.String(), "viewer").String()
+	token := testjwt.MustMint(t, s.signer, oauthTenantIssuer, oauthTenantIssuer, claims)
+
+	bundleID := "it_3016_viewer_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	code, raw := uploadManualBundle(t, s, token, bundleID)
+	if code != http.StatusForbidden || !bytes.Contains(raw, []byte(`"error":"forbidden"`)) {
+		t.Fatalf("viewer upload: status %d body %s, want 403 forbidden", code, raw)
+	}
+	if n := countControlsByBundle(t, s.admin, bundleID, tenant); n != 0 {
 		t.Errorf("a refused upload persisted %d control row(s)", n)
 	}
 }

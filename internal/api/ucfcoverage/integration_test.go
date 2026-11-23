@@ -8,14 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -115,19 +116,28 @@ func seedControl(t *testing.T, tenantID string, scfAnchorScfID, bundleID, title 
 // (and every prior slice's) registered.
 func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 	t.Helper()
+	ts, bearer, _ := setupHTTPServerWithUngranted(t, tenantID)
+	return ts, bearer
+}
+
+// setupHTTPServerWithUngranted is setupHTTPServer plus a bearer for a
+// person in tenantID who holds no live role: every grant revoked.
+func setupHTTPServerWithUngranted(t *testing.T, tenantID string) (*httptest.Server, string, string) {
+	t.Helper()
 	appPool := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
-	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
-	// the legacy IssueBootstrapCredential default (no elevation).
-	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenantID)))
+	liveroletest.Attach(t, srv, appPool)
+	// #3016: a seeded viewer with a live grant, on the real engine (no
+	// elevation).
+	bearer := liveroletest.Bearer(t, srv, tenantID, "viewer")
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")
 	}
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
-	return ts, bearer
+	return ts, bearer, liveroletest.Bearer(t, srv, tenantID)
 }
 
 func get(t *testing.T, ts *httptest.Server, path, bearer string) (*http.Response, []byte) {
@@ -594,6 +604,24 @@ func TestUCFCoverage_RejectsMissingBearer(t *testing.T) {
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s: status = %d; want 401", p, resp.StatusCode)
 		}
+	}
+}
+
+// #3016: the engine refuses a person with no live role the tenant's
+// control coverage, with its own "forbidden" body, while the catalog
+// routes ("requirements", "anchors") stay open to any signed-in caller.
+func TestUCFCoverage_UngrantedPersonRefusedControlsByAuthz(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantControls(t)
+	cid := seedControl(t, tenantA, "IAC-37", "test-ungranted", "Ungranted")
+	ts, _, ungranted := setupHTTPServerWithUngranted(t, tenantA)
+
+	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", ungranted)
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+		t.Fatalf("ungranted control coverage: status %d body=%s; want 403 forbidden", resp.StatusCode, body)
+	}
+	if resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", ungranted); resp.StatusCode != http.StatusOK {
+		t.Fatalf("ungranted catalog read: status %d body=%s; want 200", resp.StatusCode, body)
 	}
 }
 
