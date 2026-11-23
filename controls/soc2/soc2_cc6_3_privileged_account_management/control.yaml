@@ -9,17 +9,28 @@ description: |
   audit-event stream enabled, and that company secrets are not shared from
   personal vaults.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the 1Password
-  connector's `1password.org_policy.v1` snapshots, whose verdict is the
-  account's sign-in policy: it passes when two-factor sign-in is required
-  and the minimum password length is at least 12, and fails otherwise.
-  Vault membership, sharing and audit events are not checked.
+  What runs today: a SQL query over the payloads of the 1Password
+  connector's `1password.org_policy.v2` snapshots. It takes each account's
+  latest in-window snapshot and fails the control when any of them has
+  `audit_events_enabled` false, meaning the Events Reporting integration
+  the connector reads through is not authorized for audit events, so the
+  account's audit-event stream does not reach this deployment through it.
+  Otherwise the control is inconclusive. It never passes. No in-window v2
+  snapshot also leaves it inconclusive, including when only
+  `1password.org_policy.v1` snapshots arrived (a connector older than
+  #2968): v1 snapshots are not read. The connector's per-record verdict is
+  not used.
 
-  Pending: the privileged-vault sharing default, audit events and member
-  count, which the connector does not emit yet (#2830); and bounding the
-  member count by the privileged role, which needs an inventory (#2834).
+  Why it cannot pass: the v1 snapshot's two-factor and minimum password
+  length fields came from an endpoint no 1Password documentation
+  describes, and no documented 1Password API (Events, Users, Connect)
+  reports an account's two-factor requirement or password rules, so they
+  cannot be verified (#2968). The v2 snapshot's member counts are
+  recorded but not checked.
+
+  Not checked: vault membership, the sharing default, per-vault audit
+  events and personal-vault sharing (#2969); bounding the member count by
+  the privileged role, which needs an inventory (#2834).
 
 scf_anchor_id: IAC-10
 control_family: IAC
@@ -30,27 +41,17 @@ freshness_class: daily
 
 evidence_queries:
   - id: privileged_vault_locked_down
-    language: rego
-    evidence_kind: 1password.org_policy.v1
-    description: "Privileged vault has restricted membership, sharing-disabled-by-default, audit logging on"
+    language: sql
+    evidence_kind: 1password.org_policy.v2
+    description: "The 1Password account's audit-event stream reaches the platform; fails when it does not, never passes"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(payload->'audit_events_enabled' = 'false'::jsonb) THEN 'fail'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT DISTINCT ON (payload->>'org_id') payload
+        FROM evidence
+        ORDER BY payload->>'org_id', observed_at DESC
+      ) AS latest

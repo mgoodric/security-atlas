@@ -19,32 +19,48 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/1password/internal/opauth"
 )
 
+// OrgPolicyKind and OrgPolicySchemaVersion name the record the run pushes.
+const (
+	OrgPolicyKind          = "1password.org_policy.v2"
+	OrgPolicySchemaVersion = "2.0.0"
+)
+
 type runFlags struct {
-	environment  string
-	opBaseURL    string
-	serviceToken string
-	controlID    string
+	environment   string
+	eventsBaseURL string
+	usersBaseURL  string
+	controlID     string
 }
 
 func newRunCmd() *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "pull org-policy state and push an evidence record",
-		Long: `Pull 1Password Business org-policy state, transform to a
-1password.org_policy.v1 evidence record, and push to the platform.
+		Short: "pull account audit-stream and member state and push an evidence record",
+		Long: `Read the 1Password account's audit-stream and member state from the
+documented Events and Users APIs, transform it to a
+1password.org_policy.v2 evidence record, and push it to the platform.
 
-Service Account scopes required (least-privilege):
-  - vault:read_items  (Read)
-  - account:read      (Read)
+Secrets come from the environment only:
+  - ONEPASSWORD_EVENTS_TOKEN         Events Reporting integration bearer
+  - ONEPASSWORD_USERS_CLIENT_ID      Users API OAuth application client ID
+  - ONEPASSWORD_USERS_CLIENT_SECRET  Users API OAuth application secret
 
-Auth: set $ONEPASSWORD_SERVICE_ACCOUNT_TOKEN, or pass --token. The env
-path is preferred so the secret never appears in shell history.`,
+Accounts outside 1password.com set both base URLs for their region.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if f.environment == "" {
 				return errors.New("--environment is required")
+			}
+			// The base URLs decide where the Events bearer and the OAuth
+			// client secret are sent, so only documented 1Password hosts
+			// over https pass.
+			if err := opauth.CheckEventsBaseURL(f.eventsBaseURL); err != nil {
+				return err
+			}
+			if err := opauth.CheckUsersBaseURL(f.usersBaseURL); err != nil {
+				return err
 			}
 			return resolveCommon()
 		},
@@ -53,26 +69,28 @@ path is preferred so the secret never appears in shell history.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.opBaseURL, "1password-base-url", "https://api.1password.com", "1Password public API base URL")
-	cmd.Flags().StringVar(&f.serviceToken, "token", "", "1Password Service Account token (env: ONEPASSWORD_SERVICE_ACCOUNT_TOKEN preferred so the token never appears in shell history)")
-	cmd.Flags().StringVar(&f.controlID, "org-policy-control", "", "control_id to attach to 1password.org_policy.v1 records; empty (the default) routes each record to every control that queries 1password.org_policy.v1 (#2924)")
+	cmd.Flags().StringVar(&f.eventsBaseURL, "events-base-url", opaccount.DefaultEventsBaseURL, "1Password Events API base URL (events.1password.ca, events.1password.eu, events.ent.1password.com for other regions)")
+	cmd.Flags().StringVar(&f.usersBaseURL, "users-base-url", opaccount.DefaultUsersBaseURL, "1Password Users API base URL (api.1password.ca, api.1password.eu, api.ent.1password.com for other regions)")
+	cmd.Flags().StringVar(&f.controlID, "org-policy-control", "", "control_id to attach to 1password.org_policy.v2 records; empty (the default) routes each record to every control that queries 1password.org_policy.v2 (#2924)")
 	return cmd
 }
 
 func doRun(ctx context.Context, f runFlags) error {
-	creds, err := opauth.Resolve(opauth.ResolveOpts{Token: f.serviceToken})
+	creds, err := opauth.Resolve()
 	if err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
 
-	httpClient := &http.Client{Timeout: 20 * time.Second}
+	// The redirect guard keeps the Events bearer and the OAuth client
+	// secret on the origin they were sent to (#2947).
+	httpClient := &http.Client{Timeout: 20 * time.Second, CheckRedirect: opauth.CheckRedirect}
 	sdkClient, err := sdk.NewClient(common.endpoint, common.token, sdkOpts()...)
 	if err != nil {
 		return fmt.Errorf("sdk client: %w", err)
 	}
 	defer func() { _ = sdkClient.Close() }()
 
-	api := opaccount.NewClient(httpClient, f.opBaseURL, creds)
+	api := opaccount.NewClient(httpClient, f.eventsBaseURL, f.usersBaseURL, creds)
 	state, err := opaccount.Inspect(ctx, api, nil)
 	if err != nil {
 		return fmt.Errorf("org-policy inspect: %w", err)
@@ -94,34 +112,26 @@ func doRun(ctx context.Context, f runFlags) error {
 
 // buildOrgPolicyRecord shapes an opaccount.PolicyState into an
 // EvidenceRecord. Scope is the two-key (org, environment) tuple
-// matching slice 044's convention; idempotency_key is the slice 046
-// `1password.org_policy|<org_id>|<hour>` derivation; actor_id follows
+// matching slice 044's convention; idempotency_key is the
+// `1password.org_policy.v2|<org_id>|<hour>` derivation; actor_id follows
 // the platform-wide `connector:<vendor>:<service>@<version>` shape.
 //
-// The optional schema fields are populated only when present in the
-// upstream response — schemaregistry validation already enforces the
-// shape on the platform side.
+// Every v2 field is required, so every one is always emitted.
 func buildOrgPolicyRecord(s *opaccount.PolicyState, env, controlID string) (*evidencev1.EvidenceRecord, error) {
 	now := s.ObservedAt.UTC().Truncate(time.Hour)
-	pm := map[string]any{
-		"org_id":              s.OrgID,
-		"two_factor_required": s.TwoFactorRequired,
-	}
-	if s.MinimumPasswordLength > 0 {
-		pm["minimum_password_length"] = float64(s.MinimumPasswordLength)
-	}
-	pm["domain_restrictions_enabled"] = s.DomainRestrictionsEnabled
-	if s.ActiveMembers > 0 {
-		pm["active_members"] = float64(s.ActiveMembers)
-	}
-	payload, err := structpb.NewStruct(pm)
+	payload, err := structpb.NewStruct(map[string]any{
+		"org_id":               s.OrgID,
+		"audit_events_enabled": s.AuditEventsEnabled,
+		"active_members":       float64(s.ActiveMembers),
+		"suspended_members":    float64(s.SuspendedMembers),
+	})
 	if err != nil {
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.OrgPolicyKey(s.OrgID, now),
-		EvidenceKind:   "1password.org_policy.v1",
-		SchemaVersion:  "1.0.0",
+		EvidenceKind:   OrgPolicyKind,
+		SchemaVersion:  OrgPolicySchemaVersion,
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{s.OrgID}},

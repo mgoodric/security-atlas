@@ -34,6 +34,15 @@ var stockSQLChecksWithoutFail = map[string]string{
 	"soc2_cc7_4_incident_response": "#2832: no fail state until the on-call inventory (#2834)",
 }
 
+// stockSQLChecksWithoutPass lists the stock SQL checks that cannot pass on
+// the records they receive, each with the reason. Such a check states it
+// never passes in its description.
+var stockSQLChecksWithoutPass = map[string]string{
+	// The audit-event stream being off fails cc6_3; nothing documented
+	// shows the account's 2FA or password rules, so it never passes (#2968).
+	"soc2_cc6_3_privileged_account_management": "#2968: no documented 1Password source for 2FA or password rules",
+}
+
 // #2821 pattern: a stock payload check ships with bundle tests that state
 // what passes, what fails, and that an empty ledger is inconclusive, so the
 // upload gate and the integration tier both exercise the query.
@@ -62,6 +71,12 @@ func TestStockSQLChecksShipBundleTests(t *testing.T) {
 				t.Errorf("%s: has a \"fail\" case but is listed as never failing (%s); drop it from stockSQLChecksWithoutFail", name, reason)
 			}
 			wants = []string{eval.ResultPass, "empty"}
+		}
+		if reason, ok := stockSQLChecksWithoutPass[name]; ok {
+			if seen[eval.ResultPass] {
+				t.Errorf("%s: has a \"pass\" case but is listed as never passing (%s); drop it from stockSQLChecksWithoutPass", name, reason)
+			}
+			wants = []string{eval.ResultFail, "empty"}
 		}
 		for _, want := range wants {
 			if !seen[want] {

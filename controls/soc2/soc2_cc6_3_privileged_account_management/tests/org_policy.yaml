@@ -1,0 +1,129 @@
+# 1password.org_policy.v2 snapshots, shaped as the 1Password connector
+# emits them (connectors/1password/internal/opaccount, #2968): org_id is
+# the Events API introspect account_uuid, audit_events_enabled is whether
+# the integration's features include auditevents, and the member counts
+# come from the Users API. `result` is the connector's own verdict; the
+# query decides on the payload, so a record claiming pass does not pass.
+cases:
+  - name: audit-events-off-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: false
+          active_members: 2
+          suspended_members: 1
+
+  - name: audit-events-on-is-inconclusive
+    description: 2FA and password rules have no documented source, so the control never passes
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: true
+          active_members: 2
+          suspended_members: 1
+
+  - name: a-record-claiming-pass-does-not-pass
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: true
+          active_members: 40
+          suspended_members: 0
+
+  - name: latest-snapshot-decides
+    description: audit events were off, then turned on; the later snapshot is read
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T04:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: false
+          active_members: 2
+          suspended_members: 1
+      - result: inconclusive
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T08:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: true
+          active_members: 2
+          suspended_members: 1
+
+  - name: audit-events-turned-off-fails
+    description: the later snapshot reports the stream off
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T04:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: true
+          active_members: 2
+          suspended_members: 1
+      - result: fail
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T08:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: false
+          active_members: 2
+          suspended_members: 1
+
+  - name: one-account-off-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: M4E2SWNZAZFTRGQGDNS2E5A4MU
+          audit_events_enabled: true
+          active_members: 2
+          suspended_members: 0
+      - result: fail
+        evidence_kind: 1password.org_policy.v2
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: OTHERACCOUNTUUID0000000000
+          audit_events_enabled: false
+          active_members: 5
+          suspended_members: 0
+
+  - name: v1-snapshot-is-not-read
+    description: a connector older than #2968 pushes only v1, which the query does not read
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: 1password.org_policy.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          org_id: acme-corp
+          two_factor_required: false
+          minimum_password_length: 8
+
+  - name: no-snapshot-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records: []
