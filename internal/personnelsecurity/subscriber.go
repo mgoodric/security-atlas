@@ -225,18 +225,28 @@ func (s *WorkerEventSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 		_ = msg.Term()
 		return
 	}
-	if _, err := s.creator.HandleWorkerEvent(tctx, w, eventID, controlID); err != nil {
+	_, err = s.creator.HandleWorkerEvent(tctx, w, eventID, controlID)
+	if errors.Is(err, ErrControlNotFound) && controlID != uuid.Nil {
+		// The record binds the roster to a control UUID the tenant does not
+		// have, so every delivery hits the same foreign key (#3005). Treat it
+		// as D2 treats an unresolvable ref: create the checklist without a
+		// control rather than drop the joiner/leaver event. A redelivery
+		// finds that checklist through the source-event dedup.
+		countUnknownControl(tctx)
+		s.logger.Warn("personnel security subscriber: bound control not found; creating the checklist without a control",
+			"tenant", tenantID, "control", controlID, "source", string(w.SourceHRIS), "err", err.Error())
+		_, err = s.creator.HandleWorkerEvent(tctx, w, eventID, uuid.Nil)
+	}
+	if err != nil {
 		if errors.Is(err, ErrNoChecklistForEvent) || errors.Is(err, ErrInvalidSource) || errors.Is(err, ErrPersonRequired) {
 			_ = msg.Ack()
 			return
 		}
 		if errors.Is(err, ErrControlNotFound) {
-			// The record binds the roster to a control UUID the tenant does
-			// not have: every redelivery hits the same foreign key, and
-			// MaxDeliver is unlimited (#3005).
-			countUnknownControl(tctx)
-			s.logger.Warn("personnel security subscriber: bound control not found; terming",
-				"tenant", tenantID, "control", controlID, "source", string(w.SourceHRIS), "err", err.Error())
+			// Unreachable with a nil control (the column is then NULL), but
+			// a foreign key that still refuses would refuse every delivery.
+			s.logger.Warn("personnel security subscriber: checklist refused without a control; terming",
+				"tenant", tenantID, "err", err.Error())
 			_ = msg.Term()
 			return
 		}
@@ -341,8 +351,8 @@ func payloadDate(pm map[string]any, key string) time.Time {
 	return t
 }
 
-// unknownControlEvents counts worker-lifecycle messages the subscriber termed
-// because their bound control is not in the tenant (#3005). The OTel counter
+// unknownControlEvents counts worker-lifecycle deliveries whose bound control
+// is not in the tenant, so the checklist was created without one (#3005). The OTel counter
 // is created on first use, after main has wired the MeterProvider; the
 // in-process count lets tests assert it without a collector.
 var unknownControlEvents struct {
@@ -356,7 +366,7 @@ func countUnknownControl(ctx context.Context) {
 	unknownControlEvents.once.Do(func() {
 		c, err := otel.Meter("github.com/mgoodric/security-atlas/internal/personnelsecurity").Int64Counter(
 			"atlas.personnelsecurity.unknown_control",
-			metric.WithDescription("Worker lifecycle messages termed because their bound control is not in the tenant"))
+			metric.WithDescription("Worker lifecycle deliveries whose bound control is not in the tenant; the checklist is created without a control"))
 		if err == nil {
 			unknownControlEvents.counter = c
 		}
@@ -366,9 +376,8 @@ func countUnknownControl(ctx context.Context) {
 	}
 }
 
-// UnknownControlEvents returns how many worker-lifecycle messages the
-// subscriber has termed for an unknown bound control since the process
-// started.
+// UnknownControlEvents returns how many worker-lifecycle deliveries the
+// subscriber has seen bound to an unknown control since the process started.
 func UnknownControlEvents() uint64 { return unknownControlEvents.n.Load() }
 
 // discardWriter is a no-op io.Writer for the default discard logger.

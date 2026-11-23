@@ -17,12 +17,12 @@ Connection errors, statement timeouts, context cancellation and query
 runtime errors stay transient. When the audit could not show an error was
 deterministic, it stays a NAK.
 
-| Subscriber                     | Deterministic failure found                                                                                                                                                                                                                                                    | Now                                                                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `eval/consumer`                | An unknown control. `scope.Store.ControlApplicability` runs before `loadControl` and returned an unwrapped `"scope: control %s not found"`, so `ErrControlNotFound` was never reached and the message NAKed forever.                                                           | `scope.ErrControlNotFound`, translated to `eval.ErrControlNotFound`: Ack, as before for that sentinel.                                     |
-| `eval/consumer`                | A malformed `applicability_expr`, `evidence_queries` or exception predicate; a query with an empty expression or unsupported language; a Rego or JSONPath query that does not compile; a SQL query the static guard refuses; a query whose result is not a valid result value. | `eval.ErrUnevaluable`: Term, Warn log, `atlas.eval.control_unevaluable` counter.                                                           |
-| `personnelsecurity/subscriber` | A record bound to a control UUID the tenant does not have. The checklist's only foreign key, `(tenant_id, control_id)`, refuses the insert on every delivery.                                                                                                                  | `personnelsecurity.ErrControlNotFound` (SQLSTATE 23503 on that insert): Term, Warn log, `atlas.personnelsecurity.unknown_control` counter. |
-| `freshnessdrift/worker`        | None. `freshness.Refresh` and `drift.CaptureSnapshot` can fail on a query, an FK to a control deleted mid-transaction (a race, so a retry passes) or a CHECK whose inputs the Go code always satisfies. The tenant header is already Termed.                                   | Unchanged: NAK.                                                                                                                            |
+| Subscriber                     | Deterministic failure found                                                                                                                                                                                                                                                    | Now                                                                                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `eval/consumer`                | An unknown control. `scope.Store.ControlApplicability` runs before `loadControl` and returned an unwrapped `"scope: control %s not found"`, so `ErrControlNotFound` was never reached and the message NAKed forever.                                                           | `scope.ErrControlNotFound`, translated to `eval.ErrControlNotFound`: Ack, as before for that sentinel.                                                                                     |
+| `eval/consumer`                | A malformed `applicability_expr`, `evidence_queries` or exception predicate; a query with an empty expression or unsupported language; a Rego or JSONPath query that does not compile; a SQL query the static guard refuses; a query whose result is not a valid result value. | `eval.ErrUnevaluable`: Term, Warn log, `atlas.eval.control_unevaluable` counter.                                                                                                           |
+| `personnelsecurity/subscriber` | A record bound to a control UUID the tenant does not have. The checklist's only foreign key, `(tenant_id, control_id)`, refuses the insert on every delivery.                                                                                                                  | `personnelsecurity.ErrControlNotFound` (SQLSTATE 23503 on that insert): Warn log, `atlas.personnelsecurity.unknown_control` counter, and the checklist is created with a nil control (D6). |
+| `freshnessdrift/worker`        | None. `freshness.Refresh` and `drift.CaptureSnapshot` can fail on a query, an FK to a control deleted mid-transaction (a race, so a retry passes) or a CHECK whose inputs the Go code always satisfies. The tenant header is already Termed.                                   | Unchanged: NAK.                                                                                                                                                                            |
 
 A query result that is not a valid value (for example, a Rego policy that
 leaves `result` undefined for some input) depends on the records as well as
@@ -96,3 +96,17 @@ Not done, because each changes operations behaviour: a bounded
 config on running deployments and a retention decision for the DLQ. With
 the classifications above, the remaining NAKs are errors that can pass on
 a retry.
+
+## D6: An unknown bound control falls back to a nil control, not a Term
+
+The first cut termed the message, and that dropped the joiner/leaver
+checklist. The #3018 review blocked on that. OE-661's D2 already resolves
+a control ref that is not a UUID to a nil control, and the checklist's
+completion evidence then carries `DefaultControlRef`. A UUID that resolves
+to no control is the same case. On `ErrControlNotFound`, the subscriber
+logs, counts the delivery and calls `HandleWorkerEvent` again with
+`uuid.Nil`. A redelivery hits the foreign key again, retries, and finds the
+nil-control checklist through the source-event dedup, so no second
+checklist is created. Errors from the retry are classified as usual: the
+Ack sentinels Ack, a transient error NAKs, and a foreign key that still
+refuses Terms. The last can't happen, because `control_id` is NULL then.

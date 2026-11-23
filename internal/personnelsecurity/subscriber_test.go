@@ -17,7 +17,7 @@
 //                                       fallback at evidence time)
 //  9. store transient error           → NakWithDelay (will retry)
 // 10. store sentinel (no checklist)   → Ack (not retryable)
-// 11. bound control not in tenant     → Term + counted (#3005)
+// 11. bound control not in tenant     → counted, retried with uuid.Nil (#3005)
 //
 // Branches deliberately left to integration (a real JetStream + Postgres is
 // the only honest test): Start's consumer create + pull loop, the
@@ -126,6 +126,8 @@ type fakeCreator struct {
 	mu    sync.Mutex
 	calls []creatorCall
 	err   error
+	// errFor, when set, picks the error per control instead of err.
+	errFor func(controlID uuid.UUID) error
 }
 
 func (f *fakeCreator) HandleWorkerEvent(ctx context.Context, w worker.Worker, sourceEventID string, controlID uuid.UUID) (Checklist, error) {
@@ -133,6 +135,12 @@ func (f *fakeCreator) HandleWorkerEvent(ctx context.Context, w worker.Worker, so
 	defer f.mu.Unlock()
 	tenant, _ := tenancy.TenantFromContext(ctx)
 	f.calls = append(f.calls, creatorCall{tenant: tenant, worker: w, eventID: sourceEventID, controlID: controlID})
+	if f.errFor != nil {
+		if err := f.errFor(controlID); err != nil {
+			return Checklist{}, err
+		}
+		return Checklist{ID: uuid.New()}, nil
+	}
 	if f.err != nil {
 		return Checklist{}, f.err
 	}
@@ -338,21 +346,60 @@ func TestHandleAcksOnStoreSentinel(t *testing.T) {
 }
 
 // #3005: a bound control the tenant does not have fails the same way on
-// every redelivery, so the message is termed and counted, not NAKed.
-func TestHandleTermsOnUnknownBoundControl(t *testing.T) {
+// every redelivery. The checklist is created without a control (D2) and
+// the delivery is counted; the message acks.
+func TestHandleUnknownBoundControlFallsBackToNil(t *testing.T) {
 	t.Parallel()
-	creator := &fakeCreator{err: fmt.Errorf("%w: %s", ErrControlNotFound, uuid.New())}
+	bound := uuid.New()
+	creator := &fakeCreator{errFor: func(c uuid.UUID) error {
+		if c != uuid.Nil {
+			return fmt.Errorf("%w: %s", ErrControlNotFound, c)
+		}
+		return nil
+	}}
 	s := newTestSubscriber(creator)
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), uuid.NewString(), uuid.NewString())
+	msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), bound.String(), uuid.NewString())
 	before := UnknownControlEvents()
 	s.handle(context.Background(), msg)
 	acks, naks, terms := msg.outcome()
-	if acks != 0 || naks != 0 || terms != 1 {
-		t.Fatalf("acks/naks/terms = %d/%d/%d, want 0/0/1", acks, naks, terms)
+	if acks != 1 || naks != 0 || terms != 0 {
+		t.Fatalf("acks/naks/terms = %d/%d/%d, want 1/0/0", acks, naks, terms)
+	}
+	if len(creator.calls) != 2 || creator.calls[0].controlID != bound || creator.calls[1].controlID != uuid.Nil {
+		t.Fatalf("creator calls = %+v, want the bound control then uuid.Nil", creator.calls)
 	}
 	if got := UnknownControlEvents() - before; got < 1 {
 		t.Fatalf("unknown control count delta = %d, want >= 1", got)
+	}
+}
+
+// #3005: the nil-control retry keeps the normal classification: a transient
+// failure NAKs, and a foreign key that still refuses terms.
+func TestHandleUnknownBoundControlRetryOutcomes(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name                   string
+		nilErr                 error
+		wantAcks, wantNaks, wT int
+	}{
+		{"transient retry naks", errors.New("connection refused"), 0, 1, 0},
+		{"refused retry terms", ErrControlNotFound, 0, 0, 1},
+	}
+	for _, c := range cases {
+		creator := &fakeCreator{errFor: func(ctrl uuid.UUID) error {
+			if ctrl != uuid.Nil {
+				return ErrControlNotFound
+			}
+			return c.nilErr
+		}}
+		s := newTestSubscriber(creator)
+		msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), uuid.NewString(), uuid.NewString())
+		s.handle(context.Background(), msg)
+		if acks, naks, terms := msg.outcome(); acks != c.wantAcks || naks != c.wantNaks || terms != c.wT {
+			t.Fatalf("%s: acks/naks/terms = %d/%d/%d, want %d/%d/%d", c.name, acks, naks, terms, c.wantAcks, c.wantNaks, c.wT)
+		}
 	}
 }
 
