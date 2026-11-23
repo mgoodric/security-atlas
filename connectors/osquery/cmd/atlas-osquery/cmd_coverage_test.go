@@ -355,7 +355,7 @@ func TestNewRunCmd_PreRunLocalModeMissingSocket(t *testing.T) {
 // #2921: the policy flags name Fleet policies, so --mode=local rejects them
 // rather than silently ignoring them.
 func TestNewRunCmd_PreRunLocalModeRejectsPolicyFlags(t *testing.T) {
-	for _, flag := range []string{"--firewall-policy", "--screenlock-policy"} {
+	for _, flag := range []string{"--firewall-policy", "--screenlock-policy", "--antimalware-definitions-report", "--antimalware-definitions-column"} {
 		t.Run(flag, func(t *testing.T) {
 			resetCommon(t)
 			cmd := newRunCmd()
@@ -370,6 +370,29 @@ func TestNewRunCmd_PreRunLocalModeRejectsPolicyFlags(t *testing.T) {
 			err := cmd.PreRunE(cmd, nil)
 			if err == nil || !strings.Contains(err.Error(), "--mode=fleet only") {
 				t.Errorf("err = %v; want a fleet-only rejection", err)
+			}
+		})
+	}
+}
+
+// #2936: a definitions report without its column, or the reverse, cannot
+// be read, so it is refused rather than silently ignored.
+func TestNewRunCmd_PreRunDefinitionsReportNeedsColumn(t *testing.T) {
+	for _, flag := range []string{"--antimalware-definitions-report", "--antimalware-definitions-column"} {
+		t.Run(flag, func(t *testing.T) {
+			resetCommon(t)
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags([]string{
+				"--org", "example",
+				"--environment", "prod",
+				"--fleet-base-url", "https://fleet.example.com",
+				flag, "x",
+			}); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "set together") {
+				t.Errorf("err = %v; want a set-together rejection", err)
 			}
 		})
 	}

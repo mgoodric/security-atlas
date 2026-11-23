@@ -86,6 +86,48 @@ const (
 	}`
 )
 
+// Host report fixtures (#2936) follow Fleet's "List host's reports" and
+// "Get host's report data" example responses (fleetdm.com/docs/rest-api/
+// rest-api, read 2026-11-22): the envelope and keys are Fleet's, and the
+// first list entry is the docs' "List USB devices" example. The
+// "AV definitions" report (id 60), its "last_updated" column and the epoch
+// value are ours: Fleet documents no anti-malware report, and the query
+// that would produce the column was never run against a live host. Host 2
+// has the report but no stored results (the docs' empty-results shape);
+// host 3 has no reports route, so its lookup fails with a 404.
+const (
+	fleetHost1Reports = `{
+		"reports": [
+			{"id": 31, "name": "List USB devices", "description": "Retrieves USB devices and their details.",
+			 "query": "SELECT model, vendor FROM usb_devices;", "logging": "snapshot", "discard_data": false,
+			 "total_results_count": 4, "last_fetched": "2021-01-19T17:08:31Z",
+			 "first_result_columns": {"model": "USB 2.0 Hub", "vendor": "VIA Labs, Inc."}},
+			{"id": 60, "name": "AV definitions", "description": "", "query": "SELECT ...;",
+			 "logging": "snapshot", "discard_data": false, "total_results_count": 1,
+			 "last_fetched": "2021-08-19T21:00:00Z", "first_result_columns": {"last_updated": "1629334800"}}
+		],
+		"meta": {"has_next_results": false, "has_previous_results": false},
+		"count": 2
+	}`
+	fleetHost1Report60 = `{
+		"query_id": 60, "report_id": 60, "host_id": 1, "host_name": "Annas-MacBook-Pro.local",
+		"last_fetched": "2021-08-19T21:00:00Z", "report_clipped": false,
+		"results": [{"columns": {"last_updated": "1629334800"}}]
+	}`
+	fleetHost2Reports = `{
+		"reports": [
+			{"id": 60, "name": "AV definitions", "logging": "snapshot", "discard_data": false,
+			 "total_results_count": 0, "last_fetched": "2021-08-19T21:00:00Z", "first_result_columns": null}
+		],
+		"meta": {"has_next_results": false, "has_previous_results": false},
+		"count": 1
+	}`
+	fleetHost2Report60 = `{
+		"query_id": 60, "report_id": 60, "host_id": 2, "host_name": "win-1",
+		"last_fetched": "2021-08-19T21:00:00Z", "report_clipped": false, "results": []
+	}`
+)
+
 // fakeFleet wires httptest server responses for ListHosts + GetHost.
 func fakeFleet(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -95,6 +137,11 @@ func fakeFleet(t *testing.T) *httptest.Server {
 		"/api/v1/fleet/hosts/1": fleetGetHost1,
 		"/api/v1/fleet/hosts/2": fleetGetHost2,
 		"/api/v1/fleet/hosts/3": fleetGetHost3,
+
+		"/api/v1/fleet/hosts/1/reports":    fleetHost1Reports,
+		"/api/v1/fleet/hosts/1/reports/60": fleetHost1Report60,
+		"/api/v1/fleet/hosts/2/reports":    fleetHost2Reports,
+		"/api/v1/fleet/hosts/2/reports/60": fleetHost2Report60,
 	} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(body))
@@ -576,12 +623,209 @@ func TestFleetClient_AuthorizationHeaderSent(t *testing.T) {
 	}
 }
 
+// #2936: the definitions date is read from the named report's column, over
+// Fleet's documented host-report endpoints. Host 1 has one row (epoch
+// seconds); host 2 has the report but no results, so it is unread; host 3's
+// lookup fails, so it is unread and the reason names the failure.
+func TestPullFromFleet_DefinitionsReport(t *testing.T) {
+	rows := pullFakeWith(t, osqueryposture.FleetPolicies{
+		DefinitionsReport: "AV definitions",
+		DefinitionsColumn: "last_updated",
+	})
+	h1 := rows["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if want := time.Unix(1629334800, 0).UTC(); !h1.AntimalwareDefinitionsUpdatedAt.Equal(want) {
+		t.Errorf("host 1 definitions = %v; want %v", h1.AntimalwareDefinitionsUpdatedAt, want)
+	}
+	if h1.AntimalwareDefinitionsSource != "fleet_report:AV definitions" {
+		t.Errorf("host 1 source = %q", h1.AntimalwareDefinitionsSource)
+	}
+	h2 := rows["uuid-B"]
+	if !h2.AntimalwareDefinitionsUpdatedAt.IsZero() || h2.AntimalwareDefinitionsSource != "" {
+		t.Errorf("host 2 has no results; got %v %q", h2.AntimalwareDefinitionsUpdatedAt, h2.AntimalwareDefinitionsSource)
+	}
+	h3 := rows["uuid-C"]
+	if !h3.AntimalwareDefinitionsUpdatedAt.IsZero() || h3.AntimalwareDefinitionsSource != "" {
+		t.Errorf("host 3 lookup failed; got %v %q", h3.AntimalwareDefinitionsUpdatedAt, h3.AntimalwareDefinitionsSource)
+	}
+	if !strings.Contains(h3.Reason, "antimalware definitions report: fleet: HTTP 404") {
+		t.Errorf("host 3 reason = %q; want the report failure named", h3.Reason)
+	}
+}
+
+// #2936: the report name goes to Fleet as the `query` search keywords.
+func TestFleetClient_ListHostReportsSendsName(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.Query().Get("query")
+		_, _ = w.Write([]byte(`{"reports": [], "count": 0}`))
+	}))
+	t.Cleanup(srv.Close)
+	creds, _ := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "x"})
+	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
+	if _, err := client.ListHostReports(context.Background(), 7, "AV definitions & more"); err != nil {
+		t.Fatalf("ListHostReports: %v", err)
+	}
+	if gotPath != "/api/v1/fleet/hosts/7/reports" || gotQuery != "AV definitions & more" {
+		t.Errorf("path = %q query = %q", gotPath, gotQuery)
+	}
+}
+
+// #2936: the rules for turning report rows into one date.
+func TestPullFromFleet_DefinitionsReportRows(t *testing.T) {
+	const col = "last_updated"
+	named := []osqueryposture.HostReportSummary{{ID: 9, Name: "AV"}}
+	row := func(v any) osqueryposture.HostReportRow {
+		return osqueryposture.HostReportRow{Columns: map[string]any{col: v}}
+	}
+	rows := func(vs ...any) []osqueryposture.HostReportRow {
+		out := make([]osqueryposture.HostReportRow, 0, len(vs))
+		for _, v := range vs {
+			out = append(out, row(v))
+		}
+		return out
+	}
+	// pull is the connector's clock for these cases; "now + 1 h" is
+	// 2026-11-22T13:00:00Z.
+	pull := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		reports []osqueryposture.HostReportSummary
+		rows    []osqueryposture.HostReportRow
+		want    time.Time
+		reason  string // substring of the record's reason; "" means no report note
+	}{
+		{"epoch_seconds", named, rows("1763607600"), time.Unix(1763607600, 0).UTC(), ""},
+		{"rfc3339_with_offset", named, rows("2026-11-20T03:00:00+01:00"), time.Date(2026, 11, 20, 2, 0, 0, 0, time.UTC), ""},
+		{"oldest_of_two_rows", named, rows("1763607600", "1763000000"), time.Unix(1763000000, 0).UTC(), ""},
+		{"oldest_readable_despite_a_bad_row", named, rows("1763607600", "yesterday", "1763000000"), time.Unix(1763000000, 0).UTC(), "1 of 3 rows unread (row 2 not RFC 3339 or epoch seconds)"},
+		{"missing_column", named, []osqueryposture.HostReportRow{{Columns: map[string]any{"other": "1763607600"}}}, time.Time{}, "row 1 missing or not a string"},
+		{"json_number_not_converted", named, rows(1763607600.0), time.Time{}, "row 1 missing or not a string"},
+		{"zero_epoch", named, rows("0"), time.Time{}, "row 1 not a positive epoch"},
+		{"negative_epoch", named, rows("-5"), time.Time{}, "row 1 not a positive epoch"},
+		{"epoch_milliseconds", named, rows("1763607600000"), time.Time{}, "row 1 epoch over 1e11 (milliseconds?)"},
+		{"epoch_at_1e11_is_still_seconds_but_future", named, rows("100000000000"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"epoch_seconds_in_the_future", named, rows("9999999999"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"rfc3339_just_inside_the_hour", named, rows("2026-11-22T13:00:00Z"), time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC), ""},
+		{"rfc3339_just_past_the_hour", named, rows("2026-11-22T13:00:01Z"), time.Time{}, "row 1 more than 1 h in the future"},
+		{"future_row_skipped_oldest_kept", named, rows("2026-11-23T00:00:00Z", "1763000000"), time.Unix(1763000000, 0).UTC(), "1 of 2 rows unread"},
+		{"date_without_zone", named, rows("2026-11-20T03:00:00"), time.Time{}, "row 1 not RFC 3339 or epoch seconds"},
+		{"no_rows", named, nil, time.Time{}, "antimalware definitions report: no result rows"},
+		{"name_differs_only_by_case", []osqueryposture.HostReportSummary{{ID: 9, Name: "av"}}, rows("1763607600"), time.Time{}, `no report named "AV" on this host`},
+		{"two_reports_share_the_name", []osqueryposture.HostReportSummary{{ID: 9, Name: "AV"}, {ID: 10, Name: "AV"}}, rows("1763607600"), time.Time{}, `2 reports named "AV"; not read`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{
+				hosts:   []osqueryposture.HostListEntry{{ID: 1, UUID: "u", Hostname: "h"}},
+				detail:  map[uint64]osqueryposture.HostDetail{1: {ID: 1, UUID: "u"}},
+				reports: map[uint64][]osqueryposture.HostReportSummary{1: tc.reports},
+				reportRows: map[[2]uint64][]osqueryposture.HostReportRow{
+					{1, 9}: tc.rows, {1, 10}: tc.rows,
+				},
+			}
+			out, err := osqueryposture.PullFromFleet(context.Background(), api, func() time.Time { return pull }, osqueryposture.FleetPolicies{DefinitionsReport: "AV", DefinitionsColumn: col})
+			if err != nil || len(out) != 1 {
+				t.Fatalf("PullFromFleet: %v (%d rows)", err, len(out))
+			}
+			got := out[0]
+			switch {
+			case tc.reason == "" && strings.Contains(got.Reason, "antimalware definitions report"):
+				t.Errorf("reason = %q; want no report note", got.Reason)
+			case tc.reason != "" && !strings.Contains(got.Reason, tc.reason):
+				t.Errorf("reason = %q; want it to contain %q", got.Reason, tc.reason)
+			}
+			if !got.AntimalwareDefinitionsUpdatedAt.Equal(tc.want) {
+				t.Errorf("definitions = %v; want %v", got.AntimalwareDefinitionsUpdatedAt, tc.want)
+			}
+			if wantSrc := map[bool]string{true: "", false: "fleet_report:AV"}[tc.want.IsZero()]; got.AntimalwareDefinitionsSource != wantSrc {
+				t.Errorf("source = %q; want %q", got.AntimalwareDefinitionsSource, wantSrc)
+			}
+		})
+	}
+}
+
+// #2936 review: the reports list is followed through meta.has_next_results,
+// so a report on page 2 is found.
+func TestFleetClient_ListHostReportsFollowsPages(t *testing.T) {
+	var pages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		switch r.URL.Query().Get("page") {
+		case "0":
+			_, _ = w.Write([]byte(`{"reports": [{"id": 1, "name": "AV definitions old"}], "meta": {"has_next_results": true, "has_previous_results": false}, "count": 2}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"reports": [{"id": 2, "name": "AV definitions"}], "meta": {"has_next_results": false, "has_previous_results": true}, "count": 2}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	creds, _ := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "x"})
+	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
+	got, err := client.ListHostReports(context.Background(), 7, "AV definitions")
+	if err != nil {
+		t.Fatalf("ListHostReports: %v", err)
+	}
+	if len(got) != 2 || got[1].ID != 2 || got[1].Name != "AV definitions" {
+		t.Errorf("reports = %+v; want both pages", got)
+	}
+	if strings.Join(pages, ",") != "0,1" {
+		t.Errorf("pages requested = %v; want 0,1", pages)
+	}
+}
+
+// #2936 review: a server that always reports another page is cut off with
+// an error, not followed forever.
+func TestFleetClient_ListHostReportsBoundsPages(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"reports": [], "meta": {"has_next_results": true}}`))
+	}))
+	t.Cleanup(srv.Close)
+	creds, _ := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "x"})
+	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
+	if _, err := client.ListHostReports(context.Background(), 7, "AV"); err == nil {
+		t.Fatal("expected an error from an endless page sequence")
+	}
+	if calls != 50 {
+		t.Errorf("calls = %d; want 50", calls)
+	}
+}
+
+// #2936: without a named report the connector makes no report calls.
+func TestPullFromFleet_NoDefinitionsReportNoCalls(t *testing.T) {
+	api := &fakeAPI{
+		hosts:  []osqueryposture.HostListEntry{{ID: 1, UUID: "u", Hostname: "h"}},
+		detail: map[uint64]osqueryposture.HostDetail{1: {ID: 1, UUID: "u"}},
+	}
+	if _, err := osqueryposture.PullFromFleet(context.Background(), api, nil, osqueryposture.FleetPolicies{}); err != nil {
+		t.Fatalf("PullFromFleet: %v", err)
+	}
+	if api.reportCalls != 0 {
+		t.Errorf("report calls = %d; want 0", api.reportCalls)
+	}
+}
+
 // ---- Fakes ----
 
 type fakeAPI struct {
-	hosts  []osqueryposture.HostListEntry
-	detail map[uint64]osqueryposture.HostDetail
-	err    error
+	hosts       []osqueryposture.HostListEntry
+	detail      map[uint64]osqueryposture.HostDetail
+	err         error
+	reports     map[uint64][]osqueryposture.HostReportSummary
+	reportRows  map[[2]uint64][]osqueryposture.HostReportRow
+	reportCalls int
+}
+
+func (f *fakeAPI) ListHostReports(_ context.Context, hostID uint64, _ string) ([]osqueryposture.HostReportSummary, error) {
+	f.reportCalls++
+	return f.reports[hostID], nil
+}
+
+func (f *fakeAPI) GetHostReport(_ context.Context, hostID, reportID uint64) (*osqueryposture.HostReportData, error) {
+	f.reportCalls++
+	return &osqueryposture.HostReportData{Results: f.reportRows[[2]uint64{hostID, reportID}]}, nil
 }
 
 func (f *fakeAPI) ListHosts(_ context.Context) ([]osqueryposture.HostListEntry, error) {

@@ -102,6 +102,25 @@ func TestBuildHostPostureRecord_ConformsAndOmitsUnread(t *testing.T) {
 			},
 			absent: []string{"antimalware_protected", "antimalware_source", "edr_healthy", "edr_source", "host_role", "host_role_source", "disk_used_percent"},
 		},
+		// #2936: the definitions date from a named Fleet report, with its
+		// source, validates under 1.4.0.
+		"fleet_host_definitions_date": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u8", Hostname: "win-1", Platform: "windows",
+				AntimalwareProtected: ptr(true), AntimalwareSource: "fleet_policy:Defender on",
+				AntimalwareDefinitionsUpdatedAt: time.Date(2026, 5, 10, 3, 0, 0, 0, time.FixedZone("x", 3600)),
+				AntimalwareDefinitionsSource:    "fleet_report:AV definitions",
+				LastSeen:                        seen, Result: osqueryposture.ResultInconclusive, Reason: "disk_encryption and screen_lock not reported", ObservedAt: pull,
+			},
+			present: []string{"antimalware_definitions_updated_at", "antimalware_definitions_source"},
+		},
+		// No date read: neither key, even with a source set.
+		"definitions_source_without_date": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u9", Hostname: "win-2", AntimalwareDefinitionsSource: "fleet_report:AV definitions", ObservedAt: pull,
+			},
+			absent: []string{"antimalware_definitions_updated_at", "antimalware_definitions_source"},
+		},
 		"detail_fetch_failed": {
 			in: osqueryposture.HostPosture{
 				HostUUID: "u2", Hostname: "x", Platform: "darwin", LastSeen: seen,
@@ -140,6 +159,22 @@ func TestBuildHostPostureRecord_ConformsAndOmitsUnread(t *testing.T) {
 	}
 }
 
+// #2936: the definitions date is pushed as RFC 3339 in UTC, the shape the
+// cc6_8 query's timestamp guard reads.
+func TestBuildHostPostureRecord_DefinitionsDateIsUTCRFC3339(t *testing.T) {
+	rec, err := buildHostPostureRecord(osqueryposture.HostPosture{
+		HostUUID: "u", Hostname: "h", ObservedAt: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		AntimalwareDefinitionsUpdatedAt: time.Date(2026, 5, 10, 3, 0, 0, 0, time.FixedZone("x", 3600)),
+		AntimalwareDefinitionsSource:    "fleet_report:AV",
+	}, "o", "e", "scf:END-03")
+	if err != nil {
+		t.Fatalf("buildHostPostureRecord: %v", err)
+	}
+	if got := rec.GetPayload().AsMap()["antimalware_definitions_updated_at"]; got != "2026-05-10T02:00:00Z" {
+		t.Errorf("antimalware_definitions_updated_at = %v; want 2026-05-10T02:00:00Z", got)
+	}
+}
+
 // last_seen_at is the host's check-in time; observed_at stays the pull time,
 // because ingest rejects an observed_at more than 24h from receipt.
 func TestBuildHostPostureRecord_LastSeenIsNotObservedAt(t *testing.T) {
@@ -157,7 +192,7 @@ func TestBuildHostPostureRecord_LastSeenIsNotObservedAt(t *testing.T) {
 	if got := rec.GetObservedAt().AsTime(); !got.Equal(pull) {
 		t.Errorf("observed_at = %v; want pull time %v", got, pull)
 	}
-	if rec.GetSchemaVersion() != "1.3.0" {
-		t.Errorf("schema_version = %q; want 1.3.0", rec.GetSchemaVersion())
+	if rec.GetSchemaVersion() != "1.4.0" {
+		t.Errorf("schema_version = %q; want 1.4.0", rec.GetSchemaVersion())
 	}
 }
