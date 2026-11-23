@@ -229,6 +229,10 @@ func TestValidateSQLEvidenceQuery_DottedLiteralsAndRealReferences(t *testing.T) 
 		// A $ inside an identifier does not start a dollar quote.
 		"SELECT x$a$, public.users, $a$ FROM evidence",
 		"SELECT 'x' || $$y$$, pg_catalog.pg_authid FROM evidence",
+		// A line comment ends at \r as well as \n (scan.l non_newline).
+		"SELECT 1 --\rFROM public.users",
+		"SELECT 1 --x\r, pg_catalog.pg_authid FROM evidence",
+		"SELECT --\r(SELECT count(*) > 0 FROM pg_catalog.pg_authid) FROM evidence",
 		// Unterminated: refused, not guessed at.
 		"SELECT 'public.users FROM evidence",
 		"SELECT $$public.users FROM evidence",

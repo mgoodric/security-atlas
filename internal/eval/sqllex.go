@@ -18,7 +18,7 @@
 //   - $tag$...$tag$ is a dollar-quoted string. A $ inside an identifier does
 //     not start one, and $1 is a parameter.
 //   - "..." is a quoted identifier, with "" as a quote.
-//   - -- runs to the end of the line; /* */ nests.
+//   - -- runs to the next \n or \r; /* */ nests.
 //
 // Anything unterminated is an error, so a query this lexer cannot read is
 // refused rather than checked on a guess.
@@ -72,7 +72,9 @@ func lexSQL(s string) ([]sqlToken, error) {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v':
 			i++
 		case c == '-' && i+1 < n && s[i+1] == '-':
-			for i < n && s[i] != '\n' {
+			// scan.l: comment = "--" {non_newline}*, non_newline = [^\n\r].
+			// A carriage return ends the comment as a newline does.
+			for i < n && s[i] != '\n' && s[i] != '\r' {
 				i++
 			}
 		case c == '/' && i+1 < n && s[i+1] == '*':

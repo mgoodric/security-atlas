@@ -4,11 +4,17 @@ Follow-ups from [#2831](https://github.com/mgoodric/security-atlas/issues/2831)
 (PR #2970, its decisions log D2 and D4) and, per the ticket comment, from
 [#2939](https://github.com/mgoodric/security-atlas/issues/2939) (PR #2988).
 
-- detection_tier_actual: none
-- detection_tier_target: none
+- detection_tier_actual: manual_review
+- detection_tier_target: integration
 
-No bug surfaced in shipped behaviour. Every new test was watched failing
-against a mutation before the final run:
+One bug surfaced, in this PR's own lexer, before it merged (D7): a `--`
+comment ended only at `\n`, but Postgres also ends one at `\r`, so
+`SELECT --\r(SELECT … FROM pg_catalog.pg_authid) FROM evidence` passed the
+guard. Review caught it. The lexer/server differential test added for it
+(D7) is the integration-tier check that should have caught it first, and
+does when the fix is reverted.
+
+Every new test was watched failing against a mutation before the final run:
 
 - lexing every `'...'` with backslash escapes failed the
   `'a\' FROM public.users --'` refusal;
@@ -28,7 +34,8 @@ against a mutation before the final run:
 literal ends: standard strings (`''` escape, backslash literal), `E'...'`
 (backslash escape), `U&'...'`, `$tag$...$tag$` (not when the `$` continues an
 identifier, and `$1` is a parameter), quoted identifiers (`""` escape), `--`
-and nested `/* */` comments. Anything unterminated is refused.
+comments (ended by `\n` or `\r`, scan.l's `non_newline`; D7) and nested
+`/* */` comments. Anything unterminated is refused.
 
 - **Why a lexer and not "blank out quoted spans" with a regex.** The guard
   is the static half of the table-reachability seal (decisions log 495
@@ -141,7 +148,7 @@ set: the `scf:` rows would have appeared in it, and `routed.Within` would
 have closed its `control_ref` leg for sast. Both change a frozen period
 (invariant 10).
 
-- **Migration `20261301000000`** adds `evidence_routing_kind_cutover`
+- **Migration `20261302000000`** adds `evidence_routing_kind_cutover`
   (`evidence_kind` PK, `cut_at` default `now()`), seeded with sast. Global,
   no RLS, `SELECT` to `atlas_app`, the same shape as the first cutover.
 - **`routed.Cutovers`** holds the first cutover and the late kinds' own
@@ -158,6 +165,15 @@ have closed its `control_ref` leg for sast. Both change a frozen period
   A kind routed from its first record needs no row.
 - The integration test moves sast's row a day past the first cutover and
   restores it, because one migrate run applies both within moments.
+- **Deploy the migration and the binary together.** The cutover is the
+  instant the migration applied, not the instant the new binary started
+  routing. A period frozen in between is read as after the cutover, so it
+  would gain control-free sast rows the old binary never showed it. The
+  bundle's `atlas-migrate` step runs right before `atlas` serves. The
+  controlled-upgrade path in `docs-site/docs/upgrade.md` stops `atlas`
+  first and now says to freeze nothing between its migrate and start steps.
+  The migration was renumbered twice (`…300` → `…301` → `…302`) to stay
+  above #3001 and #3011.
 
 ## D6 — Supersedes two stock bundles
 
@@ -168,6 +184,43 @@ bundles are superseded on the next boot; owners, evidence, exceptions and
 risk links stay on the old versions. `stock_manifests_gen.go` gained the two
 new hashes and dropped none. `soc2_cc7_1_vulnerability_detection` is not
 changed. Upgrade note in `changelog.d/2973.changed.md`.
+
+## D7 — `--` ends at `\r`, and a differential test asks the server
+
+Review of #3007 found that `lexSQL` ended a line comment only at `\n`.
+Postgres's `scan.l` defines `comment ("--"{non_newline}*)` with
+`non_newline [^\n\r]`, so the server ends it at `\r` too. With the old
+lexer, `SELECT --\r(SELECT count(*) > 0 FROM pg_catalog.pg_authid) FROM evidence`
+hid the subquery from the guard while the server ran it. The fix ends the
+comment at either byte, and three refusals are pinned in
+`TestValidateSQLEvidenceQuery_DottedLiteralsAndRealReferences`.
+
+A hand-written lexer can drift from the server, and only the server can
+say where code stops, so `sqllex_differential_integration_test.go` asks it
+(`//go:build integration`, real Postgres, in the evaluator's own session
+settings):
+
+- **Oracle.** A sentinel identifier follows a fragment. The server reads it
+  as code exactly when it fails with `column "zz_sentinel" does not exist`
+  (42703) or `function pg_catalog.zz_sentinel() does not exist` (42883).
+  The exact wording matters: a quoted identifier that only contains the
+  sentinel is reported under its own name. The fuzz first flagged
+  `", zz_sentinel '"` because of this, which was a false positive in the
+  oracle, not the lexer. Any other error is inconclusive.
+- **Seeds**, about 30 of them, cover CR, LF, CRLF, both comment forms nested
+  each way, and every quote form (`'`, `''`, `E'`, `U&'`, `N'`, `X'`, `$$`,
+  `$tag$`, `"`, `""`). Each must be conclusive, and the lexer must agree
+  both ways.
+- **Fuzz.** 6,000 fixed-seed fragments built from the same pieces, each
+  tried with the bare sentinel and with `pg_catalog.zz_sentinel()`.
+  Whenever the server runs the sentinel as code, the lexer must read it as
+  code and `validateSQLEvidenceQuery` must refuse the qualified form. The
+  check runs one way only: the lexer may see more code than the server,
+  which only over-refuses. An `E'…'` continued over a newline is such a
+  case. The test fails if fewer than 400 cases reach the server as code;
+  the current seed gives 686 of 12,000.
+- Reverting the `\r` fix fails four seeds, the fuzz (on
+  `"\n\r\n--\r, zz_sentinel"`) and the three unit refusals.
 
 ## Not changed
 
