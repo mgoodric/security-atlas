@@ -17,7 +17,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 )
@@ -25,10 +24,6 @@ import (
 func main() {
 	if err := newRootCmd(os.Stdout).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		var ee *exitError
-		if errors.As(err, &ee) {
-			os.Exit(ee.code)
-		}
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }

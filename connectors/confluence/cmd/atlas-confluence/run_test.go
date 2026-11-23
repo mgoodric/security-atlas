@@ -345,6 +345,16 @@ func TestRun_EmptyPushRefusalIsExplained(t *testing.T) {
 	}
 }
 
+func TestExitCode(t *testing.T) {
+	if got := exitCode(errors.New("push sync: HTTP 403")); got != 1 {
+		t.Errorf("plain error: exit %d, want 1", got)
+	}
+	wrapped := fmt.Errorf("run: %w", needsAttention(0, 1, 0))
+	if got := exitCode(wrapped); got != ExitNeedsAttention {
+		t.Errorf("needs attention: exit %d, want %d", got, ExitNeedsAttention)
+	}
+}
+
 func TestNeedsAttention(t *testing.T) {
 	for _, tc := range []struct {
 		max, skipped, warnings int

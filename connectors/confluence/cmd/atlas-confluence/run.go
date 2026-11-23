@@ -61,6 +61,16 @@ type exitError struct {
 
 func (e *exitError) Error() string { return e.msg }
 
+// exitCode is the process exit status for a run's error: an exitError's
+// own code, else 1.
+func exitCode(err error) int {
+	var ee *exitError
+	if errors.As(err, &ee) {
+		return ee.code
+	}
+	return 1
+}
+
 // resolve fills unset values from the environment and checks them.
 func (c *config) resolve() error {
 	c.site = firstNonEmpty(c.site, os.Getenv(EnvSite))
