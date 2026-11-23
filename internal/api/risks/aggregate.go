@@ -109,7 +109,11 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, risk.ErrEmptyChildren),
 			errors.Is(err, risk.ErrUnknownSeverityFunction),
 			errors.Is(err, risk.ErrIncompatibleMethodology),
-			errors.Is(err, risk.ErrInvalidLevel):
+			errors.Is(err, risk.ErrInvalidLevel),
+			// #2961: the children are linked through LinkChildrenTx, so
+			// its level rule and per-request cap apply here too.
+			errors.Is(err, risk.ErrChildLevel),
+			errors.Is(err, risk.ErrTooManyChildren):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "aggregate", err)

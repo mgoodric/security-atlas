@@ -536,6 +536,9 @@ export type RiskAuditEntry = {
   before: Record<string, unknown>;
   after: Record<string, unknown>;
   created_at: string;
+  // #2961: set on a child_linked / child_unlinked row read from a parent's
+  // trail — this risk was linked under, or unlinked from, that parent.
+  parent_risk_id?: string;
 };
 
 export type RiskAuditLogResponse = {

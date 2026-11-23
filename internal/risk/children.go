@@ -359,8 +359,7 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 			}
 			return nil, fmt.Errorf("link child %s: %w", id, err)
 		}
-		before, after := childAuditStates(id, true, audit.Detail)
-		if err := insertRiskAudit(ctx, q, tenantID, parentID, audit.Actor, ActionChildLinked, before, after); err != nil {
+		if err := RecordChildLinkedTx(ctx, q, tenantID, parentID, id, audit); err != nil {
 			return nil, err
 		}
 	}
@@ -385,8 +384,35 @@ func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, chil
 	if n == 0 {
 		return ErrLinkNotFound
 	}
-	before, after := childAuditStates(childID, false, audit.Detail)
-	return insertRiskAudit(ctx, q, tenantID, parentID, audit.Actor, ActionChildUnlinked, before, after)
+	return RecordChildUnlinkedTx(ctx, q, tenantID, parentID, childID, audit)
+}
+
+// RecordChildLinkedTx writes the child_linked row for a new parentID ->
+// childID link on the parent's trail, inside the caller's transaction. It
+// is the one writer of that row: LinkChildrenTx calls it, and so does the
+// aggregation engine, whose rule-made links keep the engine's own bounds
+// rather than LinkChildrenTx's checks (#2961). An empty actor is refused.
+func RecordChildLinkedTx(ctx context.Context, w AuditWriter, tenantID, parentID, childID uuid.UUID, audit HierarchyAudit) error {
+	return recordChildLink(ctx, w, tenantID, parentID, childID, true, audit)
+}
+
+// RecordChildUnlinkedTx writes the child_unlinked row for a removed
+// parentID -> childID link on the parent's trail, inside the caller's
+// transaction (see RecordChildLinkedTx).
+func RecordChildUnlinkedTx(ctx context.Context, w AuditWriter, tenantID, parentID, childID uuid.UUID, audit HierarchyAudit) error {
+	return recordChildLink(ctx, w, tenantID, parentID, childID, false, audit)
+}
+
+func recordChildLink(ctx context.Context, w AuditWriter, tenantID, parentID, childID uuid.UUID, linked bool, audit HierarchyAudit) error {
+	if audit.Actor == "" {
+		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
+	action := ActionChildUnlinked
+	if linked {
+		action = ActionChildLinked
+	}
+	before, after := childAuditStates(childID, linked, audit.Detail)
+	return insertRiskAudit(ctx, w, tenantID, parentID, audit.Actor, action, before, after)
 }
 
 // LinkChildren attaches childIDs under parentID (see LinkChildrenTx). A

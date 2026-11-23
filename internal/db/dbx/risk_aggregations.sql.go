@@ -32,6 +32,48 @@ func (q *Queries) DeleteRiskAggregationLink(ctx context.Context, arg DeleteRiskA
 	return result.RowsAffected(), nil
 }
 
+const deleteRiskAggregationLinksForRisk = `-- name: DeleteRiskAggregationLinksForRisk :many
+DELETE FROM risk_aggregations
+WHERE tenant_id = $1
+  AND (parent_risk_id = $2 OR child_risk_id = $2)
+RETURNING parent_risk_id, child_risk_id
+`
+
+type DeleteRiskAggregationLinksForRiskParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	RiskID   pgtype.UUID `json:"risk_id"`
+}
+
+type DeleteRiskAggregationLinksForRiskRow struct {
+	ParentRiskID pgtype.UUID `json:"parent_risk_id"`
+	ChildRiskID  pgtype.UUID `json:"child_risk_id"`
+}
+
+// #2961: drop every hierarchy link a risk is either end of, before the
+// risk itself is deleted, and return them so the delete writes a
+// child_unlinked row per link. The FK cascade would drop the same rows
+// silently. The caller holds the hierarchy lock, so no link can be added
+// between this and the risk's delete.
+func (q *Queries) DeleteRiskAggregationLinksForRisk(ctx context.Context, arg DeleteRiskAggregationLinksForRiskParams) ([]DeleteRiskAggregationLinksForRiskRow, error) {
+	rows, err := q.db.Query(ctx, deleteRiskAggregationLinksForRisk, arg.TenantID, arg.RiskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeleteRiskAggregationLinksForRiskRow
+	for rows.Next() {
+		var i DeleteRiskAggregationLinksForRiskRow
+		if err := rows.Scan(&i.ParentRiskID, &i.ChildRiskID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const linkRiskAggregation = `-- name: LinkRiskAggregation :exec
 INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, rule_id, tenant_id)
 VALUES ($1, $2, $3, $4)

@@ -6052,7 +6052,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/aggregate:
     post:
-      summary: POST /v1/risks/aggregate
+      summary: POST /v1/risks/aggregate — create a parent risk rolling up child_risk_ids; each child must be scored on the 5x5 grid and sit at a level below the parent, at most 100 children (400); each link is audit-logged on the parent
       tags: [risks]
       operationId: post-v1-risks-aggregate
       security:
@@ -6564,7 +6564,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/audit-log:
     get:
-      summary: GET /v1/risks/{id}/audit-log — the risk's change history, newest first; each field change, category move and placement move with actor, time, before and after; ?limit= caps the rows (default 200, 1..500, else 400) and truncated says older rows exist
+      summary: GET /v1/risks/{id}/audit-log — the risk's change history, newest first; each field change, category move and placement move with actor, time, before and after; ?limit= caps the rows (default 200, 1..500, else 400) and truncated says older rows exist; a child risk also lists the link and unlink rows of its parents, marked with parent_risk_id
       tags: [risks]
       operationId: get-v1-risks-id-audit-log
       security:

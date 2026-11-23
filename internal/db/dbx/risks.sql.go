@@ -676,7 +676,11 @@ func (q *Queries) LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskCo
 const listRiskAuditLog = `-- name: ListRiskAuditLog :many
 SELECT id, tenant_id, risk_id, actor, action_type, before_state, after_state, created_at, subject_module
 FROM risk_audit_log
-WHERE tenant_id = $1 AND risk_id = $2
+WHERE tenant_id = $1
+  AND (risk_id = $2::uuid
+       OR (action_type IN ('child_linked', 'child_unlinked')
+           AND COALESCE(after_state->>'child_risk_id', before_state->>'child_risk_id')
+               = ($2::uuid)::text))
 ORDER BY created_at DESC, id DESC
 LIMIT $3
 `
@@ -689,6 +693,12 @@ type ListRiskAuditLogParams struct {
 
 // #2311: capped at row_limit; the caller asks for one more than it shows
 // to learn whether older rows exist.
+//
+// #2961: also the child_linked / child_unlinked rows on a parent's trail
+// that name this risk as the child, so a child's History shows being
+// linked under or unlinked from a parent without a second row. Their
+// risk_id is the parent's. The COALESCE matches the partial index
+// risk_audit_log_child_link (migration 20261299000000).
 func (q *Queries) ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error) {
 	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID, arg.RowLimit)
 	if err != nil {
