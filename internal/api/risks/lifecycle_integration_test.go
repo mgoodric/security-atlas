@@ -22,21 +22,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
-	"github.com/mgoodric/security-atlas/internal/auth/jwt"
-	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
-
-// issue mints a JWT for claims on the env's server.
-func (env transitionEnv) issue(t *testing.T, claims jwt.AtlasClaims) string {
-	t.Helper()
-	return env.srv.IssueTestJWT(t, claims)
-}
 
 func closeReason() map[string]any {
 	return map[string]any{"reason": "not_applicable", "note": "Lease ended; site decommissioned."}
@@ -276,33 +266,16 @@ func TestLifecycle_BoardBriefTopRisksExcludeClosed(t *testing.T) {
 // deleted row stays in risk_audit_log after the risk is gone.
 func TestLifecycle_HardDeleteIsAdminOnly(t *testing.T) {
 	// The tenant admin is a person with a live admin grant, and authz runs
-	// as production wires it: the delete gate reads the live role, not the
-	// JWT claim (#2428).
-	env := newTransitionEnv(t, func(srv *api.Server, app *pgxpool.Pool) {
-		engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
-		if err != nil {
-			t.Fatalf("authz.NewEngine: %v", err)
-		}
-		srv.AttachAuthz(engine, authz.NewAuditWriter(app))
-	})
+	// as production wires it (newTransitionEnv attaches the engine): the
+	// delete gate reads the live role, not the JWT claim (#2428).
+	env := newTransitionEnv(t)
 	id := env.newRisk(t)
-	tenant := uuid.MustParse(env.tenant)
-	tenantAdmin := seedTransitionUser(t, env.admin, env.tenant, "tenant-admin")
-	if _, err := env.admin.Exec(context.Background(),
-		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'admin', 'test-2428')`,
-		env.tenant, tenantAdmin.String()); err != nil {
-		t.Fatalf("grant admin: %v", err)
-	}
-	adminClaims := testjwt.OwnerFor(tenant, []string{"admin"})
-	adminClaims.Subject = "user:" + tenantAdmin.String()
-	srvJWT := func(roles ...string) string {
-		return env.issue(t, testjwt.OwnerFor(tenant, roles))
-	}
+	tenantAdmin := liveroletest.Bearer(t, env.srv, env.tenant, "admin")
 
 	for name, bearer := range map[string]string{
-		"grc_engineer":  env.nonApprJWT,
-		"control_owner": srvJWT("control_owner"),
-		"viewer":        env.issue(t, testjwt.ViewerFor(tenant)),
+		"grc_engineer":  env.grcJWT,
+		"control_owner": liveroletest.Bearer(t, env.srv, env.tenant, "control_owner"),
+		"viewer":        liveroletest.Bearer(t, env.srv, env.tenant, "viewer"),
 	} {
 		code, body := env.do(t, http.MethodDelete, "/v1/risks/"+id, bearer, nil)
 		if code != http.StatusForbidden {
@@ -313,7 +286,7 @@ func TestLifecycle_HardDeleteIsAdminOnly(t *testing.T) {
 		t.Fatalf("risk gone after refused deletes: status %d", code)
 	}
 
-	if code, body := env.do(t, http.MethodDelete, "/v1/risks/"+id, env.issue(t, adminClaims), nil); code != http.StatusNoContent {
+	if code, body := env.do(t, http.MethodDelete, "/v1/risks/"+id, tenantAdmin, nil); code != http.StatusNoContent {
 		t.Fatalf("tenant admin delete: status %d, want 204: %v", code, body)
 	}
 	if code, _ := env.do(t, http.MethodGet, "/v1/risks/"+id, env.ownerJWT, nil); code != http.StatusNotFound {
