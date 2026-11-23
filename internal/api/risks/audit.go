@@ -28,6 +28,10 @@ type auditEntryWire struct {
 	Before    json.RawMessage `json:"before"`
 	After     json.RawMessage `json:"after"`
 	CreatedAt time.Time       `json:"created_at"`
+	// ParentRiskID is set only on a child_linked / child_unlinked row read
+	// from a parent's trail (#2961): the listed risk was linked under, or
+	// unlinked from, this parent. Before and After are the parent row's.
+	ParentRiskID *string `json:"parent_risk_id,omitempty"`
 }
 
 // ListAuditLog handles GET /v1/risks/{id}/audit-log (#2104): the risk's
@@ -71,6 +75,10 @@ func (h *Handler) ListAuditLog(w http.ResponseWriter, r *http.Request) {
 			Before:    jsonRaw(e.BeforeState),
 			After:     jsonRaw(e.AfterState),
 			CreatedAt: e.CreatedAt,
+		}
+		if e.ParentRiskID != nil {
+			p := e.ParentRiskID.String()
+			out[i].ParentRiskID = &p
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
