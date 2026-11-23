@@ -181,10 +181,7 @@ func TestLateKindsNeedTheirOwnCutover(t *testing.T) {
 		t.Error("cutoversFrom with a NULL cut_at: want an error, got nil")
 	}
 	late := first.Add(time.Hour)
-	c, err := cutoversFrom(first, []dbx.EvidenceRoutingKindCutover{
-		{EvidenceKind: "sast.scan_result.v1", CutAt: ts(late)},
-		{EvidenceKind: "github.repo_protection.v2", CutAt: ts(late)}, // not late in Go: ignored
-	})
+	c, err := cutoversFrom(first, []dbx.EvidenceRoutingKindCutover{{EvidenceKind: "sast.scan_result.v1", CutAt: ts(late)}})
 	if err != nil {
 		t.Fatalf("cutoversFrom: %v", err)
 	}
@@ -193,6 +190,82 @@ func TestLateKindsNeedTheirOwnCutover(t *testing.T) {
 	}
 	if got := c.For("github.repo_protection.v2"); !got.Equal(first) {
 		t.Errorf("For(github.repo_protection.v2) = %s, want the first cutover %s", got, first)
+	}
+}
+
+// #3019: a cutover row for a kind not in lateKinds is an error, not ignored.
+// A migration that routed a kind late without listing it in Go would
+// otherwise leave the kind reading the first cutover.
+func TestCutoverRowForAKindNotLateIsRefused(t *testing.T) {
+	t.Parallel()
+	first := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	for _, extra := range []dbx.EvidenceRoutingKindCutover{
+		{EvidenceKind: "github.repo_protection.v2", CutAt: ts(first.Add(time.Hour))},   // routed at the first cutover
+		{EvidenceKind: "monitoring.host_capacity.v1", CutAt: ts(first.Add(time.Hour))}, // routed from its first record
+		{EvidenceKind: "manual.upload.v1", CutAt: ts(first.Add(time.Hour))},            // not routed
+		{EvidenceKind: "github.repo_protection.v2"},                                    // NULL cut_at
+	} {
+		rows := []dbx.EvidenceRoutingKindCutover{{EvidenceKind: "sast.scan_result.v1", CutAt: ts(first.Add(time.Hour))}, extra}
+		if _, err := cutoversFrom(first, rows); err == nil {
+			t.Errorf("cutoversFrom with a row for %q: want an error, got nil", extra.EvidenceKind)
+		}
+	}
+}
+
+// firstCutoverKinds is a snapshot of the kinds routed when the first cutover
+// (evidence_routing_cutover, migration 20261290000000, #2924) applied. It is
+// history: never add to it. 1password.org_policy.v1 has since been replaced
+// by v2 and is no longer routed.
+var firstCutoverKinds = []string{
+	"1password.org_policy.v1",
+	"aws.s3.bucket_encryption_state.v1",
+	"github.audit_event.v1",
+	"github.repo_protection.v1",
+	"github.repo_protection.v2",
+	"jira.ticket_evidence.v1",
+	"k8s.networkpolicy_coverage.v1",
+	"okta.app_assignment.v1",
+	"okta.mfa_policy.v2",
+	"okta.user_lifecycle.v1",
+	"osquery.host_posture.v1",
+	"slack.retention_settings.v1",
+}
+
+// #3019: every routed kind is in exactly one class. A kind added to kinds
+// after the first cutover must go in lateKinds (with a cutover row) or in
+// firstRecordKinds (with a one-line justification); it cannot fall back to
+// the first cutover by omission, which would silently widen periods frozen
+// between the two cutovers.
+func TestEveryRoutedKindIsClassified(t *testing.T) {
+	t.Parallel()
+	classes := map[string][]string{
+		"first cutover":    firstCutoverKinds,
+		"lateKinds":        lateKinds,
+		"firstRecordKinds": firstRecordKinds,
+	}
+	for _, k := range Kinds() {
+		var in []string
+		for name, ks := range classes {
+			if slices.Contains(ks, k) {
+				in = append(in, name)
+			}
+		}
+		switch len(in) {
+		case 0:
+			t.Errorf("routed kind %q is unclassified: add it to lateKinds (with an evidence_routing_kind_cutover row) or to firstRecordKinds (with a one-line justification)", k)
+		case 1:
+		default:
+			slices.Sort(in)
+			t.Errorf("routed kind %q is in more than one class: %v", k, in)
+		}
+	}
+	for _, name := range []string{"lateKinds", "firstRecordKinds"} {
+		for _, k := range classes[name] {
+			if !Kind(k) {
+				t.Errorf("%s entry %q is not routed", name, k)
+			}
+		}
 	}
 }
 
