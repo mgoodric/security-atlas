@@ -49,7 +49,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -129,32 +129,31 @@ func seedCatalog(t *testing.T, admin *pgxpool.Pool, boardID, programID string) {
 	})
 }
 
-// testEnv bundles the running server with admin + owner bearers. The
-// admin bearer unlocks CreateInput + UpsertTarget; the owner bearer
-// pins the 403 admin-gate branches.
+// testEnv bundles the running server with admin, owner and viewer
+// bearers. The admin bearer unlocks CreateInput + UpsertTarget; the
+// owner and viewer bearers pin the 403 branches.
 type testEnv struct {
-	server      *httptest.Server
-	adminBearer string
-	adminUserID string
-	ownerBearer string
+	server       *httptest.Server
+	adminBearer  string
+	adminUserID  string
+	ownerBearer  string
+	viewerBearer string
 }
 
+// testServer serves one tenant with the authz engine attached, so every
+// request is authorized as it is live (#3008). Each bearer is a seeded
+// person holding a live user_roles grant: the admin was a SuperAdmin
+// claim and the owner a role claim with no user behind it, and both
+// passed only while no engine ran.
 func testServer(t *testing.T, app *pgxpool.Pool, tenant uuid.UUID) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 
-	// CreateInput parses cred.UserID as a UUID (it lands in the
-	// EnteredByUserID column). The default testjwt.AdminFor sets
-	// Subject = "test-admin:<tenant>", which is NOT a UUID — so we
-	// override Subject with a real UUID for these tests.
-	adminClaims := testjwt.AdminFor(tenant)
-	adminClaims.Subject = uuid.NewString()
-	admin := srv.IssueTestJWT(t, adminClaims)
-
-	ownerClaims := testjwt.OwnerFor(tenant, []string{"control_owner"})
-	ownerClaims.Subject = uuid.NewString()
-	owner := srv.IssueTestJWT(t, ownerClaims)
+	adminID, admin := liveroletest.Person(t, srv, tenant.String(), "admin")
+	owner := liveroletest.Bearer(t, srv, tenant.String(), "control_owner")
+	viewer := liveroletest.Bearer(t, srv, tenant.String(), "viewer")
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -163,10 +162,11 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant uuid.UUID) testEnv {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	return testEnv{
-		server:      ts,
-		adminBearer: admin,
-		adminUserID: adminClaims.Subject,
-		ownerBearer: owner,
+		server:       ts,
+		adminBearer:  admin,
+		adminUserID:  adminID.String(),
+		ownerBearer:  owner,
+		viewerBearer: viewer,
 	}
 }
 
@@ -643,6 +643,44 @@ func TestIntegration_Target_UpsertIsAudited(t *testing.T) {
 	}
 	if got[1].after["warning_threshold"] != nil {
 		t.Errorf("second set: after.warning_threshold = %v; want cleared", got[1].after["warning_threshold"])
+	}
+}
+
+// TestIntegration_ViewerWritesRefusedByAuthz: a viewer's manual input and
+// target upsert are refused by the authz engine itself ({"error":
+// "forbidden"}), not by the handler's role gate, and nothing is written.
+// Drop liveroletest.Attach from testServer and this fails (#3008).
+func TestIntegration_ViewerWritesRefusedByAuthz(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+
+	boardID := "ms.3008.board." + uuid.NewString()[:8]
+	programID := "ms.3008.program." + uuid.NewString()[:8]
+	seedCatalog(t, admin, boardID, programID)
+
+	env := testServer(t, app, tenant)
+	base := env.server.URL + "/v1/metrics/" + boardID
+	for _, rt := range []struct{ method, url, body string }{
+		{http.MethodPost, base + "/inputs", `{"numeric_value": 0.5}`},
+		{http.MethodPut, base + "/target", `{"direction":"higher_is_better"}`},
+	} {
+		resp := do(t, rt.method, rt.url, env.viewerBearer, "application/json", rt.body)
+		body := decodeMap(t, resp)
+		if resp.StatusCode != http.StatusForbidden || body["error"] != "forbidden" {
+			t.Errorf("viewer %s %s = %d %v; want 403 forbidden", rt.method, rt.url, resp.StatusCode, body)
+		}
+	}
+
+	var inputs, targets int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT (SELECT count(*) FROM metric_inputs WHERE tenant_id = $1),
+		        (SELECT count(*) FROM metric_targets WHERE tenant_id = $1)`, tenant).
+		Scan(&inputs, &targets); err != nil {
+		t.Fatalf("count writes: %v", err)
+	}
+	if inputs != 0 || targets != 0 {
+		t.Fatalf("viewer writes landed: %d inputs, %d targets; want none", inputs, targets)
 	}
 }
 
