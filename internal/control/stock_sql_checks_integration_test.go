@@ -1128,3 +1128,64 @@ func TestAckChecks_EngineEvaluatesAcknowledgementPayload(t *testing.T) {
 		})
 	}
 }
+
+const cc63PrivilegedBundle = "soc2_cc6_3_privileged_account_management"
+
+// #2968: cc6_3 reads 1password.org_policy.v2. It fails when the account's
+// latest snapshot has the audit-event stream off and is inconclusive
+// otherwise; no payload makes it pass, whatever the connector's verdict.
+func TestCC63Privileged_EngineFailsOnlyWhenAuditEventsOff(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	observed := time.Now().UTC().Add(-2 * time.Hour)
+
+	// A 1password.org_policy.v2 payload as the connector builds it.
+	policy := func(audit bool) map[string]any {
+		return map[string]any{
+			"org_id":               "M4E2SWNZAZFTRGQGDNS2E5A4MU",
+			"audit_events_enabled": audit,
+			"active_members":       2,
+			"suspended_members":    1,
+		}
+	}
+	cases := []struct {
+		name            string
+		kind            string
+		connectorResult string
+		payload         map[string]any
+		want            string
+	}{
+		{"audit events off", "1password.org_policy.v2", "fail", policy(false), eval.ResultFail},
+		{"audit events on", "1password.org_policy.v2", "inconclusive", policy(true), eval.ResultInconclusive},
+		{"record claims pass", "1password.org_policy.v2", "pass", policy(true), eval.ResultInconclusive},
+		{"v1 only", "1password.org_policy.v1", "pass", map[string]any{"org_id": "acme", "two_factor_required": true}, eval.ResultInconclusive},
+		{"no snapshot", "", "", nil, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, cc63PrivilegedBundle)
+			if tc.payload != nil {
+				seedStockEvidence(t, admin, tenant, ctrl, tc.kind, observed, tc.connectorResult, tc.payload)
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
