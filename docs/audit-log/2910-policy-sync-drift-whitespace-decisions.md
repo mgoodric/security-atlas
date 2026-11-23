@@ -81,15 +81,22 @@ reader sees, so the comparison now keeps them:
 - **Trailing two-space hard breaks.** A line ending in two or more spaces
   (spaces only) is kept with exactly two, since any run of two or more
   renders the same `<br>`. It is kept only where CommonMark renders a
-  break: not on an ATX heading, and not before a blank line or at the end
-  of the body. A run that ends in a tab or NBSP is not a hard break and
-  is stripped as before.
+  break: not on an ATX heading, not before a blank line or at the end of
+  the body, and not before a line that starts a new block (a heading,
+  blockquote, list item, fence, or a `-`/`=`/`*` line). A converter that
+  pads every line, such as the #2910 integration fixture's `reflow`,
+  therefore still reads as unchanged. A run that ends in a tab or NBSP is
+  not a hard break and is stripped as before.
 
 Accepted limitations: the parse is line-local, not a CommonMark parser.
 A fence nested in a list item or a blockquote is not recognised as a
-fence, and trailing spaces on a setext underline, a table
-row or a thematic break are kept as a hard break. Both err toward
-reporting drift rather than hiding it.
+fence, and trailing spaces on a table row or before an HTML block are
+kept as a hard break. Both err toward reporting drift rather than hiding
+it.
 
-- **detection_tier_actual:** none.
-- **detection_tier_target:** unit.
+- **detection_tier_actual:** integration. The first head treated every
+  trailing two-space run before a non-blank line as a break, and
+  `TestSync2910_SameVersionWhitespaceIsUnchanged` (shard B2) caught the
+  padding before list items reported as drift.
+- **detection_tier_target:** unit. `TestBodyDriftedConverterReflow` now
+  pins that input without Postgres.
