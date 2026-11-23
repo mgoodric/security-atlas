@@ -45,6 +45,27 @@ func TestNormalizeDriftBody(t *testing.T) {
 		{"hard break in a list item continuation", "- one  \n  two", "- one  \n  two"},
 		{"hyphenated word continues the paragraph", "a  \n-b", "a  \n-b"},
 		{"number without marker continues", "a  \n2026 was", "a  \n2026 was"},
+		// #3014: only what CommonMark lets interrupt a paragraph ends one.
+		{"ordered item not at 1 is lazy", "a  \n2. b", "a  \n2. b"},
+		{"ordered item at 1 interrupts", "a  \n1. b", "a\n1. b"},
+		{"ordered item at 01 interrupts", "a  \n01) b", "a\n01) b"},
+		{"empty bullet is lazy", "a  \n*", "a  \n*"},
+		{"empty plus is lazy", "a  \n+", "a  \n+"},
+		{"empty ordered item is lazy", "a  \n1.", "a  \n1."},
+		{"equals with text is lazy", "a  \n=b", "a  \n=b"},
+		{"spaced equals is not an underline", "a  \n= =", "a  \n= ="},
+		{"underscore rule", "a  \n___", "a\n___"},
+		{"sibling items after an ordered item", "1. a  \n2. b  \n-\n3) c", "1. a\n2. b\n-\n3) c"},
+		{"indented ordered item inside an item is lazy", "- a  \n  2. b", "- a  \n  2. b"},
+		{"equals after a list item is lazy", "- a  \n===", "- a  \n==="},
+		{"double dash after a list item is lazy", "- a  \n--", "- a  \n--"},
+		{"rule after a list item", "- a  \n---", "- a\n---"},
+		{"indented equals in an item is setext", "- a  \n  ===", "- a\n  ==="},
+		{"equals after an item's second paragraph is lazy", "- a\n\n  b  \n===", "- a\n\n  b  \n==="},
+		{"paragraph after a closed list", "- a\n\nb  \n===", "- a\n\nb\n==="},
+		{"ordered item not at 1 after a closed list", "- a\n\nb  \n2. c", "- a\n\nb  \n2. c"},
+		{"lazy line after a quote keeps break", "> a  \nb", "> a  \nb"},
+		{"no break after a setext underline", "a\n===  \nb", "a\n===\nb"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,6 +124,35 @@ func TestBodyDriftedMarkdown(t *testing.T) {
 			t.Parallel()
 			if got := bodyDrifted(stored, tc.page); got != tc.drift {
 				t.Errorf("bodyDrifted(stored, %q) = %v; want %v", tc.page, got, tc.drift)
+			}
+		})
+	}
+}
+
+// TestBodyDriftedBlockStart pins #3014: where the line after a two-space
+// run cannot start a block, the run renders a <br>, so adding or removing
+// it is drift. Where it does start one, the run renders nothing.
+func TestBodyDriftedBlockStart(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, stored, page string
+		drift              bool
+	}{
+		{"ordered item not at 1", "Owners:\n2. review", "Owners:  \n2. review", true},
+		{"empty bullet", "Owners:\n*", "Owners:  \n*", true},
+		{"empty ordered item", "Owners:\n1.", "Owners:  \n1.", true},
+		{"equals with text", "Owners:\n=all", "Owners:  \n=all", true},
+		{"equals after a list item", "- Owners\n===", "- Owners  \n===", true},
+		{"ordered item at 1 renders no break", "Owners:\n1. review", "Owners:  \n1. review", false},
+		{"setext underline renders no break", "Owners\n===", "Owners  \n===", false},
+		{"ordered list padding renders no break", "1. one\n2. two\n3. three", "1. one  \n2. two  \n3. three  ", false},
+		{"bullet padding renders no break", "- one\n- two", "- one  \n- two  ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := bodyDrifted(tc.stored, tc.page); got != tc.drift {
+				t.Errorf("bodyDrifted(%q, %q) = %v; want %v", tc.stored, tc.page, got, tc.drift)
 			}
 		})
 	}

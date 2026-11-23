@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -836,6 +837,7 @@ func normalizeDriftBody(body string) string {
 	lines := strings.Split(body, "\n")
 	out := make([]string, 0, len(lines))
 	var fence string // the opening marker while inside a fence
+	st := blockState{item: -1}
 	for i, l := range lines {
 		if fence != "" {
 			out = append(out, l)
@@ -847,22 +849,75 @@ func normalizeDriftBody(body string) string {
 		t := strings.TrimRightFunc(l, unicode.IsSpace)
 		if m := openingFence(t); m != "" {
 			fence = m
+			st.para = false
+			st.leave(len(t) - len(strings.TrimLeft(t, " ")))
 			out = append(out, t)
 			continue
 		}
 		if t == "" {
+			st.para = false
 			if len(out) > 0 && out[len(out)-1] == "" {
 				continue
 			}
 			out = append(out, t)
 			continue
 		}
-		if isHardBreak(l, t, lines[i+1:]) {
+		st = st.next(l)
+		if st.para && isHardBreak(l, t, lines[i+1:], st) {
 			t += "  "
 		}
 		out = append(out, t)
 	}
 	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+// blockState is the little of CommonMark's block structure the hard-break
+// rule needs (#3014): whether the last line was paragraph text, and which
+// list item that paragraph sits in. item is that item's content indent,
+// or -1 when the paragraph is in none or the parse lost track; inList is
+// true while the line may still be inside a list, so item -1 with inList
+// means "unknown". Each unknown resolves toward keeping a break, which
+// errs toward reporting drift.
+type blockState struct {
+	para   bool
+	item   int
+	inList bool
+}
+
+// leave drops the list-item context a block at indent k is outside of.
+func (s *blockState) leave(k int) {
+	if s.item >= 0 && k < s.item {
+		s.item = -1
+	}
+	if k == 0 {
+		s.inList = false
+	}
+}
+
+// matched reports whether a line at indent k certainly still sits inside
+// every container the current paragraph is in.
+func (s blockState) matched(k int) bool {
+	return !s.inList || (s.item >= 0 && k >= s.item)
+}
+
+// next returns the state after non-blank line l outside a fence.
+func (s blockState) next(l string) blockState {
+	if s.para && !startsBlock(l, s) {
+		return s // paragraph continuation, lazy or not
+	}
+	t, _ := fenceIndent(l)
+	tt := strings.TrimRightFunc(t, unicode.IsSpace)
+	if s.para && (allOf(tt, '=') || allOf(tt, '-')) && s.matched(len(l)-len(t)) {
+		s.para = false // a setext underline
+		return s
+	}
+	s.leave(len(l) - len(t))
+	if ci, empty, _, ok := listItem(l); ok {
+		s.item, s.inList, s.para = ci, true, !empty
+		return s
+	}
+	s.para = !isATXHeading(t) && !isThematicBreak(tt)
+	return s
 }
 
 // fenceIndent strips the up to three leading spaces a fence marker or an
@@ -899,17 +954,18 @@ func isClosingFence(l, marker string) bool {
 	return len(t)-len(rest) >= len(marker) && strings.TrimRightFunc(rest, unicode.IsSpace) == ""
 }
 
-// isHardBreak reports whether line l, trimmed to t, ends in a CommonMark
-// hard break: two or more spaces and nothing else after the content, on a
-// line that is not an ATX heading, followed by a line that continues the
-// same block. A break before a blank line, before a line that starts a new
-// block, or at the end of the body renders nothing.
-func isHardBreak(l, t string, rest []string) bool {
+// isHardBreak reports whether paragraph line l, trimmed to t and leaving
+// state s, ends in a CommonMark hard break: two or more spaces and nothing
+// else after the content, on a line that is not an ATX heading, followed
+// by a line that continues the same paragraph. A break before a blank
+// line, before a line that starts a new block, or at the end of the body
+// renders nothing.
+func isHardBreak(l, t string, rest []string, s blockState) bool {
 	tail := l[len(t):]
 	if len(tail) < 2 || strings.Trim(tail, " ") != "" || isATXHeading(t) {
 		return false
 	}
-	return len(rest) > 0 && strings.TrimSpace(rest[0]) != "" && !startsBlock(rest[0])
+	return len(rest) > 0 && strings.TrimSpace(rest[0]) != "" && !startsBlock(rest[0], s)
 }
 
 // isATXHeading reports whether a line is a `#` to `######` heading.
@@ -922,29 +978,92 @@ func isATXHeading(l string) bool {
 	return n <= 6 && (n == len(h) || h[n] == ' ' || h[n] == '\t')
 }
 
-// startsBlock reports whether a line begins a block that ends the one
-// before it: a heading, a blockquote, a list item, a fence, or a `-`/`=`
-// line (a setext underline or a thematic break). Any of these closes the
-// paragraph, so trailing spaces on the line before render no break.
-func startsBlock(l string) bool {
+// allOf reports whether l is non-empty and every byte of it is c.
+func allOf(l string, c byte) bool {
+	return l != "" && strings.Trim(l, string(c)) == ""
+}
+
+// isThematicBreak reports whether trimmed line l is three or more of one
+// of `-`, `*` or `_`, optionally separated by spaces or tabs.
+func isThematicBreak(l string) bool {
+	if l == "" || (l[0] != '-' && l[0] != '*' && l[0] != '_') {
+		return false
+	}
+	return strings.Trim(l, l[:1]+" \t") == "" && strings.Count(l, l[:1]) >= 3
+}
+
+// listItem parses a list-item marker (`-`, `*`, `+`, or one to nine
+// digits then `.` or `)`) at the start of l, up to three spaces in. It
+// returns the item's content indent, whether the item is empty, and its
+// start number (-1 for a bullet). A thematic break is not an item.
+func listItem(l string) (indent int, empty bool, start int, ok bool) {
+	t, ok := fenceIndent(l)
+	if !ok || t == "" {
+		return 0, false, 0, false
+	}
+	tt := strings.TrimRightFunc(t, unicode.IsSpace)
+	w, start := 1, -1 // marker width, start number
+	switch t[0] {
+	case '-', '*', '+':
+		if isThematicBreak(tt) {
+			return 0, false, 0, false
+		}
+	default:
+		n := len(t) - len(strings.TrimLeft(t, "0123456789"))
+		if n < 1 || n > 9 || n == len(t) || (t[n] != '.' && t[n] != ')') {
+			return 0, false, 0, false
+		}
+		start, _ = strconv.Atoi(t[:n])
+		w = n + 1
+	}
+	if w < len(t) && t[w] != ' ' && t[w] != '\t' {
+		return 0, false, 0, false
+	}
+	empty = len(tt) == w
+	sp := len(t[w:]) - len(strings.TrimLeft(t[w:], " "))
+	if empty || sp < 1 || sp > 4 {
+		sp = 1
+	}
+	return len(l) - len(t) + w + sp, empty, start, true
+}
+
+// startsBlock reports whether line l ends the paragraph state s describes,
+// so trailing spaces on the line before render no break. It follows the
+// CommonMark interruption rules (#3014): a heading, blockquote, fence or
+// thematic break always does. A `=` or `-` line does as a setext underline,
+// but only while the paragraph's containers still match; otherwise it is
+// a lazy continuation. A bullet item with content, or an ordered item
+// starting at 1, interrupts any paragraph. An empty item, or an ordered
+// item starting elsewhere, ends the paragraph only by sitting outside the
+// list item it is in, where it starts a sibling item.
+func startsBlock(l string, s blockState) bool {
 	t, ok := fenceIndent(l)
 	if !ok || t == "" {
 		return false
 	}
+	k := len(l) - len(t)
+	tt := strings.TrimRightFunc(t, unicode.IsSpace)
 	switch t[0] {
 	case '#':
 		return isATXHeading(t)
-	case '>', '=':
+	case '>':
 		return true
-	case '-', '*', '+':
-		return len(t) == 1 || t[1] == ' ' || t[1] == '\t' ||
-			(t[0] != '+' && strings.Trim(t, string(t[0])+" \t") == "")
 	case '`', '~':
 		return openingFence(t) != ""
+	case '=':
+		return allOf(tt, '=') && s.matched(k)
 	}
-	n := len(t) - len(strings.TrimLeft(t, "0123456789"))
-	return n >= 1 && n <= 9 && n < len(t) && (t[n] == '.' || t[n] == ')') &&
-		(n+1 == len(t) || t[n+1] == ' ' || t[n+1] == '\t')
+	if isThematicBreak(tt) || (allOf(tt, '-') && s.matched(k)) {
+		return true
+	}
+	_, empty, start, isItem := listItem(l)
+	switch {
+	case !isItem:
+		return false
+	case s.item >= 0 && k < s.item:
+		return true
+	}
+	return !empty && (start == -1 || start == 1)
 }
 
 // bodyDrifted reports whether a page body differs in content from the
