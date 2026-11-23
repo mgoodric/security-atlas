@@ -22,7 +22,7 @@ import { fetchHierarchyOrgUnits } from "@/lib/api/risk-hierarchy";
 import { fetchRiskAuditLog, fetchRisksListWithRollUps } from "@/lib/api/risks";
 
 import {
-  historyActionLabel,
+  historyEntryLabel,
   historyChanges,
   type HistoryChange,
 } from "./history-format";
@@ -51,7 +51,8 @@ export function RiskHistory({ riskId }: { riskId: string }) {
     enabled: needs("org_unit"),
   });
 
-  // #2958: a child risk named by a hierarchy link or unlink.
+  // #2958: a child risk named by a hierarchy link or unlink; #2961: the
+  // parent risk a child was linked under or unlinked from.
   const risks = useQuery({
     queryKey: ["risk-history", "risks"],
     queryFn: fetchRisksListWithRollUps,
@@ -121,9 +122,7 @@ export function RiskHistory({ riskId }: { riskId: string }) {
                 data-testid="risk-history-entry"
               >
                 <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                  <span className="font-medium">
-                    {historyActionLabel(e.action)}
-                  </span>
+                  <span className="font-medium">{historyEntryLabel(e)}</span>
                   <span
                     className="text-muted-foreground"
                     data-testid="risk-history-actor"

@@ -343,12 +343,21 @@ type PlacementAuditEntry struct {
 	ActionType  string
 	BeforeState json.RawMessage
 	AfterState  json.RawMessage
+	// ParentRiskID is set on a child_linked / child_unlinked row from a
+	// parent's trail that names the listed risk as the child (#2961): the
+	// parent the risk was linked under or unlinked from. Nil on the
+	// risk's own rows.
+	ParentRiskID *uuid.UUID
 }
 
 // ListPlacementAudit returns a risk's latest limit audit rows, newest
 // first, and whether older rows exist past them (#2311). A risk that does
 // not exist, or has been deleted, returns its trail (possibly empty): the
 // trail outlives the risk. limit must be positive.
+//
+// The list includes the hierarchy rows on its parents' trails that name
+// it as the child, with ParentRiskID set (#2961), so a child shows being
+// linked or unlinked without a second row being written.
 func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID, limit int) ([]PlacementAuditEntry, bool, error) {
 	if limit <= 0 || limit >= math.MaxInt32 {
 		return nil, false, fmt.Errorf("risk: audit log limit %d out of range", limit)
@@ -376,6 +385,9 @@ func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID, limit 
 				ActionType:  r.ActionType,
 				BeforeState: json.RawMessage(r.BeforeState),
 				AfterState:  json.RawMessage(r.AfterState),
+			}
+			if owner := uuid.UUID(r.RiskID.Bytes); owner != riskID {
+				out[i].ParentRiskID = &owner
 			}
 		}
 		return nil

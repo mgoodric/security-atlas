@@ -4906,7 +4906,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/aggregate */
+        /** POST /v1/risks/aggregate — create a parent risk rolling up child_risk_ids; each child must be scored on the 5x5 grid and sit at a level below the parent, at most 100 children (400); each link is audit-logged on the parent */
         post: operations["post-v1-risks-aggregate"];
         delete?: never;
         options?: never;
@@ -5316,7 +5316,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/risks/{id}/audit-log — the risk's change history, newest first; each field change, category move and placement move with actor, time, before and after; ?limit= caps the rows (default 200, 1..500, else 400) and truncated says older rows exist */
+        /** GET /v1/risks/{id}/audit-log — the risk's change history, newest first; each field change, category move and placement move with actor, time, before and after; ?limit= caps the rows (default 200, 1..500, else 400) and truncated says older rows exist; a child risk also lists the link and unlink rows of its parents, marked with parent_risk_id */
         get: operations["get-v1-risks-id-audit-log"];
         put?: never;
         post?: never;
