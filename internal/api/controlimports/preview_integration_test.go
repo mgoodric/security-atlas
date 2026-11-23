@@ -15,50 +15,26 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// previewServer serves one tenant with the authz engine attached (the
-// shared testServer has none), and returns a grc_engineer bearer and a
-// viewer bearer, each a person holding that role in user_roles.
+// previewServer serves one tenant with the authz engine attached, and
+// returns a grc_engineer bearer and a viewer bearer, each a person holding
+// that role in user_roles.
 func previewServer(t *testing.T, admin, app *pgxpool.Pool, tenant string) (testEnv, string) {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
-	if err != nil {
-		t.Fatalf("authz.NewEngine: %v", err)
-	}
-	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
-	tenantID := uuid.MustParse(tenant)
-	person := func(role string) string {
-		id := uuid.New()
-		ctx := context.Background()
-		if _, err := admin.Exec(ctx, `
-			INSERT INTO users (id, tenant_id, email, display_name, status)
-			VALUES ($1, $2, $3, $4, 'active')`, id, tenant, role+"-"+id.String()[:8]+"@2836.test", role); err != nil {
-			t.Fatalf("seed user: %v", err)
-		}
-		if _, err := admin.Exec(ctx,
-			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2836')`,
-			tenant, id.String(), role); err != nil {
-			t.Fatalf("grant %s: %v", role, err)
-		}
-		claims := testjwt.OwnerFor(tenantID, []string{role})
-		claims.Subject = "user:" + id.String()
-		return srv.IssueTestJWT(t, claims)
-	}
+	attachAuthz(t, srv, app)
 	// Issue the tokens first: the first one attaches the JWT validator the
 	// router is built with.
-	env := testEnv{bearer: person("grc_engineer")}
-	viewer := person("viewer")
+	env := testEnv{bearer: personBearer(t, admin, srv, tenant, authz.RoleGRCEngineer)}
+	viewer := personBearer(t, admin, srv, tenant, authz.RoleViewer)
 	env.server = httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(env.server.Close)
 	return env, viewer

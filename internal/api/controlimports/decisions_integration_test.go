@@ -41,6 +41,7 @@ func decisionServer(t *testing.T, app *pgxpool.Pool, tenant string) decisionEnv 
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	attachAuthz(t, srv, app)
 	tenantID := uuid.MustParse(tenant)
 	user := uuid.New()
 	person := testjwt.AdminFor(tenantID)

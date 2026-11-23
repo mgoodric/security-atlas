@@ -41,6 +41,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -63,11 +64,51 @@ type testEnv struct {
 	bearer string
 }
 
+// attachAuthz wires the OPA engine the production binary runs, so every
+// request through a harness server is authorized as it would be live. A
+// server built without it skips authz entirely and any credential passes
+// (#2971). Roles resolve from user_roles, falling back to the bearer's own.
+func attachAuthz(t *testing.T, srv *api.Server, app *pgxpool.Pool) {
+	t.Helper()
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
+}
+
+// personBearer seeds an active user holding role in user_roles and returns
+// a bearer for that user. A JWT's role claim grants nothing on its own
+// (#2381): the engine reads roles from user_roles by the "user:" subject.
+func personBearer(t *testing.T, admin *pgxpool.Pool, srv *api.Server, tenant string, role authz.Role) string {
+	t.Helper()
+	id := uuid.New()
+	ctx := context.Background()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO users (id, tenant_id, email, display_name, status)
+		VALUES ($1, $2, $3, $4, 'active')`, id, tenant, string(role)+"-"+id.String()[:8]+"@controlimports.test", string(role)); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-controlimports')`,
+		tenant, id.String(), string(role)); err != nil {
+		t.Fatalf("grant %s: %v", role, err)
+	}
+	claims := testjwt.OwnerFor(uuid.MustParse(tenant), []string{string(role)})
+	claims.Subject = "user:" + id.String()
+	return srv.IssueTestJWT(t, claims)
+}
+
+// testServer serves one tenant with authz attached and returns a
+// grc_engineer bearer, the role the import routes grant. It carried an
+// "owner" claim, which is no authz role and passed only while no engine
+// ran (#2971).
 func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
+	attachAuthz(t, srv, app)
+	bearer := personBearer(t, dbtest.NewMigratePool(t), srv, tenant, authz.RoleGRCEngineer)
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")
