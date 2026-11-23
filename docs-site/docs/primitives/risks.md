@@ -77,9 +77,30 @@ organisation. Imported back into that organisation, the owner is
 linked when they are still an active user, and the risk is placed in
 the org unit when the row names no org unit by name. Into another
 organisation they name nothing, so they stay unmapped values on the
-row, and nothing is rejected for them. `parent_risk_ids` always stays
-unmapped: to rebuild the hierarchy, give a parent risk ID column with
-the parents' organisation risk IDs.
+row, and nothing is rejected for them.
+
+`parent_risk_ids` follows the same rule, id by id. Each id that is a
+risk of the uploading organisation is kept on the row, and the approved
+risk is linked under each of them, by the same rules as **Attach a
+child** (below). An id that names no risk of the organisation stays an
+unmapped value. Into another organisation every id stays unmapped: to
+rebuild the hierarchy there, give a parent risk ID column with the
+parents' organisation risk IDs. When a row has both, the parent risk ID
+column is used and `parent_risk_ids` stays unmapped.
+
+### Parent risk IDs
+
+A parent risk ID column names the risk each row rolls up to, by
+organisation risk ID. When the row is approved its risk is linked under
+that parent, if the parent is a risk of the organisation. If the parent
+is still a pending row, in this import or another one, the row waits
+and the review page counts it under **Waiting on a parent**. It is
+linked once a row with that ID is approved (or marked duplicate of an
+existing risk), and fails once no pending row carries the ID any more.
+An import has no expiry: a parent row left pending keeps its children
+waiting, so approve or reject it. A link that fails flags the row
+**Parent link failed** with the reason, and the risk is imported
+without it; link it by hand from the parent's **Attach a child**.
 
 ### Text in a score column
 

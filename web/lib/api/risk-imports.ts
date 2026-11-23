@@ -93,12 +93,16 @@ export type BatchRow = {
   org_unit_id?: string;
   // #2846: the row's parent-risk-ID cell and, once approved, how linking
   // its risk under that parent went: none, waiting on a pending parent row
-  // of the batch, linked (parent_risk_id), or failed (parent_link_error,
-  // with the parent_link_failed flag). The risk imports either way.
+  // of any import of the organisation (#2957), linked (parent_risk_id), or
+  // failed (parent_link_error, with the parent_link_failed flag). The risk
+  // imports either way.
   parent_ref?: string;
   parent_link_status?: string;
   parent_link_error?: string;
   parent_risk_id?: string;
+  // #2957: the organisation's risks the export's parent_risk_ids named,
+  // staged only when parent_ref is blank; the risk is linked under each.
+  parent_risk_ids?: string[];
   unmapped: Record<string, string> | null;
   flags: string[] | null;
   status: RowStatus | string;
@@ -182,6 +186,9 @@ export type BatchProgress = {
   duplicate: number;
   pending: number;
   flagged: number;
+  /** Approved rows whose risk waits for its parent's import row to be
+   *  decided, in this import or another (#2957). */
+  waiting: number;
   /** Rows the upload itself refused (missing title, unknown category, ...). */
   notStaged: number;
 };
@@ -199,6 +206,7 @@ export function batchProgress(batch: RiskImportBatch): BatchProgress {
     duplicate: 0,
     pending: 0,
     flagged: 0,
+    waiting: 0,
     notStaged: batch.rejected_count,
   };
   for (const row of batch.staged ?? []) {
@@ -207,6 +215,7 @@ export function batchProgress(batch: RiskImportBatch): BatchProgress {
     else if (row.status === "duplicate") p.duplicate++;
     else p.pending++;
     if (isFlagged(row)) p.flagged++;
+    if (row.parent_link_status === "waiting") p.waiting++;
   }
   return p;
 }
@@ -262,6 +271,9 @@ export function mappedFields(row: BatchRow): [string, string][] {
     out.push(["Org unit", row.org_unit_value]);
   }
   if (row.parent_ref) out.push(["Parent risk ID", parentLinkText(row)]);
+  else if (row.parent_risk_ids?.length) {
+    out.push(["Parent risks", parentLinkText(row)]);
+  }
   if (row.treatment) {
     out.push([
       "Treatment",
@@ -381,14 +393,15 @@ export function rowPath(batchID: string, rowID: string, verb: string): string {
 
 export { bffPostJSON as postJSON } from "./_shared";
 
-/** parentLinkText shows a row's parent risk ID with how its link went. */
+/** parentLinkText shows a row's parent risk ID, or the parent risks the
+ *  export's parent_risk_ids named, with how its link went. */
 export function parentLinkText(row: BatchRow): string {
-  const ref = row.parent_ref ?? "";
+  const ref = row.parent_ref || (row.parent_risk_ids ?? []).join(", ");
   switch (row.parent_link_status) {
     case "linked":
       return `${ref} (linked)`;
     case "waiting":
-      return `${ref} (waiting for its row)`;
+      return `${ref} (waiting for its import row to be decided)`;
     case "failed":
       return row.parent_link_error
         ? `${ref} (link failed: ${row.parent_link_error})`
