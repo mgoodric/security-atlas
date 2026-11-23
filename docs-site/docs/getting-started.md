@@ -62,7 +62,7 @@ just self-host-up
 ```
 
 **Decide two things before the first `just self-host-up`.** The bootstrap
-loads a small SCF sample catalog and uploads 64 stock controls. To
+loads a small SCF sample catalog and uploads 65 stock controls. To
 start from a real SCF release, or with none of the stock controls, set
 `SCF_CATALOG` and `CONTROLS_DIR` in `deploy/docker/.env` first; see
 [Bring your own SCF release](https://github.com/mgoodric/security-atlas/blob/main/docs/SELF_HOSTING.md#bring-your-own-scf-release).
@@ -260,7 +260,7 @@ to one SCF anchor, and through that anchor satisfies every framework
 requirement mapped to it. You never write one control per framework.
 
 **Today, a control is a bundle**: a directory holding a `control.yaml`.
-The 64 stock bundles in `controls/soc2/` are working examples to copy or
+The 65 stock bundles in `controls/soc2/` are working examples to copy or
 fork. A minimal one:
 
 ```yaml
