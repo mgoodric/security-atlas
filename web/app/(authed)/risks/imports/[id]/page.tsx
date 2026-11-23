@@ -381,6 +381,11 @@ function ProgressLine({ progress }: { progress: BatchProgress }) {
   if (progress.duplicate > 0) {
     parts.push(["Duplicate", progress.duplicate, "duplicate"]);
   }
+  // #2957: approved rows whose parent link waits on a pending row, here
+  // or in another import. Shown only when there are some.
+  if (progress.waiting > 0) {
+    parts.push(["Waiting on a parent", progress.waiting, "waiting"]);
+  }
   parts.push(["Flagged", progress.flagged, "flagged"]);
   parts.push(["Not staged", progress.notStaged, "not-staged"]);
   return (

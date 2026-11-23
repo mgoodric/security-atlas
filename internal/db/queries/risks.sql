@@ -280,7 +280,7 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- that name this risk as the child, so a child's History shows being
 -- linked under or unlinked from a parent without a second row. Their
 -- risk_id is the parent's. The COALESCE matches the partial index
--- risk_audit_log_child_link (migration 20261299000000).
+-- risk_audit_log_child_link (migration 20261300000000).
 SELECT *
 FROM risk_audit_log
 WHERE tenant_id = sqlc.arg(tenant_id)

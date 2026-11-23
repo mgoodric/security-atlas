@@ -698,7 +698,7 @@ type ListRiskAuditLogParams struct {
 // that name this risk as the child, so a child's History shows being
 // linked under or unlinked from a parent without a second row. Their
 // risk_id is the parent's. The COALESCE matches the partial index
-// risk_audit_log_child_link (migration 20261299000000).
+// risk_audit_log_child_link (migration 20261300000000).
 func (q *Queries) ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error) {
 	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID, arg.RowLimit)
 	if err != nil {

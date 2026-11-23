@@ -105,7 +105,7 @@ statement actually deleted.
 rows whose state names this risk as the child:
 `COALESCE(after_state->>'child_risk_id', before_state->>'child_risk_id')`.
 JSON null reads as SQL NULL, so the COALESCE picks the side that holds
-the id. Migration `20261299000000` adds a partial expression index on
+the id. Migration `20261300000000` adds a partial expression index on
 `(tenant_id, that COALESCE)` where the action is one of the two, so the
 read does not scan the tenant's hierarchy rows.
 

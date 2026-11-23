@@ -3090,7 +3090,7 @@ type Querier interface {
 	// that name this risk as the child, so a child's History shows being
 	// linked under or unlinked from a parent without a second row. Their
 	// risk_id is the parent's. The COALESCE matches the partial index
-	// risk_audit_log_child_link (migration 20261299000000).
+	// risk_audit_log_child_link (migration 20261300000000).
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// The tenant's categories, active and archived, by display name.
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)

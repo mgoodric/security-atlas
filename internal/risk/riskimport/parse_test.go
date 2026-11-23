@@ -385,7 +385,7 @@ func TestFieldNames(t *testing.T) {
 	got := fmt.Sprint(FieldNames())
 	want := "[accepted_until accepter category description external_ref inherent_impact inherent_likelihood " +
 		"inherent_loss_event_frequency inherent_loss_magnitude inherent_score instrument_reference justification level linked_controls " +
-		"org_unit org_unit_id owner owner_user_id parent_ref " +
+		"org_unit org_unit_id owner owner_user_id parent_ref parent_risk_ids " +
 		"residual_impact residual_likelihood residual_loss_event_frequency residual_loss_magnitude residual_score review_due themes title treatment]"
 	if got != want {
 		t.Errorf("FieldNames = %s", got)
