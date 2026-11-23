@@ -2560,6 +2560,10 @@ type Querier interface {
 	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
 	// summarizes FROZEN periods, so in practice the horizon is always set.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
+	// #2973: the instant each kind routed after the first cutover started
+	// routing (migration 20261300000000). routed.KindsAsOf pins a read anchored
+	// before a kind's own instant to exclude that kind's control-free records.
+	ListEvidenceRoutingKindCutovers(ctx context.Context) ([]EvidenceRoutingKindCutover, error)
 	// #2269: the AR's risk-accepted observations. The latest evaluation per
 	// (control, scope_cell) as of the frozen horizon whose result is
 	// 'excepted' (#2112). #2526: bounded to each control's latest run as of

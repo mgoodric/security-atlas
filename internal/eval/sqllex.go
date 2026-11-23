@@ -146,7 +146,7 @@ func lexSQL(s string) ([]sqlToken, error) {
 			for j < n && (isDigit(s[j]) || s[j] == '_') {
 				j++
 			}
-			if j < n && s[j] == '.' && !(j+1 < n && s[j+1] == '.') {
+			if j < n && s[j] == '.' && (j+1 >= n || s[j+1] != '.') {
 				j++
 				for j < n && (isDigit(s[j]) || s[j] == '_') {
 					j++

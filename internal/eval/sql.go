@@ -98,7 +98,8 @@ func schemaQualifiedRef(toks []sqlToken) (string, bool) {
 		if (q.kind != tokIdent && q.kind != tokQuotedIdent) || dot.kind != tokPunct || dot.val != "." {
 			continue
 		}
-		if name.kind != tokIdent && name.kind != tokQuotedIdent && !(name.kind == tokOp && strings.HasPrefix(name.val, "*")) {
+		star := name.kind == tokOp && strings.HasPrefix(name.val, "*")
+		if !isIdentTok(name) && !star {
 			continue
 		}
 		if q.val != "evidence" {

@@ -160,8 +160,8 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 // population's window and freeze horizon. A record passes its observed_at
 // as both. A nil cellID is covered only by a match-every-cell predicate.
 // routedKind is the kind of a control-free routed record, or "": a
-// population pinned before the routing cutover never draws such a record,
-// so it covers nothing for it (#2924).
+// population pinned before that kind's routing cutover never draws such a
+// record, so it covers nothing for it (#2924, #2973).
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
 	since, until *time.Time, cellID *uuid.UUID, routedKind string,
@@ -172,7 +172,7 @@ func periodsCovering(
 	if err != nil {
 		return nil, fmt.Errorf("list period populations: %w", err)
 	}
-	var cutover time.Time
+	var cutover routed.Cutovers
 	if routedKind != "" && len(pops) > 0 {
 		if cutover, err = routed.Cutover(ctx, q); err != nil {
 			return nil, err

@@ -59,7 +59,19 @@ var kinds = []string{
 	"okta.mfa_policy.v2",
 	"okta.user_lifecycle.v1",
 	"osquery.host_posture.v1",
+	"sast.scan_result.v1",
 	"slack.retention_settings.v1",
+}
+
+// lateKinds are the routed kinds that were bound first, with records already
+// in the ledger, when they became routed. Each has its own cutover row in
+// evidence_routing_kind_cutover, written by the migration that routed it,
+// and a pinned read compares against that instant instead of the first
+// cutover: a period frozen between the two read none of the kind's
+// control-free records and keeps reading none. A kind routed from its first
+// record needs no entry here.
+var lateKinds = []string{
+	"sast.scan_result.v1", // #2973, migration 20261300000000
 }
 
 // Kinds returns a copy of the routed kinds, never nil.
@@ -93,35 +105,78 @@ func Within(kinds []string) []string {
 	return out
 }
 
+// Cutovers holds when each routed kind started routing: the first cutover
+// (evidence_routing_cutover, #2924) for every kind routed then, and its own
+// instant for each of lateKinds (evidence_routing_kind_cutover, #2973).
+type Cutovers struct {
+	First time.Time
+	Late  map[string]time.Time
+}
+
+// For returns the instant kind started routing.
+func (c Cutovers) For(kind string) time.Time {
+	if t, ok := c.Late[kind]; ok {
+		return t
+	}
+	return c.First
+}
+
 // KindsAsOf returns the control-free kinds for a read pinned at anchor. A
 // frozen audit period anchors on its frozen_at; a population on the earlier
-// of its created_at and frozen_at. Anchored before cutover (the instant
-// routing shipped, from evidence_routing_cutover), the read sees only the
-// owned kinds, so a period frozen or a population drawn before routing keeps
-// exactly the records it had. Unanchored (an open period, a live read) or
-// anchored at or after cutover, it sees ControlFreeKinds.
+// of its created_at and frozen_at. The owned kinds are always in the set; a
+// routed kind is in it only when anchor is at or after the instant that kind
+// started routing (Cutovers.For). So a period frozen or a population drawn
+// before a kind was routed keeps exactly the records it had. Unanchored (an
+// open period, a live read), it is ControlFreeKinds.
 //
 // Records bound to a control are unaffected either way: they match by
 // control_id, not by this list.
-func KindsAsOf(cutover, anchor time.Time) []string {
-	if !anchor.IsZero() && anchor.Before(cutover) {
-		return unbound.Kinds()
+func KindsAsOf(c Cutovers, anchor time.Time) []string {
+	if anchor.IsZero() {
+		return ControlFreeKinds()
 	}
-	return ControlFreeKinds()
+	out := unbound.Kinds()
+	for _, k := range kinds {
+		if !anchor.Before(c.For(k)) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
-// Cutover reads the routing cutover inside the caller's transaction. A
-// missing row is an error, never "no cutover": a pinned read must not
-// silently widen.
-func Cutover(ctx context.Context, q *dbx.Queries) (time.Time, error) {
-	cut, err := q.GetEvidenceRoutingCutover(ctx)
+// Cutover reads every routing cutover inside the caller's transaction. A
+// missing first cutover, or a late kind without its own row, is an error,
+// never "no cutover": a pinned read must not silently widen.
+func Cutover(ctx context.Context, q *dbx.Queries) (Cutovers, error) {
+	first, err := q.GetEvidenceRoutingCutover(ctx)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("routed: read evidence routing cutover: %w", err)
+		return Cutovers{}, fmt.Errorf("routed: read evidence routing cutover: %w", err)
 	}
-	if !cut.Valid {
-		return time.Time{}, fmt.Errorf("routed: evidence routing cutover is NULL")
+	if !first.Valid {
+		return Cutovers{}, fmt.Errorf("routed: evidence routing cutover is NULL")
 	}
-	return cut.Time, nil
+	rows, err := q.ListEvidenceRoutingKindCutovers(ctx)
+	if err != nil {
+		return Cutovers{}, fmt.Errorf("routed: read per-kind routing cutovers: %w", err)
+	}
+	return cutoversFrom(first.Time, rows)
+}
+
+// cutoversFrom builds Cutovers from the stored rows, refusing a late kind
+// without a valid row.
+func cutoversFrom(first time.Time, rows []dbx.EvidenceRoutingKindCutover) (Cutovers, error) {
+	c := Cutovers{First: first, Late: map[string]time.Time{}}
+	for _, r := range rows {
+		if r.CutAt.Valid && slices.Contains(lateKinds, r.EvidenceKind) {
+			c.Late[r.EvidenceKind] = r.CutAt.Time
+		}
+	}
+	for _, k := range lateKinds {
+		if _, ok := c.Late[k]; !ok {
+			return Cutovers{}, fmt.Errorf("routed: no routing cutover for %s in evidence_routing_kind_cutover", k)
+		}
+	}
+	return c, nil
 }
 
 // KindsForPeriod returns the kinds for a read over an audit period whose
@@ -147,8 +202,8 @@ func KindsForPopulation(ctx context.Context, q *dbx.Queries, pop dbx.Population)
 	return PopulationKindsAt(cut, pop), nil
 }
 
-// PopulationKindsAt is KindsForPopulation with the cutover already read.
-func PopulationKindsAt(cutover time.Time, pop dbx.Population) []string {
+// PopulationKindsAt is KindsForPopulation with the cutovers already read.
+func PopulationKindsAt(cutover Cutovers, pop dbx.Population) []string {
 	return KindsAsOf(cutover, populationAnchor(pop))
 }
 

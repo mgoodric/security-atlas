@@ -192,6 +192,8 @@ sql:
       - "migrations/sql/20261290000000_evidence_routed_kinds.sql"
       # #2910: the drifted page hash on an in-place sync takeover.
       - "migrations/sql/20261298000000_policy_audit_sync_drift.sql"
+      # #2973: a routing cutover per late-routed kind.
+      - "migrations/sql/20261300000000_evidence_routing_kind_cutover.sql"
     queries: "internal/db/queries"
     gen:
       go:

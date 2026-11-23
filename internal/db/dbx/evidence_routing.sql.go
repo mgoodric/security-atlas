@@ -26,3 +26,32 @@ func (q *Queries) GetEvidenceRoutingCutover(ctx context.Context) (pgtype.Timesta
 	err := row.Scan(&cut_at)
 	return cut_at, err
 }
+
+const listEvidenceRoutingKindCutovers = `-- name: ListEvidenceRoutingKindCutovers :many
+SELECT evidence_kind, cut_at
+FROM evidence_routing_kind_cutover
+ORDER BY evidence_kind
+`
+
+// #2973: the instant each kind routed after the first cutover started
+// routing (migration 20261300000000). routed.KindsAsOf pins a read anchored
+// before a kind's own instant to exclude that kind's control-free records.
+func (q *Queries) ListEvidenceRoutingKindCutovers(ctx context.Context) ([]EvidenceRoutingKindCutover, error) {
+	rows, err := q.db.Query(ctx, listEvidenceRoutingKindCutovers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvidenceRoutingKindCutover
+	for rows.Next() {
+		var i EvidenceRoutingKindCutover
+		if err := rows.Scan(&i.EvidenceKind, &i.CutAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
