@@ -70,9 +70,24 @@ var kinds = []string{
 // and a pinned read compares against that instant instead of the first
 // cutover: a period frozen between the two read none of the kind's
 // control-free records and keeps reading none. A kind routed from its first
-// record needs no entry here.
+// record belongs in firstRecordKinds instead.
 var lateKinds = []string{
 	"sast.scan_result.v1", // #2973, migration 20261304000000
+}
+
+// firstRecordKinds are the routed kinds added after the first cutover that
+// were routed from their first record: no record of the kind was stored
+// bound before it was routed, so the first cutover reads them correctly and
+// they need no cutover row. Each entry says why (#3019).
+//
+// Every kind in kinds is in exactly one of three classes: routed at the
+// first cutover (#2924), lateKinds, or this list.
+// TestEveryRoutedKindIsClassified fails on a kind that is in none, so a kind
+// cannot fall back to the first cutover by omission.
+var firstRecordKinds = []string{
+	"1password.org_policy.v2",          // #2968: new kind, introduced routed
+	"aws.s3.bucket_tls_enforcement.v1", // #2993: new kind, introduced routed
+	"monitoring.host_capacity.v1",      // #2935: new kind, introduced routed
 }
 
 // Kinds returns a copy of the routed kinds, never nil.
@@ -164,11 +179,16 @@ func Cutover(ctx context.Context, q *dbx.Queries) (Cutovers, error) {
 }
 
 // cutoversFrom builds Cutovers from the stored rows, refusing a late kind
-// without a valid row.
+// without a valid row, and a row for a kind that is not in lateKinds: a
+// migration that routed a kind late without listing it here would otherwise
+// be ignored, and the kind would read the first cutover (#3019).
 func cutoversFrom(first time.Time, rows []dbx.EvidenceRoutingKindCutover) (Cutovers, error) {
 	c := Cutovers{First: first, Late: map[string]time.Time{}}
 	for _, r := range rows {
-		if r.CutAt.Valid && slices.Contains(lateKinds, r.EvidenceKind) {
+		if !slices.Contains(lateKinds, r.EvidenceKind) {
+			return Cutovers{}, fmt.Errorf("routed: evidence_routing_kind_cutover has a row for %s, which is not a late routed kind", r.EvidenceKind)
+		}
+		if r.CutAt.Valid {
 			c.Late[r.EvidenceKind] = r.CutAt.Time
 		}
 	}
