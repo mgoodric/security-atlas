@@ -2812,9 +2812,16 @@ type Querier interface {
 	// per run, so a cell's streak starts at its earliest evaluation after its
 	// latest non-inconclusive one (or its first evaluation, if it has never
 	// been anything else). A cell whose latest evaluation is not inconclusive
-	// has no row after its last break, so it returns nothing. Reads the
-	// history of the named controls only; callers pass the controls they
-	// already know are inconclusive.
+	// has no row after its last break, so it returns nothing. Callers pass the
+	// controls they already know are inconclusive.
+	//
+	// #2985: the cost is index probes, not history length. Per cell, the last
+	// break is one probe on the partial index
+	// idx_control_evaluations_not_inconclusive and the streak start is one
+	// probe on idx_control_evaluations_latest, so a year of hourly scheduler
+	// rows costs what a day's does. The cells come from the skip scan
+	// ListActiveControlsWithState uses (#2765). The NULL whole-tenant cell is
+	// its own branch, because = cannot match NULL.
 	ListInconclusiveStreaks(ctx context.Context, arg ListInconclusiveStreaksParams) ([]ListInconclusiveStreaksRow, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by

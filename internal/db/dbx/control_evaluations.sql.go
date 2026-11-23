@@ -244,23 +244,86 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 }
 
 const listInconclusiveStreaks = `-- name: ListInconclusiveStreaks :many
-SELECT h.control_id, h.scope_cell_id, min(h.evaluated_at)::timestamptz AS inconclusive_since
-FROM (
-    SELECT ce.control_id, ce.scope_cell_id, ce.evaluated_at,
-           max(ce.evaluated_at) FILTER (WHERE ce.result <> 'inconclusive')
-               OVER (PARTITION BY ce.control_id, ce.scope_cell_id) AS last_break
+WITH RECURSIVE ids AS (
+    SELECT DISTINCT unnest($1::uuid[]) AS control_id
+),
+cells AS (
+    SELECT ids.control_id, f.scope_cell_id
+    FROM ids
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    UNION ALL
+    SELECT c.control_id, n.scope_cell_id
+    FROM cells c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+          AND ce.scope_cell_id > c.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+)
+SELECT c.control_id::uuid AS control_id, c.scope_cell_id, s.evaluated_at::timestamptz AS inconclusive_since
+FROM cells c
+LEFT JOIN LATERAL (
+    SELECT ce.evaluated_at
     FROM control_evaluations ce
-    WHERE ce.tenant_id = $1
-      AND ce.control_id = ANY($2::uuid[])
+    WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+      AND ce.scope_cell_id = c.scope_cell_id
+      AND ce.result <> 'inconclusive'
       AND ce.evaluated_at <= $3
-) h
-WHERE h.last_break IS NULL OR h.evaluated_at > h.last_break
-GROUP BY h.control_id, h.scope_cell_id
+    ORDER BY ce.evaluated_at DESC
+    LIMIT 1
+) b ON true
+CROSS JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+      AND ce.scope_cell_id = c.scope_cell_id
+      AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
+      AND ce.evaluated_at <= $3
+    ORDER BY ce.evaluated_at
+    LIMIT 1
+) s
+UNION ALL
+SELECT ids.control_id, NULL::uuid, s.evaluated_at::timestamptz
+FROM ids
+LEFT JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+      AND ce.scope_cell_id IS NULL
+      AND ce.result <> 'inconclusive'
+      AND ce.evaluated_at <= $3
+    -- Leading scope_cell_id (constant here) lets the planner read the
+    -- index in order: IS NULL does not make it a pathkey constant.
+    ORDER BY ce.scope_cell_id, ce.evaluated_at DESC
+    LIMIT 1
+) b ON true
+CROSS JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+      AND ce.scope_cell_id IS NULL
+      AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
+      AND ce.evaluated_at <= $3
+    -- DESC so a backward scan of the index (evaluated_at DESC) serves
+    -- the ascending evaluated_at with no sort.
+    ORDER BY ce.scope_cell_id DESC, ce.evaluated_at
+    LIMIT 1
+) s
 `
 
 type ListInconclusiveStreaksParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
 	ControlIds []pgtype.UUID      `json:"control_ids"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
 	AsOf       pgtype.Timestamptz `json:"as_of"`
 }
 
@@ -275,11 +338,18 @@ type ListInconclusiveStreaksRow struct {
 // per run, so a cell's streak starts at its earliest evaluation after its
 // latest non-inconclusive one (or its first evaluation, if it has never
 // been anything else). A cell whose latest evaluation is not inconclusive
-// has no row after its last break, so it returns nothing. Reads the
-// history of the named controls only; callers pass the controls they
-// already know are inconclusive.
+// has no row after its last break, so it returns nothing. Callers pass the
+// controls they already know are inconclusive.
+//
+// #2985: the cost is index probes, not history length. Per cell, the last
+// break is one probe on the partial index
+// idx_control_evaluations_not_inconclusive and the streak start is one
+// probe on idx_control_evaluations_latest, so a year of hourly scheduler
+// rows costs what a day's does. The cells come from the skip scan
+// ListActiveControlsWithState uses (#2765). The NULL whole-tenant cell is
+// its own branch, because = cannot match NULL.
 func (q *Queries) ListInconclusiveStreaks(ctx context.Context, arg ListInconclusiveStreaksParams) ([]ListInconclusiveStreaksRow, error) {
-	rows, err := q.db.Query(ctx, listInconclusiveStreaks, arg.TenantID, arg.ControlIds, arg.AsOf)
+	rows, err := q.db.Query(ctx, listInconclusiveStreaks, arg.ControlIds, arg.TenantID, arg.AsOf)
 	if err != nil {
 		return nil, err
 	}
