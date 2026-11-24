@@ -187,6 +187,10 @@ type auditPeriodFixture struct {
 	// RowCount is how many fixture evidence rows that draw selects.
 	ControlID uuid.UUID
 	RowCount  int
+	// WindowEvidenceIDs are the records seeded inside this period's
+	// window for ControlID: members of its population, and what its
+	// sample links to (#3047).
+	WindowEvidenceIDs []uuid.UUID
 	// The slice of evidence rows pinned into this period's sample
 	// population (used by writeAuditPeriodsAndSamples to draw samples).
 	SampleEvidenceIDs []uuid.UUID
@@ -769,7 +773,13 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 		span := ap.PeriodEnd.Sub(ap.PeriodStart)
 		for j := 0; j < samplesPerPeriod; j++ {
 			obs := ap.PeriodStart.Add(span * time.Duration(j+1) / time.Duration(samplesPerPeriod+1))
+			// #3047: above scale ~1.17 the later windows open at or after
+			// now. The ledger holds nothing observed in the future.
+			if obs.After(now) {
+				continue
+			}
 			addEvidence(nEvidence+i*samplesPerPeriod+j, control, obs)
+			ap.WindowEvidenceIDs = append(ap.WindowEvidenceIDs, fs.evidence[len(fs.evidence)-1].ID)
 		}
 	}
 	for i := range fs.auditPeriods {
