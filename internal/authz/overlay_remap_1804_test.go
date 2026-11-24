@@ -4,7 +4,8 @@ package authz_test
 // decisions for the tenant's writers (admin, grc_engineer) under the
 // existing `mapping-overlays` resource, with no super_admin carve-out.
 // Every other role is refused, the list included, exactly as for the
-// overlay edges themselves. The handler checks the role again and refuses
+// overlay edges themselves, except that a viewer reads the list (#3030):
+// viewer.rego admits every mapping-overlays read. The handler checks the role again and refuses
 // a machine credential (internal/api/mappingoverlays).
 
 import (
@@ -45,7 +46,7 @@ func TestOverlayRemap1804_TenantWritersDecide(t *testing.T) {
 		}{
 			{"tenant admin", []authz.Role{authz.RoleAdmin}, true},
 			{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, true},
-			{"viewer", []authz.Role{authz.RoleViewer}, false},
+			{"viewer", []authz.Role{authz.RoleViewer}, rt.action == "read"},
 			{"auditor", []authz.Role{authz.RoleAuditor}, false},
 			{"control_owner", []authz.Role{authz.RoleControlOwner}, false},
 			{"no role", []authz.Role{}, false},

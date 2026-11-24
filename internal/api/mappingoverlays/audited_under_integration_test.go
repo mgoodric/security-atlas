@@ -114,10 +114,9 @@ func reportCSV(t *testing.T, e env, query string) [][]string {
 func TestAuditedUnder_ListsTheUnreachedTestedCriterion(t *testing.T) {
 	f := newAuditedUnderFixture(t)
 
-	// An admin reads it: the report is read-only and tenant-scoped. The
-	// engine refuses a viewer every mapping-overlays read today
-	// (TestOverlay_ViewerRefusedByAuthz); whether it should is #3021.
-	body, rows := reportRows(t, f.tenantA, f.tenantA.admin, "")
+	// A viewer reads it, on the real engine: the report is read-only and
+	// tenant-scoped, and viewer.rego admits mapping-overlays reads (#3030).
+	body, rows := reportRows(t, f.tenantA, f.tenantA.viewer, "")
 	if len(rows) != 1 {
 		t.Fatalf("rows = %v; want exactly the C2 gap", rows)
 	}
