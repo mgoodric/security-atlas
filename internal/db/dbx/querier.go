@@ -288,7 +288,9 @@ type Querier interface {
 	// AC-1 + AC-5: count evidence records that match the population's filter.
 	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
-	// the explicit "no horizon" semantic.
+	// the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
+	// (#1699): a record written after the freeze with a backdated observed_at
+	// never joins the frozen population.
 	//
 	// Scope predicate filtering happens AFTER this count -- the application
 	// evaluates the JSON-AST against scope cells in memory and intersects with
@@ -2438,6 +2440,9 @@ type Querier interface {
 	// a policy acknowledgement names a policy, never a control. A record of such
 	// a kind that IS bound reaches only its own control. internal/evidence/unbound
 	// owns the list; every ledger reader below applies the same rule.
+	// The horizon bounds ingested_at as well as observed_at (#1699, ISC-3): a
+	// replay of T sees only the rows that were in the ledger at T, so a record
+	// backdated to before T but written after it is not counted.
 	// This is a pure SELECT — the engine never mutates the ledger.
 	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
 	// Slice 064 — control-detail backend read endpoints.
@@ -2488,7 +2493,7 @@ type Querier interface {
 	// period is still 'open', in which case the caller passes NULL and the
 	// COALESCE-to-infinity short-circuits to live state). Ordered by
 	// observed_at DESC so the caller can pick the most-recent record as the
-	// pass/fail-driving observation.
+	// pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
 	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 	// the control's evidence_queries declare (internal/evidence/unbound).
 	// The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
@@ -2501,7 +2506,10 @@ type Querier interface {
 	ListEvidenceFreshness(ctx context.Context, tenantID pgtype.UUID) ([]EvidenceFreshness, error)
 	// Hash-input ingredient #1 (ADR 0003): the sorted UUIDs of evidence records
 	// visible at the period's horizon. The frozen-at filter is parameterized so
-	// a verifier can replay the hash for any horizon.
+	// a verifier can replay the hash for any horizon. The horizon bounds
+	// ingested_at as well as observed_at (#1699): a record written after the
+	// freeze with a backdated observed_at is not in the frozen population, so it
+	// can neither join the period's evidence nor change a replay of frozen_hash.
 	// Returns evidence_records.id only; the order is ASC by id so the SHA-256
 	// input is canonical without an extra sort pass in Go.
 	ListEvidenceIDsForPeriodHash(ctx context.Context, arg ListEvidenceIDsForPeriodHashParams) ([]pgtype.UUID, error)
@@ -2569,7 +2577,9 @@ type Querier interface {
 	// never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
 	// NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
 	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
-	// summarizes FROZEN periods, so in practice the horizon is always set.
+	// summarizes FROZEN periods, so in practice the horizon is always set. The
+	// horizon bounds ingested_at too (#1699): a record written after the freeze
+	// with a backdated observed_at is not in the frozen population.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	// #2973: the instant each kind routed after the first cutover started
 	// routing (migration 20261304000000). routed.KindsAsOf pins a read anchored

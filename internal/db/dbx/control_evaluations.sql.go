@@ -163,6 +163,7 @@ WHERE evidence_records.tenant_id = $1
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= $6
+  AND ingested_at <= $6
 ORDER BY observed_at DESC, ingested_at DESC, id DESC
 `
 
@@ -202,6 +203,9 @@ type ListEvidenceForControlAsOfRow struct {
 // a policy acknowledgement names a policy, never a control. A record of such
 // a kind that IS bound reaches only its own control. internal/evidence/unbound
 // owns the list; every ledger reader below applies the same rule.
+// The horizon bounds ingested_at as well as observed_at (#1699, ISC-3): a
+// replay of T sees only the rows that were in the ledger at T, so a record
+// backdated to before T but written after it is not counted.
 // This is a pure SELECT — the engine never mutates the ledger.
 func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlAsOf,
