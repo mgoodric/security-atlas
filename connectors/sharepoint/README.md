@@ -188,7 +188,7 @@ The document is still synced. Headers, footers and comments are not part
 of the body and are left out.
 
 A document the converter refuses (not a `.docx`, over 16 MiB, an XML part
-over 8 MiB or 2^20 elements, nested more than 512 levels, or not a readable `.docx`) is
+over 8 MiB, more than 2^20 elements, attributes and text nodes in all, nested more than 512 levels, or not a readable `.docx`) is
 sent `unreadable`, as on Confluence.
 
 ## The report
