@@ -9,6 +9,7 @@ description: |
   documented purpose and legal basis.
 
 scf_anchor_id: PRI-31
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: manual_attested
 owner_role: product-engineering

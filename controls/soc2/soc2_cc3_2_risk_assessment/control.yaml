@@ -9,6 +9,7 @@ description: |
   severity tier. The evidence is the PDF or signed report.
 
 scf_anchor_id: RSK-13
+scf_release: test-2026.3
 control_family: RSK
 implementation_type: manual_periodic
 owner_role: ciso

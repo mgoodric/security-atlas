@@ -103,13 +103,16 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 	id := uuid.New()
 	// control_ref is the ctrlID string passed as its own param ($7) — not
 	// `$3::text` — so no placeholder is referenced twice (avoids 42P08).
+	// A past record is ingested when it was observed, so a replay of an
+	// earlier instant finds it in the ledger (#1699); a future-dated one is
+	// ingested now, as ingest's skew window allows.
 	controlRef := ctrlID.String()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO evidence_records (
 			id, tenant_id, control_id, observed_at, ingested_at,
 			provenance, result, payload, hash, control_ref
 		)
-		VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, $5, '{}'::jsonb, $6, $7)
+		VALUES ($1, $2, $3, $4, LEAST(now(), $4), '{}'::jsonb, $5, '{}'::jsonb, $6, $7)
 	`, id, tenant, ctrlID, observedAt, result, "hash-012-"+id.String()[:8], controlRef); err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}

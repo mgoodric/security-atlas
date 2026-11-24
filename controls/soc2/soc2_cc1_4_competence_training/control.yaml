@@ -57,6 +57,7 @@ description: |
   user inventory (#2834).
 
 scf_anchor_id: SAT-04
+scf_release: test-2026.3
 control_family: SAT
 implementation_type: automated
 owner_role: hr

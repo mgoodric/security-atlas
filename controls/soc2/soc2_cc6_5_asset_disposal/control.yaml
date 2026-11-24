@@ -30,6 +30,7 @@ description: |
   pushed, which is not always when the file was written.
 
 scf_anchor_id: AST-22
+scf_release: test-2026.3
 control_family: AST
 implementation_type: semi_automated
 owner_role: it-operations

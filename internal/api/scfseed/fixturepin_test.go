@@ -13,14 +13,10 @@ package scfseed_test
 // Released labels are immutable: once a release ships with a label, never
 // change its entry; ship changed content under a new label instead.
 //
-// The open working label is the exception. test-2026.3 is not released yet:
-// each SCF 2026.3 family group of #1717 edits the sample and updates this
-// entry to the hash the test prints, until the 2026.3 remap is complete and
-// a release is cut, at which point the entry freezes. Between groups, a
-// development install that already imported an earlier test-2026.3 state
-// fails its next bootstrap with ReleaseConflictError (#1768) and needs a
-// catalog reset (wipe the database or re-run `just scratch-pg-up`). No
-// shipped install is affected, because none has imported test-2026.3.
+// test-2026.3 is frozen (#1773): the SCF 2026.3 remap of #1717 is complete,
+// and the stock control bundles and bundled crosswalks declare
+// scf_release: test-2026.3 (stockpin_test.go). Changed anchor content ships
+// under a new label, and the stock content moves to it in the same PR.
 
 import (
 	"crypto/sha256"
@@ -32,8 +28,8 @@ import (
 )
 
 // fixtureContentByRelease maps each release_version the sample has carried
-// to the sha256 of its anchor content (see fixtureContentHash). test-2026.3
-// is the open working label (see above); every other entry is frozen.
+// to the sha256 of its anchor content (see fixtureContentHash). Every entry
+// is frozen.
 var fixtureContentByRelease = map[string]string{
 	"test-2026.3": "a62477f251c4f83b71394a51c3bd42b94e2a9077b3d2c7347dde13e6844c2845",
 }

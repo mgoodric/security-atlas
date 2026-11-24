@@ -65,6 +65,7 @@ framework_issuer: "NIST"
 framework_version: "2.0"
 release_date: "2024-02-26"
 source_attribution: "community_draft"
+scf_release: "test-2026.3"
 
 requirements:
   # ===== GOVERN (GV) — CSF 2.0's headline addition; no SOC 2 analog =====

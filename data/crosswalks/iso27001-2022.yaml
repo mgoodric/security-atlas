@@ -50,6 +50,7 @@ framework_issuer: "ISO/IEC"
 framework_version: "2022"
 release_date: "2022-10-25"
 source_attribution: "community_draft"
+scf_release: "test-2026.3"
 
 requirements:
   # ===== A.5 Organizational controls =====

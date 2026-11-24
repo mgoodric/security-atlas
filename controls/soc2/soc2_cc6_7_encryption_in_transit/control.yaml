@@ -47,6 +47,7 @@ description: |
   does not read is not seen, which waits on an inventory (#2834).
 
 scf_anchor_id: CRY-05
+scf_release: test-2026.3
 control_family: CRY
 implementation_type: automated
 owner_role: security-engineering

@@ -28,6 +28,7 @@ description: |
   is not always when the plan was reviewed.
 
 scf_anchor_id: BCD-04
+scf_release: test-2026.3
 control_family: BCD
 implementation_type: semi_automated
 owner_role: ciso

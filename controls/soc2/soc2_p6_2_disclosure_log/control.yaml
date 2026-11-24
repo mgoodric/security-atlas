@@ -9,6 +9,7 @@ description: |
   request or agreement that authorised it.
 
 scf_anchor_id: PRI-17.1
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: semi_automated
 owner_role: ciso

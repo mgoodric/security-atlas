@@ -98,6 +98,7 @@ framework_name: "HIPAA Security Rule (45 CFR Part 164, Subpart C)"
 framework_issuer: "HHS"
 framework_version: "2013-01-25"
 source_attribution: "community_draft"
+scf_release: "test-2026.3"
 
 requirements:
   # ===== ADMINISTRATIVE SAFEGUARDS (§164.308) =====

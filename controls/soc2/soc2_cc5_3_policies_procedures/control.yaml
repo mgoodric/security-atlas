@@ -37,6 +37,7 @@ description: |
   inventory (#2834).
 
 scf_anchor_id: GOV-02
+scf_release: test-2026.3
 control_family: GOV
 implementation_type: automated
 owner_role: ciso
