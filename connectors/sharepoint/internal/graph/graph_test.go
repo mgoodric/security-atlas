@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -145,8 +146,14 @@ func TestDocumentsRefusals(t *testing.T) {
 func TestDownloadErrorsDoNotLeakTheURL(t *testing.T) {
 	for name, setup := range map[string]func(*graphtest.Server){
 		"transport failure": func(g *graphtest.Server) { g.FailDownloads = true },
+		// The target carries a credential, so the test fails if the
+		// redirect's URL reaches the error (#3043).
 		"refused redirect": func(g *graphtest.Server) {
-			g.Redirect = map[string]string{"download.aspx": "https://evil.example/steal"}
+			g.Redirect = map[string]string{"download.aspx": "https://evil.example/steal?tempauth=" + graphtest.TempAuth}
+		},
+		// net/http quotes a Location header it cannot parse (#3043).
+		"unparseable Location": func(g *graphtest.Server) {
+			g.Redirect = map[string]string{"download.aspx": "https://" + graphtest.SiteHost + "/%zz?tempauth=" + graphtest.TempAuth}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -193,6 +200,44 @@ func TestScrub(t *testing.T) {
 	plain := errors.New("plain")
 	if got := graph.Scrub(plain, "", "nothing"); got != plain {
 		t.Errorf("Scrub(plain) = %v", got)
+	}
+}
+
+// A redacted error keeps its chain for errors.Is, and is marked
+// ErrRedacted, but nothing reachable by unwrapping it carries the secret
+// (#3043).
+func TestScrubKeepsTheChain(t *testing.T) {
+	t.Parallel()
+	raw := "https://x/?tempauth=SECRET"
+	inner := fmt.Errorf("read %s: %w", raw, context.DeadlineExceeded)
+	got := graph.Scrub(&url.Error{Op: "Get", URL: raw, Err: inner}, raw, "tempauth=SECRET")
+	if !errors.Is(got, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(%v, context.DeadlineExceeded) = false", got)
+	}
+	if !errors.Is(got, graph.ErrRedacted) {
+		t.Errorf("errors.Is(%v, ErrRedacted) = false", got)
+	}
+	if errors.Is(got, context.Canceled) {
+		t.Errorf("errors.Is(%v, context.Canceled) = true", got)
+	}
+	for e := got; e != nil; e = errors.Unwrap(e) {
+		if strings.Contains(e.Error(), "SECRET") {
+			t.Errorf("chain link %q carries the secret", e)
+		}
+	}
+	var ue *url.Error
+	if errors.As(got, &ue) {
+		t.Errorf("errors.As reaches the *url.Error %v", ue)
+	}
+}
+
+// A Location header net/http cannot parse is redacted from the error.
+func TestScrubLocationHeader(t *testing.T) {
+	t.Parallel()
+	inner := errors.New(`failed to parse Location header "https://h/%zz?tempauth=OTHER": parse "https://h/%zz?tempauth=OTHER": invalid URL escape "%zz"`)
+	got := graph.Scrub(&url.Error{Op: "Get", URL: "https://h/%zz?tempauth=OTHER", Err: inner}, "https://d/?tempauth=SECRET", "tempauth=SECRET").Error()
+	if strings.Contains(got, "OTHER") || !strings.Contains(got, "failed to parse Location header") {
+		t.Errorf("Scrub = %q; want the Location value redacted and the cause kept", got)
 	}
 }
 

@@ -441,11 +441,16 @@ func (c *Client) download(ctx context.Context, id, raw string) ([]byte, error) {
 	return b, nil
 }
 
+// ErrRedacted marks an error whose text scrub redacted.
+var ErrRedacted = errors.New("graph: error text redacted")
+
 // scrub keeps a download URL out of an error. The URL is pre-authenticated:
 // its query (tempauth) reads the file for about an hour, and the error
 // reaches stderr and the scheduler's logs. Go's *url.Error quotes the
 // whole URL, so it is unwrapped; any remaining trace of the URL or its
-// query in the text is redacted.
+// query in the text is redacted. So is a redirect's Location header that
+// net/http could not parse, which it quotes and which may carry its own
+// tempauth.
 func scrub(err error, secrets ...string) error {
 	var ue *url.Error
 	if errors.As(err, &ue) {
@@ -453,16 +458,38 @@ func scrub(err error, secrets ...string) error {
 	}
 	msg := err.Error()
 	redacted := msg
+	if i := strings.Index(redacted, locationHeaderError); i >= 0 {
+		redacted = redacted[:i+len(locationHeaderError)] + " <redacted>"
+	}
 	for _, s := range secrets {
 		if s != "" {
 			redacted = strings.ReplaceAll(redacted, s, "<redacted>")
 		}
 	}
 	if redacted != msg {
-		return errors.New(redacted)
+		return &redactedError{msg: redacted, err: err}
 	}
 	return err
 }
+
+// locationHeaderError is how net/http's client starts the error for a
+// redirect Location it cannot parse, before quoting the header.
+const locationHeaderError = "failed to parse Location header"
+
+// redactedError is an error whose text scrub redacted. It unwraps to
+// ErrRedacted only, so nothing reached by errors.Unwrap or errors.As
+// carries the original text, but errors.Is still sees the original chain
+// (context.DeadlineExceeded and the like).
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+
+func (e *redactedError) Unwrap() error { return ErrRedacted }
+
+func (e *redactedError) Is(target error) bool { return errors.Is(e.err, target) }
 
 // get issues an authenticated Graph GET. The URL must be https on
 // graph.microsoft.com: a next link pointing anywhere else is refused, so
