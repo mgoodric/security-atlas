@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
@@ -52,10 +53,31 @@ type seed2157 struct {
 	inScope, outOfCell, outOfWindow, whole, other uuid.UUID
 }
 
-func seedPeriod2157(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
+// seedPeriod2157 writes a global framework and version and an open period
+// in tenant on it, and appends the framework id to fwIDs, which
+// assertNoRows2157 checks.
+func seedPeriod2157(t *testing.T, admin *pgxpool.Pool, tenant string, fwIDs *[]uuid.UUID) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	fwID, versionID, periodID := uuid.New(), uuid.New(), uuid.New()
+	*fwIDs = append(*fwIDs, fwID)
+	t.Cleanup(func() {
+		// Registered before the inserts, so a failed seed still cleans up.
+		// Runs before SeedTenant's cleanup (LIFO), so the tenant's rows
+		// that hang off the period go first, then the period, then the
+		// global framework rows, which no tenant cleanup reaches (#3041).
+		for _, table := range tenantTables2157 {
+			if _, err := admin.Exec(ctx, "DELETE FROM "+table+" WHERE tenant_id = $1", tenant); err != nil {
+				t.Errorf("cleanup %s: %v", table, err)
+			}
+		}
+		if _, err := admin.Exec(ctx, `DELETE FROM framework_versions WHERE id = $1`, versionID); err != nil {
+			t.Errorf("cleanup framework_versions: %v", err)
+		}
+		if _, err := admin.Exec(ctx, `DELETE FROM frameworks WHERE id = $1`, fwID); err != nil {
+			t.Errorf("cleanup frameworks: %v", err)
+		}
+	})
 	for _, q := range []struct {
 		sql  string
 		args []any
@@ -70,6 +92,63 @@ func seedPeriod2157(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID 
 		}
 	}
 	return periodID
+}
+
+// tenantTables2157 is every tenant-scoped table the test writes, directly
+// or through the API, children before parents.
+var tenantTables2157 = []string{
+	"sample_annotations",
+	"sample_evidence",
+	"sample_audit_log",
+	"samples",
+	"populations",
+	"evidence_records",
+	"controls",
+	"scopes",
+	"scope_cells",
+	"auditor_assignments",
+	"audit_period_audit_log",
+	"decision_audit_log",
+	"audit_periods",
+}
+
+// assertNoRows2157 fails the test if any table still holds a row for
+// tenant, or if any framework in fwIDs (filled by seedPeriod2157) remains.
+// It checks only this run's frameworks: a leak from an earlier run is not
+// this run's failure. Register it before anything that seeds, so it runs
+// after every other cleanup.
+func assertNoRows2157(t *testing.T, admin *pgxpool.Pool, tenant string, fwIDs *[]uuid.UUID) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		rows, err := admin.Query(ctx, `
+			SELECT c.table_name FROM information_schema.columns c
+			JOIN information_schema.tables t USING (table_schema, table_name)
+			WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND t.table_type = 'BASE TABLE'`)
+		if err != nil {
+			t.Errorf("list tenant tables: %v", err)
+			return
+		}
+		tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Errorf("list tenant tables: %v", err)
+			return
+		}
+		for _, table := range tables {
+			var n int
+			if err := admin.QueryRow(ctx, `SELECT count(*) FROM `+pgx.Identifier{table}.Sanitize()+` WHERE tenant_id::text = $1`, tenant).Scan(&n); err != nil {
+				t.Errorf("count %s: %v", table, err)
+			} else if n > 0 {
+				t.Errorf("%s holds %d row(s) for tenant %s after cleanup", table, n, tenant)
+			}
+		}
+		var n int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM frameworks WHERE id = ANY($1)`, *fwIDs).Scan(&n); err != nil {
+			t.Errorf("count frameworks: %v", err)
+		} else if n > 0 {
+			t.Errorf("frameworks holds %d #2157 row(s) after cleanup", n)
+		}
+	})
 }
 
 func seedControl2157(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
@@ -120,11 +199,13 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := dbtest.SeedTenant(t, admin)
+	var fwIDs []uuid.UUID
+	assertNoRows2157(t, admin, tenant, &fwIDs)
 	tid := uuid.MustParse(tenant)
 
 	var s seed2157
-	s.assigned = seedPeriod2157(t, admin, tenant)
-	s.unassigned = seedPeriod2157(t, admin, tenant)
+	s.assigned = seedPeriod2157(t, admin, tenant, &fwIDs)
+	s.unassigned = seedPeriod2157(t, admin, tenant, &fwIDs)
 	s.cellCtl = seedControl2157(t, admin, tenant)
 	s.wholeCtl = seedControl2157(t, admin, tenant)
 	s.otherCtl = seedControl2157(t, admin, tenant)
