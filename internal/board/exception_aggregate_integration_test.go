@@ -274,3 +274,106 @@ func TestIntegration_ExceptionAggregate_FrozenIntoBrief(t *testing.T) {
 		t.Fatalf("frozen brief exceptions = %+v, want %+v", reread.Content.Exceptions, want)
 	}
 }
+
+// lifecycleSeed is one waiver with explicit lifecycle stamps, for the as-of
+// test: seedException derives its stamps from the status and cannot place a
+// revoke or an expiry on either side of a past instant.
+type lifecycleSeed struct {
+	status      string
+	activatedAt time.Time
+	expiresAt   time.Time
+	revokedAt   *time.Time
+	expiredAt   *time.Time
+}
+
+func seedLifecycleException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, requestedAt time.Time, s lifecycleSeed) {
+	t.Helper()
+	var revokedBy *string
+	if s.revokedAt != nil {
+		by := "approver@example.test"
+		revokedBy = &by
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO exceptions (
+			id, tenant_id, control_id, scope_cell_predicate,
+			justification, requested_by, requested_at,
+			approved_by, approved_at, activated_by, activated_at,
+			effective_from, expires_at, revoked_by, revoked_at, expired_at, status
+		)
+		VALUES ($1, $2, $3, '{}'::jsonb,
+		        '#3057 fixture waiver', 'requester@example.test', $4,
+		        'approver@example.test', $4, 'approver@example.test', $5,
+		        $5, $6, $7, $8, $9, $10)
+	`, uuid.New(), tenant, ctrlID, requestedAt,
+		s.activatedAt, s.expiresAt, revokedBy, s.revokedAt, s.expiredAt, s.status); err != nil {
+		t.Fatalf("seed exception (%s): %v", s.status, err)
+	}
+}
+
+// TestIntegration_ExceptionAggregate_AsOfPastInstant proves the aggregate
+// reports the register as it stood at a past as_of (#3057), not today's
+// status column: a waiver activated after as_of is not counted, and waivers
+// revoked or expired after as_of still are. The second Assemble, at a later
+// clock, shows the same rows reduce to today's status = 'active' set.
+func TestIntegration_ExceptionAggregate_AsOfPastInstant(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	asOf := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	at := func(d time.Duration) *time.Time { v := asOf.Add(d); return &v }
+
+	seedFramework(t, admin, tenant, "soc2", "SOC 2")
+	ctrlID := seedControl(t, admin, tenant)
+	requestedAt := asOf.Add(-60 * day)
+
+	// Active then and now.
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "active", activatedAt: asOf.Add(-10 * day), expiresAt: asOf.Add(80 * day),
+	})
+	// Activated AFTER as_of: active today, not at as_of.
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "active", activatedAt: asOf.Add(5 * day), expiresAt: asOf.Add(80 * day),
+	})
+	// Expired since: active and past due at as_of (the sweeper ran 2 days later).
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "expired", activatedAt: asOf.Add(-50 * day), expiresAt: asOf.Add(-1 * day),
+		expiredAt: at(2 * day),
+	})
+	// Revoked since: active at as_of.
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "revoked", activatedAt: asOf.Add(-20 * day), expiresAt: asOf.Add(80 * day),
+		revokedAt: at(3 * day),
+	})
+	// Revoked, and expired, before as_of: not active at as_of.
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "revoked", activatedAt: asOf.Add(-40 * day), expiresAt: asOf.Add(80 * day),
+		revokedAt: at(-1 * day),
+	})
+	seedLifecycleException(t, admin, tenant, ctrlID, requestedAt, lifecycleSeed{
+		status: "expired", activatedAt: asOf.Add(-55 * day), expiresAt: asOf.Add(-2 * day),
+		expiredAt: at(-1 * time.Hour),
+	})
+
+	ctx := ctxFor(t, tenant)
+	brief, err := newBriefGenerator(t, app, asOf).Assemble(ctx, "2026-05-31")
+	if err != nil {
+		t.Fatalf("Assemble at as_of: %v", err)
+	}
+	want := board.ExceptionSummary{ActiveCount: 3, PastDueCount: 1, OldestActiveAgeDays: 50}
+	if brief.Exceptions != want {
+		t.Fatalf("as_of %s: Brief.Exceptions = %+v, want %+v", asOf.Format(time.RFC3339), brief.Exceptions, want)
+	}
+
+	// Ten days later every transition above has happened, so the as-of rule
+	// selects exactly the two rows whose status column reads 'active'.
+	later := asOf.Add(10 * day)
+	brief, err = newBriefGenerator(t, app, later).Assemble(ctx, "2026-06-10")
+	if err != nil {
+		t.Fatalf("Assemble at later: %v", err)
+	}
+	want = board.ExceptionSummary{ActiveCount: 2, PastDueCount: 0, OldestActiveAgeDays: 20}
+	if brief.Exceptions != want {
+		t.Fatalf("later: Brief.Exceptions = %+v, want %+v", brief.Exceptions, want)
+	}
+}
