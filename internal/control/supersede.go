@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 )
 
 // inPlaceManifestKeys are the top-level control.yaml keys an upload may
@@ -29,6 +31,13 @@ func isBlank(v any) bool {
 	}
 	s, ok := v.(string)
 	return ok && strings.TrimSpace(s) == ""
+}
+
+// isShippedStock reports whether manifestYAML, decoded as m, is a stock
+// control.yaml revision the platform shipped for its bundle_id.
+func isShippedStock(m map[string]any, manifestYAML []byte) bool {
+	bundleID, _ := m["bundle_id"].(string)
+	return bundleID != "" && scfimport.IsStockManifest(bundleID, string(manifestYAML))
 }
 
 // manifestSCFRelease returns the scf_release a stored control.yaml declares,
@@ -89,12 +98,14 @@ func SupersedingFields(priorYAML, nextYAML []byte) ([]string, error) {
 		}
 		stripQueryKeys(m)
 	}
-	// Declaring scf_release on a manifest that had none (issue #1773) names
-	// the release the code was already written against; it does not by
-	// itself change the anchor. Store.Upload still re-checks the anchor the
-	// declared release resolves to (rebindAnchor). Changing or removing a
-	// declared release supersedes.
-	if isBlank(prior[scfReleaseKey]) {
+	// A shipped stock manifest that declares scf_release where the stored
+	// one declared none (issue #1773) names the release the stock code was
+	// already written against; it does not by itself change the anchor.
+	// Store.Upload still re-checks the anchor (rebindAnchor). Only shipped
+	// bytes qualify (scfimport.IsStockManifest): a tenant declaring a
+	// release, or a remap approval rewriting one (#1776), means to re-bind,
+	// so it supersedes, as does changing or removing a declared release.
+	if isBlank(prior[scfReleaseKey]) && isShippedStock(next, nextYAML) {
 		delete(prior, scfReleaseKey)
 		delete(next, scfReleaseKey)
 	}

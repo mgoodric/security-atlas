@@ -446,8 +446,9 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 		//     `external_refs` (backfilling or correcting trace ids) and/or
 		//     `anchor_fit_note` (rewording why the fit is what it is,
 		//     issue #2023) and/or `evidence_queries[].description` (query
-		//     prose, issue #2891) and/or a newly declared `scf_release`
-		//     (issue #1773) updates the active row in place. Superseding would mint a
+		//     prose, issue #2891) and/or a newly declared `scf_release` on a
+		//     shipped stock manifest (issue #1773) updates the active row in
+		//     place. Superseding would mint a
 		//     new control id and orphan everything keyed on the old one:
 		//     owners, evidence, evaluations, exceptions, risk and other
 		//     links (issues #1908, #1958). Any other difference still
@@ -490,10 +491,9 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 					return ErrControlChangedConcurrently
 				}
 				// The prior manifest's pin decides the re-bind, not this
-				// one's: a manifest that newly declares scf_release
-				// (#1773) is the same control, so its anchor moves (or is
-				// flagged) as it would have unpinned. Once declared, the
-				// pin holds on every later upload.
+				// one's: a shipped stock manifest that newly declares
+				// scf_release (#1773) is the same control, so its anchor
+				// moves (or is flagged) as it would have unpinned.
 				priorRelease := manifestSCFRelease([]byte(prior.BundleManifestYaml))
 				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, priorRelease, b.Manifest.SCFAnchorID)
 				if err != nil {

@@ -1,6 +1,8 @@
 package control
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,8 +59,7 @@ external_refs:
 		{"anchor fit note reworded", replace(base, `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "Covers MFA, not SSO."`), true},
 		{"anchor fit changed", replace(base, "anchor_fit: partial", "anchor_fit: none"), false},
 		{"anchor fit and note both changed", replace(replace(base, "anchor_fit: partial", "anchor_fit: none"), `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "No fit."`), false},
-		{"scf_release declared where there was none", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-37\nscf_release: test-2026.3\n"), true},
-		{"scf_release declared alongside an anchor change", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-38\nscf_release: test-2026.3\n"), false},
+		{"scf_release declared on a manifest that is not shipped stock", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-37\nscf_release: test-2026.3\n"), false},
 		{"refs changed alongside a title change", replace(replace(base, "id: RA-03", "id: RA-09"), `title: "Test control"`, `title: "Renamed"`), false},
 	}
 	for _, tc := range cases {
@@ -117,10 +118,21 @@ evidence_queries:
 	}
 }
 
-// Issue #1773: declaring scf_release where the prior manifest had none
-// updates in place; changing or removing a declared one supersedes.
+// Issue #1773: a shipped stock manifest that declares scf_release where the
+// stored one had none updates in place. Anything else that adds, changes or
+// removes scf_release supersedes: a tenant bundle declaring a release, and
+// a remap approval rewriting one (#1776), mean to re-bind.
 func TestSupersedingFields_SCFRelease(t *testing.T) {
 	t.Parallel()
+	shipped, err := os.ReadFile(filepath.Join("..", "..", "controls", "soc2", "soc2_cc8_1_change_management", "control.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stock := string(shipped)
+	stockBefore := strings.Replace(stock, "scf_release: test-2026.3\n", "", 1)
+	if stockBefore == stock {
+		t.Fatal("shipped soc2_cc8_1_change_management manifest declares no scf_release: test-2026.3")
+	}
 	const unpinned = "bundle_id: c1\nscf_anchor_id: IAC-37\n"
 	const pinned = unpinned + "scf_release: test-2026.3\n"
 	cases := []struct {
@@ -128,8 +140,11 @@ func TestSupersedingFields_SCFRelease(t *testing.T) {
 		prior, next string
 		want        []string
 	}{
-		{"declared", unpinned, pinned, nil},
-		{"declared blank before", unpinned + "scf_release: \"\"\n", pinned, nil},
+		{"stock: declared on the shipped manifest", stockBefore, stock, nil},
+		{"stock: shipped bytes plus one byte", stockBefore, stock + "\n", []string{"scf_release"}},
+		{"stock: declared alongside an anchor change", stockBefore, strings.Replace(stock, "scf_anchor_id: CHG-02\n", "scf_anchor_id: CHG-04\n", 1), []string{"scf_anchor_id", "scf_release"}},
+		{"tenant: declared", unpinned, pinned, []string{"scf_release"}},
+		{"tenant: declared blank before", unpinned + "scf_release: \"\"\n", pinned, []string{"scf_release"}},
 		{"unchanged", pinned, pinned, nil},
 		{"changed", pinned, unpinned + "scf_release: \"2026.3\"\n", []string{"scf_release"}},
 		{"removed", pinned, unpinned, []string{"scf_release"}},
