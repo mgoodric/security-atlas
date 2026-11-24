@@ -31,6 +31,14 @@ viewer_readable_resources := {
     "themes",
     "org_units",
     "scopes",
+    # #3030 (decided on #3021): mapping overlays, the organisation's
+    # crosswalk edges onto the same controls a viewer already reads. Every
+    # GET on the resource: the list, the CSV export (which names overlay
+    # authors, #2286: internal staff, read by internal users), the
+    # audited-under report and its export, and the remap-proposal queue.
+    # Read only: is_read keeps create, retire, import and the remap
+    # decisions denied to viewer.
+    "mapping-overlays",
     # Slice 148: compliance calendar is cross-business by design
     # (slice 094 AC-9: "accessible to all signed-in users, no admin
     # gate"). The handler is read-only over four existing source
