@@ -316,6 +316,30 @@ func TestConfirmProposal_403WhenNotApprover(t *testing.T) {
 	}
 }
 
+// #3031: grc_engineer files proposals and the engine admits it to the
+// create route only. The handler gate behind confirm and reject is
+// IsTenantAdmin, not IsTenantApprover, so it refuses a live grc_engineer
+// and an approver-flag key too, should the engine ever admit them.
+func TestDecideProposal_403ForGRCEngineerAndApproverFlag(t *testing.T) {
+	t.Parallel()
+	grc := validCred()
+	grc.TenantRoles = []string{"grc_engineer"}
+	approver := validCred()
+	approver.IsApprover = true
+	h := New(nil)
+	for name, cred := range map[string]credstore.Credential{"grc_engineer": grc, "approver flag": approver} {
+		for verb, handle := range map[string]http.HandlerFunc{"confirm": h.ConfirmProposal, "reject": h.RejectProposal} {
+			r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/x/"+verb, nil)
+			r = r.WithContext(withTenantAndCred(t, cred))
+			w := httptest.NewRecorder()
+			handle(w, r)
+			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "admin role required") {
+				t.Errorf("%s %s: %d %s; want 403 admin role required", name, verb, w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
 func TestConfirmProposal_400OnNonUUID(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
