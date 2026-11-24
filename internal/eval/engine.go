@@ -216,10 +216,12 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 // shape: state is recorded per applicable cell.
 //
 // instant is the evaluation instant the queries see (queryInstant): SQL's
-// evaluated_at column and Rego's time.now_ns().
+// evaluated_at column and Rego's time.now_ns(). The freshness window is
+// measured from it too, so a replay of T judges evidence age as at T, not as
+// at the wall clock (#1699). Live evaluation's instant is the wall clock.
 func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, now, instant time.Time) (evaluationRow, error) {
-	inWindow := inWindowRecords(records, meta.freshnessClass, now)
-	freshness := computeFreshness(records, meta.freshnessClass, now)
+	inWindow := inWindowRecords(records, meta.freshnessClass, instant)
+	freshness := computeFreshness(records, meta.freshnessClass, instant)
 
 	// #2111: only the latest attestation in the window speaks for the
 	// attestation outcome; automated evidence keeps "any fail fails".

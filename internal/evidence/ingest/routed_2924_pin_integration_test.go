@@ -39,7 +39,9 @@ func routingCutover(t *testing.T, admin *pgxpool.Pool) time.Time {
 
 // insertRepoProtection writes one github.repo_protection.v2 ledger row as the
 // owner role, the way a row stored before this change looks: bound to ctrl
-// when ctrl is valid, else control-free under control_ref 'scf:TDA-06'.
+// when ctrl is valid, else control-free under control_ref 'scf:TDA-06'. It is
+// ingested when it was observed: a freeze horizon bounds ingested_at too
+// (#1699), and these rows stand for ones stored before the cutover.
 func insertRepoProtection(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl *uuid.UUID, observed time.Time) uuid.UUID {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{
@@ -58,7 +60,7 @@ func insertRepoProtection(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl
 			id, tenant_id, control_id, evidence_kind, observed_at, ingested_at,
 			provenance, result, payload, hash, control_ref
 		)
-		VALUES ($1, $2, $3, 'github.repo_protection.v2', $4, now(), '{}'::jsonb, 'pass', $5::jsonb, $6, $7)
+		VALUES ($1, $2, $3, 'github.repo_protection.v2', $4, $4, '{}'::jsonb, 'pass', $5::jsonb, $6, $7)
 	`, id, tenant, controlID, observed, string(body), "hash-pin-"+id.String()[:8], ref); err != nil {
 		t.Fatalf("insert repo protection row: %v", err)
 	}

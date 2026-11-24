@@ -118,13 +118,17 @@ ORDER BY occurred_at DESC, id ASC;
 -- name: ListEvidenceIDsForPeriodHash :many
 -- Hash-input ingredient #1 (ADR 0003): the sorted UUIDs of evidence records
 -- visible at the period's horizon. The frozen-at filter is parameterized so
--- a verifier can replay the hash for any horizon.
+-- a verifier can replay the hash for any horizon. The horizon bounds
+-- ingested_at as well as observed_at (#1699): a record written after the
+-- freeze with a backdated observed_at is not in the frozen population, so it
+-- can neither join the period's evidence nor change a replay of frozen_hash.
 -- Returns evidence_records.id only; the order is ASC by id so the SHA-256
 -- input is canonical without an extra sort pass in Go.
 SELECT id
 FROM evidence_records
 WHERE tenant_id   = $1
   AND observed_at <= $2
+  AND ingested_at <= $2
 ORDER BY id;
 
 -- name: ListControlIDsForPeriodHash :many
@@ -143,7 +147,7 @@ ORDER BY id;
 -- period is still 'open', in which case the caller passes NULL and the
 -- COALESCE-to-infinity short-circuits to live state). Ordered by
 -- observed_at DESC so the caller can pick the most-recent record as the
--- pass/fail-driving observation.
+-- pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
 -- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 -- the control's evidence_queries declare (internal/evidence/unbound).
 -- The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
@@ -159,6 +163,8 @@ WHERE evidence_records.tenant_id  = $1
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz)
+  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC, id ASC;
 
