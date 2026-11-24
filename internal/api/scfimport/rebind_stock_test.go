@@ -3,6 +3,7 @@ package scfimport
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -19,6 +20,23 @@ func stockCC81(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// stockBeforePin returns the soc2_cc8_1_change_management manifest as it
+// shipped before #1773 pinned the stock content: the shipped bytes without
+// their scf_release line. Every install bootstrapped before #1773 stores
+// these bytes, and they are on the stock list.
+func stockBeforePin(t *testing.T) string {
+	t.Helper()
+	m := stockCC81(t)
+	out := strings.Replace(m, "scf_release: test-2026.3\n", "", 1)
+	if out == m {
+		t.Fatal("shipped soc2_cc8_1_change_management manifest declares no scf_release: test-2026.3")
+	}
+	if !IsStockManifest("soc2_cc8_1_change_management", out) {
+		t.Fatal("pre-#1773 soc2_cc8_1_change_management bytes are not on the stock list")
+	}
+	return out
 }
 
 // Every control.yaml under controls/soc2/ must be on the generated stock
@@ -86,7 +104,13 @@ func TestClassify_StockTitleOnlyChange(t *testing.T) {
 		{"stock bundle id, tenant bytes", row("CHG-02", "", "soc2_cc8_1_change_management", tenant), OutcomeNeedsReanchoring},
 		{"stock, code reused", row("CHG-02", "CHG-09", "soc2_cc8_1_change_management", stock), OutcomeNeedsReanchoring},
 		{"stock, code remapped", row("IAC-10", "", "soc2_cc8_1_change_management", stock), OutcomeNeedsReanchoring},
-		{"stock, pinned", row("CHG-02", "", "soc2_cc8_1_change_management", stock+"scf_release: test-2026.1\n"), OutcomePinned},
+		// #1773: the shipped manifest declares scf_release, and is still
+		// classified as unpinned (the cases above). A tenant pinned
+		// manifest stays pinned, and so does a copy of the stock bytes
+		// with one byte changed: a tenant cannot opt in.
+		{"stock, before its scf_release (#1773)", row("CHG-02", "", "soc2_cc8_1_change_management", stockBeforePin(t)), OutcomeRebindable},
+		{"tenant, pinned", row("CHG-02", "", "tenant_chg", tenant+"scf_release: test-2026.1\n"), OutcomePinned},
+		{"stock bundle id, stock bytes plus one byte", row("CHG-02", "", "soc2_cc8_1_change_management", stock+"\n"), OutcomePinned},
 	}
 	for _, c := range cases {
 		_, got, err := Classify(c.row)

@@ -9,6 +9,7 @@ description: |
   correction carries the reason given to the requester.
 
 scf_anchor_id: PRI-39
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: automated
 owner_role: ciso

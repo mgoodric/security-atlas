@@ -30,6 +30,7 @@ description: |
   --netpol-control value overrides it.
 
 scf_anchor_id: NET-06
+scf_release: test-2026.3
 control_family: NET
 implementation_type: automated
 owner_role: security-engineering

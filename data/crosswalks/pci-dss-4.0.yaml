@@ -54,6 +54,7 @@ framework_issuer: "PCI Security Standards Council"
 framework_version: "4.0"
 release_date: "2022-03-31"
 source_attribution: "community_draft"
+scf_release: "test-2026.3"
 
 requirements:
   # ===== Req 1: Install and maintain network security controls =====

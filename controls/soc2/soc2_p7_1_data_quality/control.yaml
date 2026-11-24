@@ -8,6 +8,7 @@ description: |
   update it, and corrects records found to be wrong.
 
 scf_anchor_id: PRI-35
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: manual_attested
 owner_role: product-engineering

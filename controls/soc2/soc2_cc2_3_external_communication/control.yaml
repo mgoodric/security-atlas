@@ -11,6 +11,7 @@ description: |
   sample log of inbound reports triaged in the period.
 
 scf_anchor_id: IRO-16
+scf_release: test-2026.3
 control_family: IRO
 implementation_type: manual_periodic
 owner_role: security-engineering

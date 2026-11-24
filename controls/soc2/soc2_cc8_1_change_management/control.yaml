@@ -47,6 +47,7 @@ description: |
   never reported is not seen, which waits on an inventory (#2834).
 
 scf_anchor_id: CHG-02
+scf_release: test-2026.3
 control_family: CHG
 implementation_type: automated
 owner_role: security-engineering

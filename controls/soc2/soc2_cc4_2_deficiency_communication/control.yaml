@@ -11,6 +11,7 @@ description: |
   within 30, low within 90.
 
 scf_anchor_id: MON-05.1
+scf_release: test-2026.3
 control_family: MON
 implementation_type: manual_periodic
 owner_role: ciso

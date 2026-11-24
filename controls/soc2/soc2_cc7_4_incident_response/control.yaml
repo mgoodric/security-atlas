@@ -28,6 +28,7 @@ description: |
   evaluated.
 
 scf_anchor_id: IRO-08
+scf_release: test-2026.3
 control_family: IRO
 implementation_type: semi_automated
 owner_role: security-engineering

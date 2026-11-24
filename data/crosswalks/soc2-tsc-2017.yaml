@@ -49,6 +49,7 @@ framework_issuer: "AICPA"
 framework_version: "2017"
 release_date: "2017-04-01"
 source_attribution: "community_draft"
+scf_release: "test-2026.3"
 
 requirements:
   # Common Criteria — Control Environment (CC1)

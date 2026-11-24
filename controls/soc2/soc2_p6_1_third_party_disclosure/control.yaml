@@ -9,6 +9,7 @@ description: |
   that permits each disclosure.
 
 scf_anchor_id: PRI-16
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: manual_attested
 owner_role: ciso

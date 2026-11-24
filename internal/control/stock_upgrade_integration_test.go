@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
 
 	"github.com/mgoodric/security-atlas/internal/control"
@@ -51,6 +52,34 @@ func withDescription(t *testing.T, rawYAML []byte, desc string) []byte {
 	return out
 }
 
+// seedSCFAnchorInRelease seeds code in the named SCF release, creating the
+// release as legacy if it is absent so the current release seedSCFAnchor
+// uses stays current. The stock bundles declare their release (#1773), and
+// a declared release resolves whatever its status.
+func seedSCFAnchorInRelease(t *testing.T, admin *pgxpool.Pool, release, code, family string) {
+	t.Helper()
+	ctx := context.Background()
+	seedSCFAnchor(t, admin, "IAC-37", "IAC") // ensures the scf framework row
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		SELECT gen_random_uuid(), NULL, f.id, $1, 'legacy'
+		FROM frameworks f
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM framework_versions v WHERE v.framework_id = f.id AND v.version = $1)
+	`, release); err != nil {
+		t.Fatalf("insert framework_version %s: %v", release, err)
+	}
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title)
+		SELECT gen_random_uuid(), v.id, $2, $3, 'Test anchor ' || $2
+		FROM framework_versions v JOIN frameworks f ON f.id = v.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND v.version = $1
+		ON CONFLICT (framework_version_id, scf_id) DO NOTHING
+	`, release, code, family); err != nil {
+		t.Fatalf("insert anchor %s@%s: %v", code, release, err)
+	}
+}
+
 func TestStockSOC2Upgrade_RewordedDescriptionKeepsOwnerAndEvidence(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -70,7 +99,7 @@ func TestStockSOC2Upgrade_RewordedDescriptionKeepsOwnerAndEvidence(t *testing.T)
 	upgraded := 0
 	forEachSOC2Bundle(t, func(name string, stock *control.Bundle) {
 		anchor := stock.Manifest.SCFAnchorID
-		seedSCFAnchor(t, admin, anchor, strings.SplitN(anchor, "-", 2)[0])
+		seedSCFAnchorInRelease(t, admin, stock.Manifest.SCFRelease, anchor, strings.SplitN(anchor, "-", 2)[0])
 
 		// The previous release: same manifest, other wording.
 		raw, err := os.ReadFile(filepath.Join(soc2Dir, name, "control.yaml"))
