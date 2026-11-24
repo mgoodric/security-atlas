@@ -389,28 +389,12 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		return oscal.NewExporter(app, &capturingBridge{}, signer)
 	})
 	ctx := context.Background()
-	fwID, versionID := uuid.New(), uuid.New()
-	if _, err := e.migrate.Exec(ctx, `INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, '#2171 framework', $2, 'test')`,
-		fwID, "fw-2171-"+fwID.String()[:8]); err != nil {
-		t.Fatalf("seed framework: %v", err)
-	}
-	if _, err := e.migrate.Exec(ctx, `INSERT INTO framework_versions (id, tenant_id, framework_id, version) VALUES ($1, NULL, $2, '1.0')`,
-		versionID, fwID); err != nil {
-		t.Fatalf("seed framework version: %v", err)
-	}
-	frozenAt := time.Now().UTC().Add(-24 * time.Hour)
-	period := uuid.New()
-	if _, err := e.migrate.Exec(ctx, `
-		INSERT INTO audit_periods (id, tenant_id, name, framework_version_id, period_start, period_end, status, created_by,
-		                           frozen_at, frozen_by, frozen_hash)
-		VALUES ($1, $2, '#2171 period', $3, $4, $5, 'frozen', 'tester', $6, 'tester', decode('00','hex'))`,
-		period, e.tenant, versionID, frozenAt.Add(-90*24*time.Hour), frozenAt, frozenAt); err != nil {
-		t.Fatalf("seed frozen period: %v", err)
-	}
+	fwID, versionID, period := uuid.New(), uuid.New(), uuid.New()
 	t.Cleanup(func() {
+		// Registered before the inserts, so a failed seed still cleans up.
 		// Runs before SeedTenant's cleanup (LIFO), so the period goes
-		// first; the global framework rows outlive the tenant otherwise
-		// (#3041).
+		// first, then the global framework rows, which outlive the tenant
+		// otherwise (#3041).
 		for _, q := range []struct {
 			sql string
 			arg any
@@ -425,6 +409,22 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 			}
 		}
 	})
+	if _, err := e.migrate.Exec(ctx, `INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, '#2171 framework', $2, 'test')`,
+		fwID, "fw-2171-"+fwID.String()[:8]); err != nil {
+		t.Fatalf("seed framework: %v", err)
+	}
+	if _, err := e.migrate.Exec(ctx, `INSERT INTO framework_versions (id, tenant_id, framework_id, version) VALUES ($1, NULL, $2, '1.0')`,
+		versionID, fwID); err != nil {
+		t.Fatalf("seed framework version: %v", err)
+	}
+	frozenAt := time.Now().UTC().Add(-24 * time.Hour)
+	if _, err := e.migrate.Exec(ctx, `
+		INSERT INTO audit_periods (id, tenant_id, name, framework_version_id, period_start, period_end, status, created_by,
+		                           frozen_at, frozen_by, frozen_hash)
+		VALUES ($1, $2, '#2171 period', $3, $4, $5, 'frozen', 'tester', $6, 'tester', decode('00','hex'))`,
+		period, e.tenant, versionID, frozenAt.Add(-90*24*time.Hour), frozenAt, frozenAt); err != nil {
+		t.Fatalf("seed frozen period: %v", err)
+	}
 	ctrl := seedModuleControl(t, e.migrate, e.tenant)
 	if _, err := e.migrate.Exec(ctx, `
 		INSERT INTO policies (id, tenant_id, title, version, body_md, status, owner_role, approver_role, created_by, effective_date)

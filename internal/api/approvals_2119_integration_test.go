@@ -68,6 +68,23 @@ func seed2119Pending(t *testing.T, migrate *pgxpool.Pool, tenant string, request
 	ctx := context.Background()
 	p := pending2119{exception: uuid.New(), risk: uuid.New(), policy: uuid.New(), scope: uuid.New()}
 	ctl, fw, fv := uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		// Registered before the inserts, so a failed seed still cleans up.
+		// The global framework rows outlive the tenant otherwise, and the
+		// scopes pin the version (#3041).
+		for _, q := range []struct {
+			sql string
+			arg any
+		}{
+			{`DELETE FROM framework_scopes WHERE tenant_id = $1`, tenant},
+			{`DELETE FROM framework_versions WHERE id = $1`, fv},
+			{`DELETE FROM frameworks WHERE id = $1`, fw},
+		} {
+			if _, err := migrate.Exec(ctx, q.sql, q.arg); err != nil {
+				t.Errorf("cleanup %q: %v", q.sql, err)
+			}
+		}
+	})
 	by := requester.String()
 	for _, q := range []struct {
 		sql  string
@@ -111,22 +128,6 @@ func seed2119Pending(t *testing.T, migrate *pgxpool.Pool, tenant string, request
 			t.Fatalf("seed pending: %v\n%s", err, q.sql)
 		}
 	}
-	t.Cleanup(func() {
-		// The global framework rows outlive the tenant otherwise, and the
-		// scopes pin the version (#3041).
-		for _, q := range []struct {
-			sql string
-			arg any
-		}{
-			{`DELETE FROM framework_scopes WHERE tenant_id = $1`, tenant},
-			{`DELETE FROM framework_versions WHERE id = $1`, fv},
-			{`DELETE FROM frameworks WHERE id = $1`, fw},
-		} {
-			if _, err := migrate.Exec(ctx, q.sql, q.arg); err != nil {
-				t.Errorf("cleanup %q: %v", q.sql, err)
-			}
-		}
-	})
 	return p
 }
 
