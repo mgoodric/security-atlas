@@ -188,7 +188,9 @@ A release read from a workbook's sheet name binds just as strictly (#1774): when
 it is not loaded, the import fails, names the sheet, and writes nothing. To
 import a workbook into a different loaded release than its sheet names, rename
 the sheet to `SCF <release>`, or convert the workbook to crosswalk YAML that
-declares that `scf_release`. `--scf-release` cannot override the sheet.
+declares that `scf_release`. A sheet name can only spell an `SCF <yyyy>.<n>`
+release, so the bundled sample (`test-2026.3`) is reachable only through YAML.
+`--scf-release` cannot override the sheet.
 
 A crosswalk that declares no release is refused (#1774), and nothing is
 written. Its codes are never bound in the current release instead. The fix is

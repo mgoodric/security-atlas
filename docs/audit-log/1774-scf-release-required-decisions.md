@@ -64,6 +64,13 @@ flag. The error and `docs/operator/scf-crosswalk-import.md` give two
 supported paths: rename the sheet to `SCF <loaded release>`, or convert the
 workbook to YAML declaring `scf_release`.
 
+A sheet name can only spell an `SCF <yyyy>.<n>` release
+(`scfworkbook.SheetRelease`), so a workbook cannot be renamed onto the
+bundled sample's `test-2026.3` label. YAML is the route there. The
+workbook-fixture tests that relied on the fallback to reach the sample now
+declare it on the loaded crosswalk, as a converted YAML file would
+(`inSample` in `internal/api/soc2import`).
+
 **Why.** The owner's #1774 comment asked for a choice between an override
 flag and documenting the rename. An override would be a second way to
 declare the release that contradicts the workbook's own statement, which
