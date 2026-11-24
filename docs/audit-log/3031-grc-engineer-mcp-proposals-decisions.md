@@ -1,7 +1,7 @@
 # #3031: grc_engineer files MCP write proposals; admin decides them (decisions log)
 
 Decided by Matt on #3022 (2026-11-24): `grc_engineer` files MCP write
-proposals, and only an approver or admin decides them. This log does not
+proposals, and only a tenant admin decides them. This log does not
 block merge.
 
 - detection_tier_actual: none
@@ -39,6 +39,15 @@ For a `grc_engineer` the engine refuses confirm and reject first, with its
 own `{"error":"forbidden"}`. The handler gate stays as the second layer.
 `TestDecideProposal_403ForGRCEngineerAndApproverFlag` pins that it refuses
 a live `grc_engineer` and an approver flag on its own.
+
+**Accepted side effect: more credentials can file proposals.** The create
+admit is on the `grc_engineer` role, so every credential that derives it
+can file an MCP write proposal, not only a user granted `grc_engineer`.
+Two derive it without a role grant: an approver-flag credential
+(`internal/authz/input.go:153-154`) and a tenant key with no special flags,
+which falls to the default case (`internal/authz/input.go:196-202`).
+Matt accepted this on 2026-11-24. Deciding stays admin-only, so none of
+these credentials can confirm or reject what they file.
 
 ## D3: Self-confirmation stays allowed
 

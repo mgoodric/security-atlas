@@ -441,7 +441,7 @@ const confirmWriteInputSchema = `{
   "properties": {
     "proposal_id": {
       "type": "string",
-      "description": "Proposal UUID to confirm. The caller's credential MUST hold the approver role."
+      "description": "Proposal UUID to confirm. The caller's credential MUST be a tenant admin."
     }
   }
 }`
@@ -466,7 +466,7 @@ func (t *ConfirmWriteTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "confirm_write",
 		Description: "Confirm an ai_proposed write proposal. Requires the caller's credential " +
-			"to hold the approver role; the platform runs the canonical Applier inside the " +
+			"to be a tenant admin; the platform runs the canonical Applier inside the " +
 			"same transaction as the state flip. Idempotent: a second call on an applied " +
 			"proposal returns a 409 conflict.",
 		InputSchema: json.RawMessage(confirmWriteInputSchema),
