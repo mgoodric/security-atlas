@@ -82,7 +82,9 @@ const (
 	// historical evidence import in one tenant, so a freeze never hashes
 	// the tenant's evidence while an import's rows, stamped ingested_at at
 	// the import's BEGIN, are still uncommitted (#1742,
-	// LockTenantEvidenceFreeze). Key: hashtext(tenant uuid text).
+	// LockTenantEvidenceFreeze). Every live ledger insert takes it in
+	// shared mode, so a freeze also waits for open ingests (#3038,
+	// LockTenantEvidenceFreezeShared). Key: hashtext(tenant uuid text).
 	TenantEvidenceFreeze Namespace = 14
 )
 

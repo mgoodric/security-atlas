@@ -66,3 +66,22 @@ func TestComputeRow_ReplayExceptionWindowAnchorsOnInstant(t *testing.T) {
 		t.Fatalf("live = %s, want fail", row.result)
 	}
 }
+
+// #3038: live evaluation keeps only rows ingested by its instant, the bound
+// a replay of that instant applies in SQL.
+func TestIngestedBy_KeepsRowsAtOrBeforeHorizon(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	records := []allRecord{
+		{id: "before", ingestedAt: at.Add(-time.Second)},
+		{id: "at", ingestedAt: at},
+		{id: "after", ingestedAt: at.Add(time.Microsecond)},
+	}
+	got := ingestedBy(records, at)
+	if len(got) != 2 || got[0].id != "before" || got[1].id != "at" {
+		t.Fatalf("ingestedBy = %+v, want [before at]", got)
+	}
+	if len(records) != 3 || records[2].id != "after" {
+		t.Fatalf("ingestedBy changed its input: %+v", records)
+	}
+}

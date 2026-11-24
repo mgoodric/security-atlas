@@ -68,7 +68,9 @@ The evidence set was first defined as `observed_at <= frozen_at` only. That admi
 Upgrade: no stored hash changes, and none needs to.
 
 - `Freeze` (`internal/audit/period/period.go`) is the only caller of `ListEvidenceIDsForPeriodHash`. The product never recomputes or verifies a stored `frozen_hash`, and never rewrites one, so no existing frozen period can fail an in-product check.
-- For an external verifier, a recompute at `frozen_at` under the new definition reproduces the set the hash was taken over. At freeze time, every row visible to the freeze transaction was ingested before it ran, so `ingested_at <= frozen_at` held for it. The one exception is a row whose `ingested_at` (the database clock) is later than `frozen_at` (the app clock) because the two clocks disagree. That needs the DB clock to run ahead of the app clock (#3038).
+- For an external verifier, a recompute at `frozen_at` under the new definition reproduces the set the hash was taken over, with two exceptions. Both affect only periods frozen before the fixes named below.
+  - **Clock skew.** `ingested_at` is the database clock and `frozen_at` was then the app clock. A row visible to the freeze whose `ingested_at` is later than `frozen_at`, because the DB clock ran ahead of the app clock, was hashed, but a recompute leaves it out. Closed by stamping `frozen_at` from the database clock (#1742, and #3038 below).
+  - **Transaction start.** `ingested_at` is the ingest transaction's start (`now()`), not its commit. A row whose transaction began before `frozen_at` but committed after the freeze read the ledger has `ingested_at < frozen_at` and was not hashed, but a recompute includes it. Closed by the tenant evidence-freeze lock: for historical import by #1742, for live ingest by #3038 below.
 - Under the old definition, any late, backdated row that arrived after the freeze made the stored hash unreproducible. The amendment makes verification reproducible where it was not, so it is a correction, not a break.
 
 A reimplemented verifier MUST apply both bounds.
@@ -88,6 +90,17 @@ A historical evidence import may add records to a period that is already frozen,
 The rule, as decided 2026-11-24: a frozen population changes only through a recorded, hashed, reasoned revision; the original freeze always replays; and only records with `observed_at <= ` the original `frozen_at` may join a revision.
 
 A reimplemented verifier MUST take the revision number as an input and add the listed ids for revisions up to it.
+
+## Amendment: one clock, and live ingest under the freeze lock (#3038)
+
+The freeze horizon and `ingested_at` now come from one clock, the database's, and every ledger writer, not only the historical import, is ordered against a freeze.
+
+- **Freeze.** The HTTP freeze stamps `frozen_at` from `clock_timestamp()` once it holds `advisorylock.TenantEvidenceFreeze` in exclusive mode (as #1742 made it). An explicit `at` is still used as given; only tests and replays of a past instant pass one.
+- **Live ingest.** Every ledger insert (`ingest.Service.persist`: push, the stream-buffer consumer, and the domain writers through `ProcessInTx`; the demo seed alone writes fixture rows directly, with backdated `ingested_at`, into a tenant it builds itself) takes the same lock in shared mode just before its INSERT and holds it to commit. Ingests do not block each other. A freeze waits for every ingest holding the lock to commit, so it hashes with their rows in view. After the lock is granted, the ingest refuses if a tenant period has `frozen_at` at or after its transaction start (`ErrConcurrentFreeze`), because its row would carry an `ingested_at` inside a horizon that never hashed it. `Process` retries in a new transaction, whose `ingested_at` is after that freeze. `ProcessInTx` returns the error, and the domain writer's whole transaction is the unit to retry.
+- **Visibility rule.** With both, a row is in a freeze's hash if and only if `observed_at <= frozen_at AND ingested_at <= frozen_at`. A row committed before the freeze took the lock has `ingested_at` at or before the commit, so it is before `frozen_at`, and the freeze sees it. A row whose transaction was open when the freeze took the lock either held the shared lock, so the freeze waited for it, or refuses because `frozen_at` is after its start. A row whose transaction began after `frozen_at` is outside the horizon.
+- **Live evaluation.** `eval.Engine` reads `evaluated_at` from `clock_timestamp()` inside the evaluation's transaction, before its ledger read, and applies `ingested_at <= evaluated_at` to that read, as a replay does. A row ingested and committed before T is counted by the live result at T and by a replay of T. The engine does not take the freeze lock, so the transaction-start window stays open for live evaluation alone. A row whose transaction began before T but committed after the read is missed live at T and counted by a replay of T. Its own ingest triggers a later evaluation that counts it.
+
+Upgrade: no stored hash changes. A period frozen before this change keeps the hash it has; the two exceptions above describe when an external recompute of such a period can differ. A period frozen after this change has neither.
 
 ## Alternatives considered
 

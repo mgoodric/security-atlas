@@ -52,16 +52,30 @@ type cellResolver interface {
 type Engine struct {
 	store *Store
 	cells cellResolver
-	// now is the wall-clock source. Overridable in tests so the
-	// freshness-window cutoff is deterministic. It feeds ONLY the freshness
-	// computation and the evaluated_at stamp — never the pass/fail result.
-	now func() time.Time
+	// clock reads the evaluation time inside the evaluation's transaction.
+	// It is the database clock (dbClock): evidence_records.ingested_at is
+	// stamped by the database (DEFAULT now()), and a replay of an
+	// evaluation bounds ingested_at by its evaluated_at, so both must come
+	// from one clock (#3038). Tests may swap it to simulate an app clock
+	// that disagrees with the database.
+	clock func(ctx context.Context, q *dbx.Queries) (time.Time, error)
 }
 
 // NewEngine wires an Engine over a Store and a scope-cell resolver (slice
 // 017's scope.Store).
 func NewEngine(store *Store, cells cellResolver) *Engine {
-	return &Engine{store: store, cells: cells, now: func() time.Time { return time.Now().UTC() }}
+	return &Engine{store: store, cells: cells, clock: dbClock}
+}
+
+// dbClock is the database's current time, clock_timestamp() rather than the
+// transaction start, so it is read after every row the transaction's next
+// statement can see was committed.
+func dbClock(ctx context.Context, q *dbx.Queries) (time.Time, error) {
+	now, err := q.DBClockNow(ctx)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("database clock: %w", err)
+	}
+	return now.Time.UTC(), nil
 }
 
 // EvaluateControl computes and appends control state for one control.
@@ -135,11 +149,20 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 	}
 
 	evalRunID := uuid.New()
-	evaluatedAt := e.now()
-	instant := queryInstant(evaluatedAt, asOf)
 	written := 0
 
 	err = e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tx pgx.Tx, tenantID uuid.UUID) error {
+		// #3038: evaluated_at is read from the database clock, the clock
+		// that stamps ingested_at, before the ledger read below. Every row
+		// committed before this point has ingested_at <= evaluatedAt and is
+		// visible to that read, so the live result at T and a replay of T
+		// both count it whatever the app host's clock says.
+		evaluatedAt, err := e.clock(ctx, q)
+		if err != nil {
+			return err
+		}
+		instant := queryInstant(evaluatedAt, asOf)
+
 		meta, err := e.store.loadControl(ctx, q, tenantID, controlID)
 		if err != nil {
 			return err
@@ -155,6 +178,21 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		if err != nil {
 			return err
 		}
+		// #3038: live evaluation applies the same ingested_at horizon a
+		// replay does (the SQL bound when asOf is a past instant). A row
+		// that committed between the clock read and the ledger read has
+		// ingested_at after evaluatedAt; a replay of evaluatedAt would not
+		// count it, so the live result does not either. Its own ingest
+		// triggers a later evaluation that does.
+		//
+		// What one clock does not close: a row whose transaction began
+		// before evaluatedAt (so ingested_at <= evaluatedAt) but committed
+		// after the ledger read. The live result at T misses it and a replay
+		// of T counts it. Freeze closes that window with the tenant
+		// evidence-freeze lock. Live evaluation does not take it: that would
+		// serialise every evaluation against every ingest in the tenant, and
+		// the row's own ingest triggers a later evaluation that counts it.
+		records = ingestedBy(records, instant)
 		// #3037: a replay of an earlier instant applies the exceptions in
 		// force then, not today's active set. Live evaluation (instant is
 		// the evaluation time) reads the active set as before.
@@ -409,6 +447,18 @@ func queryInstant(evaluatedAt, asOf time.Time) time.Time {
 		return asOf.UTC()
 	}
 	return evaluatedAt.UTC()
+}
+
+// ingestedBy keeps the records whose ingested_at is at or before horizon,
+// in order (#3038).
+func ingestedBy(records []allRecord, horizon time.Time) []allRecord {
+	out := records[:0:0]
+	for _, r := range records {
+		if !r.ingestedAt.After(horizon) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // FarFuture is the sentinel horizon for live evaluation — "all evidence up to
