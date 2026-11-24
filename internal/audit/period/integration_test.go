@@ -481,19 +481,11 @@ func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
 	}
 	hash1 := append([]byte(nil), first.FrozenHash...)
 
-	// Admin-privileged rollback to 'open' so we can re-freeze (otherwise
+	// Owner-privileged rollback to 'open' so we can re-freeze (otherwise
 	// AC-6 prevents it). This simulates a recovery flow; ordinary users
-	// cannot reach this state.
-	if _, err := admin.Exec(context.Background(),
-		`UPDATE audit_periods
-		 SET status      = 'open',
-		     frozen_at   = NULL,
-		     frozen_hash = NULL,
-		     frozen_by   = NULL,
-		     updated_at  = now()
-		 WHERE id = $1`, p.ID); err != nil {
-		t.Fatalf("admin rollback: %v", err)
-	}
+	// cannot reach this state, and the freeze-immutability trigger (#3050)
+	// refuses it even for the owner unless the trigger is disabled.
+	reopenFrozenPeriod(t, admin, p.ID)
 
 	// Re-freeze at the SAME wall-clock and content. AC-7 holds because
 	// frozen_at is NOT in the hash input set (ADR 0003) -- but to make
@@ -670,12 +662,7 @@ func TestFreeze_LateIngestedBackdatedEvidenceStaysOut(t *testing.T) {
 	// Recompute frozen_hash at the same horizon: the admin reopens the period
 	// (the AC-7 recovery path) and freezes again. The late record must not
 	// change the commitment.
-	if _, err := admin.Exec(context.Background(),
-		`UPDATE audit_periods
-		 SET status = 'open', frozen_at = NULL, frozen_hash = NULL, frozen_by = NULL, updated_at = now()
-		 WHERE id = $1`, p.ID); err != nil {
-		t.Fatalf("admin reopen: %v", err)
-	}
+	reopenFrozenPeriod(t, admin, p.ID)
 	second, err := periodStore.Freeze(ctx, p.ID, "key_test_1699", frozenAt)
 	if err != nil {
 		t.Fatalf("re-Freeze: %v", err)
