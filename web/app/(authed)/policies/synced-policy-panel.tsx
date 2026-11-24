@@ -1,5 +1,5 @@
 // #2852 — what a synced policy's detail page says about its source: a
-// "Managed in Confluence" badge, the link to its page (where it is edited),
+// "Managed in Confluence" (or "Managed in SharePoint", #2837) badge, the link to its page (where it is edited),
 // the approval the page records, and a drift notice when the page's body
 // has changed without a version bump (#2851), and another when its page
 // properties have (#2877). Presentational only, so the
@@ -7,7 +7,7 @@
 //
 // The approver is source-asserted text (historical_approver_name /
 // historical_approved_at; approved_by is empty), so it is labelled as an
-// approval recorded in Confluence, never as an approval made in this app.
+// approval recorded in its source, never as an approval made in this app.
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +15,10 @@ import { Timestamp } from "@/components/ui/timestamp";
 
 import type { SyncedPolicyView } from "./lifecycle";
 
-export function ManagedInConfluenceBadge() {
+export function ManagedBySyncBadge({ source }: { source: string }) {
   return (
     <Badge variant="outline" data-testid="policy-detail-synced">
-      Managed in Confluence
+      Managed in {source}
     </Badge>
   );
 }
@@ -27,8 +27,8 @@ export function SyncedPolicyPanel({ view }: { view: SyncedPolicyView }) {
   return (
     <div className="space-y-2" data-testid="policy-detail-sync">
       <p className="text-sm text-muted-foreground">
-        This policy is synced from Confluence. Its text, version and review date
-        are edited on its page
+        This policy is synced from {view.source}. Its text, version and review
+        date are edited on its page
         {view.sourceHref ? (
           <>
             :{" "}

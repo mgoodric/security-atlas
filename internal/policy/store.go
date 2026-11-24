@@ -155,8 +155,9 @@ var (
 	// ErrManagedBySync is returned when an in-tool edit targets a synced
 	// policy (#2852): creating its next version, changing its review date,
 	// or any draft path on it or on a draft of its chain. Its page is the
-	// authority, so the edit is made there. HTTP 409.
-	ErrManagedBySync = errors.New("policy: managed in Confluence; edit it at its source page")
+	// authority, so the edit is made there. HTTP 409. The error returned
+	// is a *ManagedBySyncError naming the source; errors.Is matches it.
+	ErrManagedBySync = errors.New("policy: managed by its sync source; edit it at its source page")
 	// ErrNotSyncedPolicy is returned when SetSyncedLinks targets a policy
 	// that is not a published synced row (#2852). Any other policy changes
 	// its links in a draft or a new version. HTTP 409.
@@ -232,8 +233,11 @@ type Policy struct {
 	// reason from the latest one. Nothing else on the row changed.
 	SyncUnreadableSince  *time.Time
 	SyncUnreadableReason *string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// SyncSource names the system a synced row comes from ("Confluence",
+	// "SharePoint"), from its sync site (#2837). Empty on any other row.
+	SyncSource string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // IsImported reports whether p was brought in by Import (#1747).
@@ -400,7 +404,7 @@ func checkPredecessor(ctx context.Context, q *dbx.Queries, tenantID, pred uuid.U
 		return fmt.Errorf("get predecessor: %w", err)
 	}
 	if row.SourceAttribution == SourceSynced {
-		return ErrManagedBySync
+		return managedBySync(row)
 	}
 	if row.Status != StatePublished {
 		return ErrPredecessorNotPublished
@@ -424,7 +428,7 @@ func checkNotSynced(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID,
 		return fmt.Errorf("check synced: %w", err)
 	}
 	if row.SourceAttribution == SourceSynced {
-		return ErrManagedBySync
+		return managedBySync(row)
 	}
 	if !chain || !row.PredecessorID.Valid {
 		return nil
@@ -440,7 +444,7 @@ func checkNotSynced(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID,
 		return fmt.Errorf("check synced predecessor: %w", err)
 	}
 	if pred.SourceAttribution == SourceSynced {
-		return ErrManagedBySync
+		return managedBySync(pred)
 	}
 	return nil
 }
@@ -901,7 +905,7 @@ func (s *Store) SetNextReviewAt(ctx context.Context, id uuid.UUID, next *time.Ti
 		}
 		// A synced policy's review date follows its page (#2852).
 		if prior.SourceAttribution == SourceSynced {
-			return ErrManagedBySync
+			return managedBySync(prior)
 		}
 		if prior.Status != StatePublished {
 			return ErrWrongState
@@ -950,7 +954,7 @@ func (s *Store) DiscardDraft(ctx context.Context, id uuid.UUID, actor string) (P
 	}
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		// A synced row is refused as managed in Confluence (#2852). A
+		// A synced row is refused as managed by its source (#2852). A
 		// draft of a synced chain may still be discarded: it holds the
 		// successor slot the page's next version needs, so discarding it
 		// is how the sync is unblocked.
@@ -1257,6 +1261,9 @@ func policyFromRow(r dbx.Policy) Policy {
 		Status:                      r.Status,
 		SourceAttribution:           r.SourceAttribution,
 		CreatedBy:                   r.CreatedBy,
+	}
+	if r.SourceAttribution == SourceSynced && r.SyncSite != nil {
+		out.SyncSource = SyncSourceName(*r.SyncSite)
 	}
 	if r.PredecessorID.Valid {
 		pid := uuid.UUID(r.PredecessorID.Bytes)
