@@ -21,6 +21,13 @@ ALTER TABLE audit_period_audit_log
 
 DROP TABLE IF EXISTS audit_period_freeze_revisions;
 
+ALTER TABLE samples
+    DROP CONSTRAINT IF EXISTS samples_freeze_revision_chk,
+    DROP COLUMN IF EXISTS freeze_revision;
+
+ALTER TABLE sample_audit_log
+    DROP COLUMN IF EXISTS freeze_revision;
+
 DROP INDEX IF EXISTS idx_evidence_audit_log_tenant_import_batch;
 
 ALTER TABLE evidence_audit_log

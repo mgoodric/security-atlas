@@ -50,9 +50,21 @@ var (
 	// ErrNotAdmin refuses a credential that is not a tenant admin, or is a
 	// platform system credential.
 	ErrNotAdmin = errors.New("historicalimport: admin credential required")
-	// ErrInvalid is a malformed request: no records, too many, no source.
+	// ErrInvalid is a malformed request: no records, too many, no source,
+	// or amend_frozen without a reason.
 	ErrInvalid = errors.New("historicalimport: invalid request")
+	// ErrConcurrentFreeze is a tenant audit period frozen after the import's
+	// transaction began, on every attempt. The import's rows would carry an
+	// ingested_at at or before that frozen_at, so they would join a frozen
+	// population the freeze never hashed. Nothing was written; re-run it.
+	ErrConcurrentFreeze = errors.New("historicalimport: an audit period was frozen while the import ran; nothing was written, re-run the import")
 )
+
+// MaxAmendReasonLen caps the amend reason.
+const MaxAmendReasonLen = 2000
+
+// maxAttempts bounds the retries after a concurrent freeze.
+const maxAttempts = 3
 
 // Request is one import batch.
 type Request struct {
@@ -61,6 +73,10 @@ type Request struct {
 	Source string
 	// AmendFrozen names the frozen audit periods the import may re-freeze.
 	AmendFrozen []uuid.UUID
+	// AmendReason is the admin's free-text justification for re-freezing
+	// the AmendFrozen periods; required when AmendFrozen is not empty
+	// (Matt, 2026-11-24). Stored on each revision and its audit-log row.
+	AmendReason string
 	Records     []*evidencev1.EvidenceRecord
 }
 
@@ -127,6 +143,11 @@ type Result struct {
 type Importer struct {
 	pool *pgxpool.Pool
 	svc  *ingest.Service
+	// Test seams (export_test.go), nil in production: afterBegin runs on
+	// each attempt once the transaction has begun and before it takes the
+	// tenant lock; afterLock runs once the lock is held.
+	afterBegin func(attempt int)
+	afterLock  func(attempt int)
 }
 
 // New wires an Importer. svc is the platform's ingest service; each import
@@ -152,16 +173,71 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 	}
 	tenantCtx, outbox := ingest.WithAuditOutbox(tenantCtx)
 
+	var (
+		res     Result
+		refused error
+	)
+	for attempt := 1; ; attempt++ {
+		res, refused, err = im.attempt(tenantCtx, svc, batch, cred, req, attempt)
+		if !errors.Is(err, ErrConcurrentFreeze) || attempt == maxAttempts {
+			break
+		}
+		// A freeze committed between this attempt's BEGIN and its lock.
+		// The attempt refused before processing a record, so it wrote and
+		// audited nothing and added nothing to the outbox; a new
+		// transaction gets an ingested_at after that freeze.
+	}
+	if err != nil {
+		if refused != nil {
+			var fpe *FrozenPeriodError
+			var ate *AmendTargetError
+			if errors.As(refused, &fpe) || errors.As(refused, &ate) {
+				svc.AuditRefusedBatch(ctx, req.Records, cred, refused.Error())
+			}
+			return Result{}, refused
+		}
+		return Result{}, err
+	}
+	outbox.Flush(tenantCtx)
+	return res, nil
+}
+
+// attempt runs one transaction of the import. refused is the refusal the
+// caller audits and returns as-is; err is any failure (refused included).
+func (im *Importer) attempt(ctx context.Context, svc *ingest.Service, batch ingest.ImportBatch, cred credstore.Credential, req Request, n int) (Result, error, error) {
 	res := Result{BatchID: batch.ID}
 	var refused error
-	err = pgx.BeginTxFunc(tenantCtx, im.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		if err := tenancy.ApplyTenant(tenantCtx, tx); err != nil {
+	err := pgx.BeginTxFunc(ctx, im.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 			return fmt.Errorf("apply tenant: %w", err)
 		}
+		if im.afterBegin != nil {
+			im.afterBegin(n)
+		}
 		q := dbx.New(tx)
+		tenant := pgtype.UUID{Bytes: uuid.MustParse(cred.TenantID), Valid: true}
+		// Every row this transaction writes carries ingested_at = its start
+		// (DEFAULT now()). Hold the tenant's freeze lock for the rest of the
+		// transaction, so no freeze hashes the tenant's evidence until these
+		// rows are committed, then refuse if a freeze already committed
+		// after the start: its population would admit these rows without
+		// its hash having covered them.
+		if err := q.LockTenantEvidenceFreeze(ctx, tenant); err != nil {
+			return fmt.Errorf("lock tenant evidence freeze: %w", err)
+		}
+		if im.afterLock != nil {
+			im.afterLock(n)
+		}
+		since, err := q.CountPeriodsFrozenSinceTxStart(ctx, tenant)
+		if err != nil {
+			return fmt.Errorf("count periods frozen since start: %w", err)
+		}
+		if since > 0 {
+			return ErrConcurrentFreeze
+		}
 		first, last := dayRange(req.Records)
-		periods, err := q.LockAuditPeriodsOverlapping(tenantCtx, dbx.LockAuditPeriodsOverlappingParams{
-			TenantID: pgtype.UUID{Bytes: uuid.MustParse(cred.TenantID), Valid: true},
+		periods, err := q.LockAuditPeriodsOverlapping(ctx, dbx.LockAuditPeriodsOverlappingParams{
+			TenantID: tenant,
 			FirstDay: pgtype.Date{Time: first, Valid: true},
 			LastDay:  pgtype.Date{Time: last, Valid: true},
 		})
@@ -176,7 +252,7 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 
 		accepted := make(map[uuid.UUID]time.Time, len(req.Records))
 		for i, rec := range req.Records {
-			receipt, decision, err := svc.ProcessInTx(tenantCtx, tx, rec, cred, ingest.LedgerOptions{})
+			receipt, decision, err := svc.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{})
 			if err != nil {
 				refused = &RecordError{Index: i, Decision: decision, Err: err}
 				return refused
@@ -194,7 +270,7 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 		for _, p := range amend {
 			var ids []uuid.UUID
 			for id, observed := range accepted {
-				if inWindow(p, observed) {
+				if inFrozenPopulation(p, observed) {
 					ids = append(ids, id)
 				}
 			}
@@ -203,9 +279,10 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 				// (deduplicated); the period's population is unchanged.
 				continue
 			}
-			rev, err := period.AmendInTx(tenantCtx, q, p, period.AmendInput{
+			rev, err := period.AmendInTx(ctx, q, p, period.AmendInput{
 				ImportBatchID:     batch.ID,
 				Actor:             cred.ID,
+				Reason:            strings.TrimSpace(req.AmendReason),
 				EvidenceRecordIDs: ids,
 			})
 			if err != nil {
@@ -215,19 +292,7 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 		}
 		return nil
 	})
-	if err != nil {
-		if refused != nil {
-			var fpe *FrozenPeriodError
-			var ate *AmendTargetError
-			if errors.As(refused, &fpe) || errors.As(refused, &ate) {
-				svc.AuditRefusedBatch(ctx, req.Records, cred, refused.Error())
-			}
-			return Result{}, refused
-		}
-		return Result{}, err
-	}
-	outbox.Flush(tenantCtx)
-	return res, nil
+	return res, refused, err
 }
 
 func validate(req Request) error {
@@ -242,6 +307,12 @@ func validate(req Request) error {
 	}
 	if len(req.Records) > MaxRecords {
 		return fmt.Errorf("%w: batch exceeds %d records", ErrInvalid, MaxRecords)
+	}
+	if len(req.AmendFrozen) > 0 && strings.TrimSpace(req.AmendReason) == "" {
+		return fmt.Errorf("%w: amend_frozen needs a reason", ErrInvalid)
+	}
+	if len(req.AmendReason) > MaxAmendReasonLen {
+		return fmt.Errorf("%w: amend reason exceeds %d characters", ErrInvalid, MaxAmendReasonLen)
 	}
 	for i, rec := range req.Records {
 		if rec == nil || rec.GetObservedAt() == nil {
@@ -278,6 +349,16 @@ func inWindow(p dbx.AuditPeriod, observed time.Time) bool {
 	return !d.Before(utcDay(p.PeriodStart.Time)) && !d.After(utcDay(p.PeriodEnd.Time))
 }
 
+// inFrozenPopulation reports whether a record observed at observed belongs
+// to frozen period p's population: inside its window and observed at or
+// before its original frozen_at (invariant #10). Only such a record counts
+// as a frozen hit or may join a revision. A record in the window but
+// observed after frozen_at is outside the frozen population, as live
+// evidence is, and imports freely.
+func inFrozenPopulation(p dbx.AuditPeriod, observed time.Time) bool {
+	return inWindow(p, observed) && p.FrozenAt.Valid && !observed.After(p.FrozenAt.Time)
+}
+
 // planAmendments checks the batch against the locked periods. It returns
 // the frozen periods to amend, a *FrozenPeriodError for frozen periods hit
 // but not named, or an *AmendTargetError for a named period that is not a
@@ -296,7 +377,7 @@ func planAmendments(periods []dbx.AuditPeriod, req Request) ([]dbx.AuditPeriod, 
 		}
 		n := 0
 		for _, rec := range req.Records {
-			if inWindow(p, rec.GetObservedAt().AsTime()) {
+			if inFrozenPopulation(p, rec.GetObservedAt().AsTime()) {
 				n++
 			}
 		}

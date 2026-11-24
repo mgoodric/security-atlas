@@ -342,7 +342,7 @@ func TestImport_UnnamedFrozenPeriodFailsWhole(t *testing.T) {
 		f.attestation(t, time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	_, err := f.importer.Import(context.Background(), f.adminCred(), historicalimport.Request{
-		Source: "s", Records: recs, AmendFrozen: []uuid.UUID{named.ID},
+		Source: "s", Records: recs, AmendFrozen: []uuid.UUID{named.ID}, AmendReason: "H1 results",
 	})
 	var fpe *historicalimport.FrozenPeriodError
 	if !errors.As(err, &fpe) || len(fpe.Hits) != 1 || fpe.Hits[0].PeriodID != unnamed.ID {
@@ -404,6 +404,7 @@ func TestImport_AmendFrozenCutsRevision(t *testing.T) {
 	}
 	res, err := f.importer.Import(context.Background(), cred, historicalimport.Request{
 		Source: "FY25 report", Records: recs, AmendFrozen: []uuid.UUID{p.ID},
+		AmendReason: "Auditor requested the FY25 Type II results in the period",
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -412,6 +413,9 @@ func TestImport_AmendFrozenCutsRevision(t *testing.T) {
 		t.Fatalf("amendments = %+v, want one for the period", res.Amendments)
 	}
 	rev := res.Amendments[0].Revision
+	if rev.Justification != "Auditor requested the FY25 Type II results in the period" {
+		t.Fatalf("revision justification = %q", rev.Justification)
+	}
 	if rev.Revision != 2 || len(rev.EvidenceRecordIDs) != 2 || !bytes.Equal(rev.PreviousHash, original) || bytes.Equal(rev.FrozenHash, original) {
 		t.Fatalf("revision = %d (+%d records), previous=%x new=%x original=%x", rev.Revision, len(rev.EvidenceRecordIDs), rev.PreviousHash, rev.FrozenHash, original)
 	}
@@ -451,6 +455,9 @@ func TestImport_AmendFrozenCutsRevision(t *testing.T) {
 	}
 	var d map[string]any
 	_ = json.Unmarshal(detail, &d)
+	if d["reason"] != rev.Justification {
+		t.Fatalf("amend log reason = %v", d["reason"])
+	}
 	if d["previous_hash"] != fmt.Sprintf("%x", original) || d["frozen_hash"] != fmt.Sprintf("%x", rev.FrozenHash) ||
 		d["import_batch_id"] != res.BatchID.String() {
 		t.Fatalf("amend log detail = %s", detail)
@@ -479,6 +486,18 @@ func TestImport_AmendFrozenCutsRevision(t *testing.T) {
 	}
 	if len(s.EvidenceRecordIDs) != 3 {
 		t.Fatalf("sample = %d records, want 3", len(s.EvidenceRecordIDs))
+	}
+	// The sample records the revision it drew from and its reason, and so
+	// does its sample_drawn log row.
+	if s.FreezeRevision == nil || *s.FreezeRevision != 2 || s.AmendReason != rev.Justification {
+		t.Fatalf("sample revision = %v reason %q, want 2 and the amend reason", s.FreezeRevision, s.AmendReason)
+	}
+	if got, err := f.audits.GetSample(f.ctx, s.ID); err != nil || got.FreezeRevision == nil || *got.FreezeRevision != 2 || got.AmendReason != rev.Justification {
+		t.Fatalf("GetSample: revision %v reason %q err %v", got.FreezeRevision, got.AmendReason, err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM sample_audit_log
+		WHERE tenant_id = $1 AND sample_id = $2 AND action = 'sample_drawn' AND freeze_revision = 2`, f.tenant, s.ID); n != 1 {
+		t.Fatalf("sample_drawn log rows at revision 2 = %d, want 1", n)
 	}
 
 	// The frozen-period evidence summary reads the latest revision too, and

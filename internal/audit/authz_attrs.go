@@ -185,8 +185,9 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 // population pinned before that kind's routing cutover never draws such a
 // record, so it covers nothing for it (#2924, #2973).
 // amended holds the periods a freeze revision added the record to (#1742):
-// their populations hold it whatever its observed_at or ingested_at against
-// frozen_at, as ListPopulationEvidenceIDs draws them. Nil for none.
+// their populations hold it whatever its ingested_at, but still only when it
+// was observed at or before frozen_at, as ListPopulationEvidenceIDs draws
+// them. Nil for none.
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
 	since, until, ingestedAt *time.Time, cellID *uuid.UUID, routedKind string,
@@ -213,13 +214,11 @@ func periodsCovering(
 		if !ok || seen[period] {
 			continue
 		}
-		windowPop := pop
-		if amended[period] {
-			// The revision lifts the freeze horizon, not the window.
-			windowPop.FrozenAt = pgtype.Timestamptz{}
-		}
-		if !populationWindowCovers(windowPop, since) || !populationWindowCovers(windowPop, until) ||
-			!populationHeldAtFreeze(windowPop, ingestedAt) {
+		// A revision lifts only the ingested_at bound: its records were
+		// written after the freeze, but each was observed at or before
+		// frozen_at, which the window check still enforces (invariant #10).
+		if !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) ||
+			(!amended[period] && !populationHeldAtFreeze(pop, ingestedAt)) {
 			continue
 		}
 		if routedKind != "" && !slices.Contains(routed.PopulationKindsAt(cutover, pop), routedKind) {

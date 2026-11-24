@@ -39,8 +39,10 @@ func NewImportHandler(importer *historicalimport.Importer) *ImportHandler {
 }
 
 type importRequest struct {
-	Source      string       `json:"source"`
-	AmendFrozen []string     `json:"amend_frozen,omitempty"`
+	Source      string   `json:"source"`
+	AmendFrozen []string `json:"amend_frozen,omitempty"`
+	// AmendReason is required with amend_frozen (Matt, 2026-11-24).
+	AmendReason string       `json:"amend_reason,omitempty"`
 	Records     []recordWire `json:"records"`
 }
 
@@ -50,6 +52,7 @@ type amendmentWire struct {
 	FrozenHash      string    `json:"frozen_hash"`
 	PreviousHash    string    `json:"previous_hash"`
 	FrozenAt        time.Time `json:"frozen_at"`
+	Reason          string    `json:"amend_reason"`
 	EvidenceAddedN  int       `json:"evidence_added_n"`
 	AmendedByImport bool      `json:"amended_by_import"`
 }
@@ -98,7 +101,7 @@ func (h *ImportHandler) ImportHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	in := historicalimport.Request{Source: req.Source}
+	in := historicalimport.Request{Source: req.Source, AmendReason: req.AmendReason}
 	for _, s := range req.AmendFrozen {
 		id, err := uuid.Parse(s)
 		if err != nil {
@@ -143,6 +146,7 @@ func (h *ImportHandler) ImportHTTP(w http.ResponseWriter, r *http.Request) {
 			FrozenHash:      hex.EncodeToString(a.Revision.FrozenHash),
 			PreviousHash:    hex.EncodeToString(a.Revision.PreviousHash),
 			FrozenAt:        a.Revision.FrozenAt,
+			Reason:          a.Revision.Justification,
 			EvidenceAddedN:  len(a.Revision.EvidenceRecordIDs),
 			AmendedByImport: true,
 		})
@@ -157,6 +161,8 @@ func writeImportError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, historicalimport.ErrNotAdmin):
 		httpresp.WriteJSON(w, http.StatusForbidden, errorBody{Error: "admin credential required", Code: "forbidden"})
+	case errors.Is(err, historicalimport.ErrConcurrentFreeze):
+		httpresp.WriteJSON(w, http.StatusConflict, errorBody{Error: err.Error(), Code: "concurrent_freeze"})
 	case errors.Is(err, historicalimport.ErrInvalid):
 		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: err.Error(), Code: "invalid_request"})
 	case errors.As(err, &fpe):

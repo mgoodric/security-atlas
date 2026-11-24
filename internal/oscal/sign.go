@@ -149,6 +149,12 @@ func bundleDigest(b *Bundle) [32]byte {
 	for _, m := range b.Members {
 		lines = append(lines, m.Filename+":"+m.SHA256)
 	}
+	// #1742: the freeze revision and its hash are signed too, so a bundle
+	// cannot be relabelled with another revision. A bundle exported before
+	// #1742 carries no revision and keeps its original digest.
+	if b.FreezeRevision > 0 {
+		lines = append(lines, fmt.Sprintf("freeze_revision:%d:%s", b.FreezeRevision, b.RevisionHash))
+	}
 	sort.Strings(lines)
 	h := sha256.New()
 	for _, l := range lines {

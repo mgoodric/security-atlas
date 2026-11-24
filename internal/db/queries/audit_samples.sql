@@ -56,7 +56,8 @@ WHERE evidence_records.tenant_id = $1
   AND observed_at <= $4
   AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
         AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz))
-       OR id = ANY(sqlc.arg(amended_ids)::uuid[]));
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)));
 
 -- name: ListPopulationEvidenceIDs :many
 -- The deterministic ordering by id is load-bearing for AC-2: the sampler
@@ -82,14 +83,17 @@ WHERE evidence_records.tenant_id = $1
   AND observed_at <= $4
   AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
         AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz))
-       OR id = ANY(sqlc.arg(amended_ids)::uuid[]))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)))
 ORDER BY id;
 
 -- name: CreateSample :one
+-- #1742: freeze_revision is the revision of the frozen period the
+-- population drew from (GetPopulationFreezeRevision), NULL otherwise.
 INSERT INTO samples (
-    id, tenant_id, population_id, n, seed, created_by
+    id, tenant_id, population_id, n, seed, created_by, freeze_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6)
+VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg('freeze_revision'))
 RETURNING *;
 
 -- name: GetSampleByID :one
@@ -139,9 +143,10 @@ ORDER BY annotated_at DESC, id ASC;
 INSERT INTO sample_audit_log (
     id, tenant_id, action, actor,
     population_id, sample_id, seed,
-    n_requested, n_returned, reason_code, subject_module
+    n_requested, n_returned, reason_code, subject_module,
+    freeze_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core')
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core', sqlc.narg('freeze_revision'))
 RETURNING *;
 
 -- name: ListSampleAuditLog :many
@@ -181,3 +186,17 @@ WHERE tenant_id = $1
   AND control_id = $2
   AND audit_period_id IS NOT NULL
 ORDER BY id;
+
+-- name: GetSampleAmendReason :one
+-- #1742: the admin's reason for the freeze revision a sample was drawn
+-- from, when that revision is an import amendment (revision >= 2). No row
+-- otherwise.
+SELECT r.justification
+FROM samples s
+JOIN populations p ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+JOIN audit_period_freeze_revisions r
+  ON r.tenant_id = s.tenant_id
+ AND r.audit_period_id = p.audit_period_id
+ AND r.revision = s.freeze_revision
+WHERE s.tenant_id = $1
+  AND s.id        = $2;

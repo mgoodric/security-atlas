@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,7 +41,10 @@ type Revision struct {
 	PreviousHash []byte
 	FrozenAt     time.Time
 	Reason       string
-	Actor        string
+	// Justification is the admin's free-text reason for an amendment,
+	// required on every revision after the first (Matt, 2026-11-24).
+	Justification string
+	Actor         string
 	// ImportBatchID is the import batch that cut the revision; nil for 1.
 	ImportBatchID *uuid.UUID
 	// EvidenceRecordIDs are the records this revision added; empty for 1.
@@ -93,6 +97,7 @@ func revisionsOf(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod) ([]Revi
 			PreviousHash:      r.PreviousHash,
 			FrozenAt:          r.FrozenAt.Time,
 			Reason:            r.Reason,
+			Justification:     r.Justification,
 			Actor:             r.Actor,
 			ImportBatchID:     &batch,
 			EvidenceRecordIDs: pgUUIDsToUUIDs(r.EvidenceRecordIds),
@@ -118,11 +123,12 @@ func (s *Store) ReplayHash(ctx context.Context, periodID uuid.UUID, revision int
 		if p.Status != string(StatusFrozen) || !p.FrozenAt.Valid {
 			return ErrNotFrozen
 		}
-		amended, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
-			TenantID: p.TenantID, AuditPeriodID: p.ID, MaxRevision: int32(min(revision, LatestRevision)),
-		})
+		if revision < 1 {
+			return ErrNoRevision
+		}
+		amended, err := AmendedIDs(ctx, q, p.TenantID, p.ID, revision)
 		if err != nil {
-			return fmt.Errorf("list amended evidence: %w", err)
+			return err
 		}
 		if revision != LatestRevision && revision > 1 {
 			revs, err := revisionsOf(ctx, q, p)
@@ -137,6 +143,21 @@ func (s *Store) ReplayHash(ctx context.Context, periodID uuid.UUID, revision int
 		return err
 	})
 	return out, err
+}
+
+// AmendedIDs lists the evidence records freeze revisions 2..revision of a
+// period added to its frozen population (LatestRevision for all). Every
+// frozen-population read passes them as amended_ids, which admits them
+// alongside the original horizon, still bounded by observed_at <=
+// frozen_at. Empty for an open or never-amended period.
+func AmendedIDs(ctx context.Context, q *dbx.Queries, tenantID, periodID pgtype.UUID, revision int) ([]pgtype.UUID, error) {
+	ids, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
+		TenantID: tenantID, AuditPeriodID: periodID, MaxRevision: int32(min(revision, LatestRevision)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list amended evidence: %w", err)
+	}
+	return ids, nil
 }
 
 // revisionHash is the ADR 0003 hash over p's original horizon plus the
@@ -178,6 +199,8 @@ func revisionHash(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, amende
 type AmendInput struct {
 	ImportBatchID uuid.UUID
 	Actor         string
+	// Reason is the admin's free-text justification; required.
+	Reason string
 	// EvidenceRecordIDs are the batch's records inside the period window.
 	EvidenceRecordIDs []uuid.UUID
 	At                time.Time
@@ -197,6 +220,9 @@ func AmendInTx(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, in AmendI
 	if in.Actor == "" {
 		return Revision{}, errors.New("auditperiod: amend actor must be non-empty")
 	}
+	if strings.TrimSpace(in.Reason) == "" {
+		return Revision{}, errors.New("auditperiod: amend reason must be non-empty")
+	}
 	if len(in.EvidenceRecordIDs) == 0 {
 		return Revision{}, errors.New("auditperiod: amend needs at least one evidence record")
 	}
@@ -209,11 +235,9 @@ func AmendInTx(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, in AmendI
 		return Revision{}, err
 	}
 	prev := revs[len(revs)-1]
-	amended, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
-		TenantID: p.TenantID, AuditPeriodID: p.ID, MaxRevision: LatestRevision,
-	})
+	amended, err := AmendedIDs(ctx, q, p.TenantID, p.ID, LatestRevision)
 	if err != nil {
-		return Revision{}, fmt.Errorf("list amended evidence: %w", err)
+		return Revision{}, err
 	}
 	all := append(pgUUIDsToUUIDs(amended), in.EvidenceRecordIDs...)
 	hash, err := revisionHash(ctx, q, p, all)
@@ -233,6 +257,7 @@ func AmendInTx(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, in AmendI
 		PreviousHash:      prev.FrozenHash,
 		FrozenAt:          pgTimestamptz(at),
 		Reason:            ReasonAmendedByImport,
+		Justification:     strings.TrimSpace(in.Reason),
 		Actor:             in.Actor,
 		ImportBatchID:     pgUUID(in.ImportBatchID),
 		EvidenceRecordIds: pgIDs,
@@ -242,6 +267,7 @@ func AmendInTx(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, in AmendI
 	if err := writeLog(ctx, q, uuid.UUID(p.TenantID.Bytes), p.ID, "period_amended_by_import", in.Actor,
 		map[string]any{
 			"revision":          next,
+			"reason":            strings.TrimSpace(in.Reason),
 			"previous_revision": prev.Revision,
 			"previous_hash":     fmt.Sprintf("%x", prev.FrozenHash),
 			"frozen_hash":       fmt.Sprintf("%x", hash),
@@ -259,6 +285,7 @@ func AmendInTx(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, in AmendI
 		PreviousHash:      prev.FrozenHash,
 		FrozenAt:          at,
 		Reason:            ReasonAmendedByImport,
+		Justification:     strings.TrimSpace(in.Reason),
 		Actor:             in.Actor,
 		ImportBatchID:     &batch,
 		EvidenceRecordIDs: ids,

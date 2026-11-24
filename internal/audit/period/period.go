@@ -291,6 +291,15 @@ func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at ti
 			return ErrAlreadyFrozen
 		}
 
+		// #1742: serialise against a historical evidence import in this
+		// tenant before hashing. An import's rows carry ingested_at = its
+		// transaction start but stay invisible until it commits, so a hash
+		// taken while one is open would leave out rows the frozen reads
+		// later admit.
+		if err := q.LockTenantEvidenceFreeze(ctx, pgUUID(tenantID)); err != nil {
+			return fmt.Errorf("lock tenant evidence freeze: %w", err)
+		}
+
 		// #2078: serialise against framework-scope activation on this
 		// framework version, so an activation cannot read "no freeze"
 		// while this freeze commits.
@@ -398,13 +407,9 @@ func (s *Store) ControlState(ctx context.Context, periodID, controlID uuid.UUID)
 		}
 		// A frozen period amended by an import reads its latest freeze
 		// revision (#1742).
-		amended, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
-			TenantID:      pgUUID(tenantID),
-			AuditPeriodID: pgUUID(periodID),
-			MaxRevision:   LatestRevision,
-		})
+		amended, err := AmendedIDs(ctx, q, pgUUID(tenantID), pgUUID(periodID), LatestRevision)
 		if err != nil {
-			return fmt.Errorf("list amended evidence for period: %w", err)
+			return err
 		}
 		rows, err := q.ListEvidenceForPeriodControl(ctx, dbx.ListEvidenceForPeriodControlParams{
 			UnboundKinds: kinds,

@@ -23,7 +23,16 @@
 --                                     population at revision N is the
 --                                     original horizon plus the records of
 --                                     revisions 2..N, and any revision can
---                                     be replayed.
+--                                     be replayed. justification is the
+--                                     admin's required free-text reason for
+--                                     amending (Matt, 2026-11-24).
+--                                     Only records observed at or before the
+--                                     original frozen_at may be listed
+--                                     (invariant #10); the importer enforces
+--                                     it and the frozen reads re-check it.
+--   samples.freeze_revision           the freeze revision of the period a
+--                                     sample's population drew from; NULL for
+--                                     an open period or no period.
 --   audit_period_audit_log action     gains period_amended_by_import.
 --
 -- Constitutional invariants:
@@ -40,9 +49,16 @@
 ALTER TABLE evidence_records
     DROP CONSTRAINT evidence_records_ingestion_path_chk;
 
+-- NOT VALID, then VALIDATE: the ADD takes ACCESS EXCLUSIVE only briefly,
+-- and the full-ledger scan runs under SHARE UPDATE EXCLUSIVE, which does
+-- not block ingest.
 ALTER TABLE evidence_records
     ADD CONSTRAINT evidence_records_ingestion_path_chk
-        CHECK (ingestion_path IN ('push', 'pull', 'subscribe', 'manual_upload', 'webhook', 'import'));
+        CHECK (ingestion_path IN ('push', 'pull', 'subscribe', 'manual_upload', 'webhook', 'import'))
+        NOT VALID;
+
+ALTER TABLE evidence_records
+    VALIDATE CONSTRAINT evidence_records_ingestion_path_chk;
 
 -- ===== 2. evidence_audit_log.import_batch_id =====
 
@@ -64,6 +80,7 @@ CREATE TABLE audit_period_freeze_revisions (
     previous_hash       BYTEA NOT NULL,
     frozen_at           TIMESTAMPTZ NOT NULL,
     reason              TEXT NOT NULL,
+    justification       TEXT NOT NULL,
     actor               TEXT NOT NULL,
     import_batch_id     UUID NOT NULL,
     evidence_record_ids UUID[] NOT NULL,
@@ -72,6 +89,8 @@ CREATE TABLE audit_period_freeze_revisions (
         CHECK (revision >= 2),
     CONSTRAINT audit_period_freeze_revisions_reason_chk
         CHECK (reason IN ('amended_by_import')),
+    CONSTRAINT audit_period_freeze_revisions_justification_len
+        CHECK (char_length(btrim(justification)) BETWEEN 1 AND 2000),
     CONSTRAINT audit_period_freeze_revisions_actor_nonempty
         CHECK (length(actor) > 0),
     CONSTRAINT audit_period_freeze_revisions_records_nonempty
@@ -91,7 +110,21 @@ CREATE POLICY tenant_write ON audit_period_freeze_revisions
 
 GRANT SELECT, INSERT ON audit_period_freeze_revisions TO atlas_app;
 
--- ===== 4. audit_period_audit_log action =====
+-- ===== 4. samples.freeze_revision =====
+
+ALTER TABLE samples
+    ADD COLUMN freeze_revision INTEGER NULL;
+
+ALTER TABLE samples
+    ADD CONSTRAINT samples_freeze_revision_chk
+        CHECK (freeze_revision IS NULL OR freeze_revision >= 1);
+
+-- The sample_drawn log row carries it too, so the draw is reproducible from
+-- the log alone: same seed, same population, same revision.
+ALTER TABLE sample_audit_log
+    ADD COLUMN freeze_revision INTEGER NULL;
+
+-- ===== 5. audit_period_audit_log action =====
 
 ALTER TABLE audit_period_audit_log
     DROP CONSTRAINT audit_period_audit_log_action_chk;

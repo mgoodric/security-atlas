@@ -120,7 +120,9 @@ WHERE evidence_records.tenant_id = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY(sqlc.arg(amended_ids)::uuid[]))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
 
@@ -144,7 +146,9 @@ WHERE evidence_records.tenant_id = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY(sqlc.arg(amended_ids)::uuid[]));
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)));
 
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.

@@ -22,12 +22,49 @@ func rec(t time.Time) *evidencev1.EvidenceRecord {
 }
 
 func periodRow(id uuid.UUID, status string, start, end time.Time) dbx.AuditPeriod {
-	return dbx.AuditPeriod{
+	p := dbx.AuditPeriod{
 		ID:          pgtype.UUID{Bytes: id, Valid: true},
 		Name:        "p-" + id.String()[:4],
 		Status:      status,
 		PeriodStart: pgtype.Date{Time: start, Valid: true},
 		PeriodEnd:   pgtype.Date{Time: end, Valid: true},
+	}
+	if status == "frozen" {
+		// Frozen after the period ends unless a test says otherwise.
+		p.FrozenAt = pgtype.Timestamptz{Time: end.Add(30 * 24 * time.Hour), Valid: true}
+	}
+	return p
+}
+
+// B2 (#1742 review): only a record observed at or before the original
+// frozen_at belongs to a frozen population, so only such a record counts as
+// a frozen hit or may join a revision.
+func TestInFrozenPopulation_ObservedAtBound(t *testing.T) {
+	t.Parallel()
+	p := periodRow(uuid.New(), "frozen", day(2025, 1, 1), day(2025, 12, 31))
+	p.FrozenAt = pgtype.Timestamptz{Time: day(2025, 6, 30).Add(12 * time.Hour), Valid: true}
+	cases := []struct {
+		at   time.Time
+		want bool
+	}{
+		{day(2025, 3, 1), true},
+		{day(2025, 6, 30).Add(12 * time.Hour), true},
+		{day(2025, 6, 30).Add(13 * time.Hour), false},
+		{day(2025, 9, 1), false},
+		{day(2024, 9, 1), false},
+	}
+	for _, c := range cases {
+		if got := inFrozenPopulation(p, c.at); got != c.want {
+			t.Errorf("inFrozenPopulation(%s) = %v, want %v", c.at, got, c.want)
+		}
+	}
+	open := periodRow(uuid.New(), "open", day(2025, 1, 1), day(2025, 12, 31))
+	if inFrozenPopulation(open, day(2025, 3, 1)) {
+		t.Error("an open period has a frozen population")
+	}
+	// A record after frozen_at but inside the window is not a hit.
+	if _, err := planAmendments([]dbx.AuditPeriod{p}, Request{Records: []*evidencev1.EvidenceRecord{rec(day(2025, 9, 1))}}); err != nil {
+		t.Errorf("post-freeze record counted as a frozen hit: %v", err)
 	}
 }
 
@@ -122,6 +159,9 @@ func TestValidate(t *testing.T) {
 		{"no records", Request{Source: "s"}, false},
 		{"nil observed_at", Request{Source: "s", Records: []*evidencev1.EvidenceRecord{{}}}, false},
 		{"too many", Request{Source: "s", Records: make([]*evidencev1.EvidenceRecord, MaxRecords+1)}, false},
+		{"amend without reason", Request{Source: "s", Records: ok, AmendFrozen: []uuid.UUID{uuid.New()}, AmendReason: "  "}, false},
+		{"amend with reason", Request{Source: "s", Records: ok, AmendFrozen: []uuid.UUID{uuid.New()}, AmendReason: "auditor asked for FY25 results"}, true},
+		{"long amend reason", Request{Source: "s", Records: ok, AmendFrozen: []uuid.UUID{uuid.New()}, AmendReason: strings.Repeat("x", MaxAmendReasonLen+1)}, false},
 	}
 	for _, c := range cases {
 		err := validate(c.req)

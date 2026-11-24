@@ -81,6 +81,11 @@ A historical evidence import may add records to a period that is already frozen,
 - The evidence set at revision N is the revision-1 set (both bounds above, at the original `frozen_at`) plus the ids listed by revisions 2..N. The six-key canonical-JSON shape, the control set, and the sort are unchanged. Only the evidence id array gains those ids.
 - Revision 1's hash is unaffected by any later revision. A verifier recomputes revision N by applying the bounds at the original `frozen_at` and then adding the listed ids for revisions 2..N.
 - `frozen_at` (the horizon) does not move, so a record ingested after the original freeze joins a later revision only by being listed in it.
+- Only a record observed at or before the original `frozen_at` may be listed (invariant #10). The importer enforces it, and every frozen read admits a listed id only with `observed_at <= frozen_at`.
+- Each revision carries a required free-text reason from the admin who cut it, recorded on the revision row and in the period's audit log (Matt, 2026-11-24).
+- A freeze and a historical import in the same tenant serialise on one transaction-level advisory lock (`advisorylock.TenantEvidenceFreeze`): Freeze takes it before hashing, the import as its first statement. The import then refuses (and retries) if any tenant period has `frozen_at` at or after its own transaction start, because its rows carry `ingested_at` = that start and would otherwise join a freeze that never hashed them.
+
+The rule, as decided 2026-11-24: a frozen population changes only through a recorded, hashed, reasoned revision; the original freeze always replays; and only records with `observed_at <= ` the original `frozen_at` may join a revision.
 
 A reimplemented verifier MUST take the revision number as an input and add the listed ids for revisions up to it.
 

@@ -317,6 +317,10 @@ function FreezeCard({ period }: { period: AuditPeriod }) {
                 {period.freeze_revision}: a historical import added evidence
                 after the freeze. The original freeze hash above is unchanged.
               </dd>
+              <dt className="text-muted-foreground">Amendment reason</dt>
+              <dd data-testid="audit-period-amend-reason">
+                {period.amend_reason ?? "—"}
+              </dd>
               <dt className="text-muted-foreground">Revision hash</dt>
               <dd
                 className="font-mono text-xs break-all"

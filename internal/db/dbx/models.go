@@ -1813,6 +1813,7 @@ type AuditPeriodFreezeRevision struct {
 	PreviousHash      []byte             `json:"previous_hash"`
 	FrozenAt          pgtype.Timestamptz `json:"frozen_at"`
 	Reason            string             `json:"reason"`
+	Justification     string             `json:"justification"`
 	Actor             string             `json:"actor"`
 	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
 	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
@@ -3264,13 +3265,14 @@ type RiskControlLink struct {
 }
 
 type Sample struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	PopulationID pgtype.UUID        `json:"population_id"`
-	N            int32              `json:"n"`
-	Seed         string             `json:"seed"`
-	CreatedBy    string             `json:"created_by"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	PopulationID   pgtype.UUID        `json:"population_id"`
+	N              int32              `json:"n"`
+	Seed           string             `json:"seed"`
+	CreatedBy      string             `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	FreezeRevision *int32             `json:"freeze_revision"`
 }
 
 type SampleAnnotation struct {
@@ -3285,18 +3287,19 @@ type SampleAnnotation struct {
 }
 
 type SampleAuditLog struct {
-	ID            pgtype.UUID        `json:"id"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
-	Action        string             `json:"action"`
-	Actor         string             `json:"actor"`
-	PopulationID  pgtype.UUID        `json:"population_id"`
-	SampleID      pgtype.UUID        `json:"sample_id"`
-	Seed          *string            `json:"seed"`
-	NRequested    *int32             `json:"n_requested"`
-	NReturned     *int32             `json:"n_returned"`
-	ReasonCode    string             `json:"reason_code"`
-	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
-	SubjectModule string             `json:"subject_module"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Action         string             `json:"action"`
+	Actor          string             `json:"actor"`
+	PopulationID   pgtype.UUID        `json:"population_id"`
+	SampleID       pgtype.UUID        `json:"sample_id"`
+	Seed           *string            `json:"seed"`
+	NRequested     *int32             `json:"n_requested"`
+	NReturned      *int32             `json:"n_returned"`
+	ReasonCode     string             `json:"reason_code"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule  string             `json:"subject_module"`
+	FreezeRevision *int32             `json:"freeze_revision"`
 }
 
 type SampleEvidence struct {

@@ -26,6 +26,7 @@ type evidenceImportFlags struct {
 	historical  bool
 	source      string
 	amendFrozen []string
+	amendReason string
 	jsonOut     bool
 }
 
@@ -44,7 +45,8 @@ than 24h in the future is still refused. A record dated inside an open audit
 period joins it. A record dated inside a frozen audit period fails the whole
 import, unless that period is named with --amend-frozen: then the period is
 re-frozen as a new freeze revision that adds the batch's records, and the
-original freeze stays recorded.`,
+original freeze stays recorded. --amend-reason is then required: it is shown
+with the amended-by-import notice on the period and its samples.`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if !f.historical {
@@ -52,6 +54,9 @@ original freeze stays recorded.`,
 			}
 			if strings.TrimSpace(f.source) == "" {
 				return fmt.Errorf("--source is required (e.g. \"FY25 SOC 2 Type II report\")")
+			}
+			if len(f.amendFrozen) > 0 && strings.TrimSpace(f.amendReason) == "" {
+				return fmt.Errorf("--amend-frozen needs --amend-reason: why the frozen period is being amended")
 			}
 			for _, id := range f.amendFrozen {
 				if _, err := uuid.Parse(id); err != nil {
@@ -84,6 +89,7 @@ original freeze stays recorded.`,
 	cmd.Flags().BoolVar(&f.historical, "historical", false, "import past-dated evidence (required)")
 	cmd.Flags().StringVar(&f.source, "source", "", "where the batch came from, e.g. \"FY25 SOC 2 Type II report\" [required]")
 	cmd.Flags().StringArrayVar(&f.amendFrozen, "amend-frozen", nil, "frozen audit period ID the import may re-freeze as a new revision; repeatable")
+	cmd.Flags().StringVar(&f.amendReason, "amend-reason", "", "why the frozen periods are being amended; required with --amend-frozen, stored on each revision")
 	cmd.Flags().BoolVar(&f.jsonOut, "json", false, "print the API response as JSON")
 	return cmd
 }
@@ -130,6 +136,7 @@ func postEvidenceImport(f evidenceImportFlags, records []json.RawMessage) ([]byt
 	body, err := json.Marshal(map[string]any{
 		"source":       f.source,
 		"amend_frozen": f.amendFrozen,
+		"amend_reason": f.amendReason,
 		"records":      records,
 	})
 	if err != nil {
@@ -184,7 +191,7 @@ func importError(status int, raw []byte) error {
 	for _, p := range e.FrozenPeriods {
 		fmt.Fprintf(&b, "  %s  %s  (%d records)\n", p.AuditPeriodID, printable(p.Name), p.Records)
 	}
-	b.WriteString("Re-run with --amend-frozen <id> for each period to re-freeze it as a new revision.")
+	b.WriteString("Re-run with --amend-frozen <id> for each period and --amend-reason \"<why>\" to re-freeze them as a new revision.")
 	return fmt.Errorf("%s", b.String())
 }
 

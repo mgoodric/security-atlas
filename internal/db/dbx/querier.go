@@ -279,6 +279,13 @@ type Querier interface {
 	// The mappings scoped to one OIDC config: the rows deleting it removes.
 	CountGroupRoleMappingsForConfig(ctx context.Context, arg CountGroupRoleMappingsForConfigParams) (int64, error)
 	CountOpenPersonnelChecklistItems(ctx context.Context, arg CountOpenPersonnelChecklistItemsParams) (int64, error)
+	// #1742: the tenant's periods frozen at or after this transaction began.
+	// An import's rows carry ingested_at = its transaction start, so a freeze
+	// that committed after that start but before the import took
+	// LockTenantEvidenceFreeze would admit them to its frozen population
+	// without having hashed them. The import refuses (and retries) when this
+	// is non-zero.
+	CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
 	// notified about this overdue checklist? The notification row itself is the
@@ -540,6 +547,8 @@ type Querier interface {
 	// / idp_subject are left empty here (SCIM is push-from-IdP, not OIDC login);
 	// email is the join key with a later OIDC sign-in.
 	CreateSCIMUser(ctx context.Context, arg CreateSCIMUserParams) (User, error)
+	// #1742: freeze_revision is the revision of the frozen period the
+	// population drew from (GetPopulationFreezeRevision), NULL otherwise.
 	CreateSample(ctx context.Context, arg CreateSampleParams) (Sample, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
@@ -1143,6 +1152,11 @@ type Querier interface {
 	// same query and holds the lock only for its own short read transaction.
 	GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForAcknowledgeParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
+	// #1742: the period a population is attached to, its status, and its
+	// latest freeze revision (1 for the original freeze), recorded on each
+	// sample drawn from it. No row when the population has no period; the
+	// revision means nothing while the status is open.
+	GetPopulationFreezeRevision(ctx context.Context, arg GetPopulationFreezeRevisionParams) (GetPopulationFreezeRevisionRow, error)
 	// ===== slice 599: resolved-chain provenance read =====
 	// Read the resolved-chain provenance for one imported PROFILE baseline. The
 	// chain (the ordered {role, sha256, bytes} array slice 578 records) plus
@@ -1213,6 +1227,10 @@ type Querier interface {
 	GetSCIMUserByEmail(ctx context.Context, arg GetSCIMUserByEmailParams) (User, error)
 	// Lookup a SCIM-provisioned user by the IdP's externalId within the tenant.
 	GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserByExternalIDParams) (User, error)
+	// #1742: the admin's reason for the freeze revision a sample was drawn
+	// from, when that revision is an import amendment (revision >= 2). No row
+	// otherwise.
+	GetSampleAmendReason(ctx context.Context, arg GetSampleAmendReasonParams) (string, error)
 	GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (Sample, error)
 	// #2157: the audit period a sample belongs to, through its population. The
 	// authz hydrator puts it on input.resource.attrs.audit_period_id so the
@@ -3786,6 +3804,11 @@ type Querier interface {
 	// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
 	// than proceeding unlocked.
 	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	// #1742: serialises Freeze against a historical evidence import in one
+	// tenant for the rest of the transaction. Freeze takes it before hashing;
+	// the import takes it as its first statement. Namespace 14 is
+	// advisorylock.TenantEvidenceFreeze.
+	LockTenantEvidenceFreeze(ctx context.Context, tenantID pgtype.UUID) error
 	// #2329: serialize every routing write in one tenant (Set and Clear), so the
 	// before value an audit row records is the state the write replaced. A row
 	// lock alone cannot do this: while the tenant has no row, FOR UPDATE locks

@@ -23,6 +23,7 @@ func TestImportHTTP_NonAdmin403(t *testing.T) {
 	for _, cred := range []credstore.Credential{
 		{ID: "key_conn", TenantID: tenant},
 		{ID: "key_grc", TenantID: tenant, TenantRoles: []string{"grc_engineer"}},
+		{ID: "key_owner", TenantID: tenant, TenantRoles: []string{"control_owner"}},
 		{ID: "system:x", TenantID: tenant, IsAdmin: true, System: true},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/evidence:import", strings.NewReader(`{"source":"s","records":[{}]}`))

@@ -25,7 +25,14 @@ in the current audit period.
   not a tenant admin with `403`, before it reads the request. Connector and
   push credentials cannot reach it.
 - **All or nothing.** The batch commits in one transaction. If any record is
-  refused, nothing is written.
+  refused, nothing is written. The response names the refused record, and it
+  is the one that gets an audit-log row: the records before it roll back with
+  the batch, and the records after it are never tried. A batch refused as a
+  whole (a frozen-period conflict) audits every record.
+- **One at a time with freezes.** An import and a freeze in the same tenant
+  wait for each other. If a period is frozen while an import is starting, the
+  import retries; if that keeps happening it fails with `concurrent_freeze`
+  and writes nothing, and you can run it again.
 - **The normal pipeline.** Every record is schema-validated, kind-scoped,
   redacted and hashed like a pushed record. The past skew limit is lifted;
   a record more than 24 hours in the **future** is still refused.
@@ -102,21 +109,28 @@ imported evidence.
 ## A period you already froze: `--amend-frozen`
 
 If a record's `observed_at` falls on a day inside a **frozen** period
-(between its `period_start` and `period_end`), the import fails before
-anything is written and names each such period with its record count:
+(between its `period_start` and `period_end`) and at or before the period's
+`frozen_at`, the record belongs to the frozen population. The import fails
+before anything is written and names each such period with its record count.
+A record in the window but observed after `frozen_at` (a period frozen before
+its window ended) is outside the frozen population, as live evidence is, and
+imports without an amendment.
 
 ```text
 import failed: nothing was written. Records fall in frozen audit periods:
   7c1f…  FY25 SOC 2  (42 records)
-Re-run with --amend-frozen <id> for each period to re-freeze it as a new revision.
+Re-run with --amend-frozen <id> for each period and --amend-reason "<why>" to re-freeze them as a new revision.
 ```
 
-To add the evidence anyway, name each period:
+To add the evidence anyway, name each period and say why. The reason is
+required (`amend_reason` in the API); it is stored on the revision and the
+period's audit log, and shown to anyone reading the period or its samples:
 
 ```sh
 atlas-cli evidence import --historical fy25.jsonl \
   --source "FY25 SOC 2 Type II report" \
-  --amend-frozen 7c1f…
+  --amend-frozen 7c1f… \
+  --amend-reason "Auditor asked for the FY25 Type II results in this period"
 ```
 
 Every frozen period the batch touches must be named; one left out still fails
@@ -127,16 +141,25 @@ Each named period is re-frozen as a **new freeze revision**:
 - The original freeze is unchanged. `frozen_at` and `frozen_hash` on the
   period stay what they were, and revision 1 can still be replayed.
 - The new revision's population is the previous one plus the batch's records
-  inside the period window. Its hash (`revision_hash`) is computed the same
-  way as the original (ADR 0003) over that population.
+  inside the period window and observed at or before the original
+  `frozen_at`. Its hash (`revision_hash`) is computed the same way as the
+  original (ADR 0003) over that population.
 - The period's audit log gets a `period_amended_by_import` row naming the
-  importer, the batch, the previous hash and the new hash.
+  importer, the batch, the reason, the previous hash and the new hash.
 - `GET /v1/audit-periods/{id}` returns `freeze_revision`, `revision_hash`,
-  `amended_by_import: true` and the list of `freeze_revisions`. The audit
-  period page shows **Amended by import**.
+  `amended_by_import: true`, `amend_reason` and the list of
+  `freeze_revisions`. The audit period page shows **Amended by import** with
+  the revision, its hash and the reason.
 - Control state, samples drawn from the period's populations, the frozen
   evidence summary and auditor access all read the latest revision. A sample
   drawn before the amendment keeps the records it drew.
+- Each sample records the revision it was drawn from (`freeze_revision`, also
+  on its `sample_drawn` log row), so the same seed reproduces it. A sample
+  drawn from an amended revision shows the amendment notice and reason.
+- The OSCAL export bundle's `manifest.json` carries `freeze_revision`,
+  `revision_hash`, `amended_by_import` and `amend_reason`. The revision and
+  its hash are covered by the bundle signature, so an export taken before an
+  amendment and one taken after are told apart.
 
 Tell your auditor before you amend a period they are already working in:
 the population they sample from grows.

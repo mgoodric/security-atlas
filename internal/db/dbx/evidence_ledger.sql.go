@@ -64,7 +64,9 @@ WHERE evidence_records.tenant_id = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE($6::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY($7::uuid[]))
+       OR (id = ANY($7::uuid[])
+           AND observed_at <= COALESCE($6::timestamptz,
+                                       'infinity'::timestamptz)))
 `
 
 type CountEvidenceRecordsByControlBeforeHorizonParams struct {
@@ -620,7 +622,9 @@ WHERE evidence_records.tenant_id = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE($8::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY($9::uuid[]))
+       OR (id = ANY($9::uuid[])
+           AND observed_at <= COALESCE($8::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
 `

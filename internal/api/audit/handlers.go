@@ -109,6 +109,13 @@ type sampleWire struct {
 	CreatedBy         string    `json:"created_by"`
 	CreatedAt         time.Time `json:"created_at"`
 	EvidenceRecordIDs []string  `json:"evidence_record_ids"`
+	// FreezeRevision is the revision of the frozen period the sample's
+	// population drew from; absent when it has no frozen period (#1742).
+	// Above 1, a historical import amended the period: AmendedByImport is
+	// true and AmendReason is the admin's stated reason.
+	FreezeRevision  *int   `json:"freeze_revision,omitempty"`
+	AmendedByImport bool   `json:"amended_by_import"`
+	AmendReason     string `json:"amend_reason,omitempty"`
 }
 
 type annotateReq struct {
@@ -395,12 +402,15 @@ func populationWireFrom(p audit.Population) populationWire {
 
 func sampleWireFrom(s audit.Sample) sampleWire {
 	w := sampleWire{
-		ID:           s.ID.String(),
-		PopulationID: s.PopulationID.String(),
-		N:            s.N,
-		Seed:         s.Seed,
-		CreatedBy:    s.CreatedBy,
-		CreatedAt:    s.CreatedAt,
+		ID:              s.ID.String(),
+		PopulationID:    s.PopulationID.String(),
+		N:               s.N,
+		Seed:            s.Seed,
+		CreatedBy:       s.CreatedBy,
+		CreatedAt:       s.CreatedAt,
+		FreezeRevision:  s.FreezeRevision,
+		AmendedByImport: s.FreezeRevision != nil && *s.FreezeRevision > 1,
+		AmendReason:     s.AmendReason,
 	}
 	w.EvidenceRecordIDs = make([]string, len(s.EvidenceRecordIDs))
 	for i, id := range s.EvidenceRecordIDs {

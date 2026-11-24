@@ -35,6 +35,26 @@ func (q *Queries) AttachPopulationToPeriod(ctx context.Context, arg AttachPopula
 	return err
 }
 
+const countPeriodsFrozenSinceTxStart = `-- name: CountPeriodsFrozenSinceTxStart :one
+SELECT count(*)::bigint
+FROM audit_periods
+WHERE tenant_id = $1
+  AND frozen_at >= transaction_timestamp()
+`
+
+// #1742: the tenant's periods frozen at or after this transaction began.
+// An import's rows carry ingested_at = its transaction start, so a freeze
+// that committed after that start but before the import took
+// LockTenantEvidenceFreeze would admit them to its frozen population
+// without having hashed them. The import refuses (and retries) when this
+// is non-zero.
+func (q *Queries) CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countPeriodsFrozenSinceTxStart, tenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAuditPeriod = `-- name: CreateAuditPeriod :one
 
 INSERT INTO audit_periods (
@@ -182,15 +202,46 @@ func (q *Queries) GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByID
 	return i, err
 }
 
+const getPopulationFreezeRevision = `-- name: GetPopulationFreezeRevision :one
+SELECT ap.status,
+       COALESCE((SELECT max(r.revision) FROM audit_period_freeze_revisions r
+                 WHERE r.tenant_id = ap.tenant_id AND r.audit_period_id = ap.id), 1)::int AS freeze_revision
+FROM populations p
+JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
+WHERE p.tenant_id = $1
+  AND p.id        = $2
+`
+
+type GetPopulationFreezeRevisionParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type GetPopulationFreezeRevisionRow struct {
+	Status         string `json:"status"`
+	FreezeRevision int32  `json:"freeze_revision"`
+}
+
+// #1742: the period a population is attached to, its status, and its
+// latest freeze revision (1 for the original freeze), recorded on each
+// sample drawn from it. No row when the population has no period; the
+// revision means nothing while the status is open.
+func (q *Queries) GetPopulationFreezeRevision(ctx context.Context, arg GetPopulationFreezeRevisionParams) (GetPopulationFreezeRevisionRow, error) {
+	row := q.db.QueryRow(ctx, getPopulationFreezeRevision, arg.TenantID, arg.ID)
+	var i GetPopulationFreezeRevisionRow
+	err := row.Scan(&i.Status, &i.FreezeRevision)
+	return i, err
+}
+
 const insertAuditPeriodFreezeRevision = `-- name: InsertAuditPeriodFreezeRevision :one
 INSERT INTO audit_period_freeze_revisions (
     id, tenant_id, audit_period_id, revision,
     frozen_hash, previous_hash, frozen_at,
-    reason, actor, import_batch_id, evidence_record_ids
+    reason, justification, actor, import_batch_id, evidence_record_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
-RETURNING id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, actor, import_batch_id, evidence_record_ids
+RETURNING id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, justification, actor, import_batch_id, evidence_record_ids
 `
 
 type InsertAuditPeriodFreezeRevisionParams struct {
@@ -202,6 +253,7 @@ type InsertAuditPeriodFreezeRevisionParams struct {
 	PreviousHash      []byte             `json:"previous_hash"`
 	FrozenAt          pgtype.Timestamptz `json:"frozen_at"`
 	Reason            string             `json:"reason"`
+	Justification     string             `json:"justification"`
 	Actor             string             `json:"actor"`
 	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
 	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
@@ -219,6 +271,7 @@ func (q *Queries) InsertAuditPeriodFreezeRevision(ctx context.Context, arg Inser
 		arg.PreviousHash,
 		arg.FrozenAt,
 		arg.Reason,
+		arg.Justification,
 		arg.Actor,
 		arg.ImportBatchID,
 		arg.EvidenceRecordIds,
@@ -233,6 +286,7 @@ func (q *Queries) InsertAuditPeriodFreezeRevision(ctx context.Context, arg Inser
 		&i.PreviousHash,
 		&i.FrozenAt,
 		&i.Reason,
+		&i.Justification,
 		&i.Actor,
 		&i.ImportBatchID,
 		&i.EvidenceRecordIds,
@@ -317,7 +371,7 @@ func (q *Queries) ListAmendedEvidenceIDsForPopulation(ctx context.Context, arg L
 }
 
 const listAuditPeriodFreezeRevisions = `-- name: ListAuditPeriodFreezeRevisions :many
-SELECT id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, actor, import_batch_id, evidence_record_ids
+SELECT id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, justification, actor, import_batch_id, evidence_record_ids
 FROM audit_period_freeze_revisions
 WHERE tenant_id = $1 AND audit_period_id = $2
 ORDER BY revision
@@ -347,6 +401,7 @@ func (q *Queries) ListAuditPeriodFreezeRevisions(ctx context.Context, arg ListAu
 			&i.PreviousHash,
 			&i.FrozenAt,
 			&i.Reason,
+			&i.Justification,
 			&i.Actor,
 			&i.ImportBatchID,
 			&i.EvidenceRecordIds,
@@ -566,7 +621,9 @@ WHERE evidence_records.tenant_id  = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE($4::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY($5::uuid[]))
+       OR (id = ANY($5::uuid[])
+           AND observed_at <= COALESCE($4::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC, id ASC
 `
 
@@ -758,6 +815,19 @@ func (q *Queries) LockAuditPeriodsOverlapping(ctx context.Context, arg LockAudit
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTenantEvidenceFreeze = `-- name: LockTenantEvidenceFreeze :exec
+SELECT pg_advisory_xact_lock(14, hashtext($1::uuid::text))
+`
+
+// #1742: serialises Freeze against a historical evidence import in one
+// tenant for the rest of the transaction. Freeze takes it before hashing;
+// the import takes it as its first statement. Namespace 14 is
+// advisorylock.TenantEvidenceFreeze.
+func (q *Queries) LockTenantEvidenceFreeze(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockTenantEvidenceFreeze, tenantID)
+	return err
 }
 
 const minFrozenAtOverlappingWindow = `-- name: MinFrozenAtOverlappingWindow :one

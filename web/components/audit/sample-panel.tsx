@@ -81,9 +81,24 @@ function SampleCard({ sample }: { sample: Sample }) {
           <CardTitle className="text-sm">Sample</CardTitle>
           <Badge variant="outline">n={sample.n}</Badge>
           <Badge variant="outline">seed: {sample.seed}</Badge>
+          {sample.freeze_revision ? (
+            <Badge variant="outline" data-testid="sample-freeze-revision">
+              freeze revision {sample.freeze_revision}
+            </Badge>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="grid gap-2">
+        {sample.amended_by_import ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="sample-amended-by-import"
+          >
+            Amended by import: drawn from freeze revision{" "}
+            {sample.freeze_revision}, which added imported evidence after the
+            period froze. Reason: {sample.amend_reason ?? "—"}
+          </p>
+        ) : null}
         {sample.evidence_record_ids.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No evidence records in this sample.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -145,13 +145,9 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		}
 		// The period's latest freeze revision: the records an import
 		// amendment added join the frozen population (#1742).
-		amended, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
-			TenantID:      pgUUID(tenantID),
-			AuditPeriodID: pgUUID(auditPeriodID),
-			MaxRevision:   math.MaxInt32,
-		})
+		amended, err := auditperiod.AmendedIDs(ctx, q, pgUUID(tenantID), pgUUID(auditPeriodID), auditperiod.LatestRevision)
 		if err != nil {
-			return fmt.Errorf("evidencesummary: list amended evidence: %w", err)
+			return fmt.Errorf("evidencesummary: %w", err)
 		}
 		amendedSet := make(map[uuid.UUID]bool, len(amended))
 		for _, id := range amended {

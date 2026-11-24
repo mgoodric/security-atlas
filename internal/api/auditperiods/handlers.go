@@ -142,12 +142,15 @@ type periodWire struct {
 	// hash; frozen_hash stays the original freeze's (#1742). A revision
 	// above 1 means a historical import amended the frozen period, which
 	// AmendedByImport states outright for the UI.
-	FreezeRevision  int       `json:"freeze_revision,omitempty"`
-	RevisionHashHex string    `json:"revision_hash,omitempty"`
-	AmendedByImport bool      `json:"amended_by_import"`
-	CreatedBy       string    `json:"created_by"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	FreezeRevision  int    `json:"freeze_revision,omitempty"`
+	RevisionHashHex string `json:"revision_hash,omitempty"`
+	AmendedByImport bool   `json:"amended_by_import"`
+	// AmendReason is the admin's reason for the latest amendment, shown
+	// with the amended-by-import notice (Matt, 2026-11-24).
+	AmendReason string    `json:"amend_reason,omitempty"`
+	CreatedBy   string    `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type controlStateObservationWire struct {
@@ -440,6 +443,9 @@ func periodWireFrom(p period.Period) periodWire {
 		w.RevisionHashHex = hex.EncodeToString(p.RevisionHash)
 	}
 	w.AmendedByImport = p.AmendedByImport()
+	if n := len(p.Revisions); n > 1 {
+		w.AmendReason = p.Revisions[n-1].Justification
+	}
 	return w
 }
 
@@ -450,6 +456,7 @@ type freezeRevisionWire struct {
 	PreviousHashHex   string    `json:"previous_hash,omitempty"`
 	FrozenAt          time.Time `json:"frozen_at"`
 	Reason            string    `json:"reason"`
+	Justification     string    `json:"justification,omitempty"`
 	Actor             string    `json:"actor"`
 	ImportBatchID     string    `json:"import_batch_id,omitempty"`
 	EvidenceRecordIDs []string  `json:"evidence_record_ids,omitempty"`
@@ -463,6 +470,7 @@ func freezeRevisionWires(revs []period.Revision) []freezeRevisionWire {
 			FrozenHashHex: hex.EncodeToString(r.FrozenHash),
 			FrozenAt:      r.FrozenAt,
 			Reason:        r.Reason,
+			Justification: r.Justification,
 			Actor:         r.Actor,
 		}
 		if len(r.PreviousHash) > 0 {

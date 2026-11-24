@@ -168,7 +168,9 @@ WHERE evidence_records.tenant_id  = $1
                                'infinity'::timestamptz)
         AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                                     'infinity'::timestamptz))
-       OR id = ANY(sqlc.arg(amended_ids)::uuid[]))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC, id ASC;
 
 -- name: AttachPopulationToPeriod :exec
@@ -214,9 +216,9 @@ FOR UPDATE;
 INSERT INTO audit_period_freeze_revisions (
     id, tenant_id, audit_period_id, revision,
     frozen_hash, previous_hash, frozen_at,
-    reason, actor, import_batch_id, evidence_record_ids
+    reason, justification, actor, import_batch_id, evidence_record_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 RETURNING *;
 
@@ -259,3 +261,35 @@ FROM audit_period_freeze_revisions
 WHERE tenant_id = $1
   AND sqlc.arg(evidence_record_id)::uuid = ANY(evidence_record_ids)
 ORDER BY audit_period_id;
+
+-- name: LockTenantEvidenceFreeze :exec
+-- #1742: serialises Freeze against a historical evidence import in one
+-- tenant for the rest of the transaction. Freeze takes it before hashing;
+-- the import takes it as its first statement. Namespace 14 is
+-- advisorylock.TenantEvidenceFreeze.
+SELECT pg_advisory_xact_lock(14, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
+-- name: CountPeriodsFrozenSinceTxStart :one
+-- #1742: the tenant's periods frozen at or after this transaction began.
+-- An import's rows carry ingested_at = its transaction start, so a freeze
+-- that committed after that start but before the import took
+-- LockTenantEvidenceFreeze would admit them to its frozen population
+-- without having hashed them. The import refuses (and retries) when this
+-- is non-zero.
+SELECT count(*)::bigint
+FROM audit_periods
+WHERE tenant_id = $1
+  AND frozen_at >= transaction_timestamp();
+
+-- name: GetPopulationFreezeRevision :one
+-- #1742: the period a population is attached to, its status, and its
+-- latest freeze revision (1 for the original freeze), recorded on each
+-- sample drawn from it. No row when the population has no period; the
+-- revision means nothing while the status is open.
+SELECT ap.status,
+       COALESCE((SELECT max(r.revision) FROM audit_period_freeze_revisions r
+                 WHERE r.tenant_id = ap.tenant_id AND r.audit_period_id = ap.id), 1)::int AS freeze_revision
+FROM populations p
+JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
+WHERE p.tenant_id = $1
+  AND p.id        = $2;

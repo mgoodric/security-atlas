@@ -50,6 +50,8 @@ export type AuditPeriod = {
   freeze_revision?: number;
   revision_hash?: string;
   amended_by_import?: boolean;
+  // The admin's reason for the latest amendment (present when amended).
+  amend_reason?: string;
   created_by: string;
   created_at: string;
   updated_at: string;
