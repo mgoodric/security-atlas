@@ -13,6 +13,7 @@ package soc2import_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,13 +193,27 @@ func TestUpgradeFromUnpinnedStock_UpdatesInPlace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: parse pre-#1773 manifest: %v", dir, err)
 		}
-		was, err := store.Upload(tenantCtx(t, tenant), prior, "oauth_client:bootstrap")
-		if err != nil {
-			t.Fatalf("%s: pre-#1773 upload: %v", dir, err)
-		}
 		next, err := control.FinalizeBundleForHTTP(shipped)
 		if err != nil {
 			t.Fatalf("%s: parse shipped manifest: %v", dir, err)
+		}
+		// The pre-#1773 bytes cannot be uploaded any more: they name a code
+		// with no scf_release (#1774). Store them as that install did: the
+		// control on the code's anchor in the sample, with the unpinned
+		// manifest and its hash.
+		if prior.Manifest.MissingSCFRelease() {
+			if _, err := store.Upload(tenantCtx(t, tenant), prior, "oauth_client:bootstrap"); !errors.Is(err, control.ErrSCFReleaseRequired) {
+				t.Fatalf("%s: pre-#1773 upload: err = %v; want ErrSCFReleaseRequired", dir, err)
+			}
+		}
+		was, err := store.Upload(tenantCtx(t, tenant), next, "oauth_client:bootstrap")
+		if err != nil {
+			t.Fatalf("%s: upload: %v", dir, err)
+		}
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE controls SET bundle_manifest_yaml = $2, bundle_manifest_hash = $3 WHERE id = $1`,
+			was.ControlID, string(before), prior.ManifestHashHex); err != nil {
+			t.Fatalf("%s: store the pre-#1773 manifest: %v", dir, err)
 		}
 		now, err := store.Upload(tenantCtx(t, tenant), next, "oauth_client:bootstrap")
 		if err != nil {

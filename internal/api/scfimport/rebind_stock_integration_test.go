@@ -42,6 +42,39 @@ const stockCC81Bundle = "soc2_cc8_1_change_management"
 // scf_release line. Every install bootstrapped before #1773 stores these
 // bytes, they are on the stock list, and they bind in whatever synthetic
 // release a test makes current, which the pinned bytes (test-2026.3) do not.
+// shippedStockRelease is the SCF release the shipped stock bundles pin
+// (#1773).
+const shippedStockRelease = "test-2026.3"
+
+// stockManifestShipped returns the shipped control.yaml of bundleID: a stock
+// revision that pins shippedStockRelease.
+func stockManifestShipped(t *testing.T, bundleID string) []byte {
+	t.Helper()
+	shipped, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", bundleID, "control.yaml"))
+	if err != nil {
+		t.Fatalf("read stock manifest: %v", err)
+	}
+	if !bytes.Contains(shipped, []byte("scf_release: "+shippedStockRelease+"\n")) {
+		t.Fatalf("controls/soc2/%s/control.yaml does not pin %s", bundleID, shippedStockRelease)
+	}
+	if !scfimport.IsStockManifest(bundleID, string(shipped)) {
+		t.Fatalf("controls/soc2/%s/control.yaml is not on the stock list", bundleID)
+	}
+	return shipped
+}
+
+// importAsShippedRelease imports cat under shippedStockRelease, so the
+// shipped stock bytes bind in it. Before #1774 these tests bound the
+// unpinned pre-#1773 bytes in cat's own label through the current-release
+// fallback; those bytes are refused now. The label is the sample's, so the
+// catalog is wiped on cleanup rather than left for another test to find.
+func importAsShippedRelease(t *testing.T, admin *pgxpool.Pool, cat *scfimport.Catalog) {
+	t.Helper()
+	cat.ReleaseVersion = shippedStockRelease
+	t.Cleanup(func() { truncateCatalog(t, admin) })
+	importRelease(t, admin, cat)
+}
+
 func stockManifestBeforePin(t *testing.T, bundleID string) []byte {
 	t.Helper()
 	shipped, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", bundleID, "control.yaml"))

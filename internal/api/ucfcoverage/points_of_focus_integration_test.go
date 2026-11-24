@@ -45,6 +45,9 @@ func TestRequirementAPI_ReturnsPointsOfFocus(t *testing.T) {
 		FrameworkName:     "POF API test",
 		FrameworkVersion:  "2017",
 		SourceAttribution: "community_draft",
+		// The sample catalog ensureCatalog loads (#1773); a release is
+		// required since #1774.
+		SCFRelease: "test-2026.3",
 		Requirements: []soc2import.Requirement{
 			{Code: "CC1.1", Title: "CC1.1", PointsOfFocus: want},
 			{Code: "CC1.2", Title: "CC1.2"},

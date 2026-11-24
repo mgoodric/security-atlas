@@ -37,7 +37,7 @@ func TestImport_FrozenVersionKeepsTitlesAndAddsEdges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadSCFWorkbook: %v", err)
 		}
-		return cw
+		return inSample(cw)
 	}
 
 	first := load([][2]string{{"GOV-02", "EX-1\nEX-2"}}, `
