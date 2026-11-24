@@ -1,8 +1,8 @@
 package scfseed_test
 
 // Stock content release pin (issue #1773). The stock control bundles
-// (controls/soc2/) and the bundled crosswalks (data/crosswalks/) declare the
-// SCF release of the sample catalog the bootstrap imports
+// (controls/soc2/), the bundled crosswalks (data/crosswalks/) and, since
+// #3033, the stock policies (policies/stock/) declare the SCF release of the sample catalog the bootstrap imports
 // (migrations/fixtures/scf-sample.json), and every code they name exists in
 // it. So a fresh install binds every stock
 // code in the release it ships with, never in whatever release is current,
@@ -15,12 +15,14 @@ package scfseed_test
 // name. docs/audit-log/1773-stock-scf-release-pin-decisions.md.
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/policy/seed"
 )
 
 const repoRootRel = "../../.."
@@ -95,6 +97,32 @@ func TestBundledCrosswalksPinTheSampleRelease(t *testing.T) {
 		for _, m := range cw.Mappings {
 			if !ids[m.SCFAnchor] {
 				t.Errorf("%s: %s maps to %s, which is not in SCF release %s", path, m.RequirementCode, m.SCFAnchor, release)
+			}
+		}
+	}
+}
+
+// TestStockPoliciesPinTheSampleRelease (#3033): `atlas-cli policy
+// seed-stock` on a fresh install binds every stock policy link in the
+// sample's release, so no policy falls back to the current release and
+// every code it links is in the sample.
+func TestStockPoliciesPinTheSampleRelease(t *testing.T) {
+	t.Parallel()
+	release, ids := sampleRelease(t)
+	policies, err := seed.LoadFromFS(os.DirFS(repoRootRel), "policies/stock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range policies {
+		if p.FrontMatter.SCFRelease != release {
+			t.Errorf("%s: scf_release = %q; want %q", p.SourcePath, p.FrontMatter.SCFRelease, release)
+		}
+		if len(p.FrontMatter.LinkedControlIDs) == 0 {
+			t.Errorf("%s: links no SCF code", p.SourcePath)
+		}
+		for _, code := range p.FrontMatter.LinkedControlIDs {
+			if !ids[code] {
+				t.Errorf("%s: linked code %s is not in SCF release %s", p.SourcePath, code, release)
 			}
 		}
 	}
