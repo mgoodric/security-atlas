@@ -61,9 +61,11 @@ func TestLoadFromFS_RealStockBundle(t *testing.T) {
 			t.Errorf("%s: expected community_draft attribution, got %q", p.SourcePath, fm.SourceAttribution)
 		}
 		// #1772: the codes are bound in the release they were written
-		// against, never whatever release is current at seed time.
-		if fm.SCFRelease != "2026.3" {
-			t.Errorf("%s: scf_release = %q; want 2026.3", p.SourcePath, fm.SCFRelease)
+		// against, never whatever release is current at seed time. Which
+		// release, and that every code is in it, is internal/api/scfseed's
+		// TestStockPoliciesPinTheSampleRelease (#3033).
+		if fm.SCFRelease == "" {
+			t.Errorf("%s: declares no scf_release", p.SourcePath)
 		}
 		// #2588: every stock template is aimed at everyone; an admin narrows
 		// it afterwards. A team name ("engineer") matches no session.

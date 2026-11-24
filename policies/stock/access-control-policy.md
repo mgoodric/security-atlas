@@ -3,11 +3,11 @@ title: Access Control Policy
 version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
-scf_release: "2026.3"
+scf_release: test-2026.3
 linked_control_ids:
   - IAC-01
   - IAC-04
-  - IAC-22
+  - IAC-12
 acknowledgment_required_roles:
   - everyone
 source_attribution: community_draft
