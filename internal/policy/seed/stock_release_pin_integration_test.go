@@ -258,7 +258,7 @@ func TestSeed_UpgradeFromPreRepinStockKeepsPolicyHistory(t *testing.T) {
 
 	// The upgrade: the boot re-imports the sample (frozen, so a no-op) and
 	// ships the re-pinned files; the operator re-runs seed-stock.
-	release = sampleLoaded(t, admin)
+	sampleLoaded(t, admin)
 	again, err := seed.Seed(ctx, app, tenant, shippedStockPolicies(t), resolver)
 	if err != nil {
 		t.Fatalf("Seed(shipped): %v", err)
