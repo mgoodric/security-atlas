@@ -34,6 +34,7 @@ func newCatalogImportSCFCmd() *cobra.Command {
 	var dsn string
 	var releaseVersion string
 	var releaseDate string
+	var keepCurrent bool
 	cmd := &cobra.Command{
 		Use:   "import-scf <path>",
 		Short: "import the SCF catalog (JSON, or the published SCF .xlsx workbook) into Postgres",
@@ -74,12 +75,12 @@ func newCatalogImportSCFCmd() *cobra.Command {
 			}
 			defer pool.Close()
 
-			report, err := scfimport.Import(ctx, pool, cat)
+			report, err := scfimport.ImportWithOptions(ctx, pool, cat, scfimport.Options{KeepCurrent: keepCurrent})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("release_version=%s framework_version_id=%s new_version=%v\n",
-				report.ReleaseVersion, report.FrameworkVersionID, report.IsNewVersion)
+			fmt.Printf("release_version=%s framework_version_id=%s new_version=%v status=%s\n",
+				report.ReleaseVersion, report.FrameworkVersionID, report.IsNewVersion, report.Status)
 			fmt.Printf("created=%d updated=%d unchanged=%d\n",
 				report.Created, report.Updated, report.Unchanged)
 
@@ -118,6 +119,9 @@ func newCatalogImportSCFCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
 	cmd.Flags().StringVar(&releaseVersion, "release-version", "", "release version override for .xlsx workbooks (default: from the \"SCF <release>\" sheet name)")
 	cmd.Flags().StringVar(&releaseDate, "release-date", "", "release date (YYYY-MM-DD) for .xlsx workbooks, which do not carry one")
+	// #3061: the docker bootstrap loads the bundled sample this way beside
+	// an operator's own release, so the stock content's pin resolves.
+	cmd.Flags().BoolVar(&keepCurrent, "keep-current", false, "load a new release as legacy when another SCF release is current, instead of making it current")
 	return cmd
 }
 

@@ -230,15 +230,46 @@ EOF
 just self-host-up
 docker compose -f deploy/docker/docker-compose.yml logs atlas-bootstrap \
   | grep -E 'release_version=|uploaded [0-9]+ control bundles'
-#   release_version=2025.4 framework_version_id=... new_version=true
+#   release_version=2025.4 framework_version_id=... new_version=true status=current
+#   release_version=test-2026.3 framework_version_id=... new_version=true status=legacy
 #   uploaded 0 control bundles
+#   release_version=2025.4 framework_version_id=... new_version=false status=current
 ```
+
+What the bootstrap does with your release (#3061):
+
+1. It imports your catalog. Your release is the current SCF release.
+2. It also loads the bundled sample, `test-2026.3`, with
+   `atlas-cli catalog import-scf --keep-current`. That flag loads a new
+   release as **legacy** and leaves the current one alone, so your release
+   stays current. The stock controls, the bundled crosswalks and the stock
+   policies all declare `scf_release: test-2026.3`, and a declared release
+   resolves whether it is current or legacy.
+3. It imports the SOC 2 crosswalk and uploads the stock controls. Both
+   bind in `test-2026.3`.
+4. It imports your catalog again. That import is a no-op, but it runs the
+   re-bind and the crosswalk-edge carry that follow every SCF import.
+   Each stock control and each SOC 2 edge whose SCF code has the same
+   title in your release moves onto your release's anchor. Every sample
+   title is the SCF 2026.3 title, so on a 2026.3 release everything moves.
+   On another release, a control whose code or title changed stays on its
+   `test-2026.3` anchor and is listed at `GET /v1/controls/needs-reanchoring`,
+   and such an edge waits in the crosswalk-edge remap queue for a
+   super-admin.
+
+Every later boot repeats these steps, and each one is a no-op.
 
 Things to know:
 
-- **The SOC 2 crosswalk is still imported.** Its anchors must exist in
-  your catalog. A full SCF release has them; a trimmed one may not, and
-  the bootstrap then fails at the crosswalk step.
+- **The sample stays loaded.** `GET /v1/frameworks?include=versions` lists
+  `test-2026.3` as a legacy SCF release beside yours. Default coverage reads
+  the current release, so the sample's anchors don't count toward it.
+- **Stock policies link nothing on your release yet.**
+  `atlas-cli policy seed-stock` resolves the policies' declared release
+  (`test-2026.3`) and links each code to the control bound in that
+  release. After step 4 the stock controls are on your release, so every
+  policy seeds with no linked controls and the seed reports the codes as
+  missing.
 - **Set these before first boot.** Control upload and SCF import both
   upsert; neither deletes. Changing `CONTROLS_DIR` after the stock
   controls are uploaded does not remove them.
