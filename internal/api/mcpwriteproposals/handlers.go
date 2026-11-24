@@ -9,12 +9,15 @@
 //	POST   /v1/mcp/write-proposals/{id}/reject  operator rejects
 //
 // AuthZ:
-//   - POST /v1/mcp/write-proposals — any authenticated bearer (the MCP
-//     server proxies the caller's bearer; gating happens at the MCP
-//     tool layer + the operator's own role).
+//   - POST /v1/mcp/write-proposals — admin or grc_engineer, as OPA admits
+//     (#3031). The MCP server proxies the caller's bearer, so the
+//     operator's own role decides.
 //   - confirm / reject — REQUIRE a tenant admin (authz.IsTenantAdmin, the
-//     role set OPA admits on "mcp", #2428). Mirrors slice-021 exception
-//     approval (AC-3 segregation gate).
+//     role set OPA admits on these two routes, #2428; grc_engineer files
+//     but does not decide, #3031). Mirrors slice-021 exception approval
+//     (AC-3 segregation gate). The proposer may confirm its own proposal:
+//     the AI is the proposer, the bearer's holder the confirmer
+//     (docs/audit-log/3031-grc-engineer-mcp-proposals-decisions.md D3).
 //   - list / get — any authenticated bearer; RLS scopes to caller's tenant.
 //
 // Wire shapes mirror the store layer 1:1; payload_json equivalents
