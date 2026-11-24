@@ -44,8 +44,8 @@ a live `grc_engineer` and an approver flag on its own.
 admit is on the `grc_engineer` role, so every credential that derives it
 can file an MCP write proposal, not only a user granted `grc_engineer`.
 Two derive it without a role grant: an approver-flag credential
-(`internal/authz/input.go:153-154`) and a tenant key with no special flags,
-which falls to the default case (`internal/authz/input.go:196-202`).
+(`internal/authz/input.go:153-154`) and an unbound, unlabelled tenant key (the
+default case, `internal/authz/input.go:196-202`).
 Matt accepted this on 2026-11-24. Deciding stays admin-only, so none of
 these credentials can confirm or reject what they file.
 

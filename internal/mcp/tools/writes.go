@@ -135,7 +135,7 @@ const createRiskInputSchema = `{
 }`
 
 // CreateRiskTool files a create_risk proposal. The proposal sits at
-// state=ai_proposed until an approver invokes confirm_write or the
+// state=ai_proposed until a tenant admin invokes confirm_write or the
 // operator clicks Approve in the UI.
 type CreateRiskTool struct {
 	client *mcp.Client
@@ -149,7 +149,7 @@ func (t *CreateRiskTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "create_risk",
 		Description: "Propose a new risk register entry. The proposal is staged at " +
-			"state='ai_proposed' until an authorized approver confirms or rejects it. " +
+			"state='ai_proposed' until a tenant admin confirms or rejects it. " +
 			"Use confirm_write(proposal_id) to commit. No audit-binding artifact is " +
 			"published until a human approves.",
 		InputSchema: json.RawMessage(createRiskInputSchema),
@@ -265,7 +265,7 @@ func (t *PushEvidenceTool) Definition() mcp.ToolDefinition {
 		Name: "push_evidence",
 		Description: "Propose an evidence record append. Same wire shape as the push SDK " +
 			"(slice 003) but mediated by HITL approval because the LLM is the origin. " +
-			"Proposal sits at state='ai_proposed' until an approver confirms. On confirm the " +
+			"Proposal sits at state='ai_proposed' until a tenant admin confirms. On confirm the " +
 			"record goes through the same ingest checks as a push: observed_at within 24h, " +
 			"payload valid for the kind's schema.",
 		InputSchema: json.RawMessage(pushEvidenceInputSchema),
@@ -332,7 +332,7 @@ func (t *UpdateRiskTreatmentTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "update_risk_treatment",
 		Description: "Propose a risk treatment change (and optionally an owner " +
-			"reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
+			"reassignment). Proposal sits at state='ai_proposed' until a tenant admin confirms.",
 		InputSchema: json.RawMessage(updateRiskTreatmentInputSchema),
 	}
 }
@@ -379,7 +379,7 @@ func (t *LinkChildRisksTool) Definition() mcp.ToolDefinition {
 		Name: "link_child_risks",
 		Description: "Propose attaching existing risks as children of an existing parent risk, " +
 			"so they roll up to it. The parent's own score and treatment are not changed. " +
-			"Proposal sits at state='ai_proposed' until an approver confirms.",
+			"Proposal sits at state='ai_proposed' until a tenant admin confirms.",
 		InputSchema: json.RawMessage(linkChildRisksInputSchema),
 	}
 }
@@ -422,7 +422,7 @@ func (t *UnlinkChildRiskTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "unlink_child_risk",
 		Description: "Propose detaching a child risk from its parent risk. Neither risk is " +
-			"deleted. Proposal sits at state='ai_proposed' until an approver confirms.",
+			"deleted. Proposal sits at state='ai_proposed' until a tenant admin confirms.",
 		InputSchema: json.RawMessage(unlinkChildRiskInputSchema),
 	}
 }

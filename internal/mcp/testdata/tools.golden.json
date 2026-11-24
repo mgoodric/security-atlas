@@ -249,7 +249,7 @@
     },
     {
       "name": "create_risk",
-      "description": "Propose a new risk register entry. The proposal is staged at state='ai_proposed' until an authorized approver confirms or rejects it. Use confirm_write(proposal_id) to commit. No audit-binding artifact is published until a human approves.",
+      "description": "Propose a new risk register entry. The proposal is staged at state='ai_proposed' until a tenant admin confirms or rejects it. Use confirm_write(proposal_id) to commit. No audit-binding artifact is published until a human approves.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -354,7 +354,7 @@
     },
     {
       "name": "push_evidence",
-      "description": "Propose an evidence record append. Same wire shape as the push SDK (slice 003) but mediated by HITL approval because the LLM is the origin. Proposal sits at state='ai_proposed' until an approver confirms. On confirm the record goes through the same ingest checks as a push: observed_at within 24h, payload valid for the kind's schema.",
+      "description": "Propose an evidence record append. Same wire shape as the push SDK (slice 003) but mediated by HITL approval because the LLM is the origin. Proposal sits at state='ai_proposed' until a tenant admin confirms. On confirm the record goes through the same ingest checks as a push: observed_at within 24h, payload valid for the kind's schema.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -400,7 +400,7 @@
     },
     {
       "name": "update_risk_treatment",
-      "description": "Propose a risk treatment change (and optionally an owner reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
+      "description": "Propose a risk treatment change (and optionally an owner reassignment). Proposal sits at state='ai_proposed' until a tenant admin confirms.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -453,7 +453,7 @@
     },
     {
       "name": "link_child_risks",
-      "description": "Propose attaching existing risks as children of an existing parent risk, so they roll up to it. The parent's own score and treatment are not changed. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "description": "Propose attaching existing risks as children of an existing parent risk, so they roll up to it. The parent's own score and treatment are not changed. Proposal sits at state='ai_proposed' until a tenant admin confirms.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -480,7 +480,7 @@
     },
     {
       "name": "unlink_child_risk",
-      "description": "Propose detaching a child risk from its parent risk. Neither risk is deleted. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "description": "Propose detaching a child risk from its parent risk. Neither risk is deleted. Proposal sits at state='ai_proposed' until a tenant admin confirms.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

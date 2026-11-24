@@ -28,7 +28,7 @@ Once connected, the assistant can answer questions from your **live data**:
 - **Reads are read-only.** The read tools only call `GET` endpoints. Evidence
   reads never return raw evidence payloads.
 - **Writes are never unattended.** Every write tool files a **proposal**; nothing
-  reaches your canonical records until a human approver confirms it (see
+  reaches your canonical records until a tenant admin confirms it (see
   [The write-approval flow](#the-write-approval-flow)). This is enforced by a
   database constraint, not just by convention — an AI cannot publish an
   audit-binding change on its own.
@@ -62,24 +62,24 @@ default, so a parent and the children it summarises are not counted twice. Pass
 
 ### Write tools (human-approved)
 
-| Tool                    | Proposes…                                                    |
-| ----------------------- | ------------------------------------------------------------ |
-| `create_risk`           | A new risk (draft)                                           |
-| `update_control_state`  | A control-state override (recorded as evidence)              |
-| `push_evidence`         | A new evidence record                                        |
-| `update_risk_treatment` | A change to a risk's treatment and owner                     |
-| `link_child_risks`      | Attaching existing risks under an existing parent risk       |
-| `unlink_child_risk`     | Detaching a child risk from its parent                       |
-| `confirm_write`         | **Approver-only** — approves a pending proposal, applying it |
+| Tool                    | Proposes…                                                        |
+| ----------------------- | ---------------------------------------------------------------- |
+| `create_risk`           | A new risk (draft)                                               |
+| `update_control_state`  | A control-state override (recorded as evidence)                  |
+| `push_evidence`         | A new evidence record                                            |
+| `update_risk_treatment` | A change to a risk's treatment and owner                         |
+| `link_child_risks`      | Attaching existing risks under an existing parent risk           |
+| `unlink_child_risk`     | Detaching a child risk from its parent                           |
+| `confirm_write`         | **Tenant-admin-only** — approves a pending proposal, applying it |
 
 ## The write-approval flow
 
 1. The assistant calls a write tool (say `create_risk`). Instead of writing to
    your risk register, it files a **proposal** in the `mcp_write_proposals`
    table with `state = ai_proposed`, `ai_assisted = true`, `human_approved = false`.
-2. Nothing is in your canonical data yet. The proposal is visible to approvers in
+2. Nothing is in your canonical data yet. The proposal is visible to tenant admins in
    the web UI and via the assistant.
-3. An authorized approver (a credential with approver or admin rights) confirms —
+3. A tenant admin confirms —
    either by the **Approve** button in the web UI, or by the assistant calling
    `confirm_write` with the proposal ID. Only then does the platform apply the
    change, inside a single transaction.

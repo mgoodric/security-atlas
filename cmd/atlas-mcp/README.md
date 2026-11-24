@@ -12,7 +12,7 @@ stabilizes.
 
 **Write tools require HITL approval.** Every write tool files a proposal
 at `state='ai_proposed'`; no audit-binding artifact is published until
-an authorized approver calls `confirm_write` (or clicks Approve in the
+a tenant admin calls `confirm_write` (or clicks Approve in the
 web UI). The schema-level CHECK constraint `mcp_wp_ai_assist_invariant`
 guarantees this contract at the database layer. See
 `docs/audit-log/173-mcp-write-tools-decisions.md` for the full design.
@@ -55,21 +55,21 @@ Defaults: every list tool returns up to 100 results; pass `limit=N`
 
 ### Write tools (slice 173 — HITL approval, Pattern A draft-then-confirm)
 
-| Tool                    | Wraps endpoint                              | Effect                                                                |
-| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
-| `create_risk`           | `POST /v1/mcp/write-proposals`              | Files a draft risk; state=`ai_proposed`                               |
-| `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)        |
-| `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                  |
-| `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                |
-| `link_child_risks`      | `POST /v1/mcp/write-proposals`              | Files a draft attach of existing risks under an existing parent risk  |
-| `unlink_child_risk`     | `POST /v1/mcp/write-proposals`              | Files a draft detach of one child risk from its parent                |
-| `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Approver-only: flips state to `applied`; the Applier writes canonical |
+| Tool                    | Wraps endpoint                              | Effect                                                                    |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| `create_risk`           | `POST /v1/mcp/write-proposals`              | Files a draft risk; state=`ai_proposed`                                   |
+| `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)            |
+| `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                      |
+| `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                    |
+| `link_child_risks`      | `POST /v1/mcp/write-proposals`              | Files a draft attach of existing risks under an existing parent risk      |
+| `unlink_child_risk`     | `POST /v1/mcp/write-proposals`              | Files a draft detach of one child risk from its parent                    |
+| `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Tenant-admin-only: flips state to `applied`; the Applier writes canonical |
 
 **HITL flow.** Write tools NEVER commit to the canonical tables directly.
 Each write inserts a row into `mcp_write_proposals` with `state=
 'ai_proposed', ai_assisted=true, human_approved=false, human_approver=
-NULL`. An authorized approver (the operator's `IsApprover` or `IsAdmin`
-credential) confirms via either (a) the `confirm_write` MCP tool or
+NULL`. A tenant admin (`authz.IsTenantAdmin`, enforced at both the
+engine and the handler since #2428) confirms via either (a) the `confirm_write` MCP tool or
 (b) the web-UI Approve button. The platform then runs the canonical
 Applier inside the same transaction as the state flip; a failure rolls
 the proposal back to `ai_proposed`.
