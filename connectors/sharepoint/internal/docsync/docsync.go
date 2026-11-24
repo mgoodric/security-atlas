@@ -69,7 +69,8 @@ var encodedChar = regexp.MustCompile(`_x([0-9A-Fa-f]{4})_`)
 // a column named as the property (approved_by_name) matches as itself.
 func columnKey(name string) string {
 	name = encodedChar.ReplaceAllStringFunc(name, func(m string) string {
-		r, err := strconv.ParseUint(m[2:6], 16, 32)
+		// Four hex digits: at most 0xFFFF, so 16 bits bounds the rune.
+		r, err := strconv.ParseUint(m[2:6], 16, 16)
 		if err != nil {
 			return m
 		}
