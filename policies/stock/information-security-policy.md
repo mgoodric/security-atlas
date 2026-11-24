@@ -3,7 +3,7 @@ title: Information Security Policy
 version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
-scf_release: "2026.3"
+scf_release: test-2026.3
 linked_control_ids:
   - GOV-02
   - GOV-05

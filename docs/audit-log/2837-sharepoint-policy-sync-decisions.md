@@ -46,7 +46,11 @@ granted and revoked by a tenant admin in one place.
   refused redirect) would otherwise surface Go's `*url.Error`, which
   quotes the whole URL, on stderr. The error is unwrapped and any trace
   of the URL or its query redacted (`graph.scrub`), and a test makes a
-  download fail both ways and asserts neither appears (review of #3036). This follows the 1Password
+  download fail both ways and asserts neither appears (review of #3036). A
+  redirect `Location` header net/http cannot parse, which it quotes, is
+  redacted too. A redacted error keeps `errors.Is` on its original chain
+  (`context.DeadlineExceeded`) but unwraps only to `graph.ErrRedacted`, so
+  nothing reachable by unwrapping carries the URL (#3043). This follows the 1Password
   connector's fixed-host allowlist (#3004).
 - National clouds (GCC High, DoD, 21Vianet) use other login and Graph
   hosts. Not supported: adding them is a host table and a flag, done
@@ -141,8 +145,10 @@ strict: elements are matched by local name) to Markdown with
   syncs, as a Confluence page with an unsupported macro does.
 - Refused (pushed `unreadable`, as #3000): not a zip or not a `.docx`,
   a file over 16 MiB, any XML part over 8 MiB (bounded by reading, not by
-  trusting the zip header) or over 2^20 elements, nesting over 512
-  levels.
+  trusting the zip header), more than 2^20 elements, attributes and
+  text nodes across the document's parts (one budget per document,
+  because every part's tree can be held at once: about 200 MiB of trees
+  at worst, measured; #3043), nesting over 512 levels.
 - **SharePoint pages** (`.aspx` site pages) are not supported. The ticket
   allowed "if supported"; they are not files in a document library, and
   their canvas content is a separate Graph surface. A library holding

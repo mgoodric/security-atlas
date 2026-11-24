@@ -17,7 +17,7 @@
 // left out.
 //
 // A document that is not a .docx, or is past MaxFileBytes, MaxPartBytes,
-// MaxElements or MaxDepth, is refused with an error; the connector then sends it
+// MaxNodes or MaxDepth, is refused with an error; the connector then sends it
 // unreadable.
 package docxmd
 
@@ -65,10 +65,17 @@ const (
 	MaxPartBytes = 8 << 20
 	// MaxDepth is the deepest element nesting accepted.
 	MaxDepth = 512
-	// MaxElements is the most XML elements one part may hold. A part of
-	// MaxPartBytes made of empty elements would otherwise build a tree of
-	// some two million nodes; a long real policy holds tens of thousands.
-	MaxElements = 1 << 20
+	// MaxNodes is the most elements, attributes and text nodes, counted
+	// alike, that one document's parts may build between them. Every
+	// part's tree can be in memory at once while the document is
+	// converted, so the cap is per document, not per part. It bounds the
+	// trees at about 200 MiB in total (the densest shape, one-attribute
+	// elements, measured 204 MiB of live heap on go1.27.4/arm64), on top
+	// of the MaxFileBytes file and the one MaxPartBytes part being
+	// parsed. A part of MaxPartBytes made of empty elements, or of text
+	// nodes split by comments, would otherwise build some two million
+	// nodes; a long real policy holds tens of thousands.
+	MaxNodes = 1 << 20
 )
 
 var (
@@ -97,7 +104,7 @@ func Convert(docx []byte) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrNotDocx, err)
 	}
-	pkg := &pkg{files: map[string]*zip.File{}}
+	pkg := &pkg{files: map[string]*zip.File{}, nodes: MaxNodes}
 	for _, f := range zr.File {
 		pkg.files[f.Name] = f
 	}
@@ -144,6 +151,8 @@ func Convert(docx []byte) (Result, error) {
 // pkg is the opened zip package.
 type pkg struct {
 	files map[string]*zip.File
+	// nodes is what is left of the document's MaxNodes budget.
+	nodes int
 }
 
 // read returns a part's bytes, or nil when the part is absent.
@@ -176,7 +185,7 @@ func (p *pkg) xml(name string) (*node, error) {
 	if err != nil || b == nil {
 		return nil, err
 	}
-	n, err := parse(b)
+	n, err := parse(b, &p.nodes)
 	if err != nil {
 		return nil, fmt.Errorf("part %s: %w", name, err)
 	}
@@ -265,11 +274,18 @@ func on(n *node) bool {
 	return true
 }
 
-func parse(b []byte) (*node, error) {
+// parse builds a part's tree, spending one of budget's nodes on each
+// element, attribute and text node.
+func parse(b []byte, budget *int) (*node, error) {
 	dec := xml.NewDecoder(bytes.NewReader(b))
 	root := &node{}
 	stack := []*node{root}
-	elements := 0
+	spend := func() error {
+		if *budget--; *budget < 0 {
+			return fmt.Errorf("%w: more than %d nodes in one document", ErrTooLarge, MaxNodes)
+		}
+		return nil
+	}
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -284,11 +300,14 @@ func parse(b []byte) (*node, error) {
 			if len(stack) > MaxDepth {
 				return nil, fmt.Errorf("%w: limit %d", ErrTooDeep, MaxDepth)
 			}
-			if elements++; elements > MaxElements {
-				return nil, fmt.Errorf("%w: more than %d elements in one part", ErrTooLarge, MaxElements)
+			if err := spend(); err != nil {
+				return nil, err
 			}
 			n := &node{name: t.Name.Local, attrs: map[string]string{}}
 			for _, a := range t.Attr {
+				if err := spend(); err != nil {
+					return nil, err
+				}
 				n.attrs[a.Name.Local] = a.Value
 			}
 			top.children = append(top.children, n)
@@ -296,6 +315,9 @@ func parse(b []byte) (*node, error) {
 		case xml.EndElement:
 			stack = stack[:len(stack)-1]
 		case xml.CharData:
+			if err := spend(); err != nil {
+				return nil, err
+			}
 			top.children = append(top.children, &node{text: string(t)})
 		}
 	}

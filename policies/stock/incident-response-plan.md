@@ -3,10 +3,10 @@ title: Incident Response Plan
 version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
-scf_release: "2026.3"
+scf_release: test-2026.3
 linked_control_ids:
   - IRO-08
-  - IRO-01
+  - IRO-14
   - IRO-02
 acknowledgment_required_roles:
   - everyone

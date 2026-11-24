@@ -142,7 +142,21 @@ func TestConvertRefusals(t *testing.T) {
 	t.Parallel()
 	deep := "<w:document xmlns:w=\"w\"><w:body>" + strings.Repeat("<w:sdt>", MaxDepth) + strings.Repeat("</w:sdt>", MaxDepth) + "</w:body></w:document>"
 	big := zipParts(t, map[string][]byte{"word/document.xml": bytes.Repeat([]byte(" "), MaxPartBytes+1)})
-	many := zipParts(t, map[string][]byte{"word/document.xml": []byte("<w:document><w:body>" + strings.Repeat("<a/>", MaxElements) + "</w:body></w:document>")})
+	const nodeCap = MaxNodes
+	many := zipParts(t, map[string][]byte{"word/document.xml": []byte("<w:document><w:body>" + strings.Repeat("<a/>", nodeCap) + "</w:body></w:document>")})
+	// Text nodes count too: half the cap in elements, each followed by a
+	// text node, is under the cap in elements alone (#3043).
+	text := zipParts(t, map[string][]byte{"word/document.xml": []byte("<w:document><w:body>" + strings.Repeat("<a/>x", nodeCap/2) + "</w:body></w:document>")})
+	// Attributes count too: each one costs a map entry, more than a node.
+	attrs := zipParts(t, map[string][]byte{"word/document.xml": []byte("<w:document><w:body>" + strings.Repeat(`<a b=""/>`, nodeCap/2) + "</w:body></w:document>")})
+	// The cap is per document, not per part: the body and the styles each
+	// hold under it, together over it (#3043).
+	half := strings.Repeat("<a/>", nodeCap/2)
+	spread := zipParts(t, map[string][]byte{
+		"word/document.xml":            []byte("<document><body>" + half + "</body></document>"),
+		"word/_rels/document.xml.rels": []byte(`<Relationships><Relationship Id="a" Type="x/styles" Target="styles.xml"/></Relationships>`),
+		"word/styles.xml":              []byte("<styles>" + half + "</styles>"),
+	})
 	for _, tc := range []struct {
 		name string
 		docx []byte
@@ -158,6 +172,9 @@ func TestConvertRefusals(t *testing.T) {
 		{"too deep", zipParts(t, map[string][]byte{"word/document.xml": []byte(deep)}), ErrTooDeep},
 		{"part too large", big, ErrTooLarge},
 		{"too many elements", many, ErrTooLarge},
+		{"too many nodes with text", text, ErrTooLarge},
+		{"too many nodes across parts", spread, ErrTooLarge},
+		{"too many attributes", attrs, ErrTooLarge},
 		{"bad rels", zipParts(t, map[string][]byte{"_rels/.rels": []byte("<Relationships>"), "word/document.xml": []byte("<a/>")}), ErrNotDocx},
 		{"bad styles", zipParts(t, map[string][]byte{
 			"word/document.xml":            []byte(`<document><body/></document>`),

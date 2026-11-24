@@ -389,7 +389,26 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		return oscal.NewExporter(app, &capturingBridge{}, signer)
 	})
 	ctx := context.Background()
-	fwID, versionID := uuid.New(), uuid.New()
+	fwID, versionID, period := uuid.New(), uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		// Registered before the inserts, so a failed seed still cleans up.
+		// Runs before SeedTenant's cleanup (LIFO), so the period goes
+		// first, then the global framework rows, which outlive the tenant
+		// otherwise (#3041).
+		for _, q := range []struct {
+			sql string
+			arg any
+		}{
+			{`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`, e.tenant},
+			{`DELETE FROM audit_periods WHERE id = $1`, period},
+			{`DELETE FROM framework_versions WHERE id = $1`, versionID},
+			{`DELETE FROM frameworks WHERE id = $1`, fwID},
+		} {
+			if _, err := e.migrate.Exec(ctx, q.sql, q.arg); err != nil {
+				t.Errorf("cleanup %q: %v", q.sql, err)
+			}
+		}
+	})
 	if _, err := e.migrate.Exec(ctx, `INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, '#2171 framework', $2, 'test')`,
 		fwID, "fw-2171-"+fwID.String()[:8]); err != nil {
 		t.Fatalf("seed framework: %v", err)
@@ -399,7 +418,6 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		t.Fatalf("seed framework version: %v", err)
 	}
 	frozenAt := time.Now().UTC().Add(-24 * time.Hour)
-	period := uuid.New()
 	if _, err := e.migrate.Exec(ctx, `
 		INSERT INTO audit_periods (id, tenant_id, name, framework_version_id, period_start, period_end, status, created_by,
 		                           frozen_at, frozen_by, frozen_hash)
