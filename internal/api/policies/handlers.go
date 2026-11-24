@@ -197,9 +197,13 @@ type policyWire struct {
 	// run carried as unreadable (#3000): still in its source, but its body
 	// could not be read. The policy is unchanged and stays in force.
 	SyncUnreadable *policySyncUnreadableWire `json:"sync_unreadable,omitempty"`
-	CreatedAt      time.Time                 `json:"created_at"`
-	UpdatedAt      time.Time                 `json:"updated_at"`
-	Warnings       []string                  `json:"warnings,omitempty"`
+	// SyncSource names the system a synced policy comes from
+	// ("Confluence", "SharePoint"), read from its sync site (#2837).
+	// Absent on any other policy.
+	SyncSource string    `json:"sync_source,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Warnings   []string  `json:"warnings,omitempty"`
 }
 
 // policySyncUnreadableWire is a synced policy's unreadable state (#3000):
@@ -865,7 +869,7 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.SourceAttribution == policy.SourceSynced {
-		httpresp.WriteError(w, http.StatusConflict, managedInConfluenceMsg)
+		httpresp.WriteError(w, http.StatusConflict, managedBySyncMsg(current.SyncSource))
 		return
 	}
 	if err := validateAudience(req.AcknowledgmentRequiredRoles, current.AcknowledgmentRequiredRoles); err != nil {
@@ -1027,17 +1031,24 @@ func writePDFRenderErr(w http.ResponseWriter, r *http.Request, err error) {
 	httperr.WriteInternal(w, r, "render pdf", err)
 }
 
-// managedInConfluenceMsg answers an in-tool edit of a synced policy
-// (#2852). Its page is the authority, so the edit is made there.
-const managedInConfluenceMsg = "managed in Confluence: this policy is synced from its source page; edit it there"
+// managedBySyncMsg answers an in-tool edit of a synced policy (#2852),
+// naming the system it is synced from (#2837). Its page is the
+// authority, so the edit is made there.
+func managedBySyncMsg(source string) string {
+	if source == "" {
+		source = policy.SyncSourceConfluence
+	}
+	return "managed in " + source + ": this policy is synced from its source page; edit it there"
+}
 
 // writeManagedBySync answers 409 when err is policy.ErrManagedBySync and
 // reports whether it did.
 func writeManagedBySync(w http.ResponseWriter, err error) bool {
-	if !errors.Is(err, policy.ErrManagedBySync) {
+	source, ok := policy.SyncSourceOf(err)
+	if !ok {
 		return false
 	}
-	httpresp.WriteError(w, http.StatusConflict, managedInConfluenceMsg)
+	httpresp.WriteError(w, http.StatusConflict, managedBySyncMsg(source))
 	return true
 }
 
@@ -1185,6 +1196,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SyncPropertyDrift:           syncPropertyDriftWire(p.SyncPropertyDriftDetectedAt, p.SyncPropertyDriftKeys),
 		SyncMissingSince:            p.SyncMissingSince,
 		SyncUnreadable:              syncUnreadableWire(p.SyncUnreadableSince, p.SyncUnreadableReason),
+		SyncSource:                  p.SyncSource,
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
 	}

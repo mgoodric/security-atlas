@@ -101,6 +101,12 @@ export type Policy = {
     detected_at: string;
     keys: string[];
   } | null;
+  /**
+   * #2837 — on a synced policy, the system it is synced from
+   * ("Confluence", "SharePoint"), named from its sync site. Absent on any
+   * other policy.
+   */
+  sync_source?: string | null;
   created_at: string;
   updated_at: string;
   warnings?: string[];
