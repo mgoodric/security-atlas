@@ -149,6 +149,26 @@ func (s *Store) loadActiveExceptions(ctx context.Context, q *dbx.Queries, tenant
 	if err != nil {
 		return nil, fmt.Errorf("list active exceptions: %w", err)
 	}
+	return toActiveExceptions(rows), nil
+}
+
+// loadExceptionsAsOf reads the control's exceptions as they stood at asOf
+// (#3037): activated by then and not revoked by then, whatever their status
+// is now. A replay of asOf applies these instead of today's active set, so
+// an exception granted, revoked or expired after asOf does not change it.
+func (s *Store) loadExceptionsAsOf(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, asOf time.Time) ([]activeException, error) {
+	rows, err := q.ListExceptionsByControlAsOf(ctx, dbx.ListExceptionsByControlAsOfParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: pgUUID(controlID),
+		AsOf:      pgTimestamptz(asOf),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list exceptions as of %s: %w", asOf.Format(time.RFC3339Nano), err)
+	}
+	return toActiveExceptions(rows), nil
+}
+
+func toActiveExceptions(rows []dbx.Exception) []activeException {
 	out := make([]activeException, 0, len(rows))
 	for _, r := range rows {
 		x := activeException{predicate: r.ScopeCellPredicate, expiresAt: r.ExpiresAt.Time}
@@ -158,7 +178,7 @@ func (s *Store) loadActiveExceptions(ctx context.Context, q *dbx.Queries, tenant
 		}
 		out = append(out, x)
 	}
-	return out, nil
+	return out
 }
 
 // appendEvaluation writes ONE row to control_evaluations. This is the
