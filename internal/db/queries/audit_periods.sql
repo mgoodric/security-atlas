@@ -257,6 +257,14 @@ ORDER BY audit_period_id;
 -- advisorylock.TenantEvidenceFreeze.
 SELECT pg_advisory_xact_lock(14, hashtext(sqlc.arg(tenant_id)::uuid::text));
 
+-- name: LockTenantEvidenceFreezeShared :exec
+-- #3038: the shared mode of LockTenantEvidenceFreeze, which every live
+-- ingest takes just before it inserts a ledger row and holds to commit.
+-- Ingests do not block each other; a freeze waits until every ingest that
+-- holds it has committed, so it hashes with their rows in view. Run
+-- CountPeriodsFrozenSinceTxStart after it, as its own statement.
+SELECT pg_advisory_xact_lock_shared(14, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
 -- name: CountPeriodsFrozenSinceTxStart :one
 -- #1742: the tenant's periods frozen at or after this transaction began.
 -- An import's rows carry ingested_at = its transaction start, so a freeze

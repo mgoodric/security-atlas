@@ -54,15 +54,16 @@ type Effectiveness struct {
 // PassRate is 0 and TotalCount is 0; callers distinguish "0% effective" from
 // "no data" via TotalCount.
 func (e *Engine) Effectiveness(ctx context.Context, controlID uuid.UUID) (Effectiveness, error) {
-	windowEnd := e.now()
-	windowStart := windowEnd.Add(-EffectivenessWindow)
-
-	out := Effectiveness{
-		ControlID:   controlID,
-		WindowStart: windowStart,
-		WindowEnd:   windowEnd,
-	}
+	out := Effectiveness{ControlID: controlID}
 	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ pgx.Tx, tenantID uuid.UUID) error {
+		// #3038: the window ends at the database clock, the clock that
+		// stamps evaluated_at, so an evaluation just written is inside it.
+		windowEnd, err := e.clock(ctx, q)
+		if err != nil {
+			return err
+		}
+		windowStart := windowEnd.Add(-EffectivenessWindow)
+		out.WindowStart, out.WindowEnd = windowStart, windowEnd
 		// Confirm the control exists in-tenant first so an unknown id is a
 		// clean 404 rather than a silently-empty score.
 		if _, err := e.store.loadControl(ctx, q, tenantID, controlID); err != nil {
