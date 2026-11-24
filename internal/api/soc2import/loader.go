@@ -66,15 +66,14 @@ type Crosswalk struct {
 	// "2026.3") whose anchors the mappings' scf_anchor codes name (#1771).
 	// The SCF reuses codes between releases, so the importer binds each
 	// code within this release only. Workbook loaders fill it from the
-	// workbook's "SCF <release>" sheet. Empty still binds in the current
-	// release, with a deprecation warning, until #1774 makes it required.
+	// workbook's "SCF <release>" sheet. Required: an import without it is
+	// ErrSCFReleaseRequired, and nothing is written (#1774).
 	SCFRelease string `yaml:"scf_release"`
 	// SCFReleaseFromSheet marks a SCFRelease read from a workbook's
-	// "SCF <release>" sheet name with no --scf-release to confirm it. Until
-	// #1774 such a release binds strictly only when it is loaded; when it is
-	// not, the import binds in the current release with
-	// SheetReleaseNotLoadedWarning, as it did before #1771. Never read from
-	// YAML.
+	// "SCF <release>" sheet name with no --scf-release to confirm it. It
+	// binds as strictly as any other release (#1774); the flag only shapes
+	// the error when that release is not loaded, so it names the sheet.
+	// Never read from YAML.
 	SCFReleaseFromSheet bool `yaml:"-"`
 
 	Requirements []Requirement `yaml:"requirements"`

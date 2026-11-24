@@ -44,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -88,11 +89,11 @@ var (
 	ErrSCFReleaseConflict = scfbind.ErrConflict
 )
 
-// SCFReleaseDeprecationWarning is reported for an import that declares no
-// SCF release (#2264). Resolved control ids match in the current SCF
-// release, as before; the declaration becomes required in a later release
-// (#1774).
-const SCFReleaseDeprecationWarning = "no SCF release declared, so the profile's resolved control ids were matched in the current SCF release; pass --scf-release or add an \"scf-release\" prop to the profile's metadata, which will become required"
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); the profile's resolved control ids are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("profileimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the profile's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import profiles. admin is the
 // superset of grc_engineer in the canvas 5-role model.
@@ -151,8 +152,7 @@ type Request struct {
 	// declare it instead with an "scf-release" prop on its metadata; when
 	// both are given they must agree. Intermediate profiles and catalogs
 	// declare nothing. A declared release that is not loaded fails the
-	// import. Neither matches in the current release, with
-	// SCFReleaseDeprecationWarning.
+	// import. Neither is ErrSCFReleaseRequired (#1774).
 	SCFRelease string
 }
 
@@ -167,11 +167,9 @@ type Report struct {
 	// MappedCount is how many resolved controls matched an SCF anchor
 	// deterministically (the rest are flagged NULL for operator mapping).
 	MappedCount int
-	// SCFRelease is the SCF release the control ids were matched in, or ""
-	// when no SCF release is loaded (every control is then unmapped).
+	// SCFRelease is the SCF release the control ids were matched in.
 	SCFRelease string
-	// Warnings are non-fatal notes for the operator, such as
-	// SCFReleaseDeprecationWarning.
+	// Warnings are non-fatal notes for the operator.
 	Warnings []string
 }
 
@@ -313,11 +311,11 @@ func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha
 		return Report{}, fmt.Errorf("profileimport: insert profile: %w", err)
 	}
 
-	// Pre-load the scf_ids of the release the profile declares (#2264), or
-	// the current release when it declares none, so the deterministic
+	// Pre-load the scf_ids of the release the profile declares (#2264;
+	// required since #1774), so the deterministic
 	// requirement -> SCF-anchor mapping (slice-511 D3, reusing slice-492's
 	// crosswalk) is a single query, not one per control.
-	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: scf release: %w", err)
 	}

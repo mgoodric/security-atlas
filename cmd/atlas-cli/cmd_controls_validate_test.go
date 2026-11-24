@@ -80,14 +80,102 @@ func TestControlsValidate_ReportsReleaseAndFlagsChangedCode(t *testing.T) {
 	}
 }
 
+// runValidateErr runs controls validate and returns its output and error.
+func runValidateErr(args ...string) (string, error) {
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetArgs(append([]string{"controls", "validate"}, args...))
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// writeBundleUnder writes <parent>/<name>/control.yaml with the given
+// scf_anchor_id (omitted when empty, as anchor_fit: none) and scf_release
+// (omitted when empty).
+func writeBundleUnder(t *testing.T, parent, name, anchor, release string) string {
+	t.Helper()
+	dir := filepath.Join(parent, name)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	y := "bundle_schema_version: \"1\"\n" +
+		"bundle_id: " + name + "\n" +
+		"title: " + name + "\n" +
+		"implementation_type: manual_attested\n"
+	if anchor == "" {
+		y += "anchor_fit: none\nanchor_fit_note: no SCF control fits\n"
+	} else {
+		y += "scf_anchor_id: " + anchor + "\n"
+	}
+	if release != "" {
+		y += "scf_release: " + release + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "control.yaml"), []byte(y), 0o600); err != nil {
+		t.Fatalf("write control.yaml: %v", err)
+	}
+	return dir
+}
+
+// #1774: validate fails a bundle whose scf_anchor_id code has no
+// scf_release, with the fix in the message.
+func TestControlsValidate_MissingReleaseFails(t *testing.T) {
+	dir := writeBundle(t, "IAC-06", "")
+	out, err := runValidateErr(dir)
+	if err == nil {
+		t.Fatalf("validate passed a bundle with no scf_release:\n%s", out)
+	}
+	for _, want := range []string{"declare no scf_release", "scf_release: test-2026.3", dir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not carry %q", err, want)
+		}
+	}
+	if !strings.Contains(out, "scf_release=(none) ERROR") {
+		t.Errorf("bundle report does not flag the missing release:\n%s", out)
+	}
+}
+
+// #1774: over a directory, validate lists every bundle missing scf_release
+// in one run, not just the first. A bundle declaring one, one naming its
+// anchor by UUID and an unanchored one need none.
+func TestControlsValidate_DirectoryListsEveryBundleMissingRelease(t *testing.T) {
+	parent := t.TempDir()
+	missingA := writeBundleUnder(t, parent, "a_missing", "IAC-06", "")
+	_ = writeBundleUnder(t, parent, "b_declared", "IAC-06", scfreleasetest.ReleaseA)
+	missingC := writeBundleUnder(t, parent, "c_missing", "GOV-01", "")
+	_ = writeBundleUnder(t, parent, "d_uuid", "6f1c2a7e-0000-4000-8000-0000000017a4", "")
+	_ = writeBundleUnder(t, parent, "e_unanchored", "", "")
+
+	out, err := runValidateErr(parent)
+	if err == nil {
+		t.Fatalf("validate passed a directory with bundles missing scf_release:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "2 bundle(s)") {
+		t.Errorf("error %q does not count 2 bundles", err)
+	}
+	for _, want := range []string{missingA, missingC} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not list %s", err, want)
+		}
+	}
+	for _, ok := range []string{"b_declared", "d_uuid", "e_unanchored"} {
+		if strings.Contains(err.Error(), ok) {
+			t.Errorf("error %q lists %s, which needs no scf_release", err, ok)
+		}
+	}
+	// Every bundle was still validated and reported.
+	if n := strings.Count(out, "OK bundle_id="); n != 5 {
+		t.Errorf("reported %d bundles; want 5:\n%s", n, out)
+	}
+}
+
 func TestControlsValidate_ReleaseWarnings(t *testing.T) {
 	catA := scfreleasetest.CatalogPath("scf-release-a.json")
 
-	out := runValidate(t, writeBundle(t, "IAC-06", ""))
-	if !strings.Contains(out, "scf_release=(none) WARN") {
-		t.Errorf("missing release not warned:\n%s", out)
-	}
-	out = runValidate(t, writeBundle(t, "IAC-06", "nope"), "--scf-catalog", catA)
+	out := runValidate(t, writeBundle(t, "IAC-06", "nope"), "--scf-catalog", catA)
 	if !strings.Contains(out, "WARN scf_release nope is not among the --scf-catalog releases") {
 		t.Errorf("unknown release not warned:\n%s", out)
 	}

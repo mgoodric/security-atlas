@@ -48,11 +48,17 @@ import (
 var ErrClaimNotFound = errors.New("oscalcomponents: component claim not found")
 
 // ErrAnchorNotFound is returned when an SCF-anchor mapping targets an scf_id
-// that does not resolve to a bundled SCF anchor in the current SCF framework
-// version. The handler maps it to 422 — the request is well-formed but the
-// referenced anchor does not exist (invariant #7: a mapping must target a real
-// SCF anchor, never a free-form string the operator typed).
+// that does not resolve to a bundled SCF anchor in the named SCF release, or
+// names a release that is not loaded. The handler maps it to 422 — the
+// request is well-formed but the referenced anchor does not exist (invariant
+// #7: a mapping must target a real SCF anchor, never a free-form string the
+// operator typed).
 var ErrAnchorNotFound = errors.New("oscalcomponents: scf anchor not found")
+
+// ErrSCFReleaseRequired is returned when a mapping names no SCF release
+// (#1774). The code is never bound in the current release instead. The
+// handler maps it to 422; the message is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("oscalcomponents: %w: send scf_release with scf_anchor_id, naming the SCF release the code is from (GET /v1/anchors reports the release its anchors are in)", scfrelease.ErrReleaseRequired)
 
 // Store is the OSCAL component-claim read + disposition layer over the
 // application pgx pool.
@@ -206,9 +212,9 @@ func (s *Store) Disposition(ctx context.Context, claimID uuid.UUID, toStatus, ac
 
 // MapScfAnchor maps one unmapped (or re-maps) vendor claim to a canonical SCF
 // anchor. It validates the target scf_id resolves to a bundled SCF anchor in
-// the current SCF framework version, reads the claim's current scf_anchor_id
-// (the from_anchor of the audit trail), sets the new scf_anchor_id, and
-// appends an append-only mapping-audit row — all in one RLS-scoped
+// the named SCF release, reads the claim's current scf_anchor_id (the
+// from_anchor of the audit trail), sets the new scf_anchor_id and release,
+// and appends an append-only mapping-audit row — all in one RLS-scoped
 // transaction.
 //
 // THE LOAD-BEARING BOUNDARY: this NEVER touches control_evaluations or the
@@ -216,25 +222,25 @@ func (s *Store) Disposition(ctx context.Context, claimID uuid.UUID, toStatus, ac
 // untouched); mapping only sets the crosswalk (invariant #2 / #7 / P0-512-1).
 //
 // scfAnchorID is the SCF code (e.g. "IAC-37"), validated against the bundled
-// catalog. actor is the mapping operator's credential id. A claim id that does
-// not resolve in the tenant returns ErrClaimNotFound; an scf_id that does not
-// resolve to a bundled anchor returns ErrAnchorNotFound.
-func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error) {
+// catalog in scfRelease. actor is the mapping operator's credential id. No
+// release is ErrSCFReleaseRequired (#1774); the code is never bound in the
+// current release instead. A claim id that does not resolve in the tenant
+// returns ErrClaimNotFound; an scf_id that does not resolve to an anchor of
+// a loaded release returns ErrAnchorNotFound.
+func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, scfRelease, actor string) (dbx.ImportedComponentClaim, error) {
+	if scfRelease == "" {
+		return dbx.ImportedComponentClaim{}, ErrSCFReleaseRequired
+	}
 	var updated dbx.ImportedComponentClaim
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		// Validate the target anchor exists in the bundled SCF catalog. The
+		// Validate the target anchor exists in the named SCF release. The
 		// scf_anchors spine is catalog-global (tenant_id IS NULL); a bad
 		// scf_id must NOT silently set a dangling crosswalk (invariant #7).
-		if _, qerr := q.GetSCFAnchorBySCFID(ctx, scfAnchorID); qerr != nil {
-			if errors.Is(qerr, pgx.ErrNoRows) {
-				return ErrAnchorNotFound
-			}
-			return qerr
-		}
-		// The code was just validated in the current release, so that is
-		// the release the claim now names it in (#1771).
-		rel, qerr := scfrelease.Lookup(ctx, q, "")
-		if qerr != nil {
+		_, rel, qerr := scfrelease.Resolve(ctx, q, scfRelease, scfAnchorID)
+		switch {
+		case errors.Is(qerr, scfrelease.ErrUnknownRelease), errors.Is(qerr, scfrelease.ErrCodeNotInRelease):
+			return fmt.Errorf("%w: %w", ErrAnchorNotFound, qerr)
+		case qerr != nil:
 			return qerr
 		}
 

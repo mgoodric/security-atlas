@@ -233,6 +233,10 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	result, err := h.store.Upload(ctx, bundle, cred.ID)
 	if err != nil {
 		switch {
+		case errors.Is(err, control.ErrSCFReleaseRequired):
+			// #1774 — an SCF code with no scf_release. The message is the
+			// one-line fix.
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, control.ErrSCFAnchorUnknown):
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".

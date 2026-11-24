@@ -95,7 +95,9 @@ describe("PATCH /api/oscal/component-claims/[id]/scf-anchor", () => {
     );
 
     const res = await PATCH(
-      makeReq(JSON.stringify({ scf_anchor_id: "TST-01" })),
+      makeReq(
+        JSON.stringify({ scf_anchor_id: "TST-01", scf_release: "test-2026" }),
+      ),
       ctx(),
     );
     expect(res.status).toBe(200);
@@ -116,8 +118,10 @@ describe("PATCH /api/oscal/component-claims/[id]/scf-anchor", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe(
       "Bearer test-bearer-token",
     );
+    // scf_release is forwarded: the platform binds the code in it (#1774).
     expect(JSON.parse(init.body as string)).toEqual({
       scf_anchor_id: "TST-01",
+      scf_release: "test-2026",
     });
   });
 

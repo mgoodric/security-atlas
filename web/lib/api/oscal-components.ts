@@ -125,13 +125,15 @@ export async function dispositionClaim(
 }
 
 // Slice 620 — map an unmapped vendor claim to a canonical SCF anchor. The
-// scf_anchor_id is the SCF code (e.g. "IAC-37"); the platform validates it
-// against the bundled catalog. Requirement -> SCF anchor only (invariant #7);
+// scf_anchor_id is the SCF code (e.g. "IAC-37") and scf_release the SCF
+// release it is from (required, #1774); the platform validates the code
+// within that release. Requirement -> SCF anchor only (invariant #7);
 // this only sets the crosswalk and NEVER fabricates control coverage.
 export async function mapClaimScfAnchor(
   bearer: string,
   claimID: string,
   scfAnchorID: string,
+  scfRelease: string,
 ): Promise<MapScfAnchorResult> {
   const res = await fetch(
     `${apiBaseURL()}/v1/oscal/component-claims/${encodeURIComponent(
@@ -143,7 +145,10 @@ export async function mapClaimScfAnchor(
         Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ scf_anchor_id: scfAnchorID }),
+      body: JSON.stringify({
+        scf_anchor_id: scfAnchorID,
+        scf_release: scfRelease,
+      }),
     },
   );
   if (!res.ok) {

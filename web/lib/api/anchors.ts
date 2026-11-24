@@ -37,10 +37,18 @@ export type AnchorDetail = {
   scf_release?: string;
 };
 
-export async function listAnchors(bearer: string): Promise<Anchor[]> {
+// listAnchors reads the current SCF release's anchors. `scf_release` is the
+// release they are in (#1774), absent for an empty catalog; a caller that
+// binds one of their codes names it.
+export async function listAnchors(
+  bearer: string,
+): Promise<{ anchors: Anchor[]; scf_release?: string }> {
   const res = await apiFetch("/v1/anchors", bearer);
-  const body = (await res.json()) as { anchors: Anchor[] };
-  return body.anchors;
+  const body = (await res.json()) as {
+    anchors: Anchor[];
+    scf_release?: string;
+  };
+  return { anchors: body.anchors, scf_release: body.scf_release };
 }
 
 // ----- Slice 104: anchors with optional joined state -----
