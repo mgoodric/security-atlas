@@ -561,6 +561,73 @@ func (q *Queries) ListExceptionsByControl(ctx context.Context, arg ListException
 	return items, nil
 }
 
+const listExceptionsByControlAsOf = `-- name: ListExceptionsByControlAsOf :many
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
+FROM exceptions
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND activated_at <= $3::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > $3::timestamptz)
+ORDER BY expires_at ASC, id ASC
+`
+
+type ListExceptionsByControlAsOfParams struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	ControlID pgtype.UUID        `json:"control_id"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+// #3037: the control's exceptions as they stood at a past instant, for a
+// replay of that instant. Activated by then and not revoked by then; the
+// evaluator applies the [effective_from, expires_at) window itself, so an
+// exception expired since is still in force at an instant before its
+// expires_at. This reconstruction holds because effective_from and
+// expires_at never change after activation (#2526); oscal/excepted.go's
+// inForceAt applies the same rule.
+func (q *Queries) ListExceptionsByControlAsOf(ctx context.Context, arg ListExceptionsByControlAsOfParams) ([]Exception, error) {
+	rows, err := q.db.Query(ctx, listExceptionsByControlAsOf, arg.TenantID, arg.ControlID, arg.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Exception
+	for rows.Next() {
+		var i Exception
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.CompensatingControls,
+			&i.RequestedBy,
+			&i.RequestedAt,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.DeniedBy,
+			&i.DeniedAt,
+			&i.ActivatedBy,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.ExpiredAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiringExceptions = `-- name: ListExpiringExceptions :many
 SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 FROM exceptions

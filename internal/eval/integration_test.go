@@ -1118,6 +1118,160 @@ func TestEvaluateControl_ExceptedThenExpiryReturnsToNormal(t *testing.T) {
 	}
 }
 
+// ===== #3037: a replay applies the exceptions in force at its horizon =====
+
+// seedActiveException inserts an active exception activated at activatedAt
+// with an [effectiveFrom, expiresAt) window, and returns its id so the test
+// can revoke or expire it later.
+func seedActiveException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, effectiveFrom, activatedAt, expiresAt time.Time) uuid.UUID {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM exceptions WHERE tenant_id = $1`, tenant)
+	})
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO exceptions (
+			id, tenant_id, control_id, scope_cell_predicate, justification,
+			requested_by, requested_at, approved_by, approved_at,
+			activated_by, activated_at, effective_from, expires_at, status
+		)
+		VALUES ($1, $2, $3, '{}'::jsonb, 'test waiver',
+		        'requester', $4, 'approver', $4,
+		        'approver', $4, $5, $6, 'active')
+	`, id, tenant, ctrlID, activatedAt, effectiveFrom, expiresAt); err != nil {
+		t.Fatalf("seed exception: %v", err)
+	}
+	return id
+}
+
+// The replay of T reproduces the result recorded at T, whatever happens to
+// the control's exceptions after T: one granted after T (with an
+// effective_from backdated before T), one revoked after T, and one the
+// expiry cron flipped after T. Live evaluation sees each change.
+func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+	eng := newEngine(app)
+
+	prod := seedScopeCellEnv(t, admin, tenant, "prod", "prod")
+	now := time.Now().UTC()
+
+	type control struct {
+		name   string
+		id     uuid.UUID
+		change func(t *testing.T)
+		// live is the result a live evaluation gives after the change.
+		live string
+	}
+	newControl := func() uuid.UUID {
+		id := seedControl(t, admin, tenant, "automated", "monthly", "")
+		seedEvidence(t, admin, tenant, id, "fail", now.Add(-24*time.Hour))
+		return id
+	}
+	exec := func(t *testing.T, sql string, args ...any) {
+		t.Helper()
+		if _, err := admin.Exec(context.Background(), sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+
+	granted := newControl()
+	revoked := newControl()
+	revokedEx := seedActiveException(t, admin, tenant, revoked, now.Add(-2*time.Hour), now.Add(-2*time.Hour), now.Add(30*24*time.Hour))
+	expired := newControl()
+	// In force at T, and past its expires_at by the time the cron runs.
+	expiresAt := now.Add(2 * time.Second)
+	expiredEx := seedActiveException(t, admin, tenant, expired, now.Add(-2*time.Hour), now.Add(-2*time.Hour), expiresAt)
+
+	controls := []control{
+		{
+			name: "granted after T, effective_from backdated before T",
+			id:   granted,
+			change: func(t *testing.T) {
+				seedActiveException(t, admin, tenant, granted, now.Add(-2*time.Hour), time.Now().UTC(), now.Add(30*24*time.Hour))
+			},
+			live: eval.ResultExcepted,
+		},
+		{
+			name: "revoked after T",
+			id:   revoked,
+			change: func(t *testing.T) {
+				exec(t, `UPDATE exceptions SET status = 'revoked', revoked_by = 'approver', revoked_at = now() WHERE id = $1`, revokedEx)
+			},
+			live: eval.ResultFail,
+		},
+		{
+			name: "expired after T",
+			id:   expired,
+			change: func(t *testing.T) {
+				// ExpireActiveExceptionsBefore's write, once expires_at has passed.
+				time.Sleep(time.Until(expiresAt) + 50*time.Millisecond)
+				exec(t, `UPDATE exceptions SET status = 'expired', expired_at = now() WHERE id = $1 AND status = 'active' AND expires_at < now()`, expiredEx)
+				var status string
+				if err := admin.QueryRow(context.Background(), `SELECT status FROM exceptions WHERE id = $1`, expiredEx).Scan(&status); err != nil || status != "expired" {
+					t.Fatalf("expire exception: status = %q, %v", status, err)
+				}
+			},
+			live: eval.ResultFail,
+		},
+	}
+
+	// Record the result at T: a live evaluation, whose evaluated_at is T.
+	original := map[uuid.UUID]eval.State{}
+	for _, c := range controls {
+		if _, err := eng.EvaluateControl(ctx, c.id, eval.TriggerManual, eval.FarFuture); err != nil {
+			t.Fatalf("%s: EvaluateControl at T: %v", c.name, err)
+		}
+		states, err := eng.ControlState(ctx, c.id, "", eval.FarFuture)
+		if err != nil || len(states) != 1 || *states[0].ScopeCellID != prod {
+			t.Fatalf("%s: ControlState at T = %+v, %v", c.name, states, err)
+		}
+		original[c.id] = states[0]
+	}
+	if got := original[granted].Result; got != eval.ResultFail {
+		t.Fatalf("granted: result at T = %q, want fail", got)
+	}
+	if got := original[revoked].Result; got != eval.ResultExcepted {
+		t.Fatalf("revoked: result at T = %q, want excepted", got)
+	}
+	if got := original[expired].Result; got != eval.ResultExcepted {
+		t.Fatalf("expired: result at T = %q, want excepted", got)
+	}
+
+	for _, c := range controls {
+		c.change(t)
+	}
+
+	for _, c := range controls {
+		at := original[c.id].EvaluatedAt
+		if _, err := eng.EvaluateControl(ctx, c.id, eval.TriggerReplay, at); err != nil {
+			t.Fatalf("%s: replay of T: %v", c.name, err)
+		}
+		states, err := eng.ControlState(ctx, c.id, "", eval.FarFuture)
+		if err != nil || len(states) != 1 {
+			t.Fatalf("%s: ControlState after replay = %+v, %v", c.name, states, err)
+		}
+		got, want := states[0], original[c.id]
+		if got.Trigger != eval.TriggerReplay {
+			t.Fatalf("%s: latest row trigger = %q, want replay", c.name, got.Trigger)
+		}
+		if got.Result != want.Result || got.FreshnessStatus != want.FreshnessStatus {
+			t.Errorf("%s: replay of T = (%s, %s), recorded at T = (%s, %s)",
+				c.name, got.Result, got.FreshnessStatus, want.Result, want.FreshnessStatus)
+		}
+
+		// Live evaluation applies the exception state as it is now.
+		if _, err := eng.EvaluateControl(ctx, c.id, eval.TriggerManual, eval.FarFuture); err != nil {
+			t.Fatalf("%s: live EvaluateControl: %v", c.name, err)
+		}
+		if got := resultsByCell(ctx, t, eng, c.id)[prod]; got != c.live {
+			t.Errorf("%s: live result after the change = %q, want %q", c.name, got, c.live)
+		}
+	}
+}
+
 // A connector can never push `excepted`: it is a property of an evaluation,
 // not of evidence.
 func TestEvidenceLedger_RejectsExceptedResult(t *testing.T) {

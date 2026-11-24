@@ -100,7 +100,7 @@ var stateSteps = map[string]func(s *stateScenario){
 func (s *stateScenario) evaluate(t *testing.T) string {
 	t.Helper()
 	meta := controlMeta{id: uuid.New(), freshnessClass: "monthly"}
-	row, err := (&Engine{}).computeRow(context.Background(), nil, meta, s.records, s.exceptions, nil, uuid.New(), "test", s.now, s.now)
+	row, err := (&Engine{}).computeRow(context.Background(), nil, meta, s.records, s.exceptions, nil, uuid.New(), "test", s.now)
 	if err != nil {
 		t.Fatalf("computeRow: %v", err)
 	}
