@@ -88,7 +88,7 @@ cd /Users/gmoney/Development/security-atlas-070 && sed -n "226,246p" internal/au
 			EvidenceRecordIDs:  pgUUIDsToUUIDs(evIDs),
 ```
 
-`ListEvidenceIDsForPeriodHash` filters on `observed_at <= $at` — that is the freeze horizon. The post-freeze record is excluded from the hash, and also excluded from any sample population drawn against the frozen period.
+`ListEvidenceIDsForPeriodHash` filters on `observed_at <= $at AND ingested_at <= $at` — that is the freeze horizon. The post-freeze record is excluded from the hash, and also excluded from any sample population drawn against the frozen period. So is a record written to the ledger after the freeze with a backdated `observed_at`: it was not in the ledger when the period froze (#1699, [ADR 0003](../adr/0003-audit-period-freeze-hash-inputs.md)).
 
 ## 4. Perform the Freeze (SQL)
 
@@ -116,7 +116,7 @@ The `WHERE ... AND status = 'open'` guard is load-bearing: a concurrent second f
 
 ## 5. Sample Population Honors the Frozen Horizon
 
-With the period frozen at 2026-04-15T12:00Z, a sample query drawing from the population MUST exclude the 2026-05-01 record. The slice-026 query template uses `observed_at <= COALESCE(frozen_at, 'infinity')`:
+With the period frozen at 2026-04-15T12:00Z, a sample query drawing from the population MUST exclude the 2026-05-01 record. The slice-026 query template uses `observed_at <= COALESCE(frozen_at, 'infinity')`, and since #1699 the same bound on `ingested_at`. Every record in this walkthrough was ingested before the freeze, so the query below shows only the `observed_at` half:
 
 ```bash
 docker exec security-atlas-pg-030 psql -U atlas_app -d security_atlas -c "BEGIN; SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0'; SELECT substring(id::text, 1, 13) AS short_id, observed_at FROM evidence_records WHERE tenant_id = '00000000-0000-0000-0000-00000000d3a0' AND control_id = '33333333-3333-3333-3333-333333330001' AND observed_at <= '2026-04-15T12:00:00Z'::timestamptz ORDER BY observed_at; ROLLBACK;"
@@ -216,7 +216,7 @@ The freeze contract:
 | Surface                  | Behavior pre-freeze                   | Behavior post-freeze                                                                      |
 | ------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `audit_periods` row      | `status=open`, all freeze fields NULL | `status=frozen`, `frozen_at`, `frozen_by`, `frozen_hash` set                              |
-| Sample populations       | Drawn against the full ledger         | Drawn only from `observed_at <= frozen_at` (section 5)                                    |
+| Sample populations       | Drawn against the full ledger         | Drawn only from `observed_at` and `ingested_at <= frozen_at` (section 5)                  |
 | Live evaluation          | Drawn against the full ledger         | Drawn against the full ledger — unchanged (section 6)                                     |
 | Re-freeze                | Allowed (and runs the UPDATE)         | Rejected via `status=open` guard; writes `freeze_rejected_already_frozen` row (section 8) |
 | `audit_period_audit_log` | Empty for this period                 | One `period_frozen` row recording who/when/hash (section 7)                               |

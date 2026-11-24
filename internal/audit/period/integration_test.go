@@ -19,15 +19,20 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidencesummary"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Slice 435 / 742: the pool/DSN/tenant-seed/tenant-context boilerplate this
@@ -607,6 +612,59 @@ func TestFreeze_LateIngestedBackdatedEvidenceStaysOut(t *testing.T) {
 		if id == late {
 			t.Fatalf("frozen population includes the record ingested after the freeze")
 		}
+	}
+
+	// The population count under the frozen horizon. CountPopulationEvidence
+	// has no Store caller, so it is read directly, as the app role.
+	var count int64
+	err = func() error {
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+			return err
+		}
+		count, err = dbx.New(tx).CountPopulationEvidence(ctx, dbx.CountPopulationEvidenceParams{
+			TenantID:     pgtype.UUID{Bytes: uuid.MustParse(tenant), Valid: true},
+			ControlID:    pgtype.UUID{Bytes: ctrlID, Valid: true},
+			ObservedAt:   pgtype.Timestamptz{Time: windowStart, Valid: true},
+			ObservedAt_2: pgtype.Timestamptz{Time: windowStart.Add(48 * time.Hour), Valid: true},
+			UnboundKinds: []string{},
+			FrozenAt:     pgtype.Timestamptz{Time: frozenAt, Valid: true},
+		})
+		return err
+	}()
+	if err != nil {
+		t.Fatalf("CountPopulationEvidence: %v", err)
+	}
+	if count != 11 {
+		t.Fatalf("frozen population count: %d, want 11", count)
+	}
+
+	// The frozen-period evidence summary: its "of M" count and its citation
+	// resolver, which reads the whole frozen population.
+	summaries := evidencesummary.NewPeriodStore(app)
+	set, err := summaries.PeriodEvidenceSet(ctx, ctrlID, p.ID)
+	if err != nil {
+		t.Fatalf("PeriodEvidenceSet: %v", err)
+	}
+	if set.TotalCount != 11 {
+		t.Fatalf("frozen evidence summary: total %d, want 11", set.TotalCount)
+	}
+	if _, ok, err := summaries.ResolveBeforeHorizon(ctx, late, ctrlID, frozenAt); err != nil || ok {
+		t.Fatalf("frozen evidence summary resolves the late record: ok=%v err=%v, want false", ok, err)
+	}
+
+	// The auditor authz hydrator: the late record belongs to no frozen
+	// period, so an auditor scoped to p cannot open it.
+	scope, found, err := auditStore.EvidencePeriods(ctx, late)
+	if err != nil || !found {
+		t.Fatalf("EvidencePeriods(late): found=%v err=%v", found, err)
+	}
+	if slices.Contains(scope.Periods, p.ID) {
+		t.Fatalf("EvidencePeriods(late) lists the frozen period %s: %v", p.ID, scope.Periods)
 	}
 
 	// Recompute frozen_hash at the same horizon: the admin reopens the period
