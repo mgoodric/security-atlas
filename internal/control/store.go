@@ -109,9 +109,8 @@ const (
 )
 
 // rebindAnchor handles an unchanged manifest whose SCF code now resolves to
-// a different
-// anchor row than the active row's: a new SCF release minted a new row for
-// the code (#1768). Matt's call (#1971 D3): move the control only when the
+// a different anchor row than the active row's: a new SCF release minted a
+// new row for the code (#1768). Matt's call (#1971 D3): move the control only when the
 // new row has the same code AND the same title as the old one, i.e. the
 // meaning did not change. Otherwise the control stays where it is and is
 // reported as needing re-anchoring, never silently re-pointed.

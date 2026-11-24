@@ -3614,7 +3614,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); all or nothing unless ?partial=true; bad rows reported by row and reason */
+        /** POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); every row names its scf_release (a CSV needs the column, */
         post: operations["post-v1-mapping-overlays-import"];
         delete?: never;
         options?: never;

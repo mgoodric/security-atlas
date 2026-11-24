@@ -4367,7 +4367,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/mapping-overlays/import:
     post:
-      summary: POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); all or nothing unless ?partial=true; bad rows reported by row and reason
+      summary: POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); every row names its scf_release (a CSV needs the column, #1774); all or nothing unless ?partial=true; bad rows reported by row and reason
       tags: [mapping-overlays]
       operationId: post-v1-mapping-overlays-import
       security:
