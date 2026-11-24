@@ -56,7 +56,7 @@ export function isDraft(p: Pick<Policy, "status">): boolean {
   return p.status === "draft";
 }
 
-/** #2852 — a policy synced from Confluence. Its text, version and review
+/** #2852 — a policy synced from its source (Confluence, SharePoint). Its text, version and review
  *  date come from its page and are read-only here; only its control links
  *  and acknowledgments change in the tool. */
 export function isSynced(
@@ -69,6 +69,8 @@ export function isSynced(
  *  and date the page records, not an approval made in this app, so the
  *  line says where it was approved. Null for a policy that is not synced. */
 export type SyncedPolicyView = {
+  /** #2837 — the system the policy is synced from, e.g. "SharePoint". */
+  source: string;
   sourceHref: string | null;
   approval: string | null;
   drift: { detectedAt: string } | null;
@@ -85,14 +87,19 @@ export function syncedPolicyView(
     | "historical_approved_at"
     | "sync_drift"
     | "sync_property_drift"
+    | "sync_source"
   >,
 ): SyncedPolicyView | null {
   if (!isSynced(p)) return null;
+  // #2837 — named by the API from the policy's sync site. A response
+  // without it predates the field, when Confluence was the only source.
+  const source = p.sync_source?.trim() || "Confluence";
   const name = p.historical_approver_name?.trim();
   const on = p.historical_approved_at ? ` on ${p.historical_approved_at}` : "";
   return {
+    source,
     sourceHref: safeHttpUrl(p.source_url),
-    approval: name ? `Approved in Confluence by ${name}${on}` : null,
+    approval: name ? `Approved in ${source} by ${name}${on}` : null,
     drift: p.sync_drift ? { detectedAt: p.sync_drift.detected_at } : null,
     propertyDrift: p.sync_property_drift?.keys.length
       ? {

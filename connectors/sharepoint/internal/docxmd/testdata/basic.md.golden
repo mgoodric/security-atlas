@@ -1,0 +1,28 @@
+# Access Control Policy
+
+# 1. Purpose
+
+This policy sets out **who may** access *production*, and ~~never~~ how.
+
+Not bold. Spaces and a tab.
+
+Literal \*stars\*, \_underscores\_, \[brackets\], \`ticks\`, \~tilde\~ and a \\ backslash \<tag>.
+
+1\. Not a list item.
+
+\# Not a heading.
+
+Line one\
+line two after a page break.
+
+## Changes
+
+Kept inserted text.
+
+Page 3 of the policy.
+
+### Links
+
+See [the standards](<https://example.com/standards (v2)>), the purpose, a script link and [security@example.com](mailto:security@example.com).
+
+Owner: Security team

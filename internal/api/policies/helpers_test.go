@@ -254,6 +254,33 @@ func TestWriteTransitionErr(t *testing.T) {
 	}
 }
 
+// #2837: the 409 names the system the policy is synced from.
+func TestWriteManagedBySyncNamesSource(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&policy.ManagedBySyncError{Source: policy.SyncSourceSharePoint}, "managed in SharePoint: "},
+		{fmt.Errorf("x: %w", &policy.ManagedBySyncError{Source: policy.SyncSourceConfluence}), "managed in Confluence: "},
+		{policy.ErrManagedBySync, "managed in Confluence: "},
+	} {
+		rec := httptest.NewRecorder()
+		if !writeManagedBySync(rec, tc.err) {
+			t.Fatalf("writeManagedBySync(%v) = false", tc.err)
+		}
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("writeManagedBySync(%v) = %d %s, want 409 containing %q", tc.err, rec.Code, rec.Body.String(), tc.want)
+		}
+	}
+	if writeManagedBySync(httptest.NewRecorder(), errors.New("other")) {
+		t.Fatal("writeManagedBySync(other) = true")
+	}
+	if got := managedBySyncMsg(""); !strings.HasPrefix(got, "managed in Confluence: ") {
+		t.Fatalf("managedBySyncMsg(\"\") = %q", got)
+	}
+}
+
 // TestActorOf pins #1807's identity rule: two JWT sessions of one user, and
 // a key bound to that user, are one actor, so the submitter cannot approve
 // from a second session or through their key.
