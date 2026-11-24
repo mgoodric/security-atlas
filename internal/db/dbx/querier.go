@@ -3833,6 +3833,12 @@ type Querier interface {
 	// the import takes it as its first statement. Namespace 14 is
 	// advisorylock.TenantEvidenceFreeze.
 	LockTenantEvidenceFreeze(ctx context.Context, tenantID pgtype.UUID) error
+	// #3038: the shared mode of LockTenantEvidenceFreeze, which every live
+	// ingest takes just before it inserts a ledger row and holds to commit.
+	// Ingests do not block each other; a freeze waits until every ingest that
+	// holds it has committed, so it hashes with their rows in view. Run
+	// CountPeriodsFrozenSinceTxStart after it, as its own statement.
+	LockTenantEvidenceFreezeShared(ctx context.Context, tenantID pgtype.UUID) error
 	// #2329: serialize every routing write in one tenant (Set and Clear), so the
 	// before value an audit row records is the state the write replaced. A row
 	// lock alone cannot do this: while the tenant has no row, FOR UPDATE locks
