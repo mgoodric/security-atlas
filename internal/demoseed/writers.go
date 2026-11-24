@@ -371,11 +371,11 @@ func writeAuditPeriodsAndSamples(ctx context.Context, tx pgx.Tx, fs *fixtureSet)
 			 (id, tenant_id, control_id, scope_predicate, time_window_start,
 			  time_window_end, frozen_at, audit_period_id, created_by, row_count)
 			 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)`,
-			popID, fs.tenant.ID, fs.controls[i%len(fs.controls)].ID,
+			popID, fs.tenant.ID, ap.ControlID,
 			`{"op":"true"}`,
 			ap.PeriodStart, ap.PeriodEnd,
 			ap.FrozenAt, ap.ID, fs.user.Email,
-			samplesPerPeriod,
+			ap.RowCount,
 		)
 		if err != nil {
 			return 0, 0, 0, 0, fmt.Errorf("demoseed: insert population: %w", err)
