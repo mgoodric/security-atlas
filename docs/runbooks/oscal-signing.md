@@ -22,8 +22,14 @@ assembles a bundle (`ssp.json`, `assessment-plan.json`,
 **deterministic digest** of it:
 
 - The digest is the sha256 over the sorted `filename:memberhash` lines of
-  every member. It changes if **any** member's bytes change, so a
-  post-export tamper is detected on verification.
+  every member, plus a `freeze_revision:<n>:<revision_hash>` line when the
+  manifest carries `freeze_revision` (every bundle exported since #1742).
+  Each line is hashed with a trailing newline. The digest changes if
+  **any** member's bytes change, or if the bundle is relabelled with
+  another freeze revision, so a post-export tamper is detected on
+  verification. `amend_reason` and `amended_by_import` are informational
+  and not signed. The stock-tools recipe is in
+  `docs-site/docs/audit/verify-export.md` (Step 1).
 - The signature is recorded in `manifest.json` under `signature`, which
   now carries a **`mode`** field (`embedded-ed25519` or `cosign-kms`) so
   a verifier knows which validation path to run.
@@ -165,7 +171,9 @@ atlas oscal verify <bundle-dir>
 
 This is the value Phase 1 delivers: an auditor verifies with **stock
 cosign**, no atlas-specific tooling. Recompute the bundle digest (sorted
-`filename:memberhash` lines, sha256) — or use `atlas oscal verify` — then:
+`filename:memberhash` lines plus the `freeze_revision:<n>:<revision_hash>`
+line when present, sha256; see `docs-site/docs/audit/verify-export.md`
+Step 1) — or use `atlas oscal verify` — then:
 
 ```bash
 cosign verify-blob \

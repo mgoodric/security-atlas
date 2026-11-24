@@ -280,7 +280,9 @@ func (h *Handler) Freeze(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	p, err := h.store.Freeze(ctx, id, cred.ID, time.Now().UTC())
+	// A zero time: Freeze stamps frozen_at from the database clock once it
+	// holds the tenant's evidence-freeze lock (#1742).
+	p, err := h.store.Freeze(ctx, id, cred.ID, time.Time{})
 	if err != nil {
 		switch {
 		case errors.Is(err, period.ErrNotFound):

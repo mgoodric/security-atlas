@@ -244,21 +244,38 @@ func frameworkLabel(name, version *string) string {
 // and stamps frozen_at on any populations already attached to the period.
 // Re-freezing a frozen row returns ErrAlreadyFrozen. (AC-2 + AC-6 + AC-7)
 //
-// The `at` parameter is the wall-clock moment of the freeze event. It is
-// persisted in audit_periods.frozen_at and the period's audit log but is
-// NOT included in the hash inputs (see ADR 0003).
+// The `at` parameter is the moment of the freeze event. It is persisted in
+// audit_periods.frozen_at and the period's audit log but is NOT included in
+// the hash inputs (see ADR 0003). A zero `at` (the HTTP handler's call) is
+// stamped from the database clock once the tenant's evidence-freeze lock is
+// held (#1742): every row committed before the lock was granted has an
+// ingested_at before it, and an import still waiting on the lock refuses
+// and retries because this frozen_at is after its transaction start. An
+// explicit `at` (tests and replays of a past instant) is used as given.
 func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at time.Time) (Period, error) {
 	if frozenBy == "" {
 		return Period{}, fmt.Errorf("auditperiod: frozen_by must be non-empty")
 	}
-	if at.IsZero() {
-		at = time.Now().UTC()
-	} else {
-		at = at.UTC()
-	}
+	at = at.UTC()
 
 	var out Period
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// #1742: serialise against a historical evidence import in this
+		// tenant before reading anything the hash covers. An import's rows
+		// carry ingested_at = its transaction start but stay invisible until
+		// it commits, so a hash taken while one is open would leave out rows
+		// the frozen reads later admit.
+		if err := q.LockTenantEvidenceFreeze(ctx, pgUUID(tenantID)); err != nil {
+			return fmt.Errorf("lock tenant evidence freeze: %w", err)
+		}
+		if at.IsZero() {
+			now, err := q.DBClockNow(ctx)
+			if err != nil {
+				return fmt.Errorf("database clock: %w", err)
+			}
+			at = now.Time.UTC()
+		}
+
 		// Resolve current state first so we can give a clean
 		// ErrAlreadyFrozen rather than a "zero rows updated" generic
 		// error. The state read is in the same transaction so the
@@ -289,15 +306,6 @@ func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at ti
 				_ = s.writeRejectionLog(ctx, tenantID, alreadyFrozenID, frozenBy)
 			}()
 			return ErrAlreadyFrozen
-		}
-
-		// #1742: serialise against a historical evidence import in this
-		// tenant before hashing. An import's rows carry ingested_at = its
-		// transaction start but stay invisible until it commits, so a hash
-		// taken while one is open would leave out rows the frozen reads
-		// later admit.
-		if err := q.LockTenantEvidenceFreeze(ctx, pgUUID(tenantID)); err != nil {
-			return fmt.Errorf("lock tenant evidence freeze: %w", err)
 		}
 
 		// #2078: serialise against framework-scope activation on this

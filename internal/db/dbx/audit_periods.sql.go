@@ -118,6 +118,20 @@ func (q *Queries) CreateAuditPeriod(ctx context.Context, arg CreateAuditPeriodPa
 	return i, err
 }
 
+const dBClockNow = `-- name: DBClockNow :one
+SELECT clock_timestamp()::timestamptz AS now
+`
+
+// #1742: the database's current time (clock_timestamp, not the transaction
+// start), which Freeze stamps as frozen_at once it holds
+// LockTenantEvidenceFreeze, so frozen_at and ingested_at share one clock.
+func (q *Queries) DBClockNow(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, dBClockNow)
+	var now pgtype.Timestamptz
+	err := row.Scan(&now)
+	return now, err
+}
+
 const freezeAuditPeriod = `-- name: FreezeAuditPeriod :one
 UPDATE audit_periods
 SET status      = 'frozen',
@@ -325,44 +339,6 @@ func (q *Queries) ListAmendedEvidenceIDsForPeriod(ctx context.Context, arg ListA
 			return nil, err
 		}
 		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAmendedEvidenceIDsForPopulation = `-- name: ListAmendedEvidenceIDsForPopulation :many
-SELECT DISTINCT unnest(r.evidence_record_ids)::uuid AS evidence_record_id
-FROM audit_period_freeze_revisions r
-JOIN populations p
-  ON p.tenant_id = r.tenant_id AND p.audit_period_id = r.audit_period_id
-WHERE r.tenant_id = $1
-  AND p.id        = $2
-ORDER BY evidence_record_id
-`
-
-type ListAmendedEvidenceIDsForPopulationParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	ID       pgtype.UUID `json:"id"`
-}
-
-// #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
-// period a population is attached to. Empty when the population has no
-// period or the period was never amended.
-func (q *Queries) ListAmendedEvidenceIDsForPopulation(ctx context.Context, arg ListAmendedEvidenceIDsForPopulationParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listAmendedEvidenceIDsForPopulation, arg.TenantID, arg.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []pgtype.UUID
-	for rows.Next() {
-		var evidence_record_id pgtype.UUID
-		if err := rows.Scan(&evidence_record_id); err != nil {
-			return nil, err
-		}
-		items = append(items, evidence_record_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

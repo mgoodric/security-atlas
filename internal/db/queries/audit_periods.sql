@@ -240,18 +240,6 @@ WHERE tenant_id       = $1
   AND revision       <= sqlc.arg(max_revision)::int
 ORDER BY id;
 
--- name: ListAmendedEvidenceIDsForPopulation :many
--- #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
--- period a population is attached to. Empty when the population has no
--- period or the period was never amended.
-SELECT DISTINCT unnest(r.evidence_record_ids)::uuid AS evidence_record_id
-FROM audit_period_freeze_revisions r
-JOIN populations p
-  ON p.tenant_id = r.tenant_id AND p.audit_period_id = r.audit_period_id
-WHERE r.tenant_id = $1
-  AND p.id        = $2
-ORDER BY evidence_record_id;
-
 -- name: ListPeriodsAmendedWithEvidence :many
 -- #1742: the frozen periods a freeze revision added evidence record
 -- evidence_record_id to. The auditor authz hydrator reads it: such a record
@@ -293,3 +281,9 @@ FROM populations p
 JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
 WHERE p.tenant_id = $1
   AND p.id        = $2;
+
+-- name: DBClockNow :one
+-- #1742: the database's current time (clock_timestamp, not the transaction
+-- start), which Freeze stamps as frozen_at once it holds
+-- LockTenantEvidenceFreeze, so frozen_at and ingested_at share one clock.
+SELECT clock_timestamp()::timestamptz AS now;

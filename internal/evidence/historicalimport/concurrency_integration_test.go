@@ -71,40 +71,62 @@ func TestImport_FreezeBetweenBeginAndLockRetries(t *testing.T) {
 	f.assertRevision1Replays(t, p.ID)
 }
 
-// B1: a freeze that starts while an import's transaction holds the tenant
-// lock waits for the import to commit, then hashes with the imported rows
-// in view, so its frozen_hash replays.
+// waitForAdvisoryLockWaiter blocks until some session is waiting on an
+// advisory lock in namespace 14 (advisorylock.TenantEvidenceFreeze): the
+// freeze under test has reached the lock the open import holds.
+func (f *fixture) waitForAdvisoryLockWaiter(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		n := f.count(t, `SELECT count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND classid = 14 AND NOT granted`)
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("no session waited on the tenant evidence-freeze lock")
+}
+
+// B1, and review S2/N-B: a freeze that starts while an import's transaction
+// holds the tenant lock waits for the import to commit. It then stamps
+// frozen_at from the database clock and hashes with the imported rows in
+// view: its period_frozen log counts them, and its frozen_hash replays.
 func TestImport_FreezeDuringOpenImportWaits(t *testing.T) {
 	f := setup(t)
 	p := f.openPeriod(t, "FY26 H1", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))
-	type result struct {
-		at  time.Time
-		err error
-	}
-	done := make(chan result, 1)
+	done := make(chan error, 1)
 	historicalimport.SetTestHooks(f.importer, nil, func(attempt int) {
 		if attempt != 1 {
 			return
 		}
 		go func() {
 			_, err := f.periods.Freeze(f.ctx, p.ID, "key_test_1742", time.Time{})
-			done <- result{time.Now(), err}
+			done <- err
 		}()
-		// Give the freeze time to reach the lock while the import is open.
-		time.Sleep(500 * time.Millisecond)
+		// Deterministic: return only once the freeze is blocked on the lock
+		// this open import holds.
+		f.waitForAdvisoryLockWaiter(t)
+		select {
+		case err := <-done:
+			t.Fatalf("freeze finished while the import held the lock: %v", err)
+		default:
+		}
 	})
 	if _, err := f.importer.Import(context.Background(), f.adminCred(), historicalimport.Request{
 		Source: "s", Records: []*evidencev1.EvidenceRecord{f.attestation(t, time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC))},
 	}); err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	importDone := time.Now()
-	r := <-done
-	if r.err != nil {
-		t.Fatalf("Freeze: %v", r.err)
+	if err := <-done; err != nil {
+		t.Fatalf("Freeze: %v", err)
 	}
-	if r.at.Before(importDone.Add(-100 * time.Millisecond)) {
-		t.Fatalf("freeze finished %s before the import committed; it did not wait for the lock", importDone.Sub(r.at))
+	// The freeze's evidence set counts every row in the tenant's ledger,
+	// the imported one included.
+	total := f.evidenceCount(t)
+	if n := f.count(t, `SELECT (detail->>'evidence_n')::int FROM audit_period_audit_log
+		WHERE tenant_id = $1 AND audit_period_id = $2 AND action = 'period_frozen'`, f.tenant, p.ID); n != total || total != 1 {
+		t.Fatalf("period_frozen evidence_n = %d, tenant evidence rows = %d; want the imported row counted", n, total)
 	}
 	f.assertRevision1Replays(t, p.ID)
 }

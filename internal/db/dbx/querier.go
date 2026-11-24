@@ -599,6 +599,10 @@ type Querier interface {
 	// slice 036 store does the same re-compute; both writes use the same
 	// hash so verification is symmetric).
 	CreateWalkthroughAttachment(ctx context.Context, arg CreateWalkthroughAttachmentParams) (WalkthroughAttachment, error)
+	// #1742: the database's current time (clock_timestamp, not the transaction
+	// start), which Freeze stamps as frozen_at once it holds
+	// LockTenantEvidenceFreeze, so frozen_at and ingested_at share one clock.
+	DBClockNow(ctx context.Context) (pgtype.Timestamptz, error)
 	// Transition: active -> inactive. Stops new firings; historical meta-risks
 	// are untouched. activated_by / activated_at are intentionally PRESERVED
 	// (not cleared) so the activation-coherent CHECK still holds for an
@@ -2067,10 +2071,6 @@ type Querier interface {
 	// frozen period's population. Pass max_revision = 2147483647 for the latest
 	// revision. Sorted, so the result feeds the ADR 0003 hash directly.
 	ListAmendedEvidenceIDsForPeriod(ctx context.Context, arg ListAmendedEvidenceIDsForPeriodParams) ([]pgtype.UUID, error)
-	// #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
-	// period a population is attached to. Empty when the population has no
-	// period or the period was never amended.
-	ListAmendedEvidenceIDsForPopulation(ctx context.Context, arg ListAmendedEvidenceIDsForPopulationParams) ([]pgtype.UUID, error)
 	// Slice 008: UCF graph traversal queries.
 	//
 	// All traversals go through the SCF anchor spine (constitutional invariant 1

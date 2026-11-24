@@ -32,7 +32,8 @@ in the current audit period.
 - **One at a time with freezes.** An import and a freeze in the same tenant
   wait for each other. If a period is frozen while an import is starting, the
   import retries; if that keeps happening it fails with `concurrent_freeze`
-  and writes nothing, and you can run it again.
+  and writes nothing, and you can run it again. A `concurrent_freeze`
+  refusal writes no evidence audit-log row: no record was processed.
 - **The normal pipeline.** Every record is schema-validated, kind-scoped,
   redacted and hashed like a pushed record. The past skew limit is lifted;
   a record more than 24 hours in the **future** is still refused.
@@ -159,7 +160,9 @@ Each named period is re-frozen as a **new freeze revision**:
 - The OSCAL export bundle's `manifest.json` carries `freeze_revision`,
   `revision_hash`, `amended_by_import` and `amend_reason`. The revision and
   its hash are covered by the bundle signature, so an export taken before an
-  amendment and one taken after are told apart.
+  amendment and one taken after are told apart. `amend_reason` and
+  `amended_by_import` are informational: they are not signed, and the
+  period's audit log is the record of the reason.
 
 Tell your auditor before you amend a period they are already working in:
 the population they sample from grows.

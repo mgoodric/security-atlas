@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/sample"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
@@ -274,7 +275,28 @@ func (s *Store) DrawSample(ctx context.Context, in DrawSampleInput) (Sample, err
 			return fmt.Errorf("get population for sample: %w", err)
 		}
 
-		ids, err := resolvePopulationEvidenceIDsFromRow(ctx, q, tenantID, pop)
+		// #1742: read the freeze revision of the population's period first
+		// and draw from exactly that revision, so the label recorded on the
+		// sample is the population it was drawn from even if an amendment
+		// commits while the draw runs. Revisions are append-only, so the
+		// records of revisions <= N do not change after N is read.
+		var freezeRev *int32
+		rev, err := q.GetPopulationFreezeRevision(ctx, dbx.GetPopulationFreezeRevisionParams{
+			TenantID: pgUUID(tenantID), ID: pop.ID,
+		})
+		switch {
+		case err == nil:
+			if rev.Status == "frozen" {
+				freezeRev = &rev.FreezeRevision
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("population freeze revision: %w", err)
+		}
+		if drawSampleAfterRevision != nil {
+			drawSampleAfterRevision()
+		}
+
+		ids, err := resolvePopulationEvidenceIDsFromRow(ctx, q, tenantID, pop, freezeRev)
 		if err != nil {
 			return err
 		}
@@ -293,21 +315,6 @@ func (s *Store) DrawSample(ctx context.Context, in DrawSampleInput) (Sample, err
 		drawn, err := sample.Sample(ids, in.N, in.Seed)
 		if err != nil {
 			return fmt.Errorf("sample: %w", err)
-		}
-		// #1742: record which freeze revision of the population's period
-		// the draw used, so the same seed reproduces it after a later
-		// amendment and an auditor sees which revision it came from.
-		var freezeRev *int32
-		rev, err := q.GetPopulationFreezeRevision(ctx, dbx.GetPopulationFreezeRevisionParams{
-			TenantID: pgUUID(tenantID), ID: pop.ID,
-		})
-		switch {
-		case err == nil:
-			if rev.Status == "frozen" {
-				freezeRev = &rev.FreezeRevision
-			}
-		case !errors.Is(err, pgx.ErrNoRows):
-			return fmt.Errorf("population freeze revision: %w", err)
 		}
 
 		sampleID := uuid.New()
@@ -518,11 +525,17 @@ func resolvePopulationEvidenceIDs(
 	return applyScopeFilter(ctx, q, tenantID, predicate, rows)
 }
 
+// drawSampleAfterRevision is a test seam (export_test.go): it runs inside
+// DrawSample between reading the freeze revision and reading the
+// population. Nil in production.
+var drawSampleAfterRevision func()
+
 // resolvePopulationEvidenceIDsFromRow is the DrawSample-time equivalent:
 // honors the population's persisted frozen_at horizon (which is NULL until
-// slice 028 ships).
+// slice 028 ships). freezeRev is the revision of the population's frozen
+// period to draw from (#1742); nil for no frozen period.
 func resolvePopulationEvidenceIDsFromRow(
-	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population,
+	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population, freezeRev *int32,
 ) ([]uuid.UUID, error) {
 	// A population created or frozen before the routing cutover draws from
 	// exactly the records it drew from before (#2924).
@@ -530,17 +543,14 @@ func resolvePopulationEvidenceIDsFromRow(
 	if err != nil {
 		return nil, err
 	}
-	// A frozen period amended by a historical import draws from its latest
-	// freeze revision: the original horizon plus the records each revision
+	// A frozen period amended by a historical import draws from revision
+	// freezeRev: the original horizon plus the records revisions 2..freezeRev
 	// added (#1742).
 	var amended []pgtype.UUID
-	if pop.FrozenAt.Valid {
-		amended, err = q.ListAmendedEvidenceIDsForPopulation(ctx, dbx.ListAmendedEvidenceIDsForPopulationParams{
-			TenantID: pop.TenantID,
-			ID:       pop.ID,
-		})
+	if pop.FrozenAt.Valid && freezeRev != nil && pop.AuditPeriodID.Valid {
+		amended, err = period.AmendedIDs(ctx, q, pop.TenantID, pop.AuditPeriodID, int(*freezeRev))
 		if err != nil {
-			return nil, fmt.Errorf("list amended evidence for population: %w", err)
+			return nil, err
 		}
 	}
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{

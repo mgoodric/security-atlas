@@ -49,16 +49,14 @@
 ALTER TABLE evidence_records
     DROP CONSTRAINT evidence_records_ingestion_path_chk;
 
--- NOT VALID, then VALIDATE: the ADD takes ACCESS EXCLUSIVE only briefly,
--- and the full-ledger scan runs under SHARE UPDATE EXCLUSIVE, which does
--- not block ingest.
+-- Re-adding the CHECK scans the whole ledger under the ACCESS EXCLUSIVE lock
+-- the DROP took, so ingest waits for the scan. NOT VALID + VALIDATE would
+-- not help here: deploy/docker/bootstrap/migrate.sh runs each file with
+-- psql --single-transaction, so the lock is held to the end either way.
+-- On a large ledger, run this migration in a quiet window.
 ALTER TABLE evidence_records
     ADD CONSTRAINT evidence_records_ingestion_path_chk
-        CHECK (ingestion_path IN ('push', 'pull', 'subscribe', 'manual_upload', 'webhook', 'import'))
-        NOT VALID;
-
-ALTER TABLE evidence_records
-    VALIDATE CONSTRAINT evidence_records_ingestion_path_chk;
+        CHECK (ingestion_path IN ('push', 'pull', 'subscribe', 'manual_upload', 'webhook', 'import'));
 
 -- ===== 2. evidence_audit_log.import_batch_id =====
 

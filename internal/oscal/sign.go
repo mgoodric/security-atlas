@@ -140,10 +140,17 @@ func NewEphemeralSigner() (*Signer, error) {
 }
 
 // bundleDigest computes the deterministic sha256 digest of a bundle: the
-// sha256 over the sorted-by-filename concatenation of "filename:memberhash"
-// lines. Sorting makes the digest independent of member insertion order;
+// sha256 over the byte-sorted concatenation of one "filename:memberhash"
+// line per member, plus, when the bundle carries a freeze revision (every
+// bundle exported since #1742), the line
+// "freeze_revision:<n>:<revision_hash hex>". Each line is hashed followed
+// by "\n". Sorting makes the digest independent of member insertion order;
 // using each member's own content hash means the digest changes if ANY
-// member's bytes change.
+// member's bytes change, and the revision line means a bundle cannot be
+// relabelled with another revision. AmendReason is not signed.
+//
+// The stock-tools recipe in docs-site/docs/audit/verify-export.md (Step 1)
+// recomputes exactly this; TestVerifyExportRecipe runs it.
 func bundleDigest(b *Bundle) [32]byte {
 	lines := make([]string, 0, len(b.Members))
 	for _, m := range b.Members {
