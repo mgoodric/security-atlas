@@ -69,8 +69,8 @@ Defaults: every list tool returns up to 100 results; pass `limit=N`
 Each write inserts a row into `mcp_write_proposals` with `state=
 'ai_proposed', ai_assisted=true, human_approved=false, human_approver=
 NULL`. A tenant admin (`authz.IsTenantAdmin`, enforced at both the
-engine and the handler since #2428) confirms via either (a) the `confirm_write` MCP tool or
-(b) the web-UI Approve button. The platform then runs the canonical
+engine and the handler since #2428) confirms via either (a) the
+`confirm_write` MCP tool or (b) the web-UI Approve button. The platform then runs the canonical
 Applier inside the same transaction as the state flip; a failure rolls
 the proposal back to `ai_proposed`.
 

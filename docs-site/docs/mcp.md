@@ -10,7 +10,7 @@ Once connected, the assistant can answer questions from your **live data**:
 - _"What are my top risks in treatment right now?"_
 - _"Which controls have stale or missing evidence?"_
 - _"Show me the audit periods and which ones are frozen."_
-- _"Draft a new risk for the unencrypted-backups finding"_ — filed as a proposal for you to approve.
+- _"Draft a new risk for the unencrypted-backups finding"_ — filed as a proposal for a tenant admin to approve.
 
 !!! warning "Status: experimental"
 
@@ -77,8 +77,8 @@ default, so a parent and the children it summarises are not counted twice. Pass
 1. The assistant calls a write tool (say `create_risk`). Instead of writing to
    your risk register, it files a **proposal** in the `mcp_write_proposals`
    table with `state = ai_proposed`, `ai_assisted = true`, `human_approved = false`.
-2. Nothing is in your canonical data yet. The proposal is visible to tenant admins in
-   the web UI and via the assistant.
+2. Nothing is in your canonical data yet. The proposal is visible in the web UI
+   and via the assistant; only a tenant admin can confirm or reject it.
 3. A tenant admin confirms —
    either by the **Approve** button in the web UI, or by the assistant calling
    `confirm_write` with the proposal ID. Only then does the platform apply the
@@ -88,7 +88,7 @@ default, so a parent and the children it summarises are not counted twice. Pass
    database-level peer to the platform's [AI-assist boundary](https://github.com/mgoodric/security-atlas/blob/main/CLAUDE.md).
 
 Each credential may hold at most **5 pending proposals** at once; a sixth is
-rejected until you approve or reject the existing ones.
+rejected until a tenant admin approves or rejects the existing ones.
 
 ## Setup
 
