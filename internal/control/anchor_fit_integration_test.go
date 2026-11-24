@@ -23,7 +23,8 @@ func TestUpload_AnchorFit(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "GOV-09", "GOV")
+	seeded, code := seedSCFAnchor(t, admin, "GOV-09", "GOV")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 	ctx, err := tenancy.WithTenant(context.Background(), tenant)
@@ -54,7 +55,7 @@ func TestUpload_AnchorFit(t *testing.T) {
 	}
 
 	// An omitted anchor_fit is stored as exact with no note.
-	exactID := upload(t, yamlFor("fit_default_exact", code, "automated"))
+	exactID := upload(t, yamlForIn("fit_default_exact", code, "automated", rel))
 	if fit, note, anchor := readFit(t, exactID); fit != "exact" || note != nil || anchor == nil {
 		t.Fatalf("default: fit=%q note=%v anchor=%v; want exact, nil, set", fit, note, anchor)
 	}
@@ -64,6 +65,7 @@ func TestUpload_AnchorFit(t *testing.T) {
 bundle_id: fit_none_anchored
 title: "Audit committee independence"
 scf_anchor_id: `+code+`
+scf_release: `+rel+`
 anchor_fit: none
 anchor_fit_note: "No SCF control covers audit committee independence; GOV-09 is the nearest catch-all."
 implementation_type: manual_attested
@@ -120,7 +122,8 @@ func TestUpload_AnchorFitNoteOnlyChangeUpdatesInPlace(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-2023", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-2023", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := dbtest.SeedTenant(t, admin,
 		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
 		"control_owner_assignments", "evidence_records", "controls",
@@ -136,6 +139,7 @@ func TestUpload_AnchorFitNoteOnlyChangeUpdatesInPlace(t *testing.T) {
 bundle_id: fit_note_in_place
 title: "MFA for administrators"
 scf_anchor_id: ` + code + `
+scf_release: ` + rel + `
 anchor_fit: ` + fit + `
 anchor_fit_note: "` + note + `"
 implementation_type: manual_attested

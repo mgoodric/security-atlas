@@ -13,6 +13,7 @@ package componentimport_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -158,26 +159,22 @@ func TestImportComponentDefinition_SCFReleaseErrors(t *testing.T) {
 	}
 }
 
-// With no release declared, claims bind in the current release (B) as
-// before, the release is recorded, and the report carries the deprecation
-// warning. PRM-07 is not in B, so it stays unmapped.
-func TestImportComponentDefinition_SCFReleaseAbsentWarnsAndBindsCurrent(t *testing.T) {
+// #1774: with no release declared, the import is refused with the fix in
+// the message and persists no claim. B is current; the old fallback bound
+// the claims in it.
+func TestImportComponentDefinition_SCFReleaseAbsentIsRefused(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 
-	report, err := importWith(t, tenant, []byte(docWithoutProp), "")
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	_, err := importWith(t, tenant, []byte(docWithoutProp), "")
+	if !errors.Is(err, componentimport.ErrSCFReleaseRequired) || !errors.Is(err, scfrelease.ErrReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
 	}
-	if len(report.Warnings) != 1 || report.Warnings[0] != componentimport.SCFReleaseDeprecationWarning {
-		t.Fatalf("Warnings = %v; want the deprecation warning", report.Warnings)
+	if !strings.Contains(err.Error(), "--scf-release") {
+		t.Errorf("error %q does not give the fix", err)
 	}
-	got := claimReleases(t, admin, tenant)
-	if got["AST-04"] != [2]string{"AST-04", scfreleasetest.ReleaseB} {
-		t.Errorf("AST-04 claim = %v; want bound in current release B", got["AST-04"])
-	}
-	if got["PRM-07"] != [2]string{"", ""} {
-		t.Errorf("PRM-07 claim = %v; want unmapped (withdrawn from B)", got["PRM-07"])
+	if got := claimReleases(t, admin, tenant); len(got) != 0 {
+		t.Fatalf("claims persisted after a refused import: %v", got)
 	}
 }

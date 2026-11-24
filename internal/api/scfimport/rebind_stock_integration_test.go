@@ -272,10 +272,11 @@ func TestRebind_StockControlRebindsOnTitleOnlyChangeAndKeepsCC81Coverage(t *test
 		t.Errorf("needs-reanchoring = %v; want only the tenant-authored control %s", flagged, authored)
 	}
 
-	// Boot re-imports the bundled crosswalk in the current release. Under
-	// the default pin (#2308: the current release) CC8.1's anchors are
-	// release B's, and the re-bound stock control sits on one of them.
-	if _, err := soc2import.Import(ctx, pool, cc81Crosswalk(slug, "")); err != nil {
+	// The crosswalk is re-imported pinned to the new current release (a
+	// release is required since #1774). Under the default pin (#2308: the
+	// current release) CC8.1's anchors are release B's, and the re-bound
+	// stock control sits on one of them.
+	if _, err := soc2import.Import(ctx, pool, cc81Crosswalk(slug, b.ReleaseVersion)); err != nil {
 		t.Fatalf("re-import crosswalk: %v", err)
 	}
 	q := dbx.New(pool)

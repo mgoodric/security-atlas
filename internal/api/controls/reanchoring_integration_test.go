@@ -150,6 +150,7 @@ func TestNeedsReanchoring_ListsFlaggedControlsAndClearsOnReanchor(t *testing.T) 
 bundle_id: reanchor_2176_gone
 title: "Code gone"
 scf_anchor_id: ` + kept + `
+scf_release: ` + currentRelease + `
 implementation_type: automated
 `))
 	if err != nil {

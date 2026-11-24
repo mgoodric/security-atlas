@@ -15,7 +15,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -104,8 +103,8 @@ func TestFreshBootstrap_StockContentBindsInTheSampleRelease(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Import %s: %v", f, err)
 		}
-		if slices.Contains(rep.Warnings, soc2import.SCFReleaseDeprecationWarning) {
-			t.Errorf("%s: import warned %q", f, soc2import.SCFReleaseDeprecationWarning)
+		if rep.SCFRelease != release {
+			t.Errorf("%s: bound in SCF release %q; want %s", f, rep.SCFRelease, release)
 		}
 		var total, outside int
 		if err := pool.QueryRow(ctx, `
@@ -142,11 +141,11 @@ func TestFreshBootstrap_StockContentBindsInTheSampleRelease(t *testing.T) {
 			t.Errorf("%s: upload: %v", dir, err)
 			continue
 		}
-		if slices.Contains(res.Warnings, control.SCFReleaseDeprecationWarning) {
-			t.Errorf("%s: upload warned %q", dir, control.SCFReleaseDeprecationWarning)
-		}
 		if b.Manifest.SCFAnchorID == "" {
 			continue
+		}
+		if res.SCFRelease != release {
+			t.Errorf("%s: bound in SCF release %q; want %s", dir, res.SCFRelease, release)
 		}
 		if res.SCFRelease != release {
 			t.Errorf("%s: bound in SCF release %q; want %q", dir, res.SCFRelease, release)

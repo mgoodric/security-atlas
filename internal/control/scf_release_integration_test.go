@@ -17,6 +17,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -52,6 +53,29 @@ func uploadYAML(t *testing.T, store *control.Store, tenant, y string) (control.U
 		t.Fatalf("WithTenant: %v", err)
 	}
 	return store.Upload(ctx, bundle, "key_admin")
+}
+
+// storedUnpinned leaves a control as an install before #1774 stored it: bound
+// to code's anchor in release, with a stored control.yaml that declares no
+// scf_release. Upload refuses such a bundle now, so it is uploaded pinned to
+// release and its stored manifest (and hash) rewritten to the unpinned form.
+func storedUnpinned(t *testing.T, admin *pgxpool.Pool, store *control.Store, tenant, bundleID, code, release string) uuid.UUID {
+	t.Helper()
+	res, err := uploadYAML(t, store, tenant, releaseBundleYAML(bundleID, code, release))
+	if err != nil {
+		t.Fatalf("upload %s pinned to %s: %v", bundleID, release, err)
+	}
+	unpinned := releaseBundleYAML(bundleID, code, "")
+	b, err := control.FinalizeBundleForHTTP([]byte(unpinned))
+	if err != nil {
+		t.Fatalf("FinalizeBundleForHTTP: %v", err)
+	}
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE controls SET bundle_manifest_yaml = $2, bundle_manifest_hash = $3 WHERE id = $1`,
+		res.ControlID, unpinned, b.ManifestHashHex); err != nil {
+		t.Fatalf("store %s unpinned: %v", bundleID, err)
+	}
+	return res.ControlID
 }
 
 func boundAnchor(t *testing.T, admin *pgxpool.Pool, controlID uuid.UUID) uuid.UUID {
@@ -132,31 +156,43 @@ func TestUpload_SCFRelease_DistinctErrors(t *testing.T) {
 	}
 }
 
-// A bundle with no scf_release uploads as before, binding in the current
-// release (B), and returns the deprecation warning.
-func TestUpload_SCFRelease_AbsentWarnsAndBindsCurrent(t *testing.T) {
+// #1774: a bundle that names scf_anchor_id as a code but declares no
+// scf_release is refused with the one-line fix, and nothing is written. B is
+// current and has IAC-06, so the old fallback would have bound it. An
+// unknown code is refused the same way: there is no release to look it up in.
+func TestUpload_SCFRelease_AbsentIsRefused(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 
-	res, err := uploadYAML(t, store, tenant, releaseBundleYAML("rel_none", "IAC-06", ""))
-	if err != nil {
-		t.Fatalf("Upload: %v", err)
-	}
-	if want := anchorIDIn(t, admin, scfreleasetest.ReleaseB, "IAC-06"); boundAnchor(t, admin, res.ControlID) != want {
-		t.Fatalf("bound to %s; want current release B's IAC-06 %s", boundAnchor(t, admin, res.ControlID), want)
-	}
-	if res.SCFRelease != scfreleasetest.ReleaseB {
-		t.Errorf("SCFRelease = %q; want %q", res.SCFRelease, scfreleasetest.ReleaseB)
-	}
-	if len(res.Warnings) != 1 || res.Warnings[0] != control.SCFReleaseDeprecationWarning {
-		t.Fatalf("Warnings = %v; want the deprecation warning", res.Warnings)
+	for _, code := range []string{"IAC-06", "NOPE-99"} {
+		_, err := uploadYAML(t, store, tenant, releaseBundleYAML("rel_none", code, ""))
+		if !errors.Is(err, control.ErrSCFReleaseRequired) || !errors.Is(err, scfrelease.ErrReleaseRequired) {
+			t.Fatalf("%s without release: err = %v; want ErrSCFReleaseRequired", code, err)
+		}
+		if !strings.Contains(err.Error(), "scf_release: test-2026.3") {
+			t.Errorf("%s: error %q does not give the one-line fix", code, err)
+		}
 	}
 
-	// An unknown code with no release is still the pre-#1770 error.
-	if _, err := uploadYAML(t, store, tenant, releaseBundleYAML("rel_none_bad", "NOPE-99", "")); !errors.Is(err, control.ErrSCFAnchorUnknown) {
-		t.Fatalf("unknown code without release: err = %v; want ErrSCFAnchorUnknown", err)
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM controls WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count controls: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d controls written by refused uploads", n)
+	}
+
+	// An anchor UUID names one row in one release, so it needs no release.
+	want := anchorIDIn(t, admin, scfreleasetest.ReleaseA, "IAC-06")
+	res, err := uploadYAML(t, store, tenant, releaseBundleYAML("rel_uuid", want.String(), ""))
+	if err != nil {
+		t.Fatalf("UUID ref without release: %v", err)
+	}
+	if got := boundAnchor(t, admin, res.ControlID); got != want || res.SCFRelease != scfreleasetest.ReleaseA {
+		t.Fatalf("UUID ref bound %s in %q; want A's IAC-06 %s", got, res.SCFRelease, want)
 	}
 }
