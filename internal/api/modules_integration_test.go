@@ -407,6 +407,24 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		period, e.tenant, versionID, frozenAt.Add(-90*24*time.Hour), frozenAt, frozenAt); err != nil {
 		t.Fatalf("seed frozen period: %v", err)
 	}
+	t.Cleanup(func() {
+		// Runs before SeedTenant's cleanup (LIFO), so the period goes
+		// first; the global framework rows outlive the tenant otherwise
+		// (#3041).
+		for _, q := range []struct {
+			sql string
+			arg any
+		}{
+			{`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`, e.tenant},
+			{`DELETE FROM audit_periods WHERE id = $1`, period},
+			{`DELETE FROM framework_versions WHERE id = $1`, versionID},
+			{`DELETE FROM frameworks WHERE id = $1`, fwID},
+		} {
+			if _, err := e.migrate.Exec(ctx, q.sql, q.arg); err != nil {
+				t.Errorf("cleanup %q: %v", q.sql, err)
+			}
+		}
+	})
 	ctrl := seedModuleControl(t, e.migrate, e.tenant)
 	if _, err := e.migrate.Exec(ctx, `
 		INSERT INTO policies (id, tenant_id, title, version, body_md, status, owner_role, approver_role, created_by, effective_date)
