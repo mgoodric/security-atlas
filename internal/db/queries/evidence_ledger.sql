@@ -101,7 +101,9 @@ WHERE evidence_records.tenant_id = $1
 -- never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
 -- NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
 -- (frozen_at NULL) falls through to live state, but the slice-749 surface only
--- summarizes FROZEN periods, so in practice the horizon is always set.
+-- summarizes FROZEN periods, so in practice the horizon is always set. The
+-- horizon bounds ingested_at too (#1699): a record written after the freeze
+-- with a backdated observed_at is not in the frozen population.
 SELECT *
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
@@ -113,6 +115,8 @@ WHERE evidence_records.tenant_id = $1
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz)
+  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
@@ -134,6 +138,8 @@ WHERE evidence_records.tenant_id = $1
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz)
+  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz);
 
 -- name: WalkEvidenceRecordsForVerify :many

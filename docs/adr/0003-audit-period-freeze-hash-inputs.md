@@ -37,7 +37,8 @@ sha256(canonical_json({
   "period_start":          <ISO-8601 date>,
   "period_end":            <ISO-8601 date>,
   "framework_version_id":  <UUID>,
-  "evidence_record_ids":   <sorted UUID array, where observed_at <= frozen_at>,
+  "evidence_record_ids":   <sorted UUID array, where observed_at <= frozen_at
+                            AND ingested_at <= frozen_at>,
   "control_ids":           <sorted UUID array, in period scope>
 }))
 ```
@@ -59,6 +60,18 @@ Canonical JSON: keys in the literal order above (NOT alphabetical), values UTF-8
 - The canonical-JSON shape is intentionally narrow — six keys, three primitive types (UUID, date, array of UUID) — so a Python or TypeScript reimplementation in a future verifier tool has zero ambiguity.
 
 - We do NOT include `tenant_id` in the hash because the period id is already tenant-unique (`(tenant_id, id)` composite uniqueness) and the verifier always operates inside one tenant's RLS context.
+
+## Amendment: the ingested_at bound (#1699)
+
+The evidence set was first defined as `observed_at <= frozen_at` only. That admits a record written to the ledger after the freeze whose `observed_at` is backdated before it (a late connector push, a backdated upload, a clock-skewed source). Such a record was not in the ledger when the period froze, yet a recompute of the hash at `frozen_at` included it, so the recompute no longer matched the stored `frozen_hash`. The set is now bounded on both columns: `observed_at <= frozen_at AND ingested_at <= frozen_at` (`ListEvidenceIDsForPeriodHash`). Every other freeze-horizon read (period control state, population count and draw, the frozen evidence summary) applies the same pair.
+
+Upgrade: no stored hash changes, and none needs to.
+
+- `Freeze` (`internal/audit/period/period.go`) is the only caller of `ListEvidenceIDsForPeriodHash`. The product never recomputes or verifies a stored `frozen_hash`, and never rewrites one, so no existing frozen period can fail an in-product check.
+- For an external verifier, a recompute at `frozen_at` under the new definition reproduces the set the hash was taken over. At freeze time, every row visible to the freeze transaction was ingested before it ran, so `ingested_at <= frozen_at` held for it. The one exception is a row whose `ingested_at` (the database clock) is later than `frozen_at` (the app clock) because the two clocks disagree. That needs the DB clock to run ahead of the app clock (#3038).
+- Under the old definition, any late, backdated row that arrived after the freeze made the stored hash unreproducible. The amendment makes verification reproducible where it was not, so it is a correction, not a break.
+
+A reimplemented verifier MUST apply both bounds.
 
 ## Alternatives considered
 

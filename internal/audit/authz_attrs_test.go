@@ -44,3 +44,33 @@ func TestPopulationWindowCovers(t *testing.T) {
 		}
 	}
 }
+
+// #1699: a frozen population holds only records that were in the ledger at
+// its frozen_at, the ingested_at bound ListPopulationEvidenceIDs draws with.
+// A backdated record ingested after the freeze is not in it, however early
+// its observed_at.
+func TestPopulationHeldAtFreeze(t *testing.T) {
+	t.Parallel()
+	frozen := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	live := dbx.Population{}
+	froze := dbx.Population{FrozenAt: pgtype.Timestamptz{Time: frozen, Valid: true}}
+	at := func(t time.Time) *time.Time { return &t }
+
+	cases := []struct {
+		name     string
+		pop      dbx.Population
+		ingested *time.Time
+		want     bool
+	}{
+		{"ingested before the freeze", froze, at(frozen.Add(-time.Hour)), true},
+		{"ingested at the freeze", froze, at(frozen), true},
+		{"ingested after the freeze", froze, at(frozen.Add(time.Second)), false},
+		{"not frozen yet", live, at(frozen.Add(time.Hour)), true},
+		{"no ingestion time asked", froze, nil, true},
+	}
+	for _, tc := range cases {
+		if got := populationHeldAtFreeze(tc.pop, tc.ingested); got != tc.want {
+			t.Errorf("%s: held = %v; want %v", tc.name, got, tc.want)
+		}
+	}
+}
