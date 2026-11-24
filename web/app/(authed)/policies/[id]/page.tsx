@@ -36,7 +36,7 @@
 // platform admits the ack and records it for the caller only.
 //
 // #2852 — a synced policy (source_attribution "synced") is edited at its
-// Confluence page. It shows a "Managed in Confluence" badge, the page link,
+// Confluence or SharePoint page. It shows a "Managed in <source>" badge, the page link,
 // the approval the page records and any drift, and offers no lifecycle or
 // edit action. Its control links are kept here, so it has a link editor.
 
@@ -85,10 +85,7 @@ import {
   syncedPolicyView,
   unrecognisedAudiences,
 } from "../lifecycle";
-import {
-  ManagedInConfluenceBadge,
-  SyncedPolicyPanel,
-} from "../synced-policy-panel";
+import { ManagedBySyncBadge, SyncedPolicyPanel } from "../synced-policy-panel";
 
 const CONTROL_KINDS: readonly EntityKind[] = ["control"];
 
@@ -313,7 +310,7 @@ export default function PolicyDetailPage({
               Imported
             </Badge>
           ) : null}
-          {synced ? <ManagedInConfluenceBadge /> : null}
+          {syncView ? <ManagedBySyncBadge source={syncView.source} /> : null}
           <SelfApprovedBadge
             selfApproved={policy.self_approved}
             testId="policy-detail-self-approved"
