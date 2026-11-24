@@ -193,7 +193,19 @@ var (
 	// ErrUnavailable is returned by ProcessInTx on a nil *Service: the
 	// domain store was built without an ingest service (#1830).
 	ErrUnavailable = errors.New("ingest: no ingest service wired")
+	// ErrConcurrentFreeze is an audit period in the tenant frozen after the
+	// write's transaction began (#3038). The row would carry an ingested_at
+	// (the transaction start) before that frozen_at, so it would join a
+	// frozen population whose hash never covered it. Nothing was written.
+	// Process retries in a new transaction; ProcessInTx returns it, and the
+	// caller's whole transaction can be retried.
+	ErrConcurrentFreeze = errors.New("ingest: an audit period was frozen while this write's transaction was open; nothing was written, retry")
 )
+
+// maxFreezeAttempts bounds Process's retries after ErrConcurrentFreeze. Each
+// retry follows a freeze that committed during the previous attempt, so a
+// third in a row is not expected.
+const maxFreezeAttempts = 3
 
 // DomainWriterPath is the ingestion_path a platform-internal domain writer
 // (change register, incident register, personnel security, access review)
@@ -320,6 +332,12 @@ type Service struct {
 	// resolution between AC-3 (slice-doc typo) and P0-4 (canonical
 	// slice 015 D2 order).
 	marshalLedger func(proto.Message) ([]byte, error)
+	// afterBegin and beforeCommit are test hooks around Process's write
+	// transaction (#3038): afterBegin runs once the transaction is open and
+	// before the freeze lock, beforeCommit once the row is written and the
+	// lock is held. Both are nil outside tests.
+	afterBegin   func(attempt int)
+	beforeCommit func(attempt int)
 }
 
 // New constructs a Service over the supplied pool and validator. Pass
@@ -527,14 +545,28 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 
 	var newRecord dbx.EvidenceRecord
 	var deduped bool
-	err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
-			return fmt.Errorf("apply tenant: %w", terr)
+	for attempt := 1; ; attempt++ {
+		err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+			if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
+				return fmt.Errorf("apply tenant: %w", terr)
+			}
+			if s.afterBegin != nil {
+				s.afterBegin(attempt)
+			}
+			var perr error
+			newRecord, deduped, perr = s.persist(tenantCtx, tx, p, LedgerOptions{})
+			if perr == nil && s.beforeCommit != nil {
+				s.beforeCommit(attempt)
+			}
+			return perr
+		})
+		// #3038: a freeze committed between this attempt's BEGIN and its
+		// lock, and nothing was written. A new transaction's ingested_at is
+		// after that freeze, so the row stays out of its population.
+		if !errors.Is(err, ErrConcurrentFreeze) || attempt == maxFreezeAttempts {
+			break
 		}
-		var perr error
-		newRecord, deduped, perr = s.persist(tenantCtx, tx, p, LedgerOptions{})
-		return perr
-	})
+	}
 	if err != nil {
 		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
 	}
@@ -958,6 +990,25 @@ func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts Ledg
 		case !errors.Is(cerr, pgx.ErrNoRows):
 			return dbx.EvidenceRecord{}, false, fmt.Errorf("resolve control bundle id: %w", cerr)
 		}
+	}
+
+	// #3038: the row's ingested_at is this transaction's start (DEFAULT
+	// now(), the database clock), but it is visible only once the
+	// transaction commits. Hold the tenant's freeze lock in shared mode
+	// until then, so a freeze that has not hashed yet waits for this row.
+	// Then refuse if a freeze already committed after the start: its
+	// frozen_at is later than this row's ingested_at, so its frozen reads
+	// would admit a row its hash never covered. The count is its own
+	// statement so its snapshot is taken after the lock is granted.
+	if err := q.LockTenantEvidenceFreezeShared(ctx, pgUUID(p.cred.TenantID)); err != nil {
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("lock tenant evidence freeze: %w", err)
+	}
+	since, err := q.CountPeriodsFrozenSinceTxStart(ctx, pgUUID(p.cred.TenantID))
+	if err != nil {
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("count periods frozen since start: %w", err)
+	}
+	if since > 0 {
+		return dbx.EvidenceRecord{}, false, ErrConcurrentFreeze
 	}
 
 	observedAtNanos := p.observedAtNanos

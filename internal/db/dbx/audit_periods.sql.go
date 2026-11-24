@@ -806,6 +806,20 @@ func (q *Queries) LockTenantEvidenceFreeze(ctx context.Context, tenantID pgtype.
 	return err
 }
 
+const lockTenantEvidenceFreezeShared = `-- name: LockTenantEvidenceFreezeShared :exec
+SELECT pg_advisory_xact_lock_shared(14, hashtext($1::uuid::text))
+`
+
+// #3038: the shared mode of LockTenantEvidenceFreeze, which every live
+// ingest takes just before it inserts a ledger row and holds to commit.
+// Ingests do not block each other; a freeze waits until every ingest that
+// holds it has committed, so it hashes with their rows in view. Run
+// CountPeriodsFrozenSinceTxStart after it, as its own statement.
+func (q *Queries) LockTenantEvidenceFreezeShared(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockTenantEvidenceFreezeShared, tenantID)
+	return err
+}
+
 const minFrozenAtOverlappingWindow = `-- name: MinFrozenAtOverlappingWindow :one
 SELECT min(frozen_at)::timestamptz AS min_frozen_at
 FROM audit_periods
