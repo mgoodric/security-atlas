@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -142,6 +143,16 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		if err != nil {
 			return err
 		}
+		// The period's latest freeze revision: the records an import
+		// amendment added join the frozen population (#1742).
+		amended, err := auditperiod.AmendedIDs(ctx, q, pgUUID(tenantID), pgUUID(auditPeriodID), auditperiod.LatestRevision)
+		if err != nil {
+			return fmt.Errorf("evidencesummary: %w", err)
+		}
+		amendedSet := make(map[uuid.UUID]bool, len(amended))
+		for _, id := range amended {
+			amendedSet[uuid.UUID(id.Bytes)] = true
+		}
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
 			UnboundKinds: kinds,
 			RoutedKinds:  routed.Within(kinds),
@@ -149,6 +160,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
 			FrozenAt:     period.FrozenAt,
+			AmendedIds:   amended,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: count frozen evidence: %w", err)
@@ -162,6 +174,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
 			FrozenAt:     period.FrozenAt,
+			AmendedIds:   amended,
 			Limit:        MaxCitedExcerpts,
 			Offset:       0,
 		})
@@ -181,6 +194,9 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 				ef.ObservedAt = r.ObservedAt.Time.UTC()
 			}
 			out.Records = append(out.Records, ef)
+			if amendedSet[ef.EvidenceID] {
+				out.Amended = append(out.Amended, ef.EvidenceID)
+			}
 		}
 		return nil
 	})

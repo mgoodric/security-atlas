@@ -9,6 +9,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/evidence/historicalimport"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -93,5 +94,12 @@ func (s *Server) registerGraph(root *chi.Mux) {
 		}
 		root.Post("/v1/evidence:push", evidenceH.PushHTTP)
 		root.Get("/v1/evidence/receipts/{record_id}", evidenceH.ReceiptStatusHTTP)
+		// #1742: admin-only historical import. Straight through ingest in
+		// one transaction (never the push stream), so a batch commits or
+		// rolls back whole.
+		if s.dbPool != nil {
+			importH := apievidence.NewImportHandler(historicalimport.New(s.dbPool, s.ingestService))
+			root.Post("/v1/evidence:import", importH.ImportHTTP)
+		}
 	}
 }

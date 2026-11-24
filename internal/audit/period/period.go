@@ -80,7 +80,20 @@ type Period struct {
 	// framework version no longer resolves; the wire then omits it and
 	// the frontend falls back to the UUID.
 	FrameworkLabel string
+	// FreezeRevision is the latest freeze revision of a frozen period: 1
+	// for the original freeze, higher once an import amended it (#1742).
+	// 0 while the period is open.
+	FreezeRevision int
+	// RevisionHash is the latest revision's freeze hash; FrozenHash stays
+	// the original freeze's. Equal to FrozenHash at revision 1.
+	RevisionHash []byte
+	// Revisions lists every freeze revision, oldest first; empty while
+	// the period is open.
+	Revisions []Revision
 }
+
+// AmendedByImport reports whether a historical import re-froze p (#1742).
+func (p Period) AmendedByImport() bool { return p.FreezeRevision > 1 }
 
 // CreateInput is the API-shape for POST /v1/audit-periods.
 type CreateInput struct {
@@ -162,9 +175,25 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Period, error) {
 			return fmt.Errorf("get audit period: %w", err)
 		}
 		out = periodFromRow(row)
-		return nil
+		return withRevision(ctx, q, row, &out)
 	})
 	return out, err
+}
+
+// withRevision stamps p's latest freeze revision from its row.
+func withRevision(ctx context.Context, q *dbx.Queries, row dbx.AuditPeriod, p *Period) error {
+	revs, err := revisionsOf(ctx, q, row)
+	if err != nil {
+		return err
+	}
+	if len(revs) == 0 {
+		return nil
+	}
+	p.Revisions = revs
+	latest := revs[len(revs)-1]
+	p.FreezeRevision = latest.Revision
+	p.RevisionHash = latest.FrozenHash
+	return nil
 }
 
 // List returns periods for the current tenant, newest first. The LIST
@@ -181,6 +210,13 @@ func (s *Store) List(ctx context.Context) ([]Period, error) {
 		out = make([]Period, len(rows))
 		for i, r := range rows {
 			out[i] = periodFromListRow(r)
+			row := dbx.AuditPeriod{
+				ID: r.ID, TenantID: r.TenantID, Status: r.Status,
+				FrozenAt: r.FrozenAt, FrozenHash: r.FrozenHash, FrozenBy: r.FrozenBy,
+			}
+			if err := withRevision(ctx, q, row, &out[i]); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -208,21 +244,38 @@ func frameworkLabel(name, version *string) string {
 // and stamps frozen_at on any populations already attached to the period.
 // Re-freezing a frozen row returns ErrAlreadyFrozen. (AC-2 + AC-6 + AC-7)
 //
-// The `at` parameter is the wall-clock moment of the freeze event. It is
-// persisted in audit_periods.frozen_at and the period's audit log but is
-// NOT included in the hash inputs (see ADR 0003).
+// The `at` parameter is the moment of the freeze event. It is persisted in
+// audit_periods.frozen_at and the period's audit log but is NOT included in
+// the hash inputs (see ADR 0003). A zero `at` (the HTTP handler's call) is
+// stamped from the database clock once the tenant's evidence-freeze lock is
+// held (#1742): every row committed before the lock was granted has an
+// ingested_at before it, and an import still waiting on the lock refuses
+// and retries because this frozen_at is after its transaction start. An
+// explicit `at` (tests and replays of a past instant) is used as given.
 func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at time.Time) (Period, error) {
 	if frozenBy == "" {
 		return Period{}, fmt.Errorf("auditperiod: frozen_by must be non-empty")
 	}
-	if at.IsZero() {
-		at = time.Now().UTC()
-	} else {
-		at = at.UTC()
-	}
+	at = at.UTC()
 
 	var out Period
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// #1742: serialise against a historical evidence import in this
+		// tenant before reading anything the hash covers. An import's rows
+		// carry ingested_at = its transaction start but stay invisible until
+		// it commits, so a hash taken while one is open would leave out rows
+		// the frozen reads later admit.
+		if err := q.LockTenantEvidenceFreeze(ctx, pgUUID(tenantID)); err != nil {
+			return fmt.Errorf("lock tenant evidence freeze: %w", err)
+		}
+		if at.IsZero() {
+			now, err := q.DBClockNow(ctx)
+			if err != nil {
+				return fmt.Errorf("database clock: %w", err)
+			}
+			at = now.Time.UTC()
+		}
+
 		// Resolve current state first so we can give a clean
 		// ErrAlreadyFrozen rather than a "zero rows updated" generic
 		// error. The state read is in the same transaction so the
@@ -360,11 +413,18 @@ func (s *Store) ControlState(ctx context.Context, periodID, controlID uuid.UUID)
 		if err != nil {
 			return err
 		}
+		// A frozen period amended by an import reads its latest freeze
+		// revision (#1742).
+		amended, err := AmendedIDs(ctx, q, pgUUID(tenantID), pgUUID(periodID), LatestRevision)
+		if err != nil {
+			return err
+		}
 		rows, err := q.ListEvidenceForPeriodControl(ctx, dbx.ListEvidenceForPeriodControlParams{
 			UnboundKinds: kinds,
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			FrozenAt:     p.FrozenAt,
+			AmendedIds:   amended,
 		})
 		if err != nil {
 			return fmt.Errorf("list evidence for period control: %w", err)

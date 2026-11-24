@@ -29,15 +29,21 @@ const defaultRemediationWindow = 90 * 24 * time.Hour
 // between the database layer and the bridge layer: the sspInput /
 // assessmentInput / poamInput methods convert it to proto messages.
 type aggregate struct {
-	period       dbx.AuditPeriod
-	frozenAt     time.Time
-	scopeCells   []dbx.ScopeCell
-	controls     []dbx.ListActiveControlsWithDescriptionRow
-	policies     []dbx.Policy
-	populations  []dbx.ListPopulationsForPeriodRow
-	walkthroughs []dbx.Walkthrough
-	auditNotes   []dbx.ListAuditNotesForPeriodRow
-	failingEvals []dbx.ListFailingEvaluationsAsOfRow
+	period   dbx.AuditPeriod
+	frozenAt time.Time
+	// freezeRevision is the period's latest freeze revision (1 = the
+	// original freeze) and revisionHash its hash; amendReason is the
+	// admin's reason when the revision is an import amendment (#1742).
+	freezeRevision int
+	revisionHash   []byte
+	amendReason    string
+	scopeCells     []dbx.ScopeCell
+	controls       []dbx.ListActiveControlsWithDescriptionRow
+	policies       []dbx.Policy
+	populations    []dbx.ListPopulationsForPeriodRow
+	walkthroughs   []dbx.Walkthrough
+	auditNotes     []dbx.ListAuditNotesForPeriodRow
+	failingEvals   []dbx.ListFailingEvaluationsAsOfRow
 	// exceptedEvals and activatedExceptions feed the AR's risk-accepted
 	// observations (#2269); see excepted.go.
 	exceptedEvals       []dbx.ListExceptedEvaluationsAsOfRow
@@ -137,6 +143,23 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 	}
 	agg.period = period
 	agg.frozenAt = period.FrozenAt.Time
+
+	// 1b. The latest freeze revision (#1742). An amended period's samples
+	//     already draw from it; the bundle names it so an export taken
+	//     before and after an amendment is told apart.
+	revisions, err := q.ListAuditPeriodFreezeRevisions(ctx, dbx.ListAuditPeriodFreezeRevisionsParams{
+		TenantID: pgUUID(tenantID), AuditPeriodID: period.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list freeze revisions: %w", err)
+	}
+	agg.freezeRevision, agg.revisionHash = 1, period.FrozenHash
+	if n := len(revisions); n > 0 {
+		latest := revisions[n-1]
+		agg.freezeRevision = int(latest.Revision)
+		agg.revisionHash = latest.FrozenHash
+		agg.amendReason = latest.Justification
+	}
 
 	// 2. Scope cells (SSP system-characteristics).
 	scopeCells, err := q.ListScopeCells(ctx, pgUUID(tenantID))

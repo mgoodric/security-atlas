@@ -136,6 +136,8 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/board/narrative/generate", tenantAdminGate},
 	{http.MethodPost, "/v1/board/narrative/generate-all", tenantAdminGate},
 	{http.MethodPost, "/v1/board/narrative/approve", tenantAdminGate},
+	// #1742: the admin-only historical evidence import.
+	{http.MethodPost, "/v1/evidence:import", tenantAdminGate},
 	{http.MethodPost, "/v1/questionnaires/" + id2428 + "/answers/q1/ai-suggest", tenantAdminGate},
 	{http.MethodPost, "/v1/questionnaires/" + id2428 + "/answers/q1/ai-approve", tenantAdminGate},
 	{http.MethodPost, "/v1/questionnaires/" + id2428 + "/answers/q1/ai-reject", tenantAdminGate},
@@ -323,6 +325,11 @@ func TestTenantGates2428_Helpers(t *testing.T) {
 // narrower layer there, so nothing widens; the reverse (a handler
 // admitting what OPA refuses) is never allowed.
 var handlerNarrower2428 = map[string]bool{
+	// #1742: OPA reads POST /v1/evidence:import as an evidence write, which
+	// it admits to grc_engineer and control_owner; the historical import is
+	// admin only, so the handler refuses both.
+	"/v1/evidence:import grc_engineer":                                                  true,
+	"/v1/evidence:import control_owner":                                                 true,
 	"/v1/audit-periods/" + id2428 + "/control-state auditor":                            true,
 	"/v1/audit-periods/" + id2428 + "/controls/" + id2428 + "/evidence-summary auditor": true,
 	// #2110: OPA admits grc_engineer (controls write) and control_owner

@@ -62,12 +62,20 @@ binary against a public key the operator publishes.
 
 The signature is over a **deterministic digest** of the bundle: the
 sha256 over the sorted `filename:memberhash` lines of every member listed
-in `manifest.json`. Recompute it with stock tools and confirm it matches
-the digest the manifest records:
+in `manifest.json`, plus one `freeze_revision:<n>:<revision_hash>` line
+when the manifest carries `freeze_revision`. Every bundle exported since
+freeze revisions were added (#1742) carries it: `1` for the original
+freeze, higher when a historical import amended the frozen period. That
+line binds the bundle to the exact frozen population it was drawn from.
+Recompute the digest with stock tools and confirm it matches the digest
+the manifest records:
 
 ```bash
-# Rebuild the signed digest from the manifest's member list.
-jq -r '.members[] | "\(.filename):\(.sha256)"' manifest.json \
+# Rebuild the signed digest from the manifest's member list, plus the
+# freeze-revision line when the manifest has one.
+jq -r '(.members[] | "\(.filename):\(.sha256)"),
+       (select(.freeze_revision) | "freeze_revision:\(.freeze_revision):\(.revision_hash)")' \
+    manifest.json \
   | LC_ALL=C sort \
   | tr -d '\r' > lines.txt
 # Append the trailing newline each line is hashed with, then sha256 it.
@@ -77,7 +85,10 @@ echo "recomputed: $recomputed"
 echo "manifest:   $(jq -r .signature.digest manifest.json)"
 ```
 
-The two values **must** match. (You may also re-hash each member file and
+The two values **must** match. `amend_reason` and `amended_by_import` in
+the manifest are informational: they are not part of the signed digest.
+The revision number and its hash are what the signature binds. (You may
+also re-hash each member file and
 confirm its sha256 equals the `sha256` recorded for it in the manifest —
 that is what makes the digest a tamper check: change any member's bytes
 and the recomputed digest diverges.)

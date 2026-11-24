@@ -24,6 +24,10 @@ type PeriodEvidenceSet struct {
 	// evidence with observed_at <= FrozenAt (invariant #10, P0-749-1). Surfaced
 	// to the UI as the "frozen as of" label.
 	FrozenAt time.Time
+	// Amended holds the ids of the Records a freeze revision added to the
+	// frozen population (#1742): imported records ingested after FrozenAt,
+	// which the horizon-bound resolver alone would refuse.
+	Amended []uuid.UUID
 }
 
 // PeriodSummary is the result of PeriodService.PeriodSummarize. It embeds the
@@ -108,6 +112,10 @@ func (s *PeriodService) PeriodSummarize(ctx context.Context, controlID, auditPer
 		resolver:  s.resolver,
 		controlID: controlID,
 		frozenAt:  set.FrozenAt,
+		amended:   make(map[uuid.UUID]bool, len(set.Amended)),
+	}
+	for _, id := range set.Amended {
+		bound.amended[id] = true
 	}
 
 	sum := runSummary(ctx, s.client, bound, set.EvidenceSet)
@@ -126,8 +134,15 @@ type boundPeriodResolver struct {
 	resolver  PeriodCitationResolver
 	controlID uuid.UUID
 	frozenAt  time.Time
+	// amended is the frozen corpus's records a freeze revision added
+	// (#1742). Each was read for this control inside the period's latest
+	// revision, so it resolves as evidence without the horizon read.
+	amended map[uuid.UUID]bool
 }
 
 func (b *boundPeriodResolver) Resolve(ctx context.Context, id uuid.UUID) (Citation, bool, error) {
+	if b.amended[id] {
+		return Citation{Kind: KindEvidence, ID: id.String()}, true, nil
+	}
 	return b.resolver.ResolveBeforeHorizon(ctx, id, b.controlID, b.frozenAt)
 }

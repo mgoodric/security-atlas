@@ -337,6 +337,7 @@ POST /v1/controls:upload-bundle 11
 POST /v1/decisions 11
 POST /v1/decisions/{id}/links/{kind} 11
 POST /v1/decisions/{id}/supersede 11
+POST /v1/evidence:import 11
 POST /v1/evidence:push 11
 POST /v1/exceptions 11
 POST /v1/framework-scopes 11

@@ -337,6 +337,7 @@ POST /v1/controls:upload-bundle controls
 POST /v1/decisions risk
 POST /v1/decisions/{id}/links/{kind} risk
 POST /v1/decisions/{id}/supersede risk
+POST /v1/evidence:import evidence
 POST /v1/evidence:push evidence
 POST /v1/exceptions exceptions
 POST /v1/framework-scopes scopes
