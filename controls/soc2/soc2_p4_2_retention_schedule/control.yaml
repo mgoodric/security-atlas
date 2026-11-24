@@ -10,6 +10,7 @@ description: |
   retention-schedule review quarterly for the remaining stores.
 
 scf_anchor_id: PRI-30
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: semi_automated
 owner_role: ciso

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,32 @@ import (
 // #2023). None feeds evaluation. `anchor_fit` itself is not here: a fit
 // change alters what the SCF mapping means, so it supersedes.
 var inPlaceManifestKeys = []string{"description", "external_refs", "anchor_fit_note"}
+
+// scfReleaseKey is the control.yaml key an upload may add in place, but not
+// change or remove (issue #1773).
+const scfReleaseKey = "scf_release"
+
+// isBlank reports whether a decoded YAML value is absent, null or a string
+// of only whitespace.
+func isBlank(v any) bool {
+	if v == nil {
+		return true
+	}
+	s, ok := v.(string)
+	return ok && strings.TrimSpace(s) == ""
+}
+
+// manifestSCFRelease returns the scf_release a stored control.yaml declares,
+// or "" when it declares none or does not decode.
+func manifestSCFRelease(manifestYAML []byte) string {
+	var doc struct {
+		SCFRelease string `yaml:"scf_release"`
+	}
+	if err := yaml.Unmarshal(manifestYAML, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.SCFRelease)
+}
 
 // inPlaceQueryKeys are the keys inside each evidence_queries[] entry an
 // upload may change in place (issue #2891). A query's description is prose
@@ -61,6 +88,15 @@ func SupersedingFields(priorYAML, nextYAML []byte) ([]string, error) {
 			delete(m, k)
 		}
 		stripQueryKeys(m)
+	}
+	// Declaring scf_release on a manifest that had none (issue #1773) names
+	// the release the code was already written against; it does not by
+	// itself change the anchor. Store.Upload still re-checks the anchor the
+	// declared release resolves to (rebindAnchor). Changing or removing a
+	// declared release supersedes.
+	if isBlank(prior[scfReleaseKey]) {
+		delete(prior, scfReleaseKey)
+		delete(next, scfReleaseKey)
 	}
 	var out []string
 	for _, k := range unionKeys(prior, next) {

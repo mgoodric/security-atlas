@@ -36,6 +36,7 @@ description: |
   needs a user inventory (#2834).
 
 scf_anchor_id: HRS-02
+scf_release: test-2026.3
 control_family: HRS
 implementation_type: automated
 owner_role: hr

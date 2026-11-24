@@ -11,6 +11,7 @@ description: |
   `applicability_expr` excluding them).
 
 scf_anchor_id: RSK-02
+scf_release: test-2026.3
 control_family: RSK
 implementation_type: manual_attested
 owner_role: ciso

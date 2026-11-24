@@ -19,6 +19,7 @@ description: |
   or its own).
 
 scf_anchor_id: CHG-03
+scf_release: test-2026.3
 control_family: CHG
 implementation_type: automated
 owner_role: security-engineering

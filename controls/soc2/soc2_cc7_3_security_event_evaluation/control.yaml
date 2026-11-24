@@ -21,6 +21,7 @@ description: |
   or its own).
 
 scf_anchor_id: MON-04
+scf_release: test-2026.3
 control_family: MON
 implementation_type: automated
 owner_role: security-engineering

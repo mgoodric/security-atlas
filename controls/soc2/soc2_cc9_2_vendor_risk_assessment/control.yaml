@@ -9,6 +9,7 @@ description: |
   the assessment-status snapshot quarterly.
 
 scf_anchor_id: TPM-10
+scf_release: test-2026.3
 control_family: TPM
 implementation_type: manual_periodic
 owner_role: ciso

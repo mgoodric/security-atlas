@@ -10,6 +10,7 @@ description: |
   and policy changes to all personnel.
 
 scf_anchor_id: GOV-05
+scf_release: test-2026.3
 control_family: GOV
 implementation_type: manual_periodic
 owner_role: security-engineering

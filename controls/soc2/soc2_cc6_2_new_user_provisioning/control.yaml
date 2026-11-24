@@ -21,6 +21,7 @@ description: |
   record. There is no HRIS source yet; it needs a design (#2833).
 
 scf_anchor_id: IAC-04
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

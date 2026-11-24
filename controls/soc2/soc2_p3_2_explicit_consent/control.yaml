@@ -9,6 +9,7 @@ description: |
   until the opt-in is recorded.
 
 scf_anchor_id: PRI-27
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: manual_attested
 owner_role: product-engineering

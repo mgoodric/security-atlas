@@ -20,8 +20,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -39,10 +37,9 @@ func TestHeldBack2358_ReviewedStockControlListedAndEditsKept(t *testing.T) {
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	stockYAML, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", stockCC81Bundle, "control.yaml"))
-	if err != nil {
-		t.Fatalf("read stock manifest: %v", err)
-	}
+	// The pre-#1773 shipped bytes: this test binds the stock control in
+	// synthetic release A, which the pinned bytes cannot.
+	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
 	sum := sha256.Sum256(stockYAML)
 	stockHash := hex.EncodeToString(sum[:])
 	upload := func(tenant string, yaml []byte, by string) control.UploadResult {
@@ -213,10 +210,9 @@ func TestHeldBack2599_AppliedShippedManifestClearsRow(t *testing.T) {
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	stockYAML, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", stockCC81Bundle, "control.yaml"))
-	if err != nil {
-		t.Fatalf("read stock manifest: %v", err)
-	}
+	// The pre-#1773 shipped bytes: this test binds the stock control in
+	// synthetic release A, which the pinned bytes cannot.
+	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
 	bootSeed := func(tenant string) control.UploadResult {
 		t.Helper()
 		b, err := control.FinalizeBundleForHTTP(stockYAML)

@@ -57,6 +57,8 @@ external_refs:
 		{"anchor fit note reworded", replace(base, `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "Covers MFA, not SSO."`), true},
 		{"anchor fit changed", replace(base, "anchor_fit: partial", "anchor_fit: none"), false},
 		{"anchor fit and note both changed", replace(replace(base, "anchor_fit: partial", "anchor_fit: none"), `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "No fit."`), false},
+		{"scf_release declared where there was none", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-37\nscf_release: test-2026.3\n"), true},
+		{"scf_release declared alongside an anchor change", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-38\nscf_release: test-2026.3\n"), false},
 		{"refs changed alongside a title change", replace(replace(base, "id: RA-03", "id: RA-09"), `title: "Test control"`, `title: "Renamed"`), false},
 	}
 	for _, tc := range cases {
@@ -105,6 +107,37 @@ evidence_queries:
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got, err := SupersedingFields([]byte(base), []byte(tc.next))
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Issue #1773: declaring scf_release where the prior manifest had none
+// updates in place; changing or removing a declared one supersedes.
+func TestSupersedingFields_SCFRelease(t *testing.T) {
+	t.Parallel()
+	const unpinned = "bundle_id: c1\nscf_anchor_id: IAC-37\n"
+	const pinned = unpinned + "scf_release: test-2026.3\n"
+	cases := []struct {
+		name        string
+		prior, next string
+		want        []string
+	}{
+		{"declared", unpinned, pinned, nil},
+		{"declared blank before", unpinned + "scf_release: \"\"\n", pinned, nil},
+		{"unchanged", pinned, pinned, nil},
+		{"changed", pinned, unpinned + "scf_release: \"2026.3\"\n", []string{"scf_release"}},
+		{"removed", pinned, unpinned, []string{"scf_release"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := SupersedingFields([]byte(tc.prior), []byte(tc.next))
 			if err != nil {
 				t.Fatalf("compare: %v", err)
 			}

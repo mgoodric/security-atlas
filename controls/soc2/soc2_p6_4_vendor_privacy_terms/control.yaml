@@ -10,6 +10,7 @@ description: |
   was last reviewed.
 
 scf_anchor_id: PRI-14
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: semi_automated
 owner_role: ciso
