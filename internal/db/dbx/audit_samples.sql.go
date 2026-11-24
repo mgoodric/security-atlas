@@ -24,8 +24,10 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz))
+       OR (id = ANY($7::uuid[])
+           AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)))
 `
 
 type CountPopulationEvidenceParams struct {
@@ -35,6 +37,7 @@ type CountPopulationEvidenceParams struct {
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 // AC-1 + AC-5: count evidence records that match the population's filter.
@@ -42,7 +45,8 @@ type CountPopulationEvidenceParams struct {
 // is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
 // the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
 // (#1699): a record written after the freeze with a backdated observed_at
-// never joins the frozen population.
+// never joins the frozen population. amended_ids adds the records a freeze
+// revision put in the period's population (#1742); empty for none.
 //
 // Scope predicate filtering happens AFTER this count -- the application
 // evaluates the JSON-AST against scope cells in memory and intersects with
@@ -58,6 +62,7 @@ func (q *Queries) CountPopulationEvidence(ctx context.Context, arg CountPopulati
 		arg.ObservedAt_2,
 		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	var row_count int64
 	err := row.Scan(&row_count)
@@ -128,21 +133,24 @@ func (q *Queries) CreatePopulation(ctx context.Context, arg CreatePopulationPara
 
 const createSample = `-- name: CreateSample :one
 INSERT INTO samples (
-    id, tenant_id, population_id, n, seed, created_by
+    id, tenant_id, population_id, n, seed, created_by, freeze_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, population_id, n, seed, created_by, created_at
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, population_id, n, seed, created_by, created_at, freeze_revision
 `
 
 type CreateSampleParams struct {
-	ID           pgtype.UUID `json:"id"`
-	TenantID     pgtype.UUID `json:"tenant_id"`
-	PopulationID pgtype.UUID `json:"population_id"`
-	N            int32       `json:"n"`
-	Seed         string      `json:"seed"`
-	CreatedBy    string      `json:"created_by"`
+	ID             pgtype.UUID `json:"id"`
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	PopulationID   pgtype.UUID `json:"population_id"`
+	N              int32       `json:"n"`
+	Seed           string      `json:"seed"`
+	CreatedBy      string      `json:"created_by"`
+	FreezeRevision *int32      `json:"freeze_revision"`
 }
 
+// #1742: freeze_revision is the revision of the frozen period the
+// population drew from (GetPopulationFreezeRevision), NULL otherwise.
 func (q *Queries) CreateSample(ctx context.Context, arg CreateSampleParams) (Sample, error) {
 	row := q.db.QueryRow(ctx, createSample,
 		arg.ID,
@@ -151,6 +159,7 @@ func (q *Queries) CreateSample(ctx context.Context, arg CreateSampleParams) (Sam
 		arg.N,
 		arg.Seed,
 		arg.CreatedBy,
+		arg.FreezeRevision,
 	)
 	var i Sample
 	err := row.Scan(
@@ -161,6 +170,7 @@ func (q *Queries) CreateSample(ctx context.Context, arg CreateSampleParams) (Sam
 		&i.Seed,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.FreezeRevision,
 	)
 	return i, err
 }
@@ -194,8 +204,35 @@ func (q *Queries) GetPopulationByID(ctx context.Context, arg GetPopulationByIDPa
 	return i, err
 }
 
+const getSampleAmendReason = `-- name: GetSampleAmendReason :one
+SELECT r.justification
+FROM samples s
+JOIN populations p ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+JOIN audit_period_freeze_revisions r
+  ON r.tenant_id = s.tenant_id
+ AND r.audit_period_id = p.audit_period_id
+ AND r.revision = s.freeze_revision
+WHERE s.tenant_id = $1
+  AND s.id        = $2
+`
+
+type GetSampleAmendReasonParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1742: the admin's reason for the freeze revision a sample was drawn
+// from, when that revision is an import amendment (revision >= 2). No row
+// otherwise.
+func (q *Queries) GetSampleAmendReason(ctx context.Context, arg GetSampleAmendReasonParams) (string, error) {
+	row := q.db.QueryRow(ctx, getSampleAmendReason, arg.TenantID, arg.ID)
+	var justification string
+	err := row.Scan(&justification)
+	return justification, err
+}
+
 const getSampleByID = `-- name: GetSampleByID :one
-SELECT id, tenant_id, population_id, n, seed, created_by, created_at FROM samples
+SELECT id, tenant_id, population_id, n, seed, created_by, created_at, freeze_revision FROM samples
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -215,6 +252,7 @@ func (q *Queries) GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (S
 		&i.Seed,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.FreezeRevision,
 	)
 	return i, err
 }
@@ -364,8 +402,10 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz))
+       OR (id = ANY($7::uuid[])
+           AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)))
 ORDER BY id
 `
 
@@ -376,6 +416,7 @@ type ListPopulationEvidenceIDsParams struct {
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 type ListPopulationEvidenceIDsRow struct {
@@ -400,6 +441,7 @@ func (q *Queries) ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulat
 		arg.ObservedAt_2,
 		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	if err != nil {
 		return nil, err
@@ -499,7 +541,7 @@ func (q *Queries) ListSampleAnnotations(ctx context.Context, arg ListSampleAnnot
 }
 
 const listSampleAuditLog = `-- name: ListSampleAuditLog :many
-SELECT id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module
+SELECT id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module, freeze_revision
 FROM sample_audit_log
 WHERE tenant_id = $1
 ORDER BY occurred_at DESC, id ASC
@@ -533,6 +575,7 @@ func (q *Queries) ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLog
 			&i.ReasonCode,
 			&i.OccurredAt,
 			&i.SubjectModule,
+			&i.FreezeRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -636,23 +679,25 @@ const writeSampleAuditLog = `-- name: WriteSampleAuditLog :one
 INSERT INTO sample_audit_log (
     id, tenant_id, action, actor,
     population_id, sample_id, seed,
-    n_requested, n_returned, reason_code, subject_module
+    n_requested, n_returned, reason_code, subject_module,
+    freeze_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core')
-RETURNING id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'core', $11)
+RETURNING id, tenant_id, action, actor, population_id, sample_id, seed, n_requested, n_returned, reason_code, occurred_at, subject_module, freeze_revision
 `
 
 type WriteSampleAuditLogParams struct {
-	ID           pgtype.UUID `json:"id"`
-	TenantID     pgtype.UUID `json:"tenant_id"`
-	Action       string      `json:"action"`
-	Actor        string      `json:"actor"`
-	PopulationID pgtype.UUID `json:"population_id"`
-	SampleID     pgtype.UUID `json:"sample_id"`
-	Seed         *string     `json:"seed"`
-	NRequested   *int32      `json:"n_requested"`
-	NReturned    *int32      `json:"n_returned"`
-	ReasonCode   string      `json:"reason_code"`
+	ID             pgtype.UUID `json:"id"`
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	Action         string      `json:"action"`
+	Actor          string      `json:"actor"`
+	PopulationID   pgtype.UUID `json:"population_id"`
+	SampleID       pgtype.UUID `json:"sample_id"`
+	Seed           *string     `json:"seed"`
+	NRequested     *int32      `json:"n_requested"`
+	NReturned      *int32      `json:"n_returned"`
+	ReasonCode     string      `json:"reason_code"`
+	FreezeRevision *int32      `json:"freeze_revision"`
 }
 
 // Every sample pull writes one row here. The seed -> sample_id mapping
@@ -672,6 +717,7 @@ func (q *Queries) WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditL
 		arg.NRequested,
 		arg.NReturned,
 		arg.ReasonCode,
+		arg.FreezeRevision,
 	)
 	var i SampleAuditLog
 	err := row.Scan(
@@ -687,6 +733,7 @@ func (q *Queries) WriteSampleAuditLog(ctx context.Context, arg WriteSampleAuditL
 		&i.ReasonCode,
 		&i.OccurredAt,
 		&i.SubjectModule,
+		&i.FreezeRevision,
 	)
 	return i, err
 }

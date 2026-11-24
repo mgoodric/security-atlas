@@ -382,6 +382,11 @@ func writeAuditPeriodsAndSamples(ctx context.Context, tx pgx.Tx, fs *fixtureSet)
 		}
 		popCount++
 
+		// A window that opens at or after now has no records yet
+		// (#3047), so there is nothing to sample.
+		if len(ap.WindowEvidenceIDs) == 0 {
+			continue
+		}
 		sampleID := uuid.New()
 		_, err = tx.Exec(ctx,
 			`INSERT INTO samples
@@ -404,9 +409,9 @@ func writeAuditPeriodsAndSamples(ctx context.Context, tx pgx.Tx, fs *fixtureSet)
 	return apCount, popCount, sampleCount, sampleEvidenceCount, nil
 }
 
-// writeEvidence inserts every evidence_record fixture + emits a small
-// number of sample_evidence rows linking the first samplesPerPeriod
-// evidence rows to each audit period's sample.
+// writeEvidence inserts every evidence_record fixture + emits the
+// sample_evidence rows linking each audit period's sample to the
+// records seeded in that period's window.
 //
 // Returns the evidence row count + the distinct list of evidence
 // kinds used (for D3 / Result.EvidenceKindsUsed).
@@ -463,28 +468,24 @@ func writeEvidence(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, []strin
 		kindsSet[e.EvidenceKind] = struct{}{}
 	}
 
-	// Attach a few evidence rows to each sample (sample_evidence).
-	// The PK is (sample_id, evidence_record_id) so ordinal is a
+	// Attach each sample to its own period's window records
+	// (sample_evidence), so a sample holds members of its population
+	// (#3047). The PK is (sample_id, evidence_record_id) so ordinal is a
 	// position-within-sample integer starting at 0.
-	evidenceIdx := 0
 	for i := range fs.auditPeriods {
 		ap := &fs.auditPeriods[i]
 		for _, sampleID := range ap.SampleEvidenceIDs {
-			for j := 0; j < samplesPerPeriod; j++ {
-				if evidenceIdx >= len(fs.evidence) {
-					break
-				}
+			for j, evidenceID := range ap.WindowEvidenceIDs {
 				_, err := tx.Exec(ctx,
 					`INSERT INTO sample_evidence
 					 (tenant_id, sample_id, evidence_record_id, ordinal)
 					 VALUES ($1, $2, $3, $4)
 					 ON CONFLICT DO NOTHING`,
-					fs.tenant.ID, sampleID, fs.evidence[evidenceIdx].ID, j,
+					fs.tenant.ID, sampleID, evidenceID, j,
 				)
 				if err != nil {
 					return 0, nil, fmt.Errorf("demoseed: insert sample_evidence: %w", err)
 				}
-				evidenceIdx++
 			}
 		}
 	}

@@ -196,6 +196,8 @@ sql:
       - "migrations/sql/20261304000000_evidence_routing_kind_cutover.sql"
       # #3000: unreadable pages on synced policies.
       - "migrations/sql/20261305000000_policy_sync_unreadable.sql"
+      # #1742: historical evidence import, and audit-period freeze revisions.
+      - "migrations/sql/20261306000000_evidence_historical_import.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -103,7 +103,9 @@ WHERE evidence_records.tenant_id = $1
 -- (frozen_at NULL) falls through to live state, but the slice-749 surface only
 -- summarizes FROZEN periods, so in practice the horizon is always set. The
 -- horizon bounds ingested_at too (#1699): a record written after the freeze
--- with a backdated observed_at is not in the frozen population.
+-- with a backdated observed_at is not in the frozen population. amended_ids
+-- adds the records a later freeze revision put in the population (#1742);
+-- pass an empty array for the original freeze.
 SELECT *
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
@@ -114,10 +116,13 @@ WHERE evidence_records.tenant_id = $1
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
-  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
 
@@ -137,10 +142,13 @@ WHERE evidence_records.tenant_id = $1
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
-  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz);
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)));
 
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
@@ -165,12 +173,17 @@ LIMIT sqlc.arg('page_size');
 --
 -- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 -- the DB layer; explicit-is-clearer per AC-5).
+--
+-- #1742: import_batch_id ties a historical-import attempt to its batch;
+-- NULL on every other ingestion path.
 INSERT INTO evidence_audit_log (
     id, tenant_id, credential_id,
     decision, reason_code,
-    idempotency_key, evidence_kind, record_id, subject_module
+    idempotency_key, evidence_kind, record_id, subject_module,
+    import_batch_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'core'
+    $1, $2, $3, $4, $5, $6, $7, $8, 'core',
+    sqlc.narg('import_batch_id')
 )
 RETURNING *;
 

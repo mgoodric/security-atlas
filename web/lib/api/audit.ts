@@ -132,6 +132,12 @@ export type Sample = {
   created_by: string;
   created_at: string;
   evidence_record_ids: string[];
+  // #1742: the freeze revision of the period the population drew from
+  // (absent when it has no frozen period). Above 1, a historical import
+  // amended the period after its freeze; amend_reason is the admin's reason.
+  freeze_revision?: number;
+  amended_by_import?: boolean;
+  amend_reason?: string;
 };
 
 export type DrawSampleRequest = {

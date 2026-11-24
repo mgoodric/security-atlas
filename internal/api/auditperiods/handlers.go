@@ -138,9 +138,19 @@ type periodWire struct {
 	FrozenAt       *time.Time `json:"frozen_at,omitempty"`
 	FrozenHashHex  string     `json:"frozen_hash,omitempty"`
 	FrozenBy       string     `json:"frozen_by,omitempty"`
-	CreatedBy      string     `json:"created_by"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// FreezeRevision is the latest freeze revision, RevisionHashHex its
+	// hash; frozen_hash stays the original freeze's (#1742). A revision
+	// above 1 means a historical import amended the frozen period, which
+	// AmendedByImport states outright for the UI.
+	FreezeRevision  int    `json:"freeze_revision,omitempty"`
+	RevisionHashHex string `json:"revision_hash,omitempty"`
+	AmendedByImport bool   `json:"amended_by_import"`
+	// AmendReason is the admin's reason for the latest amendment, shown
+	// with the amended-by-import notice (Matt, 2026-11-24).
+	AmendReason string    `json:"amend_reason,omitempty"`
+	CreatedBy   string    `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type controlStateObservationWire struct {
@@ -225,7 +235,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get audit period", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"audit_period": periodWireFrom(p)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"audit_period":     periodWireFrom(p),
+		"freeze_revisions": freezeRevisionWires(p.Revisions),
+	})
 }
 
 // List handles GET /v1/audit-periods.
@@ -267,7 +280,9 @@ func (h *Handler) Freeze(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	p, err := h.store.Freeze(ctx, id, cred.ID, time.Now().UTC())
+	// A zero time: Freeze stamps frozen_at from the database clock once it
+	// holds the tenant's evidence-freeze lock (#1742).
+	p, err := h.store.Freeze(ctx, id, cred.ID, time.Time{})
 	if err != nil {
 		switch {
 		case errors.Is(err, period.ErrNotFound):
@@ -425,5 +440,51 @@ func periodWireFrom(p period.Period) periodWire {
 		w.FrozenHashHex = hex.EncodeToString(p.FrozenHash)
 	}
 	w.FrozenBy = p.FrozenBy
+	w.FreezeRevision = p.FreezeRevision
+	if len(p.RevisionHash) > 0 {
+		w.RevisionHashHex = hex.EncodeToString(p.RevisionHash)
+	}
+	w.AmendedByImport = p.AmendedByImport()
+	if n := len(p.Revisions); n > 1 {
+		w.AmendReason = p.Revisions[n-1].Justification
+	}
 	return w
+}
+
+// freezeRevisionWire is one freeze revision of a frozen period (#1742).
+type freezeRevisionWire struct {
+	Revision          int       `json:"revision"`
+	FrozenHashHex     string    `json:"frozen_hash"`
+	PreviousHashHex   string    `json:"previous_hash,omitempty"`
+	FrozenAt          time.Time `json:"frozen_at"`
+	Reason            string    `json:"reason"`
+	Justification     string    `json:"justification,omitempty"`
+	Actor             string    `json:"actor"`
+	ImportBatchID     string    `json:"import_batch_id,omitempty"`
+	EvidenceRecordIDs []string  `json:"evidence_record_ids,omitempty"`
+}
+
+func freezeRevisionWires(revs []period.Revision) []freezeRevisionWire {
+	out := make([]freezeRevisionWire, len(revs))
+	for i, r := range revs {
+		w := freezeRevisionWire{
+			Revision:      r.Revision,
+			FrozenHashHex: hex.EncodeToString(r.FrozenHash),
+			FrozenAt:      r.FrozenAt,
+			Reason:        r.Reason,
+			Justification: r.Justification,
+			Actor:         r.Actor,
+		}
+		if len(r.PreviousHash) > 0 {
+			w.PreviousHashHex = hex.EncodeToString(r.PreviousHash)
+		}
+		if r.ImportBatchID != nil {
+			w.ImportBatchID = r.ImportBatchID.String()
+		}
+		for _, id := range r.EvidenceRecordIDs {
+			w.EvidenceRecordIDs = append(w.EvidenceRecordIDs, id.String())
+		}
+		out[i] = w
+	}
+	return out
 }
