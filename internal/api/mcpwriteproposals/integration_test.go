@@ -8,7 +8,7 @@
 //   - POST proposal happy path
 //   - confirm path applies + records human_approver
 //   - reject path is terminal
-//   - non-approver cannot confirm (403)
+//   - non-admin cannot confirm (403)
 //   - cross-tenant isolation (RLS)
 //   - pending-cap enforcement (429)
 
@@ -223,7 +223,7 @@ func TestHTTP_RejectProposal(t *testing.T) {
 	}
 }
 
-// ----- ISC-45 + ISC-55: non-approver gets 403 on confirm -----
+// ----- ISC-45 + ISC-55: non-admin gets 403 on confirm -----
 
 // #3016: the engine refuses a viewer both the create and the confirm,
 // with its own {"error":"forbidden"}, and the proposal stays

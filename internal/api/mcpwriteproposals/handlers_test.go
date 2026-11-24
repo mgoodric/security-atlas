@@ -16,9 +16,9 @@ package mcpwriteproposals
 //                          tool), 400 (missing ai_model_* fields)
 //   - ListProposals      — 401 (no auth)
 //   - GetProposal        — 401 (no auth), 400 (non-UUID id)
-//   - ConfirmProposal    — 401 (no auth), 403 (no approver role),
+//   - ConfirmProposal    — 401 (no auth), 403 (not a tenant admin),
 //                          400 (non-UUID id)
-//   - RejectProposal     — 401 (no auth), 403 (no approver role),
+//   - RejectProposal     — 401 (no auth), 403 (not a tenant admin),
 //                          400 (non-UUID id)
 //   - writeCreateErr     — every documented branch (Unknown tool /
 //                          Invalid input / Pending cap exceeded /
@@ -312,7 +312,7 @@ func TestConfirmProposal_403WhenNotApprover(t *testing.T) {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
 	if !strings.Contains(w.Body.String(), "admin role required") {
-		t.Fatalf("body = %s, want approver-required message", w.Body.String())
+		t.Fatalf("body = %s, want admin-required message", w.Body.String())
 	}
 }
 
