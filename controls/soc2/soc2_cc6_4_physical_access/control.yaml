@@ -11,6 +11,7 @@ description: |
   uploaded with the most recent review date.
 
 scf_anchor_id: PES-08
+scf_release: test-2026.3
 control_family: PES
 implementation_type: manual_periodic
 owner_role: it-operations

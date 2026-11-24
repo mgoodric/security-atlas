@@ -45,6 +45,7 @@ description: |
   reported is not seen, which waits on an endpoint inventory (#2834).
 
 scf_anchor_id: NET-03
+scf_release: test-2026.3
 control_family: NET
 implementation_type: automated
 owner_role: security-engineering

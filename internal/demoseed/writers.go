@@ -438,6 +438,10 @@ func writeEvidence(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, []strin
 		// control_ref is a NOT NULL text column (slice 014's
 		// connector-driven evidence path). Use the control's UUID
 		// string as the reference token.
+		// ingested_at is the observation time (capped at now): the demo
+		// tells a year of history, and its frozen audit periods hold only
+		// what was in the ledger at their frozen_at (#1699). With now()
+		// every record would post-date every freeze.
 		_, err = tx.Exec(ctx,
 			`INSERT INTO evidence_records
 			 (id, tenant_id, control_id, control_ref, scope_id,
@@ -445,7 +449,7 @@ func writeEvidence(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, []strin
 			  provenance, result, payload, hash, freshness_class,
 			  evidence_kind, schema_version, ingestion_path)
 			 VALUES ($1, $2, $3, $4, NULL,
-			         $5, now(),
+			         $5, LEAST(now(), $5),
 			         $6::jsonb, $7::evidence_result, $8::jsonb, $9, $10::evidence_freshness_class,
 			         $11, $12, 'push')`,
 			e.ID, fs.tenant.ID, e.ControlID, e.ControlID.String(),

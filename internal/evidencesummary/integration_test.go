@@ -66,6 +66,8 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 }
 
 // seedEvidence inserts one evidence_records row (mirrors the slice-064 harness).
+// A past record is ingested when it was observed, so a freeze at a past
+// instant finds it in the ledger (#1699).
 func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, observedAt time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
@@ -74,7 +76,7 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 			id, tenant_id, control_id, control_ref, observed_at, ingested_at,
 			provenance, result, payload, hash, evidence_kind
 		)
-		VALUES ($1, $2, $3, $4, $5, now(), $6, 'pass', '{}'::jsonb, $7, 'access_review.completion')
+		VALUES ($1, $2, $3, $4, $5, LEAST(now(), $5), $6, 'pass', '{}'::jsonb, $7, 'access_review.completion')
 	`, id, tenant, ctrlID, ctrlID.String(), observedAt,
 		`{"connector_id":"test-connector"}`,
 		"hash-502-"+id.String()[:8]); err != nil {

@@ -9,6 +9,7 @@ description: |
   documented status-page workflow.
 
 scf_anchor_id: TDA-05
+scf_release: test-2026.3
 control_family: TDA
 implementation_type: manual_attested
 owner_role: product-engineering

@@ -9,6 +9,7 @@ description: |
   last-review date.
 
 scf_anchor_id: TPM-02
+scf_release: test-2026.3
 control_family: TPM
 implementation_type: manual_periodic
 owner_role: ciso

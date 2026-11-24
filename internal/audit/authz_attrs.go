@@ -63,8 +63,9 @@ func (s *Store) SamplePeriod(ctx context.Context, id uuid.UUID) (period uuid.UUI
 type EvidenceScope struct {
 	// Periods are the audit periods with an attached population that
 	// contains the record: the same control, observed inside the
-	// population's window and at or before its frozen_at, and in a scope
-	// cell its predicate selects. Sorted, without duplicates.
+	// population's window and at or before its frozen_at, ingested at or
+	// before that frozen_at (#1699), and in a scope cell its predicate
+	// selects. Sorted, without duplicates.
 	Periods []uuid.UUID
 	// ScopeCellID is the record's scope cell, nil when it has none.
 	ScopeCellID *uuid.UUID
@@ -89,6 +90,10 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 			return nil
 		}
 		at := rec.ObservedAt.Time
+		var ingested *time.Time
+		if rec.IngestedAt.Valid {
+			ingested = &rec.IngestedAt.Time
+		}
 		controls, err := recordControls(ctx, q, tenantID, rec)
 		if err != nil {
 			return err
@@ -100,7 +105,7 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 			routedKind = *rec.EvidenceKind
 		}
 		for _, c := range controls {
-			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, out.ScopeCellID, routedKind)
+			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, ingested, out.ScopeCellID, routedKind)
 			if err != nil {
 				return err
 			}
@@ -149,7 +154,7 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 	var out []uuid.UUID
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var err error
-		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil, "")
+		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil, nil, "")
 		return err
 	})
 	return out, err
@@ -158,13 +163,16 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 // periodsCovering lists the periods of the period-attached populations on
 // controlID that cover ([since, until], cellID): both bounds inside the
 // population's window and freeze horizon. A record passes its observed_at
-// as both. A nil cellID is covered only by a match-every-cell predicate.
+// as both, and its ingested_at as ingestedAt: a frozen population holds
+// only records in the ledger at its frozen_at (#1699). A nil ingestedAt
+// (a control window, not a record) skips that bound. A nil cellID is
+// covered only by a match-every-cell predicate.
 // routedKind is the kind of a control-free routed record, or "": a
 // population pinned before that kind's routing cutover never draws such a
 // record, so it covers nothing for it (#2924, #2973).
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
-	since, until *time.Time, cellID *uuid.UUID, routedKind string,
+	since, until, ingestedAt *time.Time, cellID *uuid.UUID, routedKind string,
 ) ([]uuid.UUID, error) {
 	pops, err := q.ListPeriodPopulationsForControl(ctx, dbx.ListPeriodPopulationsForControlParams{
 		TenantID: pgUUID(tenantID), ControlID: pgUUID(controlID),
@@ -184,7 +192,8 @@ func periodsCovering(
 	var out []uuid.UUID
 	for _, pop := range pops {
 		period, ok := uuidFromPG(pop.AuditPeriodID)
-		if !ok || seen[period] || !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) {
+		if !ok || seen[period] || !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) ||
+			!populationHeldAtFreeze(pop, ingestedAt) {
 			continue
 		}
 		if routedKind != "" && !slices.Contains(routed.PopulationKindsAt(cutover, pop), routedKind) {
@@ -233,6 +242,14 @@ func populationWindowCovers(pop dbx.Population, observedAt *time.Time) bool {
 		return false
 	}
 	return true
+}
+
+// populationHeldAtFreeze reports whether a record ingested at ingestedAt
+// was in the ledger when pop froze: ingested_at at or before frozen_at, the
+// bound ListPopulationEvidenceIDs draws with (#1699). A population not yet
+// frozen, or a nil ingestedAt, holds it.
+func populationHeldAtFreeze(pop dbx.Population, ingestedAt *time.Time) bool {
+	return ingestedAt == nil || !pop.FrozenAt.Valid || !ingestedAt.After(pop.FrozenAt.Time)
 }
 
 func uuidFromPG(p pgtype.UUID) (uuid.UUID, bool) {

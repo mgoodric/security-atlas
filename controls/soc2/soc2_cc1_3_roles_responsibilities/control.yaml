@@ -11,6 +11,7 @@ description: |
   matrix version that was reviewed.
 
 scf_anchor_id: GOV-05
+scf_release: test-2026.3
 control_family: GOV
 implementation_type: manual_attested
 owner_role: ciso

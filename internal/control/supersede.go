@@ -5,8 +5,11 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 )
 
 // inPlaceManifestKeys are the top-level control.yaml keys an upload may
@@ -15,6 +18,39 @@ import (
 // #2023). None feeds evaluation. `anchor_fit` itself is not here: a fit
 // change alters what the SCF mapping means, so it supersedes.
 var inPlaceManifestKeys = []string{"description", "external_refs", "anchor_fit_note"}
+
+// scfReleaseKey is the control.yaml key an upload may add in place, but not
+// change or remove (issue #1773).
+const scfReleaseKey = "scf_release"
+
+// isBlank reports whether a decoded YAML value is absent, null or a string
+// of only whitespace.
+func isBlank(v any) bool {
+	if v == nil {
+		return true
+	}
+	s, ok := v.(string)
+	return ok && strings.TrimSpace(s) == ""
+}
+
+// isShippedStock reports whether manifestYAML, decoded as m, is a stock
+// control.yaml revision the platform shipped for its bundle_id.
+func isShippedStock(m map[string]any, manifestYAML []byte) bool {
+	bundleID, _ := m["bundle_id"].(string)
+	return bundleID != "" && scfimport.IsStockManifest(bundleID, string(manifestYAML))
+}
+
+// manifestSCFRelease returns the scf_release a stored control.yaml declares,
+// or "" when it declares none or does not decode.
+func manifestSCFRelease(manifestYAML []byte) string {
+	var doc struct {
+		SCFRelease string `yaml:"scf_release"`
+	}
+	if err := yaml.Unmarshal(manifestYAML, &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.SCFRelease)
+}
 
 // inPlaceQueryKeys are the keys inside each evidence_queries[] entry an
 // upload may change in place (issue #2891). A query's description is prose
@@ -61,6 +97,17 @@ func SupersedingFields(priorYAML, nextYAML []byte) ([]string, error) {
 			delete(m, k)
 		}
 		stripQueryKeys(m)
+	}
+	// A shipped stock manifest that declares scf_release where the stored
+	// one declared none (issue #1773) names the release the stock code was
+	// already written against; it does not by itself change the anchor.
+	// Store.Upload still re-checks the anchor (rebindAnchor). Only shipped
+	// bytes qualify (scfimport.IsStockManifest): a tenant declaring a
+	// release, or a remap approval rewriting one (#1776), means to re-bind,
+	// so it supersedes, as does changing or removing a declared release.
+	if isBlank(prior[scfReleaseKey]) && isShippedStock(next, nextYAML) {
+		delete(prior, scfReleaseKey)
+		delete(next, scfReleaseKey)
 	}
 	var out []string
 	for _, k := range unionKeys(prior, next) {

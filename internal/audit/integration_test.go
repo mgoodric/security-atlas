@@ -76,7 +76,8 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 
 // seedEvidence inserts n evidence_records rows with observed_at evenly
 // spaced inside [windowStart, windowEnd]. ids are server-generated UUIDs,
-// returned for the test's reference.
+// returned for the test's reference. Each row is ingested when it was
+// observed, so a freeze at a past instant finds it in the ledger (#1699).
 func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, n int, windowStart time.Time) []uuid.UUID {
 	t.Helper()
 	out := make([]uuid.UUID, n)
@@ -89,7 +90,7 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 				id, tenant_id, control_id, observed_at, ingested_at,
 				provenance, result, payload, hash, control_ref
 			)
-			VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
+			VALUES ($1, $2, $3, $4, $4, '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
 		`, id, tenant, ctrlID, observed, fmt.Sprintf("hash-%03d", i)); err != nil {
 			t.Fatalf("seed evidence %d: %v", i, err)
 		}

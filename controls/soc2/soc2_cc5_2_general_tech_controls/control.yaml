@@ -10,6 +10,7 @@ description: |
   each new service shipped in the period.
 
 scf_anchor_id: SEA-05
+scf_release: test-2026.3
 control_family: SEA
 implementation_type: manual_attested
 owner_role: security-engineering

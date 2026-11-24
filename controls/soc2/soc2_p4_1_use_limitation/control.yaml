@@ -9,6 +9,7 @@ description: |
   through a privacy review before launch.
 
 scf_anchor_id: PRI-29
+scf_release: test-2026.3
 control_family: PRI
 implementation_type: manual_attested
 owner_role: ciso

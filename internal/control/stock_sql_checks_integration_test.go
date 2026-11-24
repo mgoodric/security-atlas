@@ -110,7 +110,8 @@ func seedMFAPolicy(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl uuid.U
 }
 
 // seedStockEvidence inserts one ledger record of the given kind, carrying the
-// connector's own verdict and payload.
+// connector's own verdict and payload. It is ingested when it was observed,
+// so a replay of an earlier instant finds it in the ledger (#1699).
 func seedStockEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl uuid.UUID, kind string, observedAt time.Time, connectorResult string, payload map[string]any) {
 	t.Helper()
 	body, err := json.Marshal(payload)
@@ -123,7 +124,7 @@ func seedStockEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl uu
 			id, tenant_id, control_id, evidence_kind, observed_at, ingested_at,
 			provenance, result, payload, hash, control_ref
 		)
-		VALUES ($1, $2, $3, $4, $5, now(), '{}'::jsonb, $6, $7::jsonb, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $5, '{}'::jsonb, $6, $7::jsonb, $8, $9)
 	`, id, tenant, ctrl, kind, observedAt, connectorResult, string(body), "hash-stock-"+id.String()[:8], ctrl.String()); err != nil {
 		t.Fatalf("seed %s record: %v", kind, err)
 	}

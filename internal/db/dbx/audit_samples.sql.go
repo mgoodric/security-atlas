@@ -25,6 +25,7 @@ WHERE evidence_records.tenant_id = $1
   AND observed_at >= $3
   AND observed_at <= $4
   AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
 `
 
 type CountPopulationEvidenceParams struct {
@@ -39,7 +40,9 @@ type CountPopulationEvidenceParams struct {
 // AC-1 + AC-5: count evidence records that match the population's filter.
 // AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 // is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
-// the explicit "no horizon" semantic.
+// the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
+// (#1699): a record written after the freeze with a backdated observed_at
+// never joins the frozen population.
 //
 // Scope predicate filtering happens AFTER this count -- the application
 // evaluates the JSON-AST against scope cells in memory and intersects with
@@ -362,6 +365,7 @@ WHERE evidence_records.tenant_id = $1
   AND observed_at >= $3
   AND observed_at <= $4
   AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
 ORDER BY id
 `
 

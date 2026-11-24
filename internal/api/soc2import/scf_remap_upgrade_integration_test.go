@@ -158,6 +158,9 @@ func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 	}
 	importSCF(t, pool, old)
 	oldCW := loadHIPAACrosswalk(t)
+	// The pre-#1773 shipped crosswalk declared no scf_release, so its codes
+	// bound in the current release (here the pre-#1971 one).
+	oldCW.SCFRelease = ""
 	for i, m := range oldCW.Mappings {
 		if p, ok := preRemap[m.SCFAnchor]; ok {
 			oldCW.Mappings[i].SCFAnchor = p.id

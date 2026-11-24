@@ -14,8 +14,6 @@ package scfimport_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -41,10 +39,9 @@ func approvedStockSurvivesBootSeed(t *testing.T, releaseB, wantClass, scfID stri
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	stockYAML, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", stockCC81Bundle, "control.yaml"))
-	if err != nil {
-		t.Fatalf("read stock manifest: %v", err)
-	}
+	// The pre-#1773 shipped bytes: this test binds the stock control in
+	// synthetic release A, which the pinned bytes cannot.
+	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
 	if !scfimport.IsStockManifest(stockCC81Bundle, string(stockYAML)) {
 		t.Fatalf("controls/soc2/%s/control.yaml is not in the stock manifest list", stockCC81Bundle)
 	}

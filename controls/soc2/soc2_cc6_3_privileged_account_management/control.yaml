@@ -33,6 +33,7 @@ description: |
   the privileged role, which needs an inventory (#2834).
 
 scf_anchor_id: IAC-10
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

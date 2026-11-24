@@ -30,6 +30,7 @@ description: |
   checked; that half needs a system inventory (#2834).
 
 scf_anchor_id: IAC-12
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

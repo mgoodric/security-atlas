@@ -9,6 +9,7 @@ description: |
   documented RTO.
 
 scf_anchor_id: BCD-32
+scf_release: test-2026.3
 control_family: BCD
 implementation_type: manual_periodic
 owner_role: it-operations

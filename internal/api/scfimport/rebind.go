@@ -59,7 +59,8 @@ type RebindReport struct {
 	// gone from the current release or now names a different control.
 	NeedsReanchoring []ControlOnLegacyAnchor
 	// Pinned controls declare scf_release (#1770) in their bundle, so they
-	// are bound to that release on purpose and are never moved.
+	// are bound to that release on purpose and are never moved. A shipped
+	// stock manifest is not listed here even though it declares one (#1773).
 	Pinned []ControlOnLegacyAnchor
 	// SupersededMidRun counts rebindable controls a concurrent upload
 	// superseded between the listing and the update. They are not moved
@@ -193,7 +194,8 @@ const (
 	// else, or the stored manifest does not parse; a person re-anchors it.
 	OutcomeNeedsReanchoring
 	// OutcomePinned: the bundle binds its anchor to one release on purpose
-	// (#1770), so it is neither moved nor flagged.
+	// (#1770), so it is neither moved nor flagged. Shipped stock manifests
+	// are never pinned in this sense (#1773, see Classify).
 	OutcomePinned
 )
 
@@ -208,12 +210,19 @@ func Classify(r dbx.ListControlsOnLegacySCFAnchorsRow) (ControlOnLegacyAnchor, O
 	// A bundle pinned to an SCF release (#1770) is bound there on purpose:
 	// moving it would be the silent re-point D3 forbids. A manifest whose
 	// pin cannot be read is not moved either.
+	//
+	// A shipped stock manifest is the exception (#1773): it declares
+	// scf_release so its codes resolve in the release it was written
+	// against at upload, not to opt out of upgrades. It keeps the remap
+	// queue (#1775), the stock re-bind (#2321) and the needs-reanchoring
+	// flag. IsStockManifest matches shipped bytes only, so a tenant cannot
+	// opt in.
 	pinned, parsed := IsPinned(r.BundleManifestYaml)
 	switch {
 	case !parsed:
 		row.Note = unparseableNote
 		return row, OutcomeNeedsReanchoring, nil
-	case pinned:
+	case pinned && !IsStockManifest(r.BundleID, r.BundleManifestYaml):
 		return row, OutcomePinned, nil
 	case Rebindable(r):
 		return row, OutcomeRebindable, nil
