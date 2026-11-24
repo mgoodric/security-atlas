@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -142,6 +143,35 @@ func assertFrozenPeriodHoldsEvidence(t *testing.T, tenantID uuid.UUID) {
 	if len(drawn) != rowCount {
 		t.Errorf("frozen period's population (control %s) draws %d records, want its row_count %d",
 			popControl, len(drawn), rowCount)
+	}
+
+	// #3047: every record the frozen period's sample links to is a member
+	// of that period's population draw.
+	inDraw := map[uuid.UUID]bool{}
+	for _, id := range drawn {
+		inDraw[uuid.UUID(id.ID.Bytes)] = true
+	}
+	rows, err := adminPool.Query(ctx, `
+		SELECT se.evidence_record_id
+		FROM sample_evidence se
+		JOIN samples s ON s.tenant_id = se.tenant_id AND s.id = se.sample_id
+		JOIN populations p ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+		JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
+		WHERE se.tenant_id = $1 AND ap.status = 'frozen'`, tenantID)
+	if err != nil {
+		t.Fatalf("read frozen period's sample_evidence: %v", err)
+	}
+	sampled, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		t.Fatalf("scan frozen period's sample_evidence: %v", err)
+	}
+	if len(sampled) == 0 {
+		t.Errorf("frozen period's sample links no records")
+	}
+	for _, id := range sampled {
+		if !inDraw[id] {
+			t.Errorf("frozen period's sample links record %s outside its population", id)
+		}
 	}
 }
 
@@ -867,4 +897,33 @@ func TestApply_RejectsInvalidSlug(t *testing.T) {
 			t.Errorf("slug %q: expected error; got nil", bad)
 		}
 	}
+}
+
+// TestApply_MaxScaleNoFutureEvidence seeds at MaxScale, where the later
+// audit periods open after now, and checks no ledger record is observed
+// after now() and the frozen period's sample stays inside its population
+// (#3047).
+func TestApply_MaxScaleNoFutureEvidence(t *testing.T) {
+	const slug = "demo-it-maxscale"
+	cleanupTenant(t, slug)
+
+	seeder, err := demoseed.NewSeeder(adminPool, demoseed.MaxScale)
+	if err != nil {
+		t.Fatalf("NewSeeder: %v", err)
+	}
+	res, err := seeder.Apply(context.Background(), demoseed.ApplyInput{Slug: slug})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	var future int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1 AND observed_at > now()`,
+		res.TenantID,
+	).Scan(&future); err != nil {
+		t.Fatalf("count future evidence: %v", err)
+	}
+	if future != 0 {
+		t.Errorf("MaxScale seed wrote %d evidence records observed after now()", future)
+	}
+	assertFrozenPeriodHoldsEvidence(t, res.TenantID)
 }
