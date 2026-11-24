@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Access Control Policy</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="0" w:name="_Purpose"/><w:r><w:t>1. Purpose</w:t></w:r><w:bookmarkEnd w:id="0"/></w:p>
+<w:p><w:r><w:t xml:space="preserve">This policy sets out </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>who</w:t></w:r><w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve"> may</w:t></w:r><w:r><w:t xml:space="preserve"> access </w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>production</w:t></w:r><w:r><w:t xml:space="preserve">, and </w:t></w:r><w:r><w:rPr><w:strike/></w:rPr><w:t>never</w:t></w:r><w:r><w:t xml:space="preserve"> how.</w:t></w:r></w:p>
+<w:p><w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t>Not bold.</w:t></w:r><w:r><w:t xml:space="preserve">  Spaces	and a tab.</w:t></w:r></w:p>
+<w:p><w:r><w:t>Literal *stars*, _underscores_, [brackets], `ticks`, ~tilde~ and a \ backslash &lt;tag&gt;.</w:t></w:r></w:p>
+<w:p><w:r><w:t>1. Not a list item.</w:t></w:r></w:p>
+<w:p><w:r><w:t># Not a heading.</w:t></w:r></w:p>
+<w:p><w:r><w:t>Line one</w:t></w:r><w:r><w:br/><w:t>line two</w:t></w:r><w:r><w:br w:type="page"/><w:t>after a page break.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Changes</w:t></w:r></w:p>
+<w:p><w:r><w:t xml:space="preserve">Kept </w:t></w:r><w:ins w:id="1" w:author="A" w:date="2025-01-01T00:00:00Z"><w:r><w:t>inserted</w:t></w:r></w:ins><w:del w:id="2" w:author="A" w:date="2025-01-01T00:00:00Z"><w:r><w:delText>deleted</w:delText></w:r></w:del><w:r><w:t xml:space="preserve"> text.</w:t></w:r></w:p>
+<w:p><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>3</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve"> of the policy.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="berschrift3"/></w:pPr><w:r><w:t>Links</w:t></w:r></w:p>
+<w:p><w:r><w:t xml:space="preserve">See </w:t></w:r><w:hyperlink r:id="rId8" w:history="1"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>the standards</w:t></w:r></w:hyperlink><w:r><w:t xml:space="preserve">, </w:t></w:r><w:hyperlink w:anchor="_Purpose"><w:r><w:t>the purpose</w:t></w:r></w:hyperlink><w:r><w:t xml:space="preserve">, </w:t></w:r><w:hyperlink r:id="rId9"><w:r><w:t>a script link</w:t></w:r></w:hyperlink><w:r><w:t xml:space="preserve"> and </w:t></w:r><w:hyperlink r:id="rId10"><w:r><w:t>security@example.com</w:t></w:r></w:hyperlink><w:r><w:t>.</w:t></w:r></w:p>
+<w:sdt><w:sdtPr><w:alias w:val="Owner"/></w:sdtPr><w:sdtContent><w:p><w:r><w:t xml:space="preserve">Owner: </w:t></w:r><w:sdt><w:sdtContent><w:r><w:t>Security team</w:t></w:r></w:sdtContent></w:sdt></w:p></w:sdtContent></w:sdt>
+<w:p/>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:p>
+<w:sectPr><w:pgSz w:w="12240" w:h="15840"/></w:sectPr>
+</w:body>
+</w:document>

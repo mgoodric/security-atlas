@@ -14,9 +14,7 @@
 package policysync
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,34 +24,23 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/confluence/internal/confluenceapi"
 	"github.com/mgoodric/security-atlas/connectors/confluence/internal/storagemd"
+	shared "github.com/mgoodric/security-atlas/connectors/shared/policysync"
 )
 
-// Source names the set a push covers: one space on one site.
-type Source struct {
-	Site  string `json:"site"`
-	Space string `json:"space"`
-}
+// The wire shapes and the push are the shared policy-sync client's
+// (connectors/shared/policysync), which the SharePoint connector uses too
+// (#2837).
+type (
+	Source      = shared.Source
+	PagePayload = shared.PagePayload
+	Request     = shared.Request
+	Result      = shared.Result
+	Report      = shared.Report
+	PushError   = shared.PushError
+)
 
-// PagePayload is one page in the push. Properties is nil (JSON null) for
-// a page with no Page Properties macro, which the platform reports as
-// "missing page properties". Unreadable marks a page whose body the
-// converter refused (#3000); it carries UnreadableReason and no body or
-// properties.
-type PagePayload struct {
-	ID               string         `json:"id"`
-	Title            string         `json:"title"`
-	URL              string         `json:"url"`
-	BodyMd           string         `json:"body_md"`
-	Properties       map[string]any `json:"properties"`
-	Unreadable       bool           `json:"unreadable,omitempty"`
-	UnreadableReason string         `json:"unreadable_reason,omitempty"`
-}
-
-// Request is the body of POST /v1/policies:sync.
-type Request struct {
-	Source Source        `json:"source"`
-	Pages  []PagePayload `json:"pages"`
-}
+// SyncPath is the platform's policy sync endpoint.
+const SyncPath = shared.SyncPath
 
 // PageNote is what the connector itself found on a page: macros the
 // converter could not render, or a body it refused.
@@ -160,107 +147,9 @@ func unreadableReason(err error) string {
 	return "body not converted: " + err.Error()
 }
 
-// Readable counts the pages of a push that carry a body.
-func (r Request) Readable() int {
-	n := 0
-	for _, p := range r.Pages {
-		if !p.Unreadable {
-			n++
-		}
-	}
-	return n
-}
-
-// Result is one line of the platform's report.
-type Result struct {
-	PageID        string `json:"page_id"`
-	Title         string `json:"title,omitempty"`
-	Status        string `json:"status"`
-	Reason        string `json:"reason,omitempty"`
-	PolicyID      string `json:"policy_id,omitempty"`
-	Version       string `json:"version,omitempty"`
-	PredecessorID string `json:"predecessor_id,omitempty"`
-}
-
-// Report is the platform's response to a sync.
-type Report struct {
-	Created    int      `json:"created"`
-	NewVersion int      `json:"new_version"`
-	TakenOver  int      `json:"taken_over"`
-	Unchanged  int      `json:"unchanged"`
-	Drift      int      `json:"drift"`
-	Skipped    int      `json:"skipped"`
-	Missing    int      `json:"missing"`
-	Unreadable int      `json:"unreadable"`
-	Results    []Result `json:"results"`
-	// Warnings are run-level notes from the platform, such as a run that
-	// leaves more than half of the source's policies missing (#2902).
-	Warnings []string `json:"warnings"`
-}
-
-// SyncPath is the platform's policy sync endpoint.
-const SyncPath = "/v1/policies:sync"
-
-// maxErrorBody is how much of an error response is quoted in the error.
-const maxErrorBody = 1024
-
-// PushError is a push the platform answered with anything but 200.
-// Message is the platform's {"error": ...} text when the body carries
-// one, else the start of the body.
-type PushError struct {
-	Status  int
-	Message string
-}
-
-func (e *PushError) Error() string {
-	if e.Status == http.StatusUnprocessableEntity {
-		// The platform refuses an empty push for a source that has synced
-		// policies (#2902). The connector refuses an empty set before it
-		// pushes, so reaching this means the two disagree.
-		return fmt.Sprintf("push sync: platform refused an empty push (HTTP 422): %s", e.Message)
-	}
-	return fmt.Sprintf("push sync: HTTP %d: %s", e.Status, e.Message)
-}
-
-// Push sends the full set in one request, authenticated with the
-// policy-sync key, and returns the report. Any answer but 200 is a
-// *PushError.
+// Push sends the full set in one request; see shared.Push.
 func Push(ctx context.Context, hc *http.Client, platform *url.URL, key string, req Request) (Report, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return Report{}, fmt.Errorf("encode sync request: %w", err)
-	}
-	u := *platform
-	u.Path = strings.TrimRight(u.Path, "/") + SyncPath
-	u.RawPath = ""
-	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
-	if err != nil {
-		return Report{}, fmt.Errorf("build sync request: %w", err)
-	}
-	hr.Header.Set("Authorization", "Bearer "+key)
-	hr.Header.Set("Content-Type", "application/json")
-	hr.Header.Set("Accept", "application/json")
-	resp, err := hc.Do(hr)
-	if err != nil {
-		return Report{}, fmt.Errorf("push sync: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		msg := strings.TrimSpace(string(snippet))
-		var body struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(snippet, &body) == nil && strings.TrimSpace(body.Error) != "" {
-			msg = strings.TrimSpace(body.Error)
-		}
-		return Report{}, &PushError{Status: resp.StatusCode, Message: msg}
-	}
-	var rep Report
-	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
-		return Report{}, fmt.Errorf("decode sync report: %w", err)
-	}
-	return rep, nil
+	return shared.Push(ctx, hc, platform, key, req)
 }
 
 // ConverterSkipped counts the pages whose body could not be converted,
@@ -279,22 +168,7 @@ func ConverterSkipped(notes []PageNote) int {
 // then the connector's own notes, then the platform's warnings, then the
 // totals.
 func WriteReport(w io.Writer, rep Report, notes []PageNote) {
-	for _, r := range rep.Results {
-		line := fmt.Sprintf("page %s %q: %s", r.PageID, r.Title, r.Status)
-		if r.Version != "" {
-			line += " version=" + r.Version
-		}
-		if r.PolicyID != "" {
-			line += " policy=" + r.PolicyID
-		}
-		if r.PredecessorID != "" {
-			line += " predecessor=" + r.PredecessorID
-		}
-		if r.Reason != "" {
-			line += " reason=" + r.Reason
-		}
-		_, _ = fmt.Fprintln(w, line)
-	}
+	shared.WriteResults(w, "page", rep)
 	for _, n := range notes {
 		if n.ConvertErr != nil {
 			// The platform's own line for the page, unreadable with this
@@ -308,9 +182,5 @@ func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 		sort.Strings(parts)
 		_, _ = fmt.Fprintf(w, "page %s %q: unsupported macros: %s\n", n.PageID, n.Title, strings.Join(parts, ", "))
 	}
-	for _, warn := range rep.Warnings {
-		_, _ = fmt.Fprintf(w, "warning: %s\n", warn)
-	}
-	_, _ = fmt.Fprintf(w, "sync: created=%d new_version=%d taken_over=%d unchanged=%d drift=%d skipped=%d missing=%d unreadable=%d\n",
-		rep.Created, rep.NewVersion, rep.TakenOver, rep.Unchanged, rep.Drift, rep.Skipped, rep.Missing, rep.Unreadable)
+	shared.WriteTotals(w, rep)
 }

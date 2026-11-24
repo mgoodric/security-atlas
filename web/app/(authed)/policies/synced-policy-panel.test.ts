@@ -13,10 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { Policy } from "@/lib/api/policies";
 
 import { isDraft, primaryAction, syncedPolicyView } from "./lifecycle";
-import {
-  ManagedInConfluenceBadge,
-  SyncedPolicyPanel,
-} from "./synced-policy-panel";
+import { ManagedBySyncBadge, SyncedPolicyPanel } from "./synced-policy-panel";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const PAGE = "https://acme.atlassian.net/wiki/spaces/SEC/pages/1001";
@@ -31,6 +28,7 @@ type Synced = Pick<
   | "historical_approved_at"
   | "sync_drift"
   | "sync_property_drift"
+  | "sync_source"
 >;
 
 function synced(over: Partial<Synced> = {}): Synced {
@@ -43,6 +41,7 @@ function synced(over: Partial<Synced> = {}): Synced {
     historical_approved_at: "2025-03-01",
     sync_drift: null,
     sync_property_drift: null,
+    sync_source: "Confluence",
     ...over,
   };
 }
@@ -55,9 +54,33 @@ function render(p: Synced): string {
 
 describe("synced policy", () => {
   it("shows the Managed in Confluence badge", () => {
-    const html = renderToStaticMarkup(h(ManagedInConfluenceBadge));
+    const html = renderToStaticMarkup(
+      h(ManagedBySyncBadge, { source: "Confluence" }),
+    );
     expect(html).toContain('data-testid="policy-detail-synced"');
     expect(html).toContain("Managed in Confluence");
+  });
+
+  // #2837 — a SharePoint policy names SharePoint, not Confluence.
+  it("names SharePoint for a policy synced from SharePoint", () => {
+    const view = syncedPolicyView(synced({ sync_source: "SharePoint" }));
+    expect(view?.source).toBe("SharePoint");
+    expect(view?.approval).toBe(
+      "Approved in SharePoint by Jane Doe on 2025-03-01",
+    );
+    const badge = renderToStaticMarkup(
+      h(ManagedBySyncBadge, { source: view!.source }),
+    );
+    expect(badge).toContain("Managed in SharePoint");
+    const html = render(synced({ sync_source: "SharePoint" }));
+    expect(html).toContain("This policy is synced from SharePoint.");
+    expect(html).not.toContain("Confluence");
+  });
+
+  it("falls back to Confluence when the response has no sync_source", () => {
+    expect(syncedPolicyView(synced({ sync_source: undefined }))?.source).toBe(
+      "Confluence",
+    );
   });
 
   it("links to the source page, opening it in a new tab", () => {
