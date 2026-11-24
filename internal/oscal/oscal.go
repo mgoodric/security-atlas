@@ -104,6 +104,10 @@ type Bundle struct {
 	AuditPeriodID uuid.UUID
 	// FrozenAt is the period's freeze horizon, RFC-3339.
 	FrozenAt string
+	// FreezeRevision, RevisionHash (hex) and AmendReason: see Manifest.
+	FreezeRevision int
+	RevisionHash   string
+	AmendReason    string
 	// OSCALVersion is the pinned OSCAL spec version (see OSCALVersion).
 	OSCALVersion string
 	// GeneratedAt is the wall-clock instant the export ran, RFC-3339.

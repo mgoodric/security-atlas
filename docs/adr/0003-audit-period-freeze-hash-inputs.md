@@ -73,6 +73,22 @@ Upgrade: no stored hash changes, and none needs to.
 
 A reimplemented verifier MUST apply both bounds.
 
+## Amendment: freeze revisions (#1742)
+
+A historical evidence import may add records to a period that is already frozen, but only when the import names the period explicitly. The period is then re-frozen as a new **freeze revision**; `frozen_at` and `frozen_hash` on `audit_periods` are never rewritten and remain revision 1.
+
+- Revision N (N >= 2) is an append-only row in `audit_period_freeze_revisions` that records its hash, the previous revision's hash, the cut time, the actor, the import batch, and the evidence record ids it adds.
+- The evidence set at revision N is the revision-1 set (both bounds above, at the original `frozen_at`) plus the ids listed by revisions 2..N. The six-key canonical-JSON shape, the control set, and the sort are unchanged. Only the evidence id array gains those ids.
+- Revision 1's hash is unaffected by any later revision. A verifier recomputes revision N by applying the bounds at the original `frozen_at` and then adding the listed ids for revisions 2..N.
+- `frozen_at` (the horizon) does not move, so a record ingested after the original freeze joins a later revision only by being listed in it.
+- Only a record observed at or before the original `frozen_at` may be listed (invariant #10). The importer enforces it, and every frozen read admits a listed id only with `observed_at <= frozen_at`.
+- Each revision carries a required free-text reason from the admin who cut it, recorded on the revision row and in the period's audit log (Matt, 2026-11-24).
+- A freeze and a historical import in the same tenant serialise on one transaction-level advisory lock (`advisorylock.TenantEvidenceFreeze`): Freeze takes it before it reads the period or hashes, the import as its first statement. The HTTP freeze stamps `frozen_at` from the database clock (`clock_timestamp()`) once it holds the lock, so `frozen_at` and `ingested_at` share one clock and every row committed before the lock was granted is inside the horizon. The import then refuses (and retries) if any tenant period has `frozen_at` at or after its own transaction start, because its rows carry `ingested_at` = that start and would otherwise join a freeze that never hashed them.
+
+The rule, as decided 2026-11-24: a frozen population changes only through a recorded, hashed, reasoned revision; the original freeze always replays; and only records with `observed_at <= ` the original `frozen_at` may join a revision.
+
+A reimplemented verifier MUST take the revision number as an input and add the listed ids for revisions up to it.
+
 ## Alternatives considered
 
 1. **Include `frozen_at`.** Rejected: breaks AC-7 under the wall-clock reading, which is the practitioner-natural reading ("audit said the dashboard hasn't changed since freeze — prove it"). Wall-clock differences between two equivalent freezes are bookkeeping, not content.

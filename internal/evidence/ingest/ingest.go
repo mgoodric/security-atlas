@@ -56,8 +56,25 @@ const pgErrUniqueViolation = "23505"
 
 // MaxObservedAtSkew bounds how far the caller's observed_at may stray
 // from received_at. EVIDENCE_SDK §9 calls this out as the replay-protection
-// mitigation. Symmetric: past and future skew both rejected.
+// mitigation. Symmetric: past and future skew both rejected, on every path
+// except a historical import (ForHistoricalImport), which lifts the past
+// limit only.
 const MaxObservedAtSkew = 24 * time.Hour
+
+// ImportPath is the ingestion_path of a historical-import record (#1742).
+const ImportPath = "import"
+
+// ImportBatch identifies one historical evidence import (#1742): every
+// record it writes carries the batch in its provenance, and every accepted
+// and rejected attempt writes an evidence_audit_log row tied to it.
+type ImportBatch struct {
+	ID uuid.UUID
+	// Source is the operator's free-text origin of the batch, e.g.
+	// "FY25 SOC 2 Type II report".
+	Source string
+	// Importer is the admin credential that ran the import.
+	Importer string
+}
 
 // MaxPayloadBytes caps the inline payload size. EVIDENCE_SDK §4.6 and
 // AC-6 redirect payloads above this to S3 (slice 036). Until slice 036
@@ -277,6 +294,11 @@ type Service struct {
 	// ownedKind is the one owner-only kind (OwnedKind) this copy may
 	// write; "" on every Service except the owning handler's (#2873).
 	ownedKind string
+	// importBatch is set only on the copy ForHistoricalImport returns. It
+	// lifts the past observed_at skew limit and stamps the batch on the
+	// record and its audit rows (#1742). No transport handler holds such a
+	// copy: only the admin import endpoint builds one, per request.
+	importBatch *ImportBatch
 	// marshalLedger is the protojson-marshal seam for the bytes that
 	// LAND in the ledger (and feed the canonjson hash). Slice 379
 	// (F-ING-1 closure) split the protojson marshal sites into two
@@ -388,7 +410,41 @@ func (s *Service) WithClock(clock func() time.Time) *Service {
 func (s *Service) WithPath(path string) *Service {
 	copy := *s
 	copy.path = path
+	// A path tag is never an import (#1742): drop any batch, so the past
+	// skew limit is lifted only on the copy ForHistoricalImport returns.
+	copy.importBatch = nil
 	return &copy
+}
+
+// ForHistoricalImport returns a copy of s for one historical evidence
+// import batch (#1742): ingestion_path "import", the batch in each record's
+// provenance and audit rows, and an observed_at that may lie any distance
+// in the past. The future skew limit still applies. Only the admin import
+// path calls it; connector, push, attest and upload paths never do, so they
+// keep the symmetric MaxObservedAtSkew check.
+func (s *Service) ForHistoricalImport(batch ImportBatch) *Service {
+	copy := *s
+	copy.path = ImportPath
+	b := batch
+	copy.importBatch = &b
+	return &copy
+}
+
+// importBatchID is the batch id for audit rows, or NULL off the import path.
+func (s *Service) importBatchID() pgtype.UUID {
+	if s == nil || s.importBatch == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: s.importBatch.ID, Valid: true}
+}
+
+// observedAtSkewAllowed reports whether skew (observed_at minus received_at)
+// is inside the window this Service accepts.
+func (s *Service) observedAtSkewAllowed(skew time.Duration) bool {
+	if skew > MaxObservedAtSkew {
+		return false
+	}
+	return s.importBatch != nil || skew >= -MaxObservedAtSkew
 }
 
 // WithOwnedKind returns a copy of s that may write the owner-only kind
@@ -558,7 +614,7 @@ func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.Ev
 	if deduped {
 		decision = DecisionDeduplicated
 	}
-	entry, err := insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	entry, err := insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID, s.importBatchID())
 	if err != nil {
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: audit row: %w", err)
 	}
@@ -614,7 +670,7 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// AC-8: observed_at skew check (replay protection).
 	observed := rec.GetObservedAt().AsTime()
 	skew := observed.Sub(receivedAt)
-	if skew < -MaxObservedAtSkew || skew > MaxObservedAtSkew {
+	if !s.observedAtSkewAllowed(skew) {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedObservedAtSkew,
 			fmt.Sprintf("observed_at skew %s > %s", skew, MaxObservedAtSkew), recordID)
 		return nil, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
@@ -794,6 +850,11 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 		"received_at":      receivedAt.Format(time.RFC3339Nano),
 		"endpoint_version": "v1",
 		"schema_version":   rec.SchemaVersion,
+	}
+	if b := s.importBatch; b != nil {
+		provenance["import_batch_id"] = b.ID.String()
+		provenance["import_source"] = b.Source
+		provenance["importer"] = b.Importer
 	}
 	provenanceBytes, _ := json.Marshal(provenance)
 
@@ -1014,7 +1075,7 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 			return terr
 		}
 		var ierr error
-		entry, ierr = insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID)
+		entry, ierr = insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID, s.importBatchID())
 		return ierr
 	})
 	if err == nil {
@@ -1026,7 +1087,7 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 // the external audit-sink event for it. The caller emits that event once
 // the row's transaction commits: writeAudit after its own transaction,
 // ProcessInTx through the caller's AuditOutbox (#1933).
-func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID pgtype.UUID) (unifiedlog.Entry, error) {
+func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID, importBatchID pgtype.UUID) (unifiedlog.Entry, error) {
 	var idemPtr, kindPtr *string
 	if idem != "" {
 		idemPtr = &idem
@@ -1044,6 +1105,7 @@ func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential,
 		IdempotencyKey: idemPtr,
 		EvidenceKind:   kindPtr,
 		RecordID:       recordID,
+		ImportBatchID:  importBatchID,
 	}); err != nil {
 		return unifiedlog.Entry{}, err
 	}
@@ -1056,12 +1118,16 @@ func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential,
 	if recordID.Valid {
 		recordIDStr = uuid.UUID(recordID.Bytes).String()
 	}
-	payload, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"credential_id":   cred.ID,
 		"idempotency_key": idem,
 		"evidence_kind":   kind,
 		"reason_code":     truncate(reason, 1024),
-	})
+	}
+	if importBatchID.Valid {
+		fields["import_batch_id"] = uuid.UUID(importBatchID.Bytes).String()
+	}
+	payload, _ := json.Marshal(fields)
 	return unifiedlog.Entry{
 		OccurredAt:    time.Now().UTC(),
 		ActorID:       cred.ID,
@@ -1181,4 +1247,15 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// AuditRefusedBatch writes a rejected_validation audit row for every record
+// of a historical-import batch refused as a whole before any record was
+// processed (#1742): a batch with records in a frozen audit period it did
+// not name, for one. Each row carries the batch and reason. Best-effort,
+// like every refusal audit.
+func (s *Service) AuditRefusedBatch(ctx context.Context, recs []*evidencev1.EvidenceRecord, cred credstore.Credential, reason string) {
+	for _, rec := range recs {
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, reason, pgtype.UUID{})
+	}
 }

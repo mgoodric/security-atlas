@@ -3577,6 +3577,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence:import:
+    post:
+      summary: POST /v1/evidence:import — admin-only historical evidence import with real past observed_at; all or nothing; 409 names frozen audit periods unless amend_frozen re-freezes them as a new revision (#1742)
+      tags: [evidence]
+      operationId: post-v1-evidence_import
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push

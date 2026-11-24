@@ -2970,6 +2970,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/evidence:import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/evidence:import — admin-only historical evidence import with real past observed_at; all or nothing; 409 names frozen audit periods unless amend_frozen re-freezes them as a new revision (#1742) */
+        post: operations["post-v1-evidence_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/evidence:push": {
         parameters: {
             query?: never;
@@ -10505,6 +10522,26 @@ export interface operations {
             path: {
                 id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-evidence_import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

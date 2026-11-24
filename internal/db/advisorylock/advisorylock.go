@@ -78,6 +78,12 @@ const (
 	// LockPolicySyncSource). Key: hashtext(tenant || '|' || site || '|' ||
 	// space).
 	PolicySyncSource Namespace = 13
+	// TenantEvidenceFreeze serialises an audit-period freeze against a
+	// historical evidence import in one tenant, so a freeze never hashes
+	// the tenant's evidence while an import's rows, stamped ingested_at at
+	// the import's BEGIN, are still uncommitted (#1742,
+	// LockTenantEvidenceFreeze). Key: hashtext(tenant uuid text).
+	TenantEvidenceFreeze Namespace = 14
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -112,6 +118,7 @@ func All() []Entry {
 		{TenantSSOConfig, "tenant_sso_config"},
 		{ExceptionIdempotencyKey, "exception_idempotency_key"},
 		{PolicySyncSource, "policy_sync_source"},
+		{TenantEvidenceFreeze, "tenant_evidence_freeze"},
 	}
 }
 

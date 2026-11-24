@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/sample"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
@@ -117,6 +118,13 @@ type Sample struct {
 	CreatedBy         string
 	CreatedAt         time.Time
 	EvidenceRecordIDs []uuid.UUID
+	// FreezeRevision is the revision of the frozen period the population
+	// drew from (1 = the original freeze; above 1 = amended by import,
+	// #1742). Nil for a population with no frozen period.
+	FreezeRevision *int
+	// AmendReason is the admin's reason for that revision when it is an
+	// import amendment (FreezeRevision > 1); "" otherwise.
+	AmendReason string
 }
 
 // Annotation is one auditor decision against one sampled evidence record.
@@ -267,7 +275,28 @@ func (s *Store) DrawSample(ctx context.Context, in DrawSampleInput) (Sample, err
 			return fmt.Errorf("get population for sample: %w", err)
 		}
 
-		ids, err := resolvePopulationEvidenceIDsFromRow(ctx, q, tenantID, pop)
+		// #1742: read the freeze revision of the population's period first
+		// and draw from exactly that revision, so the label recorded on the
+		// sample is the population it was drawn from even if an amendment
+		// commits while the draw runs. Revisions are append-only, so the
+		// records of revisions <= N do not change after N is read.
+		var freezeRev *int32
+		rev, err := q.GetPopulationFreezeRevision(ctx, dbx.GetPopulationFreezeRevisionParams{
+			TenantID: pgUUID(tenantID), ID: pop.ID,
+		})
+		switch {
+		case err == nil:
+			if rev.Status == "frozen" {
+				freezeRev = &rev.FreezeRevision
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("population freeze revision: %w", err)
+		}
+		if drawSampleAfterRevision != nil {
+			drawSampleAfterRevision()
+		}
+
+		ids, err := resolvePopulationEvidenceIDsFromRow(ctx, q, tenantID, pop, freezeRev)
 		if err != nil {
 			return err
 		}
@@ -290,12 +319,13 @@ func (s *Store) DrawSample(ctx context.Context, in DrawSampleInput) (Sample, err
 
 		sampleID := uuid.New()
 		sampleRow, err := q.CreateSample(ctx, dbx.CreateSampleParams{
-			ID:           pgUUID(sampleID),
-			TenantID:     pgUUID(tenantID),
-			PopulationID: pop.ID,
-			N:            int32(len(drawn)),
-			Seed:         in.Seed,
-			CreatedBy:    in.CreatedBy,
+			ID:             pgUUID(sampleID),
+			TenantID:       pgUUID(tenantID),
+			PopulationID:   pop.ID,
+			N:              int32(len(drawn)),
+			Seed:           in.Seed,
+			CreatedBy:      in.CreatedBy,
+			FreezeRevision: freezeRev,
 		})
 		if err != nil {
 			return fmt.Errorf("create sample: %w", err)
@@ -311,19 +341,20 @@ func (s *Store) DrawSample(ctx context.Context, in DrawSampleInput) (Sample, err
 			}
 		}
 		if err := writeAuditLog(ctx, q, tenantID, auditLogEntry{
-			Action:       "sample_drawn",
-			Actor:        in.CreatedBy,
-			PopulationID: &pop.ID,
-			SampleID:     &sampleRow.ID,
-			Seed:         &in.Seed,
-			NRequested:   nullableInt32(int32(in.N)),
-			NReturned:    nullableInt32(int32(len(drawn))),
+			Action:         "sample_drawn",
+			Actor:          in.CreatedBy,
+			PopulationID:   &pop.ID,
+			SampleID:       &sampleRow.ID,
+			Seed:           &in.Seed,
+			NRequested:     nullableInt32(int32(in.N)),
+			NReturned:      nullableInt32(int32(len(drawn))),
+			FreezeRevision: freezeRev,
 		}); err != nil {
 			return err
 		}
 		out = sampleFromRow(sampleRow)
 		out.EvidenceRecordIDs = drawn
-		return nil
+		return withAmendReason(ctx, q, tenantID, &out)
 	})
 	return out, err
 }
@@ -354,7 +385,7 @@ func (s *Store) GetSample(ctx context.Context, id uuid.UUID) (Sample, error) {
 		for i, r := range evRows {
 			out.EvidenceRecordIDs[i] = uuid.UUID(r.EvidenceRecordID.Bytes)
 		}
-		return nil
+		return withAmendReason(ctx, q, tenantID, &out)
 	})
 	return out, err
 }
@@ -494,17 +525,33 @@ func resolvePopulationEvidenceIDs(
 	return applyScopeFilter(ctx, q, tenantID, predicate, rows)
 }
 
+// drawSampleAfterRevision is a test seam (export_test.go): it runs inside
+// DrawSample between reading the freeze revision and reading the
+// population. Nil in production.
+var drawSampleAfterRevision func()
+
 // resolvePopulationEvidenceIDsFromRow is the DrawSample-time equivalent:
 // honors the population's persisted frozen_at horizon (which is NULL until
-// slice 028 ships).
+// slice 028 ships). freezeRev is the revision of the population's frozen
+// period to draw from (#1742); nil for no frozen period.
 func resolvePopulationEvidenceIDsFromRow(
-	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population,
+	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population, freezeRev *int32,
 ) ([]uuid.UUID, error) {
 	// A population created or frozen before the routing cutover draws from
 	// exactly the records it drew from before (#2924).
 	kinds, err := routed.KindsForPopulation(ctx, q, pop)
 	if err != nil {
 		return nil, err
+	}
+	// A frozen period amended by a historical import draws from revision
+	// freezeRev: the original horizon plus the records revisions 2..freezeRev
+	// added (#1742).
+	var amended []pgtype.UUID
+	if pop.FrozenAt.Valid && freezeRev != nil && pop.AuditPeriodID.Valid {
+		amended, err = period.AmendedIDs(ctx, q, pop.TenantID, pop.AuditPeriodID, int(*freezeRev))
+		if err != nil {
+			return nil, err
+		}
 	}
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
 		UnboundKinds: kinds,
@@ -513,6 +560,7 @@ func resolvePopulationEvidenceIDsFromRow(
 		ObservedAt:   pop.TimeWindowStart,
 		ObservedAt_2: pop.TimeWindowEnd,
 		FrozenAt:     pop.FrozenAt,
+		AmendedIds:   amended,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list population evidence (from row): %w", err)
@@ -641,6 +689,8 @@ type auditLogEntry struct {
 	NRequested   *int32
 	NReturned    *int32
 	ReasonCode   string
+	// FreezeRevision is the frozen-period revision a draw used (#1742).
+	FreezeRevision *int32
 }
 
 func writeAuditLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, e auditLogEntry) error {
@@ -658,16 +708,17 @@ func writeAuditLog(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, e au
 	}
 	auditID := uuid.New()
 	_, err := q.WriteSampleAuditLog(ctx, dbx.WriteSampleAuditLogParams{
-		ID:           pgUUID(auditID),
-		TenantID:     pgUUID(tenantID),
-		Action:       e.Action,
-		Actor:        e.Actor,
-		PopulationID: popID,
-		SampleID:     sampID,
-		Seed:         seed,
-		NRequested:   e.NRequested,
-		NReturned:    e.NReturned,
-		ReasonCode:   e.ReasonCode,
+		ID:             pgUUID(auditID),
+		TenantID:       pgUUID(tenantID),
+		Action:         e.Action,
+		Actor:          e.Actor,
+		PopulationID:   popID,
+		SampleID:       sampID,
+		Seed:           seed,
+		NRequested:     e.NRequested,
+		NReturned:      e.NReturned,
+		ReasonCode:     e.ReasonCode,
+		FreezeRevision: e.FreezeRevision,
 	})
 	if err != nil {
 		return fmt.Errorf("write audit log: %w", err)
@@ -771,7 +822,27 @@ func sampleFromRow(r dbx.Sample) Sample {
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time
 	}
+	if r.FreezeRevision != nil {
+		v := int(*r.FreezeRevision)
+		out.FreezeRevision = &v
+	}
 	return out
+}
+
+// withAmendReason stamps the reason of the import amendment smp was drawn
+// from, when its freeze revision is one (#1742).
+func withAmendReason(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, smp *Sample) error {
+	if smp.FreezeRevision == nil || *smp.FreezeRevision < 2 {
+		return nil
+	}
+	reason, err := q.GetSampleAmendReason(ctx, dbx.GetSampleAmendReasonParams{
+		TenantID: pgUUID(tenantID), ID: pgUUID(smp.ID),
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("sample amend reason: %w", err)
+	}
+	smp.AmendReason = reason
+	return nil
 }
 
 func annotationFromRow(r dbx.SampleAnnotation) Annotation {

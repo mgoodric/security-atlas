@@ -359,6 +359,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/saved-views", Tag: "saved-views", Tier: "bearer", Internal: false, Summary: "POST /v1/saved-views"},
 	{Method: "POST", Path: "/v1/decisions/{id}/links/{kind}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "POST /v1/decisions/{id}/links/{kind}"},
 	{Method: "POST", Path: "/v1/decisions/{id}/supersede", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "POST /v1/decisions/{id}/supersede"},
+	{Method: "POST", Path: "/v1/evidence:import", Tag: "evidence", Tier: "adminBearer", Internal: false, Summary: "POST /v1/evidence:import — admin-only historical evidence import with real past observed_at; all or nothing; 409 names frozen audit periods unless amend_frozen re-freezes them as a new revision (#1742)"},
 	{Method: "POST", Path: "/v1/evidence:push", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "POST /v1/evidence:push"},
 	{Method: "POST", Path: "/v1/exceptions", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618); a replay (header Idempotent-Replayed set to true) returns the exception as it is now, not as first filed, so it may already be approved, denied or active (#2714)"},
 	{Method: "POST", Path: "/v1/incidents", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "POST /v1/incidents"},
