@@ -100,14 +100,15 @@ func assertFrozenPeriodHoldsEvidence(t *testing.T, tenantID uuid.UUID) {
 		frozenAt               time.Time
 		popControl             uuid.UUID
 		windowStart, windowEnd time.Time
+		rowCount               int
 	)
 	if err := adminPool.QueryRow(ctx, `
-		SELECT ap.frozen_at, p.control_id, p.time_window_start, p.time_window_end
+		SELECT ap.frozen_at, p.control_id, p.time_window_start, p.time_window_end, p.row_count
 		FROM audit_periods ap
 		JOIN populations p ON p.tenant_id = ap.tenant_id AND p.audit_period_id = ap.id
 		WHERE ap.tenant_id = $1 AND ap.status = 'frozen'
 		LIMIT 1`, tenantID,
-	).Scan(&frozenAt, &popControl, &windowStart, &windowEnd); err != nil {
+	).Scan(&frozenAt, &popControl, &windowStart, &windowEnd, &rowCount); err != nil {
 		t.Fatalf("read frozen period and its population: %v", err)
 	}
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
@@ -132,21 +133,15 @@ func assertFrozenPeriodHoldsEvidence(t *testing.T, tenantID uuid.UUID) {
 	if err != nil {
 		t.Fatalf("ListPopulationEvidenceIDs: %v", err)
 	}
-	// The seed's population records observed in its window before the
-	// freeze, which is what the draw held before ingested_at was bounded.
-	var observed int
-	if err := adminPool.QueryRow(ctx, `
-		SELECT count(*) FROM evidence_records
-		WHERE tenant_id = $1 AND control_id = $2
-		  AND observed_at BETWEEN $3 AND $4 AND observed_at <= $5`,
-		tenantID, popControl, windowStart, windowEnd, frozenAt,
-	).Scan(&observed); err != nil {
-		t.Fatalf("count observed population records: %v", err)
+	// #3040: the seeded row_count is the size of the draw, and the draw is
+	// not empty (0 == 0 would prove nothing).
+	t.Logf("frozen period: %d ledger records at frozen_at; population draws %d, row_count %d", len(ids), len(drawn), rowCount)
+	if len(drawn) == 0 {
+		t.Errorf("frozen period's population (control %s) draws no records", popControl)
 	}
-	t.Logf("frozen period: %d ledger records at frozen_at; population draws %d of %d observed", len(ids), len(drawn), observed)
-	if len(drawn) != observed {
-		t.Errorf("frozen period's population (control %s) draws %d records, want the %d observed before the freeze",
-			popControl, len(drawn), observed)
+	if len(drawn) != rowCount {
+		t.Errorf("frozen period's population (control %s) draws %d records, want its row_count %d",
+			popControl, len(drawn), rowCount)
 	}
 }
 
