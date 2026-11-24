@@ -472,12 +472,12 @@ func TestOverlay_RetireRecordsReasonAndActor(t *testing.T) {
 	}
 }
 
-// The engine, not a handler gate, refuses a viewer (#3016): the body is the
-// authz middleware's own "forbidden", nothing is written, and each refused
-// write leaves its deny row in decision_audit_log. viewer.rego admits no
-// mapping-overlays read either; the read case pins that until #3021
-// decides whether a viewer should read overlays.
-func TestOverlay_ViewerRefusedByAuthz(t *testing.T) {
+// The engine, not a handler gate, refuses a viewer's writes (#3016): the
+// body is the authz middleware's own "forbidden", nothing is written, and
+// each refused write leaves its deny row in decision_audit_log. Reads are
+// admitted (#3030, decided on #3021): viewer.rego lists mapping-overlays
+// among the viewer's readable resources.
+func TestOverlay_ViewerReadsButEngineRefusesWrites(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	_, body := call(t, f.tenantA, http.MethodPost, "/v1/mapping-overlays", f.tenantA.admin, f.body("C2", "IAC-06"))
@@ -496,9 +496,8 @@ func TestOverlay_ViewerRefusedByAuthz(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/v1/mapping-overlays", "/v1/mapping-overlays/audited-under"} {
-		status, body := call(t, f.tenantA, http.MethodGet, path, f.tenantA.viewer, nil)
-		if status != http.StatusForbidden || body["error"] != "forbidden" {
-			t.Errorf("viewer GET %s = %d %v; want 403 forbidden (#3021)", path, status, body)
+		if status, body := call(t, f.tenantA, http.MethodGet, path, f.tenantA.viewer, nil); status != http.StatusOK {
+			t.Errorf("viewer GET %s = %d %v; want 200 (#3030)", path, status, body)
 		}
 	}
 	if got := list(t, f.tenantA, "?anchor=AST-04"); len(got) != 0 {

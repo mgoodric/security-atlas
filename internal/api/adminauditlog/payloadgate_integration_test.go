@@ -61,7 +61,8 @@ var keepsPayload = map[authz.Role]map[string]bool{
 		"evidence": true, "walkthrough": true,
 	},
 	authz.RoleViewer: {
-		"taxonomy": true,
+		// #3030: a viewer reads mapping overlays.
+		"taxonomy": true, "mapping_overlay": true,
 	},
 	authz.RoleGRCEngineer: {
 		"decision": true, "evidence": true, "exception": true, "sample": true,
