@@ -2643,6 +2643,14 @@ type Querier interface {
 	// evaluation engine (slice 020/012) intersects scope_cell_predicate with
 	// the cell under evaluation.
 	ListExceptionsByControl(ctx context.Context, arg ListExceptionsByControlParams) ([]Exception, error)
+	// #3037: the control's exceptions as they stood at a past instant, for a
+	// replay of that instant. Activated by then and not revoked by then; the
+	// evaluator applies the [effective_from, expires_at) window itself, so an
+	// exception expired since is still in force at an instant before its
+	// expires_at. This reconstruction holds because effective_from and
+	// expires_at never change after activation (#2526); oscal/excepted.go's
+	// inForceAt applies the same rule.
+	ListExceptionsByControlAsOf(ctx context.Context, arg ListExceptionsByControlAsOfParams) ([]Exception, error)
 	// ===== #1792: excluded requirements -> SSP not-applicable entries =====
 	// The requirements excluded in the framework-scope revision that was in
 	// force for a framework version at the audit period's frozen_at. The

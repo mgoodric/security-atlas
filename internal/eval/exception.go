@@ -5,9 +5,12 @@
 // cell instead of the result the evidence produced. `excepted` is never a
 // pass: it is its own value on control_evaluations.result.
 //
-// The logic here is pure. The engine reads the control's active exceptions
-// inside its tenant-GUC transaction (so RLS binds the read) and hands them to
-// exceptedIn together with the cell and the evaluation's wall clock.
+// The logic here is pure. The engine reads the control's exceptions inside
+// its tenant-GUC transaction (so RLS binds the read) and hands them to
+// exceptedIn together with the cell and the evaluation instant. A live
+// evaluation reads the active set and judges it at the wall clock; a replay
+// of an earlier instant reads the exceptions in force at that instant and
+// judges them there (#3037).
 package eval
 
 import (

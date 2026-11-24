@@ -53,6 +53,22 @@ WHERE tenant_id = $1
   AND status = 'active'
 ORDER BY expires_at ASC, id ASC;
 
+-- name: ListExceptionsByControlAsOf :many
+-- #3037: the control's exceptions as they stood at a past instant, for a
+-- replay of that instant. Activated by then and not revoked by then; the
+-- evaluator applies the [effective_from, expires_at) window itself, so an
+-- exception expired since is still in force at an instant before its
+-- expires_at. This reconstruction holds because effective_from and
+-- expires_at never change after activation (#2526); oscal/excepted.go's
+-- inForceAt applies the same rule.
+SELECT *
+FROM exceptions
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND activated_at <= sqlc.arg(as_of)::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > sqlc.arg(as_of)::timestamptz)
+ORDER BY expires_at ASC, id ASC;
+
 -- name: ListExpiringExceptions :many
 -- AC-6 calendar surface. Returns active exceptions whose expires_at is
 -- within the supplied window. Window upper bound is computed in Go from

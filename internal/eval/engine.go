@@ -155,7 +155,15 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		if err != nil {
 			return err
 		}
-		exceptions, err := e.store.loadActiveExceptions(ctx, q, tenantID, controlID)
+		// #3037: a replay of an earlier instant applies the exceptions in
+		// force then, not today's active set. Live evaluation (instant is
+		// the evaluation time) reads the active set as before.
+		var exceptions []activeException
+		if instant.Before(evaluatedAt) {
+			exceptions, err = e.store.loadExceptionsAsOf(ctx, q, tenantID, controlID, instant)
+		} else {
+			exceptions, err = e.store.loadActiveExceptions(ctx, q, tenantID, controlID)
+		}
 		if err != nil {
 			return err
 		}
@@ -174,7 +182,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		}
 
 		for _, cell := range targets {
-			row, err := e.computeRow(ctx, tx, meta, records, exceptions, cell, evalRunID, trigger, evaluatedAt, instant)
+			row, err := e.computeRow(ctx, tx, meta, records, exceptions, cell, evalRunID, trigger, instant)
 			if err != nil {
 				return err
 			}
@@ -219,7 +227,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 // evaluated_at column and Rego's time.now_ns(). The freshness window is
 // measured from it too, so a replay of T judges evidence age as at T, not as
 // at the wall clock (#1699). Live evaluation's instant is the wall clock.
-func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, now, instant time.Time) (evaluationRow, error) {
+func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, instant time.Time) (evaluationRow, error) {
 	inWindow := inWindowRecords(records, meta.freshnessClass, instant)
 	freshness := computeFreshness(records, meta.freshnessClass, instant)
 
@@ -241,8 +249,10 @@ func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, re
 	// #2112: an active exception covering this cell waives the normal
 	// result. It is applied last so it holds whatever the evidence said,
 	// and only while the exception is in force: once it expires or leaves
-	// status 'active', the next evaluation is the normal result again.
-	excepted, err := exceptedIn(exceptions, cell, now)
+	// status 'active', the next evaluation is the normal result again. The
+	// window is judged at instant, so a replay judges it as at the replayed
+	// instant (#3037); for live evaluation instant is the wall clock.
+	excepted, err := exceptedIn(exceptions, cell, instant)
 	if err != nil {
 		// A stored exception predicate that does not parse fails every time.
 		return evaluationRow{}, unevaluable(fmt.Errorf("control %s: %w", meta.id, err))
