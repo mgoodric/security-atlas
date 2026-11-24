@@ -37,11 +37,6 @@ import (
 
 const stockCC81Bundle = "soc2_cc8_1_change_management"
 
-// stockManifestBeforePin returns the shipped controls/soc2/<bundleID>
-// manifest as it was before #1773 pinned the stock content: without its
-// scf_release line. Every install bootstrapped before #1773 stores these
-// bytes, they are on the stock list, and they bind in whatever synthetic
-// release a test makes current, which the pinned bytes (test-2026.3) do not.
 // shippedStockRelease is the SCF release the shipped stock bundles pin
 // (#1773).
 const shippedStockRelease = "test-2026.3"
@@ -75,24 +70,8 @@ func importAsShippedRelease(t *testing.T, admin *pgxpool.Pool, cat *scfimport.Ca
 	importRelease(t, admin, cat)
 }
 
-func stockManifestBeforePin(t *testing.T, bundleID string) []byte {
-	t.Helper()
-	shipped, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", bundleID, "control.yaml"))
-	if err != nil {
-		t.Fatalf("read stock manifest: %v", err)
-	}
-	out := bytes.Replace(shipped, []byte("scf_release: test-2026.3\n"), nil, 1)
-	if bytes.Equal(out, shipped) {
-		t.Fatalf("controls/soc2/%s/control.yaml declares no scf_release: test-2026.3", bundleID)
-	}
-	if !scfimport.IsStockManifest(bundleID, string(out)) {
-		t.Fatalf("pre-#1773 controls/soc2/%s/control.yaml is not on the stock list", bundleID)
-	}
-	return out
-}
-
-// cc81Crosswalk maps one requirement, CC8.1, to CHG-02. scfRelease "" binds
-// the edge in the current release, as the bundled crosswalks do at boot.
+// cc81Crosswalk maps one requirement, CC8.1, to CHG-02, bound in scfRelease
+// (required since #1774).
 func cc81Crosswalk(slug, scfRelease string) *soc2import.Crosswalk {
 	return &soc2import.Crosswalk{
 		SchemaVersion:     soc2import.SchemaVersion,

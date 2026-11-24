@@ -81,6 +81,20 @@ func startBridge(t *testing.T) (string, func()) {
 	return bridgetest.Start(t)
 }
 
+// currentSCFRelease returns the label of the current SCF release, where
+// seedCurrentSCFAnchor put the anchor. An import declares it: a release is
+// required since #1774.
+func currentSCFRelease(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`).Scan(&label); err != nil {
+		t.Fatalf("current SCF release: %v", err)
+	}
+	return label
+}
+
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a vendor-claim control id
 // ("IAC-37"). Proves the deterministic requirement -> SCF anchor mapping
@@ -145,6 +159,7 @@ func TestImportComponentDefinition_ImportsEndToEnd(t *testing.T) {
 		OscalJSON:   loadFixture(t, "component_definition.json"),
 		SourceLabel: "Acme Cloud",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
@@ -298,6 +313,7 @@ func TestImportComponentDefinition_DoesNotSatisfyAnyControl(t *testing.T) {
 		OscalJSON:   loadFixture(t, "component_definition.json"),
 		SourceLabel: "Acme Cloud",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
@@ -401,6 +417,7 @@ func TestImportComponentDefinition_TenantIsolation(t *testing.T) {
 		OscalJSON:   loadFixture(t, "component_definition.json"),
 		SourceLabel: "Tenant A vendor",
 		ImportedBy:  "grc-a",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
