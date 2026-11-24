@@ -142,6 +142,7 @@ func TestConvertRefusals(t *testing.T) {
 	t.Parallel()
 	deep := "<w:document xmlns:w=\"w\"><w:body>" + strings.Repeat("<w:sdt>", MaxDepth) + strings.Repeat("</w:sdt>", MaxDepth) + "</w:body></w:document>"
 	big := zipParts(t, map[string][]byte{"word/document.xml": bytes.Repeat([]byte(" "), MaxPartBytes+1)})
+	many := zipParts(t, map[string][]byte{"word/document.xml": []byte("<w:document><w:body>" + strings.Repeat("<a/>", MaxElements) + "</w:body></w:document>")})
 	for _, tc := range []struct {
 		name string
 		docx []byte
@@ -156,6 +157,7 @@ func TestConvertRefusals(t *testing.T) {
 		{"control char", zipParts(t, map[string][]byte{"word/document.xml": []byte("<a>\x01</a>")}), ErrNotDocx},
 		{"too deep", zipParts(t, map[string][]byte{"word/document.xml": []byte(deep)}), ErrTooDeep},
 		{"part too large", big, ErrTooLarge},
+		{"too many elements", many, ErrTooLarge},
 		{"bad rels", zipParts(t, map[string][]byte{"_rels/.rels": []byte("<Relationships>"), "word/document.xml": []byte("<a/>")}), ErrNotDocx},
 		{"bad styles", zipParts(t, map[string][]byte{
 			"word/document.xml":            []byte(`<document><body/></document>`),

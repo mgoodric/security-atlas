@@ -419,16 +419,16 @@ func (c *Client) download(ctx context.Context, id, raw string) ([]byte, error) {
 	if err != nil || raw == "" {
 		return nil, fmt.Errorf("graph: item %s: no usable download URL", id)
 	}
-	if u.Scheme != "https" || u.User != nil || !IsSharePointHost(u.Hostname()) {
-		return nil, fmt.Errorf("graph: item %s: download URL is not https on a %s host", id, SharePointHostSuffix)
+	if u.Scheme != "https" || u.User != nil || u.Port() != "" || !IsSharePointHost(u.Hostname()) {
+		return nil, fmt.Errorf("graph: item %s: download URL is not https on a %s host with no port", id, SharePointHostSuffix)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("graph: item %s: build download: %w", id, err)
+		return nil, fmt.Errorf("graph: item %s: build download: %w", id, scrub(err, raw, u.RawQuery))
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("graph: item %s: download: %w", id, err)
+		return nil, fmt.Errorf("graph: item %s: download: %w", id, scrub(err, raw, u.RawQuery))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -436,9 +436,32 @@ func (c *Client) download(ctx context.Context, id, raw string) ([]byte, error) {
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, MaxContentBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("graph: item %s: download: %w", id, err)
+		return nil, fmt.Errorf("graph: item %s: download: %w", id, scrub(err, raw, u.RawQuery))
 	}
 	return b, nil
+}
+
+// scrub keeps a download URL out of an error. The URL is pre-authenticated:
+// its query (tempauth) reads the file for about an hour, and the error
+// reaches stderr and the scheduler's logs. Go's *url.Error quotes the
+// whole URL, so it is unwrapped; any remaining trace of the URL or its
+// query in the text is redacted.
+func scrub(err error, secrets ...string) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	msg := err.Error()
+	redacted := msg
+	for _, s := range secrets {
+		if s != "" {
+			redacted = strings.ReplaceAll(redacted, s, "<redacted>")
+		}
+	}
+	if redacted != msg {
+		return errors.New(redacted)
+	}
+	return err
 }
 
 // get issues an authenticated Graph GET. The URL must be https on
@@ -469,11 +492,7 @@ const maxErrorBody = 512
 func (c *Client) do(req *http.Request, what string, out any) error {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
-		}
-		return fmt.Errorf("graph: %s: %w", what, err)
+		return fmt.Errorf("graph: %s: %w", what, scrub(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

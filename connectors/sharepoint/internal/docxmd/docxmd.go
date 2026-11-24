@@ -16,8 +16,8 @@
 // footers, comments and field codes are not part of the body and are
 // left out.
 //
-// A document that is not a .docx, or is past MaxFileBytes, MaxPartBytes
-// or MaxDepth, is refused with an error; the connector then sends it
+// A document that is not a .docx, or is past MaxFileBytes, MaxPartBytes,
+// MaxElements or MaxDepth, is refused with an error; the connector then sends it
 // unreadable.
 package docxmd
 
@@ -65,6 +65,10 @@ const (
 	MaxPartBytes = 8 << 20
 	// MaxDepth is the deepest element nesting accepted.
 	MaxDepth = 512
+	// MaxElements is the most XML elements one part may hold. A part of
+	// MaxPartBytes made of empty elements would otherwise build a tree of
+	// some two million nodes; a long real policy holds tens of thousands.
+	MaxElements = 1 << 20
 )
 
 var (
@@ -265,6 +269,7 @@ func parse(b []byte) (*node, error) {
 	dec := xml.NewDecoder(bytes.NewReader(b))
 	root := &node{}
 	stack := []*node{root}
+	elements := 0
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -278,6 +283,9 @@ func parse(b []byte) (*node, error) {
 		case xml.StartElement:
 			if len(stack) > MaxDepth {
 				return nil, fmt.Errorf("%w: limit %d", ErrTooDeep, MaxDepth)
+			}
+			if elements++; elements > MaxElements {
+				return nil, fmt.Errorf("%w: more than %d elements in one part", ErrTooLarge, MaxElements)
 			}
 			n := &node{name: t.Name.Local, attrs: map[string]string{}}
 			for _, a := range t.Attr {

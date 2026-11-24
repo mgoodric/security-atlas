@@ -40,7 +40,13 @@ granted and revoked by a tenant admin in one place.
   already used). The file content comes from the driveItem's
   `@microsoft.graph.downloadUrl`, which Microsoft documents as needing no
   authentication, so it is fetched **without** the token, and only from
-  an https `*.sharepoint.com` host. This follows the 1Password
+  an https `*.sharepoint.com` host with no explicit port.
+- That download URL is itself a credential: its `tempauth` query reads
+  the file for about an hour. A failed download (timeout, TLS error,
+  refused redirect) would otherwise surface Go's `*url.Error`, which
+  quotes the whole URL, on stderr. The error is unwrapped and any trace
+  of the URL or its query redacted (`graph.scrub`), and a test makes a
+  download fail both ways and asserts neither appears (review of #3036). This follows the 1Password
   connector's fixed-host allowlist (#3004).
 - National clouds (GCC High, DoD, 21Vianet) use other login and Graph
   hosts. Not supported: adding them is a host table and a flag, done
@@ -135,7 +141,8 @@ strict: elements are matched by local name) to Markdown with
   syncs, as a Confluence page with an unsupported macro does.
 - Refused (pushed `unreadable`, as #3000): not a zip or not a `.docx`,
   a file over 16 MiB, any XML part over 8 MiB (bounded by reading, not by
-  trusting the zip header), nesting over 512 levels.
+  trusting the zip header) or over 2^20 elements, nesting over 512
+  levels.
 - **SharePoint pages** (`.aspx` site pages) are not supported. The ticket
   allowed "if supported"; they are not files in a document library, and
   their canvas content is a separate Graph surface. A library holding

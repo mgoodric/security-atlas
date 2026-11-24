@@ -14,6 +14,7 @@ package graphtest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,7 +35,10 @@ const (
 	SitePath     = "/sites/Policies"
 	SiteID       = "contoso.sharepoint.com,2C712604-1370-44E7-A1F5-426573FDA80A,2D2244C3-251A-49EA-93A8-39E1C3A060FE"
 	ListID       = "b57af081-936c-4803-a120-d94887b03864"
-	Library      = "Policies"
+	// TempAuth is the download URLs' pre-authenticated query value, which
+	// must never reach an error or a log.
+	TempAuth = "v1.eyJTRUNSRVQtVEVNUEFVVEgifQ"
+	Library  = "Policies"
 )
 
 // Item is one list item: its column values and the file (or folder)
@@ -78,6 +82,9 @@ type Server struct {
 	Redirect map[string]string
 	// Sync answers POST /v1/policies:sync; nil answers 404.
 	Sync http.HandlerFunc
+	// FailDownloads makes every request to a *.sharepoint.com host fail
+	// in the transport, as a timeout or a TLS error would.
+	FailDownloads bool
 
 	mu   sync.Mutex
 	seen []Request
@@ -103,13 +110,22 @@ func (s *Server) Requests() []Request {
 // fixed hosts to the fake.
 func (s *Server) Client() *http.Client {
 	target, _ := url.Parse(s.URL)
-	return &http.Client{Transport: &transport{target: target}}
+	return &http.Client{Transport: &transport{target: target, s: s}}
 }
 
-type transport struct{ target *url.URL }
+type transport struct {
+	target *url.URL
+	s      *Server
+}
+
+// ErrInjected is the transport error FailDownloads returns.
+var ErrInjected = errors.New("injected transport failure")
 
 func (t *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	host := strings.ToLower(r.URL.Hostname())
+	if t.s.FailDownloads && strings.HasSuffix(host, ".sharepoint.com") {
+		return nil, ErrInjected
+	}
 	if host == "login.microsoftonline.com" || host == "graph.microsoft.com" || strings.HasSuffix(host, ".sharepoint.com") || host == "evil.example" {
 		r2 := r.Clone(r.Context())
 		r2.URL.Scheme = t.target.Scheme
@@ -261,7 +277,7 @@ func (s *Server) driveItem(w http.ResponseWriter, r *http.Request, id string) {
 			di["file"] = map[string]any{"mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 			dl := it.DownloadURL
 			if dl == "" {
-				dl = "https://" + SiteHost + SitePath + "/_layouts/15/download.aspx?UniqueId=" + it.ID + "&tempauth=t"
+				dl = "https://" + SiteHost + SitePath + "/_layouts/15/download.aspx?UniqueId=" + it.ID + "&tempauth=" + TempAuth
 			}
 			di["@microsoft.graph.downloadUrl"] = dl
 		}

@@ -34,10 +34,20 @@ func SyncSourceName(site string) string {
 	if err != nil {
 		return SyncSourceConfluence
 	}
-	if strings.HasSuffix(strings.ToLower(u.Hostname()), sharePointHostSuffix) {
+	if isSharePointHost(u.Hostname()) {
 		return SyncSourceSharePoint
 	}
 	return SyncSourceConfluence
+}
+
+// isSharePointHost reports whether host is <name>.sharepoint.com: the
+// suffix with at least one character before it. It is the rule the
+// SharePoint connector applies to the sites it accepts
+// (connectors/sharepoint/internal/graph.IsSharePointHost), restated here
+// because the platform does not import connector code.
+func isSharePointHost(host string) bool {
+	host = strings.ToLower(host)
+	return strings.HasSuffix(host, sharePointHostSuffix) && len(host) > len(sharePointHostSuffix)
 }
 
 // ManagedBySyncError refuses an in-tool edit of a synced policy (#2852),

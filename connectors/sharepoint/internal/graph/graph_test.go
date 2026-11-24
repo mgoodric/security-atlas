@@ -139,6 +139,63 @@ func TestDocumentsRefusals(t *testing.T) {
 	}
 }
 
+// A failed download never puts the pre-authenticated download URL, or its
+// tempauth query, in the error: the error reaches stderr and logs, and the
+// URL reads the file for about an hour.
+func TestDownloadErrorsDoNotLeakTheURL(t *testing.T) {
+	for name, setup := range map[string]func(*graphtest.Server){
+		"transport failure": func(g *graphtest.Server) { g.FailDownloads = true },
+		"refused redirect": func(g *graphtest.Server) {
+			g.Redirect = map[string]string{"download.aspx": "https://evil.example/steal"}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := graphtest.New(t, graphtest.Item{ID: "1", Name: "A.docx", Content: []byte("a")})
+			setup(g)
+			_, docs, err := client(t, g).Documents(context.Background(), site(t), "Policies")
+			if err == nil || docs != nil {
+				t.Fatalf("Documents = %v, %v; want an error and no documents", docs, err)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "graph: item 1: download: ") {
+				t.Errorf("err = %q; want it to name the item", msg)
+			}
+			for _, leak := range []string{graphtest.TempAuth, "tempauth", "download.aspx", "UniqueId", "https://" + graphtest.SiteHost} {
+				if strings.Contains(msg, leak) {
+					t.Errorf("err = %q; leaks %q", msg, leak)
+				}
+			}
+		})
+	}
+}
+
+func TestDownloadRefusesAPort(t *testing.T) {
+	g := graphtest.New(t, graphtest.Item{ID: "1", Name: "A.docx", DownloadURL: "https://contoso.sharepoint.com:8443/f?UniqueId=1&tempauth=" + graphtest.TempAuth})
+	_, _, err := client(t, g).Documents(context.Background(), site(t), "Policies")
+	if err == nil || !strings.Contains(err.Error(), "with no port") || strings.Contains(err.Error(), graphtest.TempAuth) {
+		t.Fatalf("err = %v; want a port refusal without the URL", err)
+	}
+	for _, r := range g.Requests() {
+		if strings.Contains(r.Host, "8443") {
+			t.Errorf("requested %s", r.Host)
+		}
+	}
+}
+
+// scrub redacts a secret that survives unwrapping, and leaves an error
+// without one as it is.
+func TestScrub(t *testing.T) {
+	t.Parallel()
+	inner := errors.New("dial tcp: lookup x?tempauth=SECRET failed")
+	if got := graph.Scrub(&url.Error{Op: "Get", URL: "https://x/?tempauth=SECRET", Err: inner}, "https://x/?tempauth=SECRET", "tempauth=SECRET").Error(); strings.Contains(got, "SECRET") {
+		t.Errorf("Scrub = %q", got)
+	}
+	plain := errors.New("plain")
+	if got := graph.Scrub(plain, "", "nothing"); got != plain {
+		t.Errorf("Scrub(plain) = %v", got)
+	}
+}
+
 func TestDocumentsNeedsClient(t *testing.T) {
 	t.Parallel()
 	if _, _, err := (&graph.Client{}).Documents(context.Background(), nil, "x"); err == nil {

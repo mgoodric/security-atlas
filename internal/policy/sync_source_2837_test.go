@@ -31,6 +31,24 @@ func TestSyncSourceName(t *testing.T) {
 	}
 }
 
+// The platform and the connector agree on what a SharePoint host is: the
+// suffix alone, or a host merely containing it, is not one.
+func TestIsSharePointHost(t *testing.T) {
+	t.Parallel()
+	for host, want := range map[string]bool{
+		"contoso.sharepoint.com":      true,
+		"Contoso-my.SharePoint.com":   true,
+		".sharepoint.com":             false,
+		"sharepoint.com":              false,
+		"sharepoint.com.evil.example": false,
+		"evil.example":                false,
+	} {
+		if got := isSharePointHost(host); got != want {
+			t.Errorf("isSharePointHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
 func TestManagedBySyncError(t *testing.T) {
 	t.Parallel()
 	sp := "https://contoso.sharepoint.com/sites/Policies"
