@@ -48,7 +48,8 @@ func TestPayloadGate_Unit(t *testing.T) {
 		{"another user's me row withheld", credstore.Credential{TenantID: tenant, UserID: self}, engine, entry(unifiedlog.KindMe, "other"), false},
 		{"unmapped kind fails closed", credstore.Credential{TenantID: tenant, UserID: self, OwnerRoles: []string{"viewer"}}, engine, entry("future_kind", "x"), false},
 		{"viewer reads risks: taxonomy kept", credstore.Credential{TenantID: tenant, UserID: self, OwnerRoles: []string{"viewer"}}, engine, entry(unifiedlog.KindTaxonomy, "x"), true},
-		{"viewer cannot read overlays: withheld", credstore.Credential{TenantID: tenant, UserID: self, OwnerRoles: []string{"viewer"}}, engine, entry(unifiedlog.KindMappingOverlay, "x"), false},
+		{"viewer reads overlays (#3030): kept", credstore.Credential{TenantID: tenant, UserID: self, OwnerRoles: []string{"viewer"}}, engine, entry(unifiedlog.KindMappingOverlay, "x"), true},
+		{"viewer cannot read exceptions: withheld", credstore.Credential{TenantID: tenant, UserID: self, OwnerRoles: []string{"viewer"}}, engine, entry(unifiedlog.KindException, "x"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
