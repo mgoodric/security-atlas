@@ -128,6 +128,20 @@ allow if {
     input.resource.type == "risks"
 }
 
+# #3031 (decided on #3022): grc_engineer files an MCP write proposal
+# (POST /v1/mcp/write-proposals). Confirm and reject
+# (/v1/mcp/write-proposals/{id}/confirm|reject) derive the same "write"
+# action on the same "mcp" resource, so the admit is bound to the
+# collection path, as the metrics target admit below is. Deciding a
+# proposal stays admin's, here and in the handler gate (IsTenantAdmin).
+allow if {
+    has_role("grc_engineer")
+    input.action == "write"
+    input.resource.type == "mcp"
+    input.request.method == "POST"
+    input.request.path == "/v1/mcp/write-proposals"
+}
+
 # #2572: grc_engineer sets a metric's target (PUT /v1/metrics/{id}/target),
 # as it sets a framework posture target (#2136); the handler gate is the
 # same IsTenantApprover. Bound to that one path: "metrics" is not in
