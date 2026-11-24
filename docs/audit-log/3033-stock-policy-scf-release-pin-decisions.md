@@ -13,7 +13,7 @@ The ticket allowed either remapping each code to one the sample has, or adding t
 - The docker bootstrap re-imports `migrations/fixtures/scf-sample.json` on every boot.
 - So an install that already loaded `test-2026.3` with 77 rows would get a `ReleaseConflictError` on its next boot. Updating `fixtureContentByRelease` would only silence the guard that exists to catch exactly this (`fixturepin_test.go`, #1971). #1773 D2 records the same rule: changed anchor content ships under a new label.
 
-Each replacement is a sample row whose SCF 2026.3 title matches a section the policy body already has. Each keeps three links per policy.
+Each replacement is a sample row whose SCF 2026.3 title matches a section the policy body already has. Each policy still declares three codes. How many of them link a control depends on which controls are bound (D4).
 
 | Policy            | Was      | SCF 2026.3 title (was)                       | Now      | SCF 2026.3 title (now)                                     | Body section it covers                                                       |
 | ----------------- | -------- | -------------------------------------------- | -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -23,6 +23,8 @@ Each replacement is a sample row whose SCF 2026.3 title matches a section the po
 | Vendor Management | `TPM-04` | Supply Chain Risk Management (SCRM)          | `TPM-14` | Third-Party Contract Requirements                          | contractual data-handling terms in "Vendor classification" and "Offboarding" |
 
 `IRO-01` (a policy-level control) would have been the closest fit for the plan as a whole. `IRO-08` (Incident Response Plan) is already linked and carries that meaning. `IRO-14` adds coverage the plan states and no other link names.
+
+**Decided by Matt (2026-11-24, review of #3042): keep `IRO-14`.** He considered `IRO-16` (Incident Stakeholder Reporting), which matches the plan's "Notification" section, and declined it. Neither code has a bound stock control (D4), so the choice does not change what a fresh install links today.
 
 Titles are from `internal/api/scfseed/testdata/scf-pin.json` (SCF 2026.3, IDs and titles only).
 
@@ -41,10 +43,24 @@ Re-running `seed-stock` on an already-seeded tenant still inserts five more draf
 
 ## D3 — The fresh-install seed needs no fallback
 
-#1774 removes the current-release fallback from every write path, the policy seed included. `TestSeed_FreshInstallBindsStockPoliciesInTheSampleRelease` imports the sample, binds a control to each linked code in `test-2026.3`, and seeds the shipped files. It asserts:
+#1774 removes the current-release fallback from every write path, the policy seed included. `TestSeed_FreshInstallBindsStockPoliciesInTheSampleRelease` imports the sample, binds a test control to each linked code in `test-2026.3`, and seeds the shipped files. It asserts:
 
 - no `SCFReleaseWarnings`;
 - no `MissingAnchors`;
 - three links per policy.
 
 Against the pre-#3033 files it fails with five fallback warnings and the four missing codes.
+
+## D4 — Links without a bound stock control still drop (review of #3042)
+
+The seed links a code only when a control is bound to its anchor. Four declared codes have no bound control among the 65 shipped stock bundles (`controls/soc2/*/control.yaml`): `CFG-04`, `IRO-02`, `IRO-14` and `TPM-14`. On a fresh install with only stock controls, those links drop and are reported in `MissingAnchors`.
+
+| Policy               | Linked before #3033 | Linked after |
+| -------------------- | ------------------- | ------------ |
+| Information Security | 3                   | 3            |
+| Access Control       | 2                   | 3            |
+| Change Management    | 1                   | 2            |
+| Incident Response    | 1                   | 1            |
+| Vendor Management    | 2                   | 2            |
+
+Both columns use the same 65 bundles. No policy links fewer controls than before. Adding stock control bundles for those four codes is a separate change, and this PR does not make it.

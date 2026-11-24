@@ -79,6 +79,7 @@ func shippedStockPolicies(t *testing.T) []seed.StockPolicy {
 func preRepinStockPolicies(t *testing.T, release string) []seed.StockPolicy {
 	t.Helper()
 	fsys := fstest.MapFS{}
+	rewritten := map[string]bool{}
 	for _, p := range shippedStockPolicies(t) {
 		b, err := os.ReadFile(filepath.Join(repoRoot, p.SourcePath))
 		if err != nil {
@@ -91,9 +92,17 @@ func preRepinStockPolicies(t *testing.T, release string) []seed.StockPolicy {
 		}
 		s = strings.Replace(s, pin, "scf_release: \"2026.3\"\n", 1)
 		for now, was := range preRepinCodes {
-			s = strings.Replace(s, "  - "+now+"\n", "  - "+was+"\n", 1)
+			if line := "  - " + now + "\n"; strings.Contains(s, line) {
+				s = strings.Replace(s, line, "  - "+was+"\n", 1)
+				rewritten[now] = true
+			}
 		}
 		fsys["stock/"+filepath.Base(p.SourcePath)] = &fstest.MapFile{Data: []byte(s)}
+	}
+	for now, was := range preRepinCodes {
+		if !rewritten[now] {
+			t.Fatalf("no shipped stock policy links %s, so the pre-#3033 %s could not be restored", now, was)
+		}
 	}
 	policies, err := seed.LoadFromFS(fsys, "stock")
 	if err != nil {
