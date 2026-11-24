@@ -1592,7 +1592,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/anchors:
     get:
-      summary: GET /v1/anchors
+      summary: GET /v1/anchors — the current SCF release's anchors; the response's scf_release names that release (absent for an empty catalog)
       tags: [ucf]
       operationId: get-v1-anchors
       security:
@@ -4311,7 +4311,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release?, anchor_code, relationship_type, strength, rationale, source_ref}
+      summary: POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release, anchor_code, relationship_type, strength, rationale, source_ref}; 400 without scf_release (#1774)
       tags: [mapping-overlays]
       operationId: post-v1-mapping-overlays
       security:
@@ -5088,7 +5088,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/oscal/component-claims/{id}/scf-anchor:
     patch:
-      summary: PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor
+      summary: PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor; body {scf_anchor_id, scf_release}; 422 without scf_release (#1774)
       tags: [oscal]
       operationId: patch-v1-oscal-component-claims-id-scf-anchor
       security:

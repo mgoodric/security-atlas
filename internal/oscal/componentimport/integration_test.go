@@ -362,6 +362,7 @@ func TestImportComponentDefinition_MalformedPersistsNothing(t *testing.T) {
 	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), componentimport.Request{
 		OscalJSON:   loadFixture(t, "component_definition_malformed.json"),
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})

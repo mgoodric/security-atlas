@@ -24,7 +24,7 @@ asserting the refusal.
 | Mapping overlay edge (create and bulk import) | `scf_release` on the edge                          | 400 `invalid_overlay_edge`                             |
 | Stock policy seed                             | `scf_release` in the policy frontmatter            | `seed.ErrSCFReleaseRequired`; unloaded release refused |
 | Demo seed posture spine                       | `demoseed.DemoSCFRelease` (`test-2026.3`)          | unloaded release: every anchor synthesized (D5)        |
-| Control import approval (#1784)               | the batch's recorded release                       | already strict (`ErrNoBatchRelease`)                   |
+| Control import approval (#1784)               | the batch's recorded release (staging: D6)         | already strict (`ErrNoBatchRelease`)                   |
 | SCF remap approval (#1775)                    | the proposal's target release                      | already strict                                         |
 
 Every error wraps `scfrelease.ErrReleaseRequired`, so a caller can test for
@@ -71,6 +71,11 @@ workbook-fixture tests that relied on the fallback to reach the sample now
 declare it on the loaded crosswalk, as a converted YAML file would
 (`inSample` in `internal/api/soc2import`).
 
+The common fix is the one the error names first: import the workbook's own
+release, `atlas-cli catalog import-scf <same .xlsx>`, then import the
+crosswalk. There is no workbook-to-YAML converter; converting means writing
+the YAML by hand.
+
 **Why.** The owner's #1774 comment asked for a choice between an override
 flag and documenting the rename. An override would be a second way to
 declare the release that contradicts the workbook's own statement, which
@@ -105,26 +110,38 @@ adopts exactly what it adopted before through the fallback (7 of 8 codes;
 `TPM-04` is not in the 77-row sample and is synthesized, as before).
 `TestDemoSCFAnchors_MatchPinnedRelease` now checks `"test-" + pin release`.
 
-## D6 — The AI question-mapping suggestion keeps its read default (deliberate exclusion)
+## D6 — Two staged writes keep their read default (deliberate exclusions)
 
-**Decision.** `POST …/scf-mapping/ai-suggest` without `?scf_release=` still
-reads its candidates in the current release. This is the one write-adjacent
-path that keeps a default. Matt's call through the dispatcher, 2026-11-24,
-option (a).
+Two paths take the release that is current _when they read_, record it, and
+then bind only in the recorded release. Neither binds a code in whatever
+release is current at the moment of the write. Both are Matt's calls through
+the dispatcher, 2026-11-24.
 
-**Why.** The suggestion is a read that persists a proposal. The release is
-resolved once (`qmapsuggest/service.go`, `LookupRelease`), and both the
-candidates and the model's pick are resolved inside it
-(`ResolveAnchorInRelease(rel.Version, …)`). The proposal row pins that
-release through `scf_anchor_uuid`, a foreign key to one anchor row of one
-frozen release, and the response returns `scf_release`. Approval does no
-lookup at all: it copies the recorded code. So no anchor is ever bound by
-code against an implicit current release. Its only caller, the web
-answer-editor panel, has no release to send, and making the API strict would
-only move the same default into the client.
-`TestApprove_KeepsTheRecordedReleaseWhenTheCurrentReleaseChanges` changes the
-current release between suggest and approve, and asserts the approved
-proposal still names the recorded release's anchor.
+**1. The AI question-mapping suggestion** (option a).
+`POST …/scf-mapping/ai-suggest` without `?scf_release=` reads its candidates
+in the current release (`internal/qmapsuggest/service.go:72`). Both the
+candidates and the model's pick are resolved inside that one release
+(`ResolveAnchorInRelease(rel.Version, …)`). The proposal row records it
+through `scf_anchor_uuid`, a foreign key to one anchor row of one frozen
+release, and the response returns `scf_release`. Approval does no lookup: it
+copies the recorded code (`internal/qmapsuggest/store.go:225`). Its only
+caller, the web answer-editor panel, has no release to send.
+`TestApprove_KeepsTheRecordedReleaseWhenTheCurrentReleaseChanges` suggests
+`CRY-03.1`, a code only release B has, while B is current. It then makes A
+current and approves. The question is mapped to `CRY-03.1`, which a lookup in
+the current release (A) could not produce.
+
+**2. Control-import batch staging.** Staging a control import
+(`internal/controlimport/batch.go:248`, `store_suggest.go:63-85`) records
+the release current at staging on the batch, without the operator choosing
+it. The staging response returns it as `scf_release` and the review page
+shows it as a badge (`web/app/(authed)/controls/imports/[id]/page.tsx:182`).
+Approval (`approve.go`) binds every row in that recorded release: a typed-in
+code becomes the control's `scf_release`, and an anchor UUID must belong to
+the batch's release (`approve.go:370-381`). It never binds in the current
+release. `TestApproveRow_BindsInTheStagedReleaseAfterTheCurrentReleaseChanges`
+stages while B is current, makes A current, and approves `IAC-06`. The
+control is bound to B's `IAC-06` row, not A's.
 
 ## D7 — What stays as it is
 
@@ -137,6 +154,33 @@ proposal still names the recorded release's anchor.
   (#1971 D3, #1775). It moves a control only when its code and title are
   unchanged, and only when the control is not pinned. Since this change, a
   pin is every code-anchored control uploaded from now on.
+- **The edge and overlay remap queues** (`internal/api/scfimport/edgeremap.go:63`,
+  `overlayremap.go:75`) join each legacy edge to the current release to
+  propose its successor. That is the same reviewed upgrade mechanism (#2315,
+  #1804): nothing moves until a person approves, and approval binds in the
+  proposal's target release.
+- **Search** (`internal/api/search/search.go:593`) reads anchors in the
+  current release. It is a read.
 - **`AnchorCoverageWarning`**, the non-fatal note after an upload, reads the
-  bound anchor by UUID. It reads its parent code in the current release, and
-  only in a read-only transaction.
+  bound anchor by UUID, and its parent code in that anchor's own release
+  (`GetSCFAnchorByVersionAndSCFID`), in a read-only transaction.
+- **The in-place stock upgrade still re-binds on upload.** A shipped stock
+  manifest that newly declares `scf_release` over a stored one that declared
+  none updates the control in place (#1773). Because the stored manifest was
+  unpinned, `rebindAnchor` moves or flags it under D3 and records
+  `SourceUpload`. That is the only upload path that re-binds, and
+  `TestUpload_ShippedStockPinUpgradeRebindsInPlaceAndRecordsUpload` covers it.
+  The byte-identical branch's call was dead (its manifest is always pinned)
+  and is gone.
+
+## D8 — OSCAL imports refuse a missing release before the bridge
+
+**Decision.** The OSCAL catalog, profile and component imports check for a
+declared release right after reading it (`scfbind.Declared`). That is before
+the bridge round-trip, so a refused import writes nothing, not even the
+rejection audit row the bridge-failure path writes. `scfbind.Bind` still
+refuses an empty release as a backstop.
+
+**Why.** Review of #3055: the first version found the missing release only
+inside `persist`, after the bridge had validated the document. A request
+missing a required field is not a validation rejection worth an audit row.

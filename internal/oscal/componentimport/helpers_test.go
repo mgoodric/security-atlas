@@ -70,6 +70,7 @@ func okReq() Request {
 		OscalJSON:  []byte(`{"component-definition":{}}`),
 		ImportedBy: "tester",
 		Role:       authz.RoleGRCEngineer,
+		SCFRelease: "test-2026.3",
 	}
 }
 
@@ -237,5 +238,24 @@ func TestReleaseOf(t *testing.T) {
 	}
 	if got := releaseOf(&code, &rel); got == nil || *got != rel {
 		t.Fatalf("mapped claim release = %v; want %q", got, rel)
+	}
+}
+
+// #1774: an import that declares no SCF release fails before the bridge
+// round-trip, and begins no transaction (so not even a rejection audit row
+// is written).
+func TestImport_NoSCFReleaseFailsBeforeTheBridge(t *testing.T) {
+	t.Parallel()
+	bridge := &fakeBridge{}
+	beginner := &nilBeginner{}
+	im := NewImporter(beginner, bridge)
+	req := okReq()
+	req.SCFRelease = ""
+	_, err := im.Import(tenantCtx(t), req)
+	if !errors.Is(err, ErrSCFReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
+	}
+	if bridge.called || beginner.begun {
+		t.Fatalf("bridge called=%v, tx begun=%v; want neither before the release is checked", bridge.called, beginner.begun)
 	}
 }

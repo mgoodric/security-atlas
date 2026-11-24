@@ -281,6 +281,7 @@ func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_external_href.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "malicious",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -333,6 +334,7 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_malformed.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -442,6 +444,7 @@ func TestImportProfile_CyclicChainRejected(t *testing.T) {
 			Profiles:    [][]byte{loadFixture(t, "profile_cycle_b.json")},
 			Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 			SourceLabel: "cyclic",
+			SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 			ImportedBy:  "grc-tester",
 			Role:        authz.RoleGRCEngineer,
 		})

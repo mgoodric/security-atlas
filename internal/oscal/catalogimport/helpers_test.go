@@ -148,6 +148,7 @@ func TestImport_ValidationRejectedSurfacesAndAttemptsAudit(t *testing.T) {
 		OscalJSON:  []byte(`{"catalog":{}}`),
 		ImportedBy: "tester",
 		Role:       authz.RoleGRCEngineer,
+		SCFRelease: "test-2026.3",
 	})
 	if !errors.Is(err, ErrValidationFailed) {
 		t.Fatalf("expected ErrValidationFailed, got %v", err)
@@ -191,11 +192,31 @@ func TestImport_BridgeTransportErrorSurfaces(t *testing.T) {
 		OscalJSON:  []byte(`{"catalog":{}}`),
 		ImportedBy: "tester",
 		Role:       authz.RoleGRCEngineer,
+		SCFRelease: "test-2026.3",
 	})
 	if err == nil || !bridge.called {
 		t.Fatalf("expected a surfaced bridge error, got %v (called=%v)", err, bridge.called)
 	}
 	if errors.Is(err, ErrValidationFailed) {
 		t.Fatalf("a transport error must not be reported as a validation failure")
+	}
+}
+
+// #1774: an import that declares no SCF release fails before the bridge
+// round-trip, and begins no transaction (so not even a rejection audit row
+// is written).
+func TestImport_NoSCFReleaseFailsBeforeTheBridge(t *testing.T) {
+	t.Parallel()
+	bridge := &fakeBridge{}
+	beginner := &nilBeginner{}
+	im := NewImporter(beginner, bridge)
+	req := Request{OscalJSON: []byte(`{"catalog":{}}`), ImportedBy: "tester", Role: authz.RoleGRCEngineer}
+	req.SCFRelease = ""
+	_, err := im.Import(tenantCtx(t), req)
+	if !errors.Is(err, ErrSCFReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
+	}
+	if bridge.called || beginner.begun {
+		t.Fatalf("bridge called=%v, tx begun=%v; want neither before the release is checked", bridge.called, beginner.begun)
 	}
 }

@@ -267,37 +267,46 @@ func TestSuggest_AnchorsFromOneStatedRelease(t *testing.T) {
 	}
 }
 
-// #1774: a suggestion made with no ?scf_release= reads in the current
-// release (B), and the proposal row pins that release by its anchor row
-// (scf_anchor_uuid). When the current release changes to A before approval,
-// approval does no lookup against the new current release: the proposal
-// still names B's anchor, and the approved code is the one recorded.
+// #1774 D6: a suggestion made with no ?scf_release= reads in the current
+// release (B) and records it: the proposal names B's anchor row
+// (scf_anchor_uuid) and the response says B. CRY-03.1 (Transmission
+// Integrity) exists only in B. When A becomes current before approval, the
+// question is still mapped to CRY-03.1, the code only the recorded release
+// has: an approval that looked the code up in the current release would
+// find no CRY-03.1 in A and could not produce this mapping.
 func TestApprove_KeepsTheRecordedReleaseWhenTheCurrentReleaseChanges(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	admin := dbtest.NewMigratePool(t)
 	scfreleasetest.LoadAB(t, admin)
 	ctx := context.Background()
-	anchorOf := func(release string) string {
+	const onlyInB = "CRY-03.1"
+	anchorOf := func(release string) (string, bool) {
 		var id string
-		if err := admin.QueryRow(ctx, `
+		err := admin.QueryRow(ctx, `
 			SELECT a.id::text FROM scf_anchors a
 			JOIN framework_versions fv ON fv.id = a.framework_version_id
-			WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = 'IAC-06'`,
-			release).Scan(&id); err != nil {
-			t.Fatalf("fixture anchor in %s: %v", release, err)
-		}
-		return id
+			WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = $2`,
+			release, onlyInB).Scan(&id)
+		return id, err == nil
+	}
+	inB, ok := anchorOf(scfreleasetest.ReleaseB)
+	if !ok {
+		t.Fatalf("fixture release B has no %s", onlyInB)
+	}
+	if _, inA := anchorOf(scfreleasetest.ReleaseA); inA {
+		t.Fatalf("fixture release A has %s; the test needs a code only B has", onlyInB)
 	}
 	tenant := freshTenant(t, admin)
-	qID := seedQuestion(t, admin, tenant, "Do you require multi-factor authentication for remote access?")
-	svc := serviceWith(app, `{"scf_id":"IAC-06","rationale":"The question asks about multi-factor authentication."}`)
+	qID := seedQuestion(t, admin, tenant, "Do you protect the integrity of data in transmission?")
+	svc := serviceWith(app, `{"scf_id":"`+onlyInB+`","rationale":"The question asks about transmission integrity."}`)
 
 	out, err := svc.Suggest(dbtest.WithTenantCtx(t, tenant), qmapsuggest.SuggestParams{QuestionID: qID, Actor: "key_grc"})
 	if err != nil || out.ProposalID == "" {
 		t.Fatalf("Suggest: out=%+v err=%v", out, err)
 	}
-	if out.SCFRelease != scfreleasetest.ReleaseB || out.SCFAnchorUUID != anchorOf(scfreleasetest.ReleaseB) {
-		t.Fatalf("suggest read release %q anchor %s; want the current release %s and its anchor", out.SCFRelease, out.SCFAnchorUUID, scfreleasetest.ReleaseB)
+	if out.SCFRelease != scfreleasetest.ReleaseB || out.SCFAnchorUUID != inB {
+		t.Fatalf("suggest read release %q anchor %s; want the current release %s and its %s %s",
+			out.SCFRelease, out.SCFAnchorUUID, scfreleasetest.ReleaseB, onlyInB, inB)
 	}
 
 	// Make A current. LoadAB's cleanup deletes both and restores the
@@ -316,20 +325,14 @@ func TestApprove_KeepsTheRecordedReleaseWhenTheCurrentReleaseChanges(t *testing.
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
-	if approved.SCFAnchorID != "IAC-06" {
-		t.Fatalf("approved code %q; want IAC-06", approved.SCFAnchorID)
+	if approved.SCFAnchorID != onlyInB || approved.NeedsMapping {
+		t.Fatalf("approved = %+v; want the question mapped to %s", approved, onlyInB)
 	}
-	var proposalAnchor, proposalRelease string
-	if err := admin.QueryRow(ctx, `
-		SELECT p.scf_anchor_uuid::text, fv.version
-		FROM questionnaire_mapping_proposals p
-		JOIN scf_anchors a ON a.id = p.scf_anchor_uuid
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		WHERE p.id = $1`, out.ProposalID).Scan(&proposalAnchor, &proposalRelease); err != nil {
-		t.Fatalf("read proposal: %v", err)
+	var mapped *string
+	if err := admin.QueryRow(ctx, `SELECT scf_anchor_id FROM questionnaire_questions WHERE id = $1`, qID).Scan(&mapped); err != nil {
+		t.Fatalf("read question: %v", err)
 	}
-	if proposalAnchor != anchorOf(scfreleasetest.ReleaseB) || proposalRelease != scfreleasetest.ReleaseB {
-		t.Fatalf("approved proposal names anchor %s in %s; want release %s's anchor %s, not the new current release's",
-			proposalAnchor, proposalRelease, scfreleasetest.ReleaseB, anchorOf(scfreleasetest.ReleaseB))
+	if mapped == nil || *mapped != onlyInB {
+		t.Fatalf("question mapped to %v; want %s, the recorded release's code", mapped, onlyInB)
 	}
 }

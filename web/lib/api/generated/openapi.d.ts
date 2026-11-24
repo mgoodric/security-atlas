@@ -1335,7 +1335,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/anchors */
+        /** GET /v1/anchors — the current SCF release's anchors; the response's scf_release names that release (absent for an empty catalog) */
         get: operations["get-v1-anchors"];
         put?: never;
         post?: never;
@@ -3546,7 +3546,7 @@ export interface paths {
         /** GET /v1/mapping-overlays — the organisation's overlay edges (requirement -> SCF anchor); ?framework, ?requirement, ?anchor, ?status=active|retired */
         get: operations["get-v1-mapping-overlays"];
         put?: never;
-        /** POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release?, anchor_code, relationship_type, strength, rationale, source_ref} */
+        /** POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release, anchor_code, relationship_type, strength, rationale, source_ref}; 400 without scf_release (#1774) */
         post: operations["post-v1-mapping-overlays"];
         delete?: never;
         options?: never;
@@ -4207,7 +4207,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor */
+        /** PATCH /v1/oscal/component-claims/{id}/scf-anchor — operator maps an unmapped vendor claim to a canonical SCF anchor; body {scf_anchor_id, scf_release}; 422 without scf_release (#1774) */
         patch: operations["patch-v1-oscal-component-claims-id-scf-anchor"];
         trace?: never;
     };

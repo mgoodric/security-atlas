@@ -108,13 +108,19 @@ const (
 	rebindNeedsReanchor                      // left in place: the code's meaning changed
 )
 
-// rebindAnchor handles an unchanged manifest (byte-identical, or differing
-// only in in-place metadata) whose SCF code now resolves to a different
+// rebindAnchor handles an unchanged manifest whose SCF code now resolves to
+// a different
 // anchor row than the active row's: a new SCF release minted a new row for
 // the code (#1768). Matt's call (#1971 D3): move the control only when the
 // new row has the same code AND the same title as the old one, i.e. the
 // meaning did not change. Otherwise the control stays where it is and is
 // reported as needing re-anchoring, never silently re-pointed.
+//
+// Since #1774 its one caller is the in-place stock upgrade (3b in upload): a
+// shipped stock manifest that newly declares scf_release over a stored one
+// that declared none (#1773). pinnedRelease is the stored manifest's, so a
+// stock control an older install bound in an earlier sample release is
+// still moved, or flagged, as D3 says, and recorded as SourceUpload.
 //
 // anchorID is what bindSCFAnchor resolved the manifest to. A bundle pinned
 // to one release is never re-bound: one that declares scf_release (#1770),
@@ -422,12 +428,12 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 		//     guard a restart would version-bump all 50 SOC 2 controls to
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
+		//
+		//     There is nothing to re-bind here (#1774): the manifest bound
+		//     above, so it is pinned (an scf_release, or an anchor UUID), and
+		//     the stored bytes are the same bytes. rebindAnchor's remaining
+		//     caller is the in-place stock upgrade in 3b.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
-			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
-			if err != nil {
-				return err
-			}
-			outcome.apply(&result)
 			result.ControlID = uuid.UUID(prior.ID.Bytes)
 			result.BundleID = b.Manifest.BundleID
 			result.Version = prior.Version

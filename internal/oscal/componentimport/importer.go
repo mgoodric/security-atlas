@@ -199,6 +199,11 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
+	}
 
 	// --- Bridge deserialize + validate ---
 	resp, err := im.bridge.ImportComponentDefinition(ctx, req.OscalJSON, req.SourceLabel)

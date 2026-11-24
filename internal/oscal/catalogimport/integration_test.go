@@ -265,6 +265,7 @@ func TestImport_MalformedCatalogPersistsNothing(t *testing.T) {
 	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), catalogimport.Request{
 		OscalJSON:   loadFixture(t, "catalog_malformed.json"),
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
