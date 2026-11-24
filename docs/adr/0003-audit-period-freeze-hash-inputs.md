@@ -73,6 +73,17 @@ Upgrade: no stored hash changes, and none needs to.
 
 A reimplemented verifier MUST apply both bounds.
 
+## Amendment: freeze revisions (#1742)
+
+A historical evidence import may add records to a period that is already frozen, but only when the import names the period explicitly. The period is then re-frozen as a new **freeze revision**; `frozen_at` and `frozen_hash` on `audit_periods` are never rewritten and remain revision 1.
+
+- Revision N (N >= 2) is an append-only row in `audit_period_freeze_revisions` that records its hash, the previous revision's hash, the cut time, the actor, the import batch, and the evidence record ids it adds.
+- The evidence set at revision N is the revision-1 set (both bounds above, at the original `frozen_at`) plus the ids listed by revisions 2..N. The six-key canonical-JSON shape, the control set, and the sort are unchanged. Only the evidence id array gains those ids.
+- Revision 1's hash is unaffected by any later revision. A verifier recomputes revision N by applying the bounds at the original `frozen_at` and then adding the listed ids for revisions 2..N.
+- `frozen_at` (the horizon) does not move, so a record ingested after the original freeze joins a later revision only by being listed in it.
+
+A reimplemented verifier MUST take the revision number as an input and add the listed ids for revisions up to it.
+
 ## Alternatives considered
 
 1. **Include `frozen_at`.** Rejected: breaks AC-7 under the wall-clock reading, which is the practitioner-natural reading ("audit said the dashboard hasn't changed since freeze — prove it"). Wall-clock differences between two equivalent freezes are bookkeeping, not content.

@@ -148,6 +148,8 @@ ORDER BY id;
 -- COALESCE-to-infinity short-circuits to live state). Ordered by
 -- observed_at DESC so the caller can pick the most-recent record as the
 -- pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
+-- amended_ids adds the records a freeze revision put in the frozen
+-- population (#1742); pass an empty array for none.
 -- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 -- the control's evidence_queries declare (internal/evidence/unbound).
 -- The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
@@ -162,10 +164,11 @@ WHERE evidence_records.tenant_id  = $1
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
-  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR id = ANY(sqlc.arg(amended_ids)::uuid[]))
 ORDER BY observed_at DESC, id ASC;
 
 -- name: AttachPopulationToPeriod :exec
@@ -191,3 +194,68 @@ SET frozen_at = $3
 WHERE tenant_id       = $1
   AND audit_period_id = $2
   AND frozen_at IS NULL;
+
+-- name: LockAuditPeriodsOverlapping :many
+-- #1742: the periods whose window holds a date in [first_day, last_day],
+-- locked FOR UPDATE so a historical import and a freeze of the same period
+-- serialise: the import decides "open or frozen" on a row no freeze can
+-- change until the import commits.
+SELECT *
+FROM audit_periods
+WHERE tenant_id    = $1
+  AND period_start <= sqlc.arg(last_day)::date
+  AND period_end   >= sqlc.arg(first_day)::date
+ORDER BY id
+FOR UPDATE;
+
+-- name: InsertAuditPeriodFreezeRevision :one
+-- #1742: append freeze revision N (N >= 2) of a frozen period. The original
+-- freeze (revision 1) stays on the audit_periods row and is never rewritten.
+INSERT INTO audit_period_freeze_revisions (
+    id, tenant_id, audit_period_id, revision,
+    frozen_hash, previous_hash, frozen_at,
+    reason, actor, import_batch_id, evidence_record_ids
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING *;
+
+-- name: ListAuditPeriodFreezeRevisions :many
+-- #1742: every revision after the original freeze, oldest first.
+SELECT *
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1 AND audit_period_id = $2
+ORDER BY revision;
+
+-- name: ListAmendedEvidenceIDsForPeriod :many
+-- #1742: the evidence records freeze revisions 2..max_revision added to a
+-- frozen period's population. Pass max_revision = 2147483647 for the latest
+-- revision. Sorted, so the result feeds the ADR 0003 hash directly.
+SELECT DISTINCT unnest(evidence_record_ids)::uuid AS id
+FROM audit_period_freeze_revisions
+WHERE tenant_id       = $1
+  AND audit_period_id = $2
+  AND revision       <= sqlc.arg(max_revision)::int
+ORDER BY id;
+
+-- name: ListAmendedEvidenceIDsForPopulation :many
+-- #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
+-- period a population is attached to. Empty when the population has no
+-- period or the period was never amended.
+SELECT DISTINCT unnest(r.evidence_record_ids)::uuid AS evidence_record_id
+FROM audit_period_freeze_revisions r
+JOIN populations p
+  ON p.tenant_id = r.tenant_id AND p.audit_period_id = r.audit_period_id
+WHERE r.tenant_id = $1
+  AND p.id        = $2
+ORDER BY evidence_record_id;
+
+-- name: ListPeriodsAmendedWithEvidence :many
+-- #1742: the frozen periods a freeze revision added evidence record
+-- evidence_record_id to. The auditor authz hydrator reads it: such a record
+-- is in the period's population although it was ingested after the freeze.
+SELECT DISTINCT audit_period_id
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1
+  AND sqlc.arg(evidence_record_id)::uuid = ANY(evidence_record_ids)
+ORDER BY audit_period_id;

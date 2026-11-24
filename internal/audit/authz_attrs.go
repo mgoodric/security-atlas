@@ -104,8 +104,22 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 		if !rec.ControlID.Valid && rec.EvidenceKind != nil && routed.Kind(*rec.EvidenceKind) {
 			routedKind = *rec.EvidenceKind
 		}
+		// A freeze revision may have added the record to a frozen period
+		// after the freeze (#1742); that period's population holds it.
+		amendedRows, err := q.ListPeriodsAmendedWithEvidence(ctx, dbx.ListPeriodsAmendedWithEvidenceParams{
+			TenantID: pgUUID(tenantID), EvidenceRecordID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("evidence periods: amended periods: %w", err)
+		}
+		amended := map[uuid.UUID]bool{}
+		for _, p := range amendedRows {
+			if pid, valid := uuidFromPG(p); valid {
+				amended[pid] = true
+			}
+		}
 		for _, c := range controls {
-			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, ingested, out.ScopeCellID, routedKind)
+			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, ingested, out.ScopeCellID, routedKind, amended)
 			if err != nil {
 				return err
 			}
@@ -154,7 +168,7 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 	var out []uuid.UUID
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var err error
-		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil, nil, "")
+		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil, nil, "", nil)
 		return err
 	})
 	return out, err
@@ -170,9 +184,13 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 // routedKind is the kind of a control-free routed record, or "": a
 // population pinned before that kind's routing cutover never draws such a
 // record, so it covers nothing for it (#2924, #2973).
+// amended holds the periods a freeze revision added the record to (#1742):
+// their populations hold it whatever its observed_at or ingested_at against
+// frozen_at, as ListPopulationEvidenceIDs draws them. Nil for none.
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
 	since, until, ingestedAt *time.Time, cellID *uuid.UUID, routedKind string,
+	amended map[uuid.UUID]bool,
 ) ([]uuid.UUID, error) {
 	pops, err := q.ListPeriodPopulationsForControl(ctx, dbx.ListPeriodPopulationsForControlParams{
 		TenantID: pgUUID(tenantID), ControlID: pgUUID(controlID),
@@ -192,8 +210,16 @@ func periodsCovering(
 	var out []uuid.UUID
 	for _, pop := range pops {
 		period, ok := uuidFromPG(pop.AuditPeriodID)
-		if !ok || seen[period] || !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) ||
-			!populationHeldAtFreeze(pop, ingestedAt) {
+		if !ok || seen[period] {
+			continue
+		}
+		windowPop := pop
+		if amended[period] {
+			// The revision lifts the freeze horizon, not the window.
+			windowPop.FrozenAt = pgtype.Timestamptz{}
+		}
+		if !populationWindowCovers(windowPop, since) || !populationWindowCovers(windowPop, until) ||
+			!populationHeldAtFreeze(windowPop, ingestedAt) {
 			continue
 		}
 		if routedKind != "" && !slices.Contains(routed.PopulationKindsAt(cutover, pop), routedKind) {

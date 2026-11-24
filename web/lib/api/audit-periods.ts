@@ -42,6 +42,14 @@ export type AuditPeriod = {
   frozen_at?: string | null;
   frozen_hash?: string | null;
   frozen_by?: string | null;
+  // #1742: a frozen period's latest freeze revision and its hash. 1 is
+  // the original freeze; above 1, a historical import re-froze the period
+  // with more evidence, and amended_by_import is true. frozen_hash stays
+  // the original freeze's hash. Absent (omitempty) on an open period;
+  // amended_by_import is always present.
+  freeze_revision?: number;
+  revision_hash?: string;
+  amended_by_import?: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;

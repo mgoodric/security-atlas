@@ -1804,6 +1804,20 @@ type AuditPeriodAuditLog struct {
 	SubjectModule string             `json:"subject_module"`
 }
 
+type AuditPeriodFreezeRevision struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID     pgtype.UUID        `json:"audit_period_id"`
+	Revision          int32              `json:"revision"`
+	FrozenHash        []byte             `json:"frozen_hash"`
+	PreviousHash      []byte             `json:"previous_hash"`
+	FrozenAt          pgtype.Timestamptz `json:"frozen_at"`
+	Reason            string             `json:"reason"`
+	Actor             string             `json:"actor"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
+}
+
 type AuditSinkFailure struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
@@ -2323,6 +2337,7 @@ type EvidenceAuditLog struct {
 	RecordID       pgtype.UUID        `json:"record_id"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
 	SubjectModule  string             `json:"subject_module"`
+	ImportBatchID  pgtype.UUID        `json:"import_batch_id"`
 }
 
 type EvidenceFreshness struct {

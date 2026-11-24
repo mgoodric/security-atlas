@@ -506,6 +506,19 @@ func resolvePopulationEvidenceIDsFromRow(
 	if err != nil {
 		return nil, err
 	}
+	// A frozen period amended by a historical import draws from its latest
+	// freeze revision: the original horizon plus the records each revision
+	// added (#1742).
+	var amended []pgtype.UUID
+	if pop.FrozenAt.Valid {
+		amended, err = q.ListAmendedEvidenceIDsForPopulation(ctx, dbx.ListAmendedEvidenceIDsForPopulationParams{
+			TenantID: pop.TenantID,
+			ID:       pop.ID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list amended evidence for population: %w", err)
+		}
+	}
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
 		UnboundKinds: kinds,
 		TenantID:     pop.TenantID,
@@ -513,6 +526,7 @@ func resolvePopulationEvidenceIDsFromRow(
 		ObservedAt:   pop.TimeWindowStart,
 		ObservedAt_2: pop.TimeWindowEnd,
 		FrozenAt:     pop.FrozenAt,
+		AmendedIds:   amended,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list population evidence (from row): %w", err)

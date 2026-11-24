@@ -24,8 +24,9 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz))
+       OR id = ANY($7::uuid[]))
 `
 
 type CountPopulationEvidenceParams struct {
@@ -35,6 +36,7 @@ type CountPopulationEvidenceParams struct {
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 // AC-1 + AC-5: count evidence records that match the population's filter.
@@ -42,7 +44,8 @@ type CountPopulationEvidenceParams struct {
 // is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
 // the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
 // (#1699): a record written after the freeze with a backdated observed_at
-// never joins the frozen population.
+// never joins the frozen population. amended_ids adds the records a freeze
+// revision put in the period's population (#1742); empty for none.
 //
 // Scope predicate filtering happens AFTER this count -- the application
 // evaluates the JSON-AST against scope cells in memory and intersects with
@@ -58,6 +61,7 @@ func (q *Queries) CountPopulationEvidence(ctx context.Context, arg CountPopulati
 		arg.ObservedAt_2,
 		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	var row_count int64
 	err := row.Scan(&row_count)
@@ -364,8 +368,9 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz))
+       OR id = ANY($7::uuid[]))
 ORDER BY id
 `
 
@@ -376,6 +381,7 @@ type ListPopulationEvidenceIDsParams struct {
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 type ListPopulationEvidenceIDsRow struct {
@@ -400,6 +406,7 @@ func (q *Queries) ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulat
 		arg.ObservedAt_2,
 		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	if err != nil {
 		return nil, err

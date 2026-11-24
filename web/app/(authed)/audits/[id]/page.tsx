@@ -278,8 +278,16 @@ function FreezeCard({ period }: { period: AuditPeriod }) {
   return (
     <Card data-testid="audit-period-freeze-card">
       <CardHeader>
-        <CardTitle>
+        <CardTitle className="flex items-center gap-2">
           <Term id="freeze">Frozen</Term>
+          {period.amended_by_import ? (
+            <Badge
+              variant="outline"
+              data-testid="audit-period-amended-by-import"
+            >
+              Amended by import
+            </Badge>
+          ) : null}
         </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -302,6 +310,22 @@ function FreezeCard({ period }: { period: AuditPeriod }) {
           >
             {period.frozen_hash ?? "—"}
           </dd>
+          {period.amended_by_import ? (
+            <>
+              <dt className="text-muted-foreground">Freeze revision</dt>
+              <dd data-testid="audit-period-freeze-revision">
+                {period.freeze_revision}: a historical import added evidence
+                after the freeze. The original freeze hash above is unchanged.
+              </dd>
+              <dt className="text-muted-foreground">Revision hash</dt>
+              <dd
+                className="font-mono text-xs break-all"
+                data-testid="audit-period-revision-hash"
+              >
+                {period.revision_hash ?? "—"}
+              </dd>
+            </>
+          ) : null}
         </dl>
         <OscalExportButton period={period} />
       </CardContent>

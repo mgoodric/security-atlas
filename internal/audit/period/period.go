@@ -80,7 +80,20 @@ type Period struct {
 	// framework version no longer resolves; the wire then omits it and
 	// the frontend falls back to the UUID.
 	FrameworkLabel string
+	// FreezeRevision is the latest freeze revision of a frozen period: 1
+	// for the original freeze, higher once an import amended it (#1742).
+	// 0 while the period is open.
+	FreezeRevision int
+	// RevisionHash is the latest revision's freeze hash; FrozenHash stays
+	// the original freeze's. Equal to FrozenHash at revision 1.
+	RevisionHash []byte
+	// Revisions lists every freeze revision, oldest first; empty while
+	// the period is open.
+	Revisions []Revision
 }
+
+// AmendedByImport reports whether a historical import re-froze p (#1742).
+func (p Period) AmendedByImport() bool { return p.FreezeRevision > 1 }
 
 // CreateInput is the API-shape for POST /v1/audit-periods.
 type CreateInput struct {
@@ -162,9 +175,25 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Period, error) {
 			return fmt.Errorf("get audit period: %w", err)
 		}
 		out = periodFromRow(row)
-		return nil
+		return withRevision(ctx, q, row, &out)
 	})
 	return out, err
+}
+
+// withRevision stamps p's latest freeze revision from its row.
+func withRevision(ctx context.Context, q *dbx.Queries, row dbx.AuditPeriod, p *Period) error {
+	revs, err := revisionsOf(ctx, q, row)
+	if err != nil {
+		return err
+	}
+	if len(revs) == 0 {
+		return nil
+	}
+	p.Revisions = revs
+	latest := revs[len(revs)-1]
+	p.FreezeRevision = latest.Revision
+	p.RevisionHash = latest.FrozenHash
+	return nil
 }
 
 // List returns periods for the current tenant, newest first. The LIST
@@ -181,6 +210,13 @@ func (s *Store) List(ctx context.Context) ([]Period, error) {
 		out = make([]Period, len(rows))
 		for i, r := range rows {
 			out[i] = periodFromListRow(r)
+			row := dbx.AuditPeriod{
+				ID: r.ID, TenantID: r.TenantID, Status: r.Status,
+				FrozenAt: r.FrozenAt, FrozenHash: r.FrozenHash, FrozenBy: r.FrozenBy,
+			}
+			if err := withRevision(ctx, q, row, &out[i]); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -360,11 +396,22 @@ func (s *Store) ControlState(ctx context.Context, periodID, controlID uuid.UUID)
 		if err != nil {
 			return err
 		}
+		// A frozen period amended by an import reads its latest freeze
+		// revision (#1742).
+		amended, err := q.ListAmendedEvidenceIDsForPeriod(ctx, dbx.ListAmendedEvidenceIDsForPeriodParams{
+			TenantID:      pgUUID(tenantID),
+			AuditPeriodID: pgUUID(periodID),
+			MaxRevision:   LatestRevision,
+		})
+		if err != nil {
+			return fmt.Errorf("list amended evidence for period: %w", err)
+		}
 		rows, err := q.ListEvidenceForPeriodControl(ctx, dbx.ListEvidenceForPeriodControlParams{
 			UnboundKinds: kinds,
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			FrozenAt:     p.FrozenAt,
+			AmendedIds:   amended,
 		})
 		if err != nil {
 			return fmt.Errorf("list evidence for period control: %w", err)

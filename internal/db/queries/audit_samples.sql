@@ -33,7 +33,8 @@ ORDER BY created_at DESC, id ASC;
 -- is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
 -- the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
 -- (#1699): a record written after the freeze with a backdated observed_at
--- never joins the frozen population.
+-- never joins the frozen population. amended_ids adds the records a freeze
+-- revision put in the period's population (#1742); empty for none.
 --
 -- Scope predicate filtering happens AFTER this count -- the application
 -- evaluates the JSON-AST against scope cells in memory and intersects with
@@ -53,8 +54,9 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz);
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz))
+       OR id = ANY(sqlc.arg(amended_ids)::uuid[]));
 
 -- name: ListPopulationEvidenceIDs :many
 -- The deterministic ordering by id is load-bearing for AC-2: the sampler
@@ -78,8 +80,9 @@ WHERE evidence_records.tenant_id = $1
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
-  AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz))
+       OR id = ANY(sqlc.arg(amended_ids)::uuid[]))
 ORDER BY id;
 
 -- name: CreateSample :one

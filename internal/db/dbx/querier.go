@@ -290,7 +290,8 @@ type Querier interface {
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
 	// the explicit "no horizon" semantic. frozen_at bounds ingested_at as well
 	// (#1699): a record written after the freeze with a backdated observed_at
-	// never joins the frozen population.
+	// never joins the frozen population. amended_ids adds the records a freeze
+	// revision put in the period's population (#1742); empty for none.
 	//
 	// Scope predicate filtering happens AFTER this count -- the application
 	// evaluates the JSON-AST against scope cells in memory and intersects with
@@ -1340,6 +1341,9 @@ type Querier interface {
 	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
 	// Save an answer to the canonical library, keyed on SCF anchor.
 	InsertAnswerLibraryEntry(ctx context.Context, arg InsertAnswerLibraryEntryParams) (AnswerLibrary, error)
+	// #1742: append freeze revision N (N >= 2) of a frozen period. The original
+	// freeze (revision 1) stays on the audit_periods row and is never rewritten.
+	InsertAuditPeriodFreezeRevision(ctx context.Context, arg InsertAuditPeriodFreezeRevisionParams) (AuditPeriodFreezeRevision, error)
 	// Slice 031: monthly board brief pinned-snapshot queries.
 	//
 	// The board brief is an append-only frozen snapshot (canvas §7.5). These
@@ -1433,6 +1437,9 @@ type Querier interface {
 	//
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
+	//
+	// #1742: import_batch_id ties a historical-import attempt to its batch;
+	// NULL on every other ingestion path.
 	InsertEvidenceAuditEntry(ctx context.Context, arg InsertEvidenceAuditEntryParams) (EvidenceAuditLog, error)
 	// Insert a new schema row. The caller (slice 014 registry service) parses
 	// semver into major/minor/patch and supplies all three; the DB CHECK
@@ -2038,6 +2045,14 @@ type Querier interface {
 	// tenant themes alphabetically. Used by slice 053's "available themes for
 	// this tenant" picker.
 	ListAllVisibleThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
+	// #1742: the evidence records freeze revisions 2..max_revision added to a
+	// frozen period's population. Pass max_revision = 2147483647 for the latest
+	// revision. Sorted, so the result feeds the ADR 0003 hash directly.
+	ListAmendedEvidenceIDsForPeriod(ctx context.Context, arg ListAmendedEvidenceIDsForPeriodParams) ([]pgtype.UUID, error)
+	// #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
+	// period a population is attached to. Empty when the population has no
+	// period or the period was never amended.
+	ListAmendedEvidenceIDsForPopulation(ctx context.Context, arg ListAmendedEvidenceIDsForPopulationParams) ([]pgtype.UUID, error)
 	// Slice 008: UCF graph traversal queries.
 	//
 	// All traversals go through the SCF anchor spine (constitutional invariant 1
@@ -2097,6 +2112,8 @@ type Querier interface {
 	// operator and includes the full audit-note record (the visibility
 	// model is an in-product UI concern, not an export-time redaction).
 	ListAuditNotesForPeriod(ctx context.Context, arg ListAuditNotesForPeriodParams) ([]ListAuditNotesForPeriodRow, error)
+	// #1742: every revision after the original freeze, oldest first.
+	ListAuditPeriodFreezeRevisions(ctx context.Context, arg ListAuditPeriodFreezeRevisionsParams) ([]AuditPeriodFreezeRevision, error)
 	// Used by the audit-trail re-audit flow and by the integration test
 	// (verifies that period_created + period_frozen rows landed).
 	ListAuditPeriodLog(ctx context.Context, arg ListAuditPeriodLogParams) ([]AuditPeriodAuditLog, error)
@@ -2494,6 +2511,8 @@ type Querier interface {
 	// COALESCE-to-infinity short-circuits to live state). Ordered by
 	// observed_at DESC so the caller can pick the most-recent record as the
 	// pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
+	// amended_ids adds the records a freeze revision put in the frozen
+	// population (#1742); pass an empty array for none.
 	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 	// the control's evidence_queries declare (internal/evidence/unbound).
 	// The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
@@ -2579,7 +2598,9 @@ type Querier interface {
 	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
 	// summarizes FROZEN periods, so in practice the horizon is always set. The
 	// horizon bounds ingested_at too (#1699): a record written after the freeze
-	// with a backdated observed_at is not in the frozen population.
+	// with a backdated observed_at is not in the frozen population. amended_ids
+	// adds the records a later freeze revision put in the population (#1742);
+	// pass an empty array for the original freeze.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	// #2973: the instant each kind routed after the first cutover started
 	// routing (migration 20261304000000). routed.KindsAsOf pins a read anchored
@@ -2950,6 +2971,10 @@ type Querier interface {
 	// period. The authz hydrator tests an evidence record (or a control and
 	// scope cell) against each one to find the periods it belongs to.
 	ListPeriodPopulationsForControl(ctx context.Context, arg ListPeriodPopulationsForControlParams) ([]Population, error)
+	// #1742: the frozen periods a freeze revision added evidence record
+	// evidence_record_id to. The auditor authz hydrator reads it: such a record
+	// is in the period's population although it was ingested after the freeze.
+	ListPeriodsAmendedWithEvidence(ctx context.Context, arg ListPeriodsAmendedWithEvidenceParams) ([]pgtype.UUID, error)
 	ListPersonnelChecklistItems(ctx context.Context, arg ListPersonnelChecklistItemsParams) ([]PersonnelSecurityChecklistItem, error)
 	// OE-663: the checklist-index read behind GET /v1/personnel-security/
 	// checklists. Optional filters compose via the sqlc.narg NULL-collapse
@@ -3703,6 +3728,11 @@ type Querier interface {
 	// hashtext maps the hex key into it, and a hash collision only
 	// over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// #1742: the periods whose window holds a date in [first_day, last_day],
+	// locked FOR UPDATE so a historical import and a freeze of the same period
+	// serialise: the import decides "open or frozen" on a row no freeze can
+	// change until the import commits.
+	LockAuditPeriodsOverlapping(ctx context.Context, arg LockAuditPeriodsOverlappingParams) ([]AuditPeriod, error)
 	// #2618: serialises two requests carrying the same Idempotency-Key, so the
 	// second waits for the first to commit and then replays it. Released at
 	// the end of the transaction. Namespace 12 is

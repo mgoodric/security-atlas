@@ -182,6 +182,185 @@ func (q *Queries) GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByID
 	return i, err
 }
 
+const insertAuditPeriodFreezeRevision = `-- name: InsertAuditPeriodFreezeRevision :one
+INSERT INTO audit_period_freeze_revisions (
+    id, tenant_id, audit_period_id, revision,
+    frozen_hash, previous_hash, frozen_at,
+    reason, actor, import_batch_id, evidence_record_ids
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, actor, import_batch_id, evidence_record_ids
+`
+
+type InsertAuditPeriodFreezeRevisionParams struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID     pgtype.UUID        `json:"audit_period_id"`
+	Revision          int32              `json:"revision"`
+	FrozenHash        []byte             `json:"frozen_hash"`
+	PreviousHash      []byte             `json:"previous_hash"`
+	FrozenAt          pgtype.Timestamptz `json:"frozen_at"`
+	Reason            string             `json:"reason"`
+	Actor             string             `json:"actor"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
+}
+
+// #1742: append freeze revision N (N >= 2) of a frozen period. The original
+// freeze (revision 1) stays on the audit_periods row and is never rewritten.
+func (q *Queries) InsertAuditPeriodFreezeRevision(ctx context.Context, arg InsertAuditPeriodFreezeRevisionParams) (AuditPeriodFreezeRevision, error) {
+	row := q.db.QueryRow(ctx, insertAuditPeriodFreezeRevision,
+		arg.ID,
+		arg.TenantID,
+		arg.AuditPeriodID,
+		arg.Revision,
+		arg.FrozenHash,
+		arg.PreviousHash,
+		arg.FrozenAt,
+		arg.Reason,
+		arg.Actor,
+		arg.ImportBatchID,
+		arg.EvidenceRecordIds,
+	)
+	var i AuditPeriodFreezeRevision
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AuditPeriodID,
+		&i.Revision,
+		&i.FrozenHash,
+		&i.PreviousHash,
+		&i.FrozenAt,
+		&i.Reason,
+		&i.Actor,
+		&i.ImportBatchID,
+		&i.EvidenceRecordIds,
+	)
+	return i, err
+}
+
+const listAmendedEvidenceIDsForPeriod = `-- name: ListAmendedEvidenceIDsForPeriod :many
+SELECT DISTINCT unnest(evidence_record_ids)::uuid AS id
+FROM audit_period_freeze_revisions
+WHERE tenant_id       = $1
+  AND audit_period_id = $2
+  AND revision       <= $3::int
+ORDER BY id
+`
+
+type ListAmendedEvidenceIDsForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+	MaxRevision   int32       `json:"max_revision"`
+}
+
+// #1742: the evidence records freeze revisions 2..max_revision added to a
+// frozen period's population. Pass max_revision = 2147483647 for the latest
+// revision. Sorted, so the result feeds the ADR 0003 hash directly.
+func (q *Queries) ListAmendedEvidenceIDsForPeriod(ctx context.Context, arg ListAmendedEvidenceIDsForPeriodParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAmendedEvidenceIDsForPeriod, arg.TenantID, arg.AuditPeriodID, arg.MaxRevision)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAmendedEvidenceIDsForPopulation = `-- name: ListAmendedEvidenceIDsForPopulation :many
+SELECT DISTINCT unnest(r.evidence_record_ids)::uuid AS evidence_record_id
+FROM audit_period_freeze_revisions r
+JOIN populations p
+  ON p.tenant_id = r.tenant_id AND p.audit_period_id = r.audit_period_id
+WHERE r.tenant_id = $1
+  AND p.id        = $2
+ORDER BY evidence_record_id
+`
+
+type ListAmendedEvidenceIDsForPopulationParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1742: ListAmendedEvidenceIDsForPeriod at the latest revision, for the
+// period a population is attached to. Empty when the population has no
+// period or the period was never amended.
+func (q *Queries) ListAmendedEvidenceIDsForPopulation(ctx context.Context, arg ListAmendedEvidenceIDsForPopulationParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAmendedEvidenceIDsForPopulation, arg.TenantID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var evidence_record_id pgtype.UUID
+		if err := rows.Scan(&evidence_record_id); err != nil {
+			return nil, err
+		}
+		items = append(items, evidence_record_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditPeriodFreezeRevisions = `-- name: ListAuditPeriodFreezeRevisions :many
+SELECT id, tenant_id, audit_period_id, revision, frozen_hash, previous_hash, frozen_at, reason, actor, import_batch_id, evidence_record_ids
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1 AND audit_period_id = $2
+ORDER BY revision
+`
+
+type ListAuditPeriodFreezeRevisionsParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+// #1742: every revision after the original freeze, oldest first.
+func (q *Queries) ListAuditPeriodFreezeRevisions(ctx context.Context, arg ListAuditPeriodFreezeRevisionsParams) ([]AuditPeriodFreezeRevision, error) {
+	rows, err := q.db.Query(ctx, listAuditPeriodFreezeRevisions, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditPeriodFreezeRevision
+	for rows.Next() {
+		var i AuditPeriodFreezeRevision
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AuditPeriodID,
+			&i.Revision,
+			&i.FrozenHash,
+			&i.PreviousHash,
+			&i.FrozenAt,
+			&i.Reason,
+			&i.Actor,
+			&i.ImportBatchID,
+			&i.EvidenceRecordIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditPeriodLog = `-- name: ListAuditPeriodLog :many
 SELECT id, tenant_id, audit_period_id, action, actor, detail, occurred_at, subject_module
 FROM audit_period_audit_log
@@ -383,10 +562,11 @@ WHERE evidence_records.tenant_id  = $1
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE($4::timestamptz,
-                              'infinity'::timestamptz)
-  AND ingested_at <= COALESCE($4::timestamptz,
-                              'infinity'::timestamptz)
+  AND ((observed_at <= COALESCE($4::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($4::timestamptz,
+                                    'infinity'::timestamptz))
+       OR id = ANY($5::uuid[]))
 ORDER BY observed_at DESC, id ASC
 `
 
@@ -395,6 +575,7 @@ type ListEvidenceForPeriodControlParams struct {
 	ControlID    pgtype.UUID        `json:"control_id"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 type ListEvidenceForPeriodControlRow struct {
@@ -410,6 +591,8 @@ type ListEvidenceForPeriodControlRow struct {
 // COALESCE-to-infinity short-circuits to live state). Ordered by
 // observed_at DESC so the caller can pick the most-recent record as the
 // pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
+// amended_ids adds the records a freeze revision put in the frozen
+// population (#1742); pass an empty array for none.
 // #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 // the control's evidence_queries declare (internal/evidence/unbound).
 // The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
@@ -420,6 +603,7 @@ func (q *Queries) ListEvidenceForPeriodControl(ctx context.Context, arg ListEvid
 		arg.ControlID,
 		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	if err != nil {
 		return nil, err
@@ -479,6 +663,96 @@ func (q *Queries) ListEvidenceIDsForPeriodHash(ctx context.Context, arg ListEvid
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPeriodsAmendedWithEvidence = `-- name: ListPeriodsAmendedWithEvidence :many
+SELECT DISTINCT audit_period_id
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1
+  AND $2::uuid = ANY(evidence_record_ids)
+ORDER BY audit_period_id
+`
+
+type ListPeriodsAmendedWithEvidenceParams struct {
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
+}
+
+// #1742: the frozen periods a freeze revision added evidence record
+// evidence_record_id to. The auditor authz hydrator reads it: such a record
+// is in the period's population although it was ingested after the freeze.
+func (q *Queries) ListPeriodsAmendedWithEvidence(ctx context.Context, arg ListPeriodsAmendedWithEvidenceParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listPeriodsAmendedWithEvidence, arg.TenantID, arg.EvidenceRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var audit_period_id pgtype.UUID
+		if err := rows.Scan(&audit_period_id); err != nil {
+			return nil, err
+		}
+		items = append(items, audit_period_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAuditPeriodsOverlapping = `-- name: LockAuditPeriodsOverlapping :many
+SELECT id, tenant_id, name, framework_version_id, period_start, period_end, status, frozen_at, frozen_hash, frozen_by, created_by, created_at, updated_at
+FROM audit_periods
+WHERE tenant_id    = $1
+  AND period_start <= $2::date
+  AND period_end   >= $3::date
+ORDER BY id
+FOR UPDATE
+`
+
+type LockAuditPeriodsOverlappingParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	LastDay  pgtype.Date `json:"last_day"`
+	FirstDay pgtype.Date `json:"first_day"`
+}
+
+// #1742: the periods whose window holds a date in [first_day, last_day],
+// locked FOR UPDATE so a historical import and a freeze of the same period
+// serialise: the import decides "open or frozen" on a row no freeze can
+// change until the import commits.
+func (q *Queries) LockAuditPeriodsOverlapping(ctx context.Context, arg LockAuditPeriodsOverlappingParams) ([]AuditPeriod, error) {
+	rows, err := q.db.Query(ctx, lockAuditPeriodsOverlapping, arg.TenantID, arg.LastDay, arg.FirstDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditPeriod
+	for rows.Next() {
+		var i AuditPeriod
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.FrameworkVersionID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.Status,
+			&i.FrozenAt,
+			&i.FrozenHash,
+			&i.FrozenBy,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -42,6 +42,7 @@ func newEvidenceCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newEvidencePushCmd())
 	cmd.AddCommand(newEvidenceVerifyCmd())
+	cmd.AddCommand(newEvidenceImportCmd())
 	return cmd
 }
 

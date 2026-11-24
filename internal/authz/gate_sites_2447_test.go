@@ -179,6 +179,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(post, "/v1/audit-periods/"+id+"/freeze"),
 			r2447(post, "/v1/audit-periods/"+id+"/populations/"+id)),
 		"boardnarrative/handlers.go Handler.Approve":     site(adm, r2447(post, "/v1/board/narrative/approve")),
+		"evidence/import.go ImportHandler.ImportHTTP":    site(adm, r2447(post, "/v1/evidence:import")),
 		"boardnarrative/handlers.go Handler.Generate":    site(adm, r2447(post, "/v1/board/narrative/generate")),
 		"boardnarrative/handlers.go Handler.GenerateAll": site(adm, r2447(post, "/v1/board/narrative/generate-all")),
 		"checklist/handler.go Handler.ApproveSection":    site(apr, r2447(post, "/v1/controls/checklist/sections/"+id+":approve")),
