@@ -183,6 +183,10 @@ type auditPeriodFixture struct {
 	FrozenAt           *time.Time
 	FrozenBy           string
 	CreatedBy          string
+	// ControlID is the control the period's population draws for;
+	// RowCount is how many fixture evidence rows that draw selects.
+	ControlID uuid.UUID
+	RowCount  int
 	// The slice of evidence rows pinned into this period's sample
 	// population (used by writeAuditPeriodsAndSamples to draw samples).
 	SampleEvidenceIDs []uuid.UUID
@@ -697,25 +701,12 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 	}
 	cellID := fs.scope.CellID
 	kindSeq := map[string]int{}
-	for i := 0; i < nEvidence; i++ {
-		// Pick a band by index.
-		band := bands[0]
-		acc := 0.0
-		for _, b := range bands {
-			acc += b.Fraction
-			if float64(i)/float64(nEvidence) < acc {
-				band = b
-				break
-			}
-		}
-		// Days back within the band.
-		bandLen := band.MaxDays - band.MinDays
-		days := band.MinDays + (i % (bandLen + 1))
-		obs := now.AddDate(0, 0, -days)
+	// addEvidence appends one ledger row for control observed at obs; i
+	// varies the result, freshness and connector run.
+	addEvidence := func(i int, control controlFixture, obs time.Time) {
 		// #2903: a row carries its control's kind, so a control holds the
 		// kind its subject produces (S3 rows on the encryption-at-rest
 		// control, MFA policy rows on the MFA control).
-		control := fs.controls[i%len(fs.controls)]
 		controlID := control.ID
 		kind := control.EvidenceKind
 		result := evidenceResults[i%len(evidenceResults)]
@@ -748,6 +739,46 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 			Provenance:   provenance,
 			HashHex:      hexString(hashBytes),
 		})
+	}
+	for i := 0; i < nEvidence; i++ {
+		// Pick a band by index.
+		band := bands[0]
+		acc := 0.0
+		for _, b := range bands {
+			acc += b.Fraction
+			if float64(i)/float64(nEvidence) < acc {
+				band = b
+				break
+			}
+		}
+		// Days back within the band.
+		bandLen := band.MaxDays - band.MinDays
+		days := band.MinDays + (i % (bandLen + 1))
+		addEvidence(i, fs.controls[i%len(fs.controls)], now.AddDate(0, 0, -days))
+	}
+
+	// #3040: a period's population draws its control's records observed
+	// in the period window (and, once frozen, at or before frozen_at). The
+	// banded spread above leaves some windows empty for their control, so
+	// seed samplesPerPeriod records evenly inside each window, then set
+	// the population's row_count to the number of fixture rows it draws.
+	for i := range fs.auditPeriods {
+		ap := &fs.auditPeriods[i]
+		control := fs.controls[i%len(fs.controls)]
+		ap.ControlID = control.ID
+		span := ap.PeriodEnd.Sub(ap.PeriodStart)
+		for j := 0; j < samplesPerPeriod; j++ {
+			obs := ap.PeriodStart.Add(span * time.Duration(j+1) / time.Duration(samplesPerPeriod+1))
+			addEvidence(nEvidence+i*samplesPerPeriod+j, control, obs)
+		}
+	}
+	for i := range fs.auditPeriods {
+		ap := &fs.auditPeriods[i]
+		for _, e := range fs.evidence {
+			if e.ControlID == ap.ControlID && populationHolds(ap, e.ObservedAt) {
+				ap.RowCount++
+			}
+		}
 	}
 
 	// Walkthroughs — N walkthroughs across N controls, all finalized.
@@ -1524,4 +1555,16 @@ func capitalize(s string) string {
 		c -= 32
 	}
 	return string(c) + s[1:]
+}
+
+// populationHolds reports whether a record observed at obs is in the
+// period's population draw (ListPopulationEvidenceIDs): inside the window
+// and, for a frozen period, at or before frozen_at. The seed stamps
+// ingested_at = min(now, observed_at), so the draw's ingested_at bound
+// selects nothing the observed_at bound keeps out.
+func populationHolds(ap *auditPeriodFixture, obs time.Time) bool {
+	if obs.Before(ap.PeriodStart) || obs.After(ap.PeriodEnd) {
+		return false
+	}
+	return ap.FrozenAt == nil || !obs.After(*ap.FrozenAt)
 }
