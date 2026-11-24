@@ -61,7 +61,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		ctx := context.Background()
 		for _, stmt := range []string{
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`UPDATE populations SET audit_period_id = NULL, frozen_at = NULL WHERE tenant_id = $1`,
+			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
 			`DELETE FROM sample_audit_log WHERE tenant_id = $1`,
 			`DELETE FROM sample_annotations WHERE tenant_id = $1`,
 			`DELETE FROM sample_evidence WHERE tenant_id = $1`,

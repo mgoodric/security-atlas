@@ -46,7 +46,7 @@ import (
 // the privileged BYPASSRLS pool used only for cross-tenant seeding and the
 // freshTenant cleanup the app role cannot perform; dbtest.WithTenantCtx tags the
 // tenant GUC context. freshTenant stays suite-local because it carries a
-// load-bearing `UPDATE populations SET audit_period_id = NULL, frozen_at = NULL`
+// load-bearing `UPDATE populations SET audit_period_id = NULL`
 // FK-detach step that dbtest.SeedTenant's pure-DELETE loop cannot express; it
 // routes through the migrate pool exactly as before.
 
@@ -63,7 +63,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 			`DELETE FROM walkthroughs WHERE tenant_id = $1`,
 			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`UPDATE populations SET audit_period_id = NULL, frozen_at = NULL WHERE tenant_id = $1`,
+			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
 			`DELETE FROM populations WHERE tenant_id = $1`,
 			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 			`DELETE FROM policies WHERE tenant_id = $1`,
