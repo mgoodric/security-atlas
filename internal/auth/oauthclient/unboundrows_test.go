@@ -88,3 +88,17 @@ func TestTableRefString(t *testing.T) {
 		t.Errorf("ident = %q", got)
 	}
 }
+
+func TestRetainedReason(t *testing.T) {
+	t.Parallel()
+	for kind, want := range map[string]string{
+		"":               "",
+		"ledger":         RetainedLedger,
+		"delete_trigger": RetainedDeleteTrigger,
+		"unrecognised":   RetainedLedger, // fails closed
+	} {
+		if got := retainedReason(kind); got != want {
+			t.Errorf("retainedReason(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}

@@ -619,7 +619,6 @@ var teardownTables = []string{
 	"exception_audit_log",
 	"exceptions",
 	"audit_period_audit_log",
-	"audit_periods",
 	"evidence_audit_log",
 	"evidence_records",
 	// Slice 678 demo-breadth rows. decision link tables BEFORE
@@ -649,6 +648,12 @@ var teardownTables = []string{
 	"policies",
 	"controls",
 	"framework_scopes",
+	// audit_periods as late as its foreign keys allow: its only parent,
+	// framework_versions (ON DELETE RESTRICT), comes next, and each child the
+	// seed writes (populations, walkthroughs) is swept above. Deleting it takes the
+	// SHARE ROW EXCLUSIVE lock period.OwnerDelete holds until commit, so
+	// late keeps that lock short (#3089).
+	"audit_periods",
 	// Tenant-scoped demo framework rows: Apply writes a fallback
 	// `frameworks` + `framework_versions` pair ONLY when the global
 	// SCF catalog (tenant_id IS NULL) is absent (writers.go

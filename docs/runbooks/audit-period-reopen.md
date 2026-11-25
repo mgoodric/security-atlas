@@ -31,7 +31,7 @@ Also stop if any sample has been drawn from the period's populations (`samples`)
 
 ## Procedure
 
-Run it as the owner in one transaction. `ALTER TABLE ... DISABLE TRIGGER` is transactional: other sessions never see the trigger disabled, and the `ACCESS EXCLUSIVE` lock it takes blocks writers on the table until `COMMIT`.
+Run it as the owner in one transaction. `ALTER TABLE ... DISABLE TRIGGER` is transactional: other sessions never see the trigger disabled, and the `SHARE ROW EXCLUSIVE` lock it takes blocks writers on the table (readers are not blocked) until `COMMIT`.
 
 ```sql
 BEGIN;

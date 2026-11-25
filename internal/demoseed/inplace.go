@@ -23,12 +23,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/password"
 )
 
@@ -525,31 +527,22 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 	return tag.RowsAffected(), false, nil
 }
 
-// frozenNoDeleteTrigger refuses DELETE of a frozen audit period for every
-// role, the owner included (#3081, migration 20261313000000). The demo seed
-// writes a frozen period, so teardown disables it around its audit_periods
-// DELETE, as the owner, inside its own transaction.
-const frozenNoDeleteTrigger = "audit_periods_frozen_no_delete_trg"
+// teardownLockTimeout bounds how long a teardown waits for the SHARE ROW
+// EXCLUSIVE lock that disabling period.FrozenNoDeleteTrigger takes on
+// audit_periods. On a live install a teardown that cannot get it fails with
+// lock_not_available and can be retried, rather than queueing every
+// tenant's audit_periods writes behind its ALTER (#3089).
+const teardownLockTimeout = 2 * time.Second
 
-// execTeardownDelete runs stmt on tx. When table is audit_periods it first
-// disables frozenNoDeleteTrigger and enables it again after the DELETE. ALTER
-// TABLE is transactional, so no other session sees the trigger disabled, and
-// a failed DELETE rolls the disable back with the transaction or savepoint.
-// The ACCESS EXCLUSIVE lock the ALTER takes holds audit_periods until tx
-// commits.
+// execTeardownDelete runs stmt on tx. The demo seed writes a frozen period,
+// and since #3081 a trigger refuses to delete one for every role, so when
+// table is audit_periods the DELETE goes through period.OwnerDelete, which
+// disables the trigger for this transaction only. Its lock is held until tx
+// commits, which is why audit_periods sits as late in teardownTables as its
+// foreign keys allow.
 func execTeardownDelete(ctx context.Context, tx pgx.Tx, table, stmt string, args ...any) (pgconn.CommandTag, error) {
 	if table != "audit_periods" {
 		return tx.Exec(ctx, stmt, args...)
 	}
-	if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER `+frozenNoDeleteTrigger); err != nil {
-		return pgconn.CommandTag{}, err
-	}
-	tag, err := tx.Exec(ctx, stmt, args...)
-	if err != nil {
-		return tag, err
-	}
-	if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER `+frozenNoDeleteTrigger); err != nil {
-		return pgconn.CommandTag{}, err
-	}
-	return tag, nil
+	return period.OwnerDelete(ctx, tx, teardownLockTimeout, stmt, args...)
 }

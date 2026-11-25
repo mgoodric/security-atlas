@@ -112,7 +112,10 @@ func TestFrozenControls_InsertGuardRefusesRoleSwitch(t *testing.T) {
 			`SET LOCAL ROLE atlas_service_account;
 			 INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
 			 VALUES ('`+tenant+`', '`+frozen.ID.String()+`', '{}', '`+src+`')`)
-		wantCheckViolation(t, "app as atlas_service_account records "+src, err)
+		// The message, not only the SQLSTATE: the not-frozen branch of the
+		// same guard also raises 23514, and would pass a code-only check.
+		wantCheckViolationMsg(t, "app as atlas_service_account records "+src, err,
+			"reserved for the migration and the seed")
 	}
 }
 
@@ -134,5 +137,24 @@ func TestFrozenControls_RecordFunctionNotPublic(t *testing.T) {
 	if _, err := admin.Exec(context.Background(),
 		`SELECT audit_period_record_catalog_controls($1, $2, 'seed')`, tenant, frozen.ID); err != nil {
 		t.Fatalf("migrate role executes the record function: %v", err)
+	}
+}
+
+// #3089: the SECURITY DEFINER commit check holds no PUBLIC EXECUTE, so
+// atlas_app has none; the owner keeps it. Firing the trigger does not check
+// EXECUTE, which the freeze tests above (an app-role freeze that commits)
+// already exercise.
+func TestFrozenControls_CommitCheckNotPublic(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	for role, want := range map[string]bool{"atlas_app": false, "atlas_migrate": true} {
+		var got bool
+		if err := admin.QueryRow(context.Background(),
+			`SELECT has_function_privilege($1, 'audit_periods_frozen_has_controls()', 'EXECUTE')`, role,
+		).Scan(&got); err != nil {
+			t.Fatalf("has_function_privilege(%s): %v", role, err)
+		}
+		if got != want {
+			t.Errorf("%s EXECUTE on audit_periods_frozen_has_controls() = %v, want %v", role, got, want)
+		}
 	}
 }
