@@ -21,12 +21,12 @@ INSERT INTO control_evaluations (
     id, tenant_id, control_id, scope_cell_id, eval_run_id,
     evaluated_at, result, freshness_status,
     evidence_count_in_window, last_observed_at, freshness_class, trigger,
-    triggered_by
+    triggered_by, evaluated_as_of
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12,
-    sqlc.narg(triggered_by)
+    sqlc.narg(triggered_by), sqlc.narg(evaluated_as_of)
 )
 RETURNING *;
 

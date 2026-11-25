@@ -2648,6 +2648,8 @@ type Querier interface {
 	// the dashboard's control_excepted_now.
 	// An excepted cell is never a finding: the export links it to the
 	// exception that accepted the risk instead.
+	// #3056: evaluated_as_of is the instant a replay row judged; the export
+	// names the exception in force then, not at evaluated_at.
 	ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error)
 	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
 	// Returns every exception for the tenant, newest first. The handler applies

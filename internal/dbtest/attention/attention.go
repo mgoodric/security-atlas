@@ -159,9 +159,10 @@ func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) 
 		exec("exception "+status, `
 			INSERT INTO exceptions (
 				id, tenant_id, control_id, scope_cell_predicate,
-				justification, requested_by, requested_at, expires_at, status
+				justification, requested_by, requested_at, expires_at, activated_at, status
 			)
-			VALUES ($1, $2, $3, '{}'::jsonb, 'attention fixture', 'tester', now(), $4, $5)
+			VALUES ($1, $2, $3, '{}'::jsonb, 'attention fixture', 'tester', now(), $4,
+			        CASE WHEN $5 IN ('active', 'expired', 'revoked') THEN now() END, $5)
 		`, id, at.ID, at.WaiverControl, expires, status)
 		return id
 	}

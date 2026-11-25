@@ -92,6 +92,8 @@ ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
 -- the dashboard's control_excepted_now.
 -- An excepted cell is never a finding: the export links it to the
 -- exception that accepted the risk instead.
+-- #3056: evaluated_as_of is the instant a replay row judged; the export
+-- names the exception in force then, not at evaluated_at.
 WITH control_latest_run AS (
     SELECT DISTINCT ON (control_id)
         control_id, eval_run_id
@@ -103,7 +105,7 @@ WITH control_latest_run AS (
 SELECT * FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
         ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
-        ce.evaluated_at, ce.result
+        ce.evaluated_at, ce.evaluated_as_of, ce.result
     FROM control_evaluations ce
     JOIN control_latest_run lr
       ON lr.control_id = ce.control_id

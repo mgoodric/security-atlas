@@ -126,3 +126,35 @@ func TestExceptedCells_WholeTenantAndUnresolved(t *testing.T) {
 		t.Fatalf("unknown cell exceptions = %d, want 0 (cell no longer exists)", n)
 	}
 }
+
+// #3056: a replay row written now about an earlier instant names the
+// exception in force at that instant, read from evaluated_as_of. One
+// revoked since then is still the one that waived it.
+func TestExceptedCells_ReplayRowAttributesAtItsInstant(t *testing.T) {
+	t.Parallel()
+	judged := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	written := judged.Add(10 * 24 * time.Hour)
+	ctrl := uuid.New()
+	waived := dbx.ListActivatedExceptionsForExportRow{
+		ID:                 pgUUID(uuid.New()),
+		ControlID:          pgUUID(ctrl),
+		ScopeCellPredicate: []byte(`{}`),
+		ActivatedAt:        ts(judged.Add(-time.Hour)),
+		ExpiresAt:          ts(judged.Add(30 * 24 * time.Hour)),
+		RevokedAt:          ts(judged.Add(24 * time.Hour)),
+		Status:             "revoked",
+	}
+	rows := []dbx.ListExceptedEvaluationsAsOfRow{{
+		ID:            pgUUID(uuid.New()),
+		ControlID:     pgUUID(ctrl),
+		EvaluatedAt:   ts(written),
+		EvaluatedAsOf: ts(judged),
+	}}
+	got := exceptedCells(rows, []dbx.ListActivatedExceptionsForExportRow{waived}, map[uuid.UUID]scope.Cell{})
+	if len(got) != 1 || len(got[0].Exceptions) != 1 || got[0].Exceptions[0].Id != uuid.UUID(waived.ID.Bytes).String() {
+		t.Fatalf("replay row exceptions = %v, want the one in force at %s", got, judged)
+	}
+	if got[0].EvaluatedAt != written.Format(time.RFC3339) {
+		t.Fatalf("evaluated_at = %q, want the write instant %s", got[0].EvaluatedAt, written.Format(time.RFC3339))
+	}
+}

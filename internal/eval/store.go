@@ -184,7 +184,12 @@ func toActiveExceptions(rows []dbx.Exception) []activeException {
 // appendEvaluation writes ONE row to control_evaluations. This is the
 // engine's ONLY write. There is no sibling method that touches
 // evidence_records — invariant #2 is enforced by the absence of that code.
-func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row evaluationRow, evaluatedAt time.Time) error {
+//
+// instant is the horizon the row was judged at. When it is earlier than
+// evaluatedAt (a replay) it is stored as evaluated_as_of, so a reader that
+// rebuilds the row's inputs (the OSCAL AR's waiving exception, #3056) reads
+// them at the instant the row judged, not at the clock that wrote it.
+func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row evaluationRow, evaluatedAt, instant time.Time) error {
 	var scopeCell pgtype.UUID
 	if row.scopeCellID != nil {
 		scopeCell = pgUUID(*row.scopeCellID)
@@ -203,6 +208,10 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 		tb := row.triggeredBy
 		triggeredBy = &tb
 	}
+	var asOf pgtype.Timestamptz
+	if instant.Before(evaluatedAt) {
+		asOf = pgTimestamptz(instant)
+	}
 	_, err := q.InsertControlEvaluation(ctx, dbx.InsertControlEvaluationParams{
 		ID:                    pgUUID(uuid.New()),
 		TenantID:              pgUUID(tenantID),
@@ -217,6 +226,7 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 		FreshnessClass:        freshnessClass,
 		Trigger:               row.trigger,
 		TriggeredBy:           triggeredBy,
+		EvaluatedAsOf:         asOf,
 	})
 	if err != nil {
 		return fmt.Errorf("append control evaluation: %w", err)
