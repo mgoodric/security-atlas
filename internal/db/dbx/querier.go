@@ -1085,6 +1085,9 @@ type Querier interface {
 	// Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
 	// an unknown id.
 	GetFrameworkVersionMigrationForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersionMigration, error)
+	// #3066: the control set recorded for a frozen period. No row means the
+	// period cannot be replayed (period.ErrNoControlSnapshot).
+	GetFrozenControlIDs(ctx context.Context, arg GetFrozenControlIDsParams) ([]pgtype.UUID, error)
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
@@ -1527,6 +1530,9 @@ type Querier interface {
 	// (from_version_id, to_version_id, requirement_code, match_kind) constraint —
 	// ON CONFLICT DO NOTHING leaves a previously-decided row untouched.
 	InsertFrameworkVersionMigration(ctx context.Context, arg InsertFrameworkVersionMigrationParams) (FrameworkVersionMigration, error)
+	// #3066: record the control set a freeze hashed, in the freeze's own
+	// transaction. Write-once (trigger audit_period_frozen_controls_immutable).
+	InsertFrozenControls(ctx context.Context, arg InsertFrozenControlsParams) error
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
 	// Append the immutable audit row for a tier transition (threat-model R /
 	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
@@ -2339,7 +2345,9 @@ type Querier interface {
 	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
 	// narrow to controls satisfied by the period's framework_version_id once
-	// canvas §8 audit-scope-narrowing lands.
+	// canvas §8 audit-scope-narrowing lands. Only Freeze reads it: the list is
+	// recorded in audit_period_frozen_controls and every replay reads that
+	// (#3066), never the live catalog.
 	ListControlIDsForPeriodHash(ctx context.Context, tenantID pgtype.UUID) ([]pgtype.UUID, error)
 	// Newest first. Includes superseded rows so callers see the supersession chain.
 	ListControlVersionsByBundle(ctx context.Context, arg ListControlVersionsByBundleParams) ([]ListControlVersionsByBundleRow, error)

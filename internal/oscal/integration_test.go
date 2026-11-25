@@ -160,7 +160,7 @@ func seedPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fwVersion uuid
 		t.Fatalf("seed audit period: %v", err)
 	}
 	if frozen {
-		if _, err := admin.Exec(context.Background(),
+		if err := dbtest.FreezeRaw(context.Background(), admin, tenant, id,
 			`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 			        frozen_hash=decode('00','hex') WHERE id=$1`,
 			id, frozenAt); err != nil {

@@ -51,7 +51,7 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 	if !frozen {
 		return id
 	}
-	if _, err := admin.Exec(ctx,
+	if err := dbtest.FreezeRaw(ctx, admin, tenant, id,
 		`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 		        frozen_hash=decode('00','hex') WHERE id=$1`, id, frozenAt); err != nil {
 		t.Fatalf("freeze audit period: %v", err)
@@ -277,6 +277,11 @@ func TestActivate_SerialisedAgainstFreeze(t *testing.T) {
 		`UPDATE audit_periods SET status='frozen', frozen_at=now(), frozen_by='tester',
 		        frozen_hash=decode('00','hex') WHERE id=$1`, periodID); err != nil {
 		t.Fatalf("freeze: %v", err)
+	}
+	// #3066: the commit check needs the period's control set in this tx.
+	if _, err := freeze.Exec(context.Background(),
+		`SELECT audit_period_record_catalog_controls($1::uuid, $2, 'seed')`, tenant, periodID); err != nil {
+		t.Fatalf("record frozen controls: %v", err)
 	}
 	if err := freeze.Commit(context.Background()); err != nil {
 		t.Fatalf("commit freeze: %v", err)
