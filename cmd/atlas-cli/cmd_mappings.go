@@ -249,11 +249,12 @@ func newMappingsOverlayAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&frameworkVersion, "framework-version", "", "framework version label (default: the current version)")
-	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the anchor code is in (default: the current release)")
+	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the anchor code is in, e.g. test-2026.3 (required)")
 	cmd.Flags().StringVar(&relationship, "relationship", "", "STRM relationship: equal, subset_of, superset_of or intersects_with (required)")
 	cmd.Flags().Float64Var(&strength, "strength", 0, "strength, 0 to 1 (required)")
 	cmd.Flags().StringVar(&rationale, "rationale", "", "why the requirement maps to the anchor (required)")
 	cmd.Flags().StringVar(&source, "source", "", "the evidence for the mapping, e.g. an audit report section (required)")
+	_ = cmd.MarkFlagRequired("scf-release")
 	_ = cmd.MarkFlagRequired("relationship")
 	_ = cmd.MarkFlagRequired("strength")
 	return cmd

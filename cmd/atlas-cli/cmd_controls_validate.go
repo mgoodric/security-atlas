@@ -16,9 +16,12 @@ import (
 // then by the order the catalogs were given. Flags are warnings: the
 // bundle still validates.
 func reportSCFRelease(out io.Writer, m *control.Manifest, catalogPaths []string) error {
-	if m.SCFRelease == "" {
-		_, _ = fmt.Fprintf(out, "    scf_release=(none) WARN: scf_anchor_id will bind in the current SCF release at upload; declare scf_release, which will become required\n")
-	} else {
+	switch {
+	case m.MissingSCFRelease():
+		_, _ = fmt.Fprintf(out, "    scf_release=(none) ERROR: scf_anchor_id %s is an SCF code but control.yaml declares no scf_release; upload refuses it. Add one line naming the release the code is from, e.g. `scf_release: test-2026.3`\n", m.SCFAnchorID)
+	case m.SCFRelease == "":
+		_, _ = fmt.Fprintf(out, "    scf_release=(none)\n")
+	default:
 		_, _ = fmt.Fprintf(out, "    scf_release=%s\n", m.SCFRelease)
 	}
 	if len(catalogPaths) == 0 {

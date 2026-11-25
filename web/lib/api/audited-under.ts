@@ -67,13 +67,15 @@ export interface AuditedUnderReport {
   candidate_scf_release: string | null;
 }
 
-/** The overlay POST body. Every field is required except the two
- *  versions, which the platform defaults to the current ones. */
+/** The overlay POST body. Every field is required except
+ *  framework_version, which the platform defaults to the framework's
+ *  current version. scf_release is required: the anchor code is never
+ *  bound in the current SCF release (#1774). */
 export interface NewOverlayEdge {
   framework: string;
   framework_version?: string;
   requirement_code: string;
-  scf_release?: string;
+  scf_release: string;
   anchor_code: string;
   relationship_type: string;
   strength: number;
@@ -195,8 +197,9 @@ export function defaultSourceRef(r: AuditedUnderRow): string {
   return `Tested under ${r.framework} ${r.requirement_code}`;
 }
 
-/** edgeFor builds the overlay edge criterion -> the control's anchor, or
- *  null for an unanchored control (there is no anchor to map to). */
+/** edgeFor builds the overlay edge criterion -> the control's anchor, in
+ *  the SCF release that anchor is in, or null for an unanchored control
+ *  (there is no anchor to map to) or one whose anchor's release is unknown. */
 export function edgeFor(
   r: AuditedUnderRow,
   input: {
@@ -206,7 +209,7 @@ export function edgeFor(
     source_ref: string;
   },
 ): NewOverlayEdge | null {
-  if (!r.anchor_id || !r.anchor_code) return null;
+  if (!r.anchor_id || !r.anchor_code || !r.anchor_scf_release) return null;
   return {
     framework: r.framework,
     framework_version: r.framework_version,

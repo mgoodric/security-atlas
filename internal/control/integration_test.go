@@ -9,6 +9,7 @@ package control_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -110,11 +111,12 @@ func TestUpload_HappyPath_CreatesActiveRow(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 
-	bundle, err := control.FinalizeBundleForHTTP([]byte(yamlFor("happy_control", code, "automated")))
+	bundle, err := control.FinalizeBundleForHTTP([]byte(yamlForIn("happy_control", code, "automated", rel)))
 	if err != nil {
 		t.Fatalf("FinalizeBundleForHTTP: %v", err)
 	}
@@ -150,19 +152,20 @@ func TestUpload_ReuploadSupersedes(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-04", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-04", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 
 	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
 
-	b1, _ := control.FinalizeBundleForHTTP([]byte(yamlFor("supersede_test", code, "automated")))
+	b1, _ := control.FinalizeBundleForHTTP([]byte(yamlForIn("supersede_test", code, "automated", rel)))
 	res1, err := store.Upload(ctx, b1, "key_admin")
 	if err != nil {
 		t.Fatalf("first upload: %v", err)
 	}
 
-	b2, _ := control.FinalizeBundleForHTTP([]byte(yamlFor("supersede_test", code, "semi_automated")))
+	b2, _ := control.FinalizeBundleForHTTP([]byte(yamlForIn("supersede_test", code, "semi_automated", rel)))
 	res2, err := store.Upload(ctx, b2, "key_admin")
 	if err != nil {
 		t.Fatalf("second upload: %v", err)
@@ -203,14 +206,15 @@ func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-08", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-08", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 
 	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
 
 	// Same manifest body both times — byte-identical content.
-	body := []byte(yamlFor("noop_test", code, "automated"))
+	body := []byte(yamlForIn("noop_test", code, "automated", rel))
 
 	b1, _ := control.FinalizeBundleForHTTP(body)
 	res1, err := store.Upload(ctx, b1, "key_admin")
@@ -253,24 +257,27 @@ func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
 	}
 }
 
-// TestUpload_UnknownAnchor — AC-4 + invariant 7: bundle referencing an SCF
-// anchor that isn't registered must be rejected with ErrSCFAnchorUnknown.
+// TestUpload_UnknownAnchor — AC-4 + invariant 7: a bundle referencing an
+// SCF anchor that isn't registered is rejected. A code the declared release
+// lacks is ErrSCFCodeNotInRelease (#1770); an anchor UUID no row has is
+// ErrSCFAnchorUnknown.
 func TestUpload_UnknownAnchor(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
+	seeded, _ := seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
-
-	bundle, _ := control.FinalizeBundleForHTTP([]byte(yamlFor("ghost_control", "NEVER-99", "automated")))
-
 	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
-	_, err := store.Upload(ctx, bundle, "key_admin")
-	if err == nil {
-		t.Fatalf("expected rejection")
+
+	bundle, _ := control.FinalizeBundleForHTTP([]byte(yamlForIn("ghost_control", "NEVER-99", "automated", rel)))
+	if _, err := store.Upload(ctx, bundle, "key_admin"); !errors.Is(err, control.ErrSCFCodeNotInRelease) {
+		t.Fatalf("unknown code: expected ErrSCFCodeNotInRelease; got %v", err)
 	}
-	if !errors.Is(err, control.ErrSCFAnchorUnknown) {
-		t.Fatalf("expected ErrSCFAnchorUnknown; got %v", err)
+	bundle, _ = control.FinalizeBundleForHTTP([]byte(yamlFor("ghost_control", uuid.NewString(), "automated")))
+	if _, err := store.Upload(ctx, bundle, "key_admin"); !errors.Is(err, control.ErrSCFAnchorUnknown) {
+		t.Fatalf("unknown anchor uuid: expected ErrSCFAnchorUnknown; got %v", err)
 	}
 }
 
@@ -281,7 +288,8 @@ func TestUpload_StoresExternalRefs(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 	ctx, err := tenancy.WithTenant(context.Background(), tenant)
@@ -289,7 +297,7 @@ func TestUpload_StoresExternalRefs(t *testing.T) {
 		t.Fatalf("WithTenant: %v", err)
 	}
 
-	withRefs := yamlFor("refs_control", code, "manual_periodic") + `external_refs:
+	withRefs := yamlForIn("refs_control", code, "manual_periodic", rel) + `external_refs:
   - system: acme-audit
     id: RA-03
   - system: soc2
@@ -302,7 +310,7 @@ func TestUpload_StoresExternalRefs(t *testing.T) {
 		want string
 	}{
 		{withRefs, `[{"id": "RA-03", "kind": "reference", "system": "acme-audit"}, {"id": "CC3.1", "kind": "tested_under", "note": "FY25 report, section 4", "system": "soc2"}]`},
-		{yamlFor("no_refs_control", code, "automated"), `[]`},
+		{yamlForIn("no_refs_control", code, "automated", rel), `[]`},
 	}
 	for _, tc := range cases {
 		bundle, err := control.FinalizeBundleForHTTP([]byte(tc.yaml))
@@ -327,6 +335,40 @@ func TestUpload_StoresExternalRefs(t *testing.T) {
 
 // yamlFor builds a minimal manifest body for a given bundle id, anchor, and
 // implementation_type. Lets tests vary one axis at a time.
+// releaseOfAnchor returns the SCF release label of the anchor row id,
+// which a fixture bundle naming its code must declare (#1774).
+func releaseOfAnchor(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		WHERE a.id = $1`, id).Scan(&label); err != nil {
+		t.Fatalf("release of anchor %s: %v", id, err)
+	}
+	return label
+}
+
+// withSCFRelease adds `scf_release: release` after a manifest's
+// scf_anchor_id line.
+func withSCFRelease(manifest, release string) string {
+	i := strings.Index(manifest, "scf_anchor_id: ")
+	if i < 0 {
+		return manifest
+	}
+	eol := strings.IndexByte(manifest[i:], '\n')
+	if eol < 0 {
+		return manifest + "\nscf_release: " + release + "\n"
+	}
+	at := i + eol + 1
+	return manifest[:at] + "scf_release: " + release + "\n" + manifest[at:]
+}
+
+// yamlForIn is yamlFor declaring scf_release.
+func yamlForIn(bundleID, anchor, impl, release string) string {
+	return yamlFor(bundleID, anchor, impl) + "scf_release: " + release + "\n"
+}
+
 func yamlFor(bundleID, anchor, impl string) string {
 	return `bundle_schema_version: "1"
 bundle_id: ` + bundleID + `

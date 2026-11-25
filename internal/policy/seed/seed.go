@@ -47,8 +47,9 @@ type FrontMatter struct {
 	ApproverRole     string   `yaml:"approver_role"`
 	LinkedControlIDs []string `yaml:"linked_control_ids"` // SCF codes like "GOV-01"
 	// SCFRelease is the SCF release the linked_control_ids codes belong to
-	// (#1772), e.g. "2026.3". Empty binds in the current release with a
-	// warning in the report.
+	// (#1772), e.g. "test-2026.3". Required when linked_control_ids is not
+	// empty (#1774): Seed refuses a policy without it, and a release that
+	// is not loaded, and writes nothing.
 	SCFRelease                  string   `yaml:"scf_release"`
 	AcknowledgmentRequiredRoles []string `yaml:"acknowledgment_required_roles"`
 	SourceAttribution           string   `yaml:"source_attribution"`
@@ -66,10 +67,13 @@ type Report struct {
 	Loaded         []LoadedPolicy
 	MissingAnchors []string // SCF codes that did not resolve
 	OrphanWarnings []string // titles whose linked_control_ids ended up empty
-	// SCFReleaseWarnings names each policy that declares no scf_release, or
-	// whose declared release is not loaded.
-	SCFReleaseWarnings []string
 }
+
+// ErrSCFReleaseRequired is returned for a stock policy that links SCF codes
+// but declares no scf_release (#1774). The codes are never bound in the
+// current release instead, and nothing is seeded. The message is the
+// one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("seed: %w: add `scf_release: <release>` to the policy's frontmatter, naming the SCF release its linked_control_ids are from (e.g. `scf_release: test-2026.3`)", scfrelease.ErrReleaseRequired)
 
 // LoadedPolicy is one inserted policy plus its resolved link state.
 type LoadedPolicy struct {
@@ -175,34 +179,18 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 	q := dbx.New(tx)
 
 	for _, sp := range policies {
+		// #1774: codes bind only in the release the policy declares. None
+		// declared, or one that is not loaded, refuses the whole seed (the
+		// transaction rolls back); neither falls back to the current release.
 		release := sp.FrontMatter.SCFRelease
-		if release == "" {
-			report.SCFReleaseWarnings = append(report.SCFReleaseWarnings, fmt.Sprintf(
-				"%s declares no scf_release; its linked_control_ids bind in the current SCF release. Declare scf_release, which will become required.",
-				sp.FrontMatter.Title))
+		if release == "" && len(sp.FrontMatter.LinkedControlIDs) > 0 {
+			return Report{}, fmt.Errorf("%w (policy %q)", ErrSCFReleaseRequired, sp.FrontMatter.Title)
 		}
 		linkedIDs, missing, err := anchorResolver.Resolve(ctx, release, sp.FrontMatter.LinkedControlIDs)
-		if release != "" && errors.Is(err, scfrelease.ErrUnknownRelease) {
-			// The declared release is not loaded: bind in the current
-			// release, as today, and say so (the #1771 D5 pattern). #1774
-			// makes the declared release strict.
-			if cur, lerr := scfrelease.Lookup(ctx, q, ""); lerr == nil {
-				report.SCFReleaseWarnings = append(report.SCFReleaseWarnings, fmt.Sprintf(
-					"%s declares SCF release %q, which is not loaded; its linked_control_ids bound in the current SCF release %q instead. Load %s with `atlas-cli catalog import-scf`, then re-seed.",
-					sp.FrontMatter.Title, release, cur.Version, release))
-			}
-			linkedIDs, missing, err = anchorResolver.Resolve(ctx, "", sp.FrontMatter.LinkedControlIDs)
-		}
 		switch {
-		case errors.Is(err, scfrelease.ErrNoCurrentRelease):
-			// No SCF release is current, so there is nothing to bind in.
-			// Links are best-effort here (a missing anchor drops the link),
-			// so every link is missing and the report says why, rather than
-			// refusing the seed.
-			report.SCFReleaseWarnings = append(report.SCFReleaseWarnings, fmt.Sprintf(
-				"%s: no SCF release is loaded; its linked_control_ids are not linked. Load one with `atlas-cli catalog import-scf`, then re-seed.",
-				sp.FrontMatter.Title))
-			linkedIDs, missing = nil, append([]string{}, sp.FrontMatter.LinkedControlIDs...)
+		case errors.Is(err, scfrelease.ErrUnknownRelease):
+			return Report{}, fmt.Errorf("seed: %s declares SCF release %q, which is not loaded; load it with `atlas-cli catalog import-scf`, then seed again: %w",
+				sp.FrontMatter.Title, release, err)
 		case err != nil:
 			return Report{}, fmt.Errorf("seed: resolve anchors for %s: %w", sp.FrontMatter.Title, err)
 		}
@@ -256,10 +244,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 
 // AnchorResolver maps SCF codes (e.g., "GOV-01") of one SCF release to the
 // UUID of the `controls` row bound to that code's anchor in that release.
-// An empty release means the current one. Returns the resolved UUIDs (in
-// stable order) and the list of unresolved codes for reporting; a release
-// that is not loaded is scfrelease.ErrUnknownRelease (or
-// ErrNoCurrentRelease when none was named and none is current).
+// Seed never passes an empty release with codes (#1774). Returns the
+// resolved UUIDs (in stable order) and the list of unresolved codes for
+// reporting; a release that is not loaded is scfrelease.ErrUnknownRelease.
 type AnchorResolver interface {
 	Resolve(ctx context.Context, release string, scfCodes []string) (resolved []uuid.UUID, missing []string, err error)
 }
@@ -299,6 +286,9 @@ func NewSQLAnchorResolver(pool *pgxpool.Pool) *SQLAnchorResolver {
 func (r *SQLAnchorResolver) Resolve(ctx context.Context, release string, scfCodes []string) ([]uuid.UUID, []string, error) {
 	if len(scfCodes) == 0 {
 		return nil, nil, nil
+	}
+	if release == "" {
+		return nil, nil, ErrSCFReleaseRequired
 	}
 	q := dbx.New(r.pool)
 	rel, err := scfrelease.Lookup(ctx, q, release)

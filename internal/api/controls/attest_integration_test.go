@@ -246,6 +246,40 @@ type setupResult struct {
 	registry  *schemaregistry.Service
 	hasMinIO  bool
 	bucket    string
+	// scfRelease is the SCF release the seeded IAC-37 anchor is in; every
+	// fixture bundle declares it (#1774).
+	scfRelease string
+}
+
+// scfReleaseOf returns the label of the current SCF release that holds
+// code, where seedSCFAnchor put it.
+func scfReleaseOf(t *testing.T, admin *pgxpool.Pool, code string) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current' AND a.scf_id = $1`,
+		code).Scan(&label); err != nil {
+		t.Fatalf("SCF release of %s: %v", code, err)
+	}
+	return label
+}
+
+// withSCFRelease adds `scf_release: release` after a manifest's
+// scf_anchor_id line: upload requires it for a code (#1774).
+func withSCFRelease(manifest, release string) string {
+	i := strings.Index(manifest, "scf_anchor_id: ")
+	if i < 0 {
+		return manifest
+	}
+	eol := strings.IndexByte(manifest[i:], '\n')
+	if eol < 0 {
+		return manifest + "\nscf_release: " + release + "\n"
+	}
+	at := i + eol + 1
+	return manifest[:at] + "scf_release: " + release + "\n" + manifest[at:]
 }
 
 const ownerRole = "control_owner"
@@ -265,6 +299,7 @@ func setupHTTP(t *testing.T) setupResult {
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
 	seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	scfRelease := scfReleaseOf(t, admin, "IAC-37")
 	tenant := freshTenant(t, admin)
 
 	ingester := ingest.New(app, reg)
@@ -320,6 +355,7 @@ func setupHTTP(t *testing.T) setupResult {
 		registry:   reg,
 		hasMinIO:   store != nil,
 		bucket:     bucket,
+		scfRelease: scfRelease,
 	}
 }
 
@@ -377,6 +413,7 @@ bundle_id: ` + bundleID + `
 title: "Manual review of access list"
 implementation_type: manual_attested
 scf_anchor_id: IAC-37
+scf_release: ` + s.scfRelease + `
 owner_role: ` + role + `
 freshness_class: quarterly
 manual_evidence_schema:

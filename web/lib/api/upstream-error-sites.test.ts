@@ -87,7 +87,10 @@ const SITES: [string, () => Promise<unknown>][] = [
   ["evidence detail", () => fetchEvidenceDetail("e1")],
   ["exceptions", () => fetchExceptionsList()],
   ["metrics", () => fetchMetric("m1")],
-  ["oscal-components", () => mapClaimScfAnchor("b", "c1", "IAC-06")],
+  [
+    "oscal-components",
+    () => mapClaimScfAnchor("b", "c1", "IAC-06", "test-2026.3"),
+  ],
   ["personnel-security", () => fetchPersonnelChecklists()],
   ["policies list", () => fetchPoliciesList()],
   ["policies detail", () => fetchPolicyDetail("p1")],

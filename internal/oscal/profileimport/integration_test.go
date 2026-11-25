@@ -79,6 +79,20 @@ func startBridge(t *testing.T) (string, func()) {
 	return bridgetest.Start(t)
 }
 
+// currentSCFRelease returns the label of the current SCF release, where
+// seedCurrentSCFAnchor put the anchor. An import declares it: a release is
+// required since #1774.
+func currentSCFRelease(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`).Scan(&label); err != nil {
+		t.Fatalf("current SCF release: %v", err)
+	}
+	return label
+}
+
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a control id in the
 // resolved profile ("IAC-37"). Proves the deterministic requirement -> SCF
@@ -144,6 +158,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "FedRAMP Moderate test",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
@@ -266,6 +281,7 @@ func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_external_href.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "malicious",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -318,6 +334,7 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_malformed.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -359,6 +376,7 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "Chained baseline test",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
@@ -426,6 +444,7 @@ func TestImportProfile_CyclicChainRejected(t *testing.T) {
 			Profiles:    [][]byte{loadFixture(t, "profile_cycle_b.json")},
 			Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 			SourceLabel: "cyclic",
+			SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 			ImportedBy:  "grc-tester",
 			Role:        authz.RoleGRCEngineer,
 		})
@@ -481,6 +500,7 @@ func TestImportProfile_TenantIsolation(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "Tenant A baseline",
 		ImportedBy:  "grc-a",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {

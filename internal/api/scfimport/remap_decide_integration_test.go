@@ -65,22 +65,14 @@ func withTenant(t *testing.T, tenant string) context.Context {
 	return ctx
 }
 
-// seedDecideControls uploads one unpinned control per release-A code
-// through the control store, so each has a real, re-parseable manifest.
+// seedDecideControls seeds one unpinned control per release-A code, as an
+// install before #1774 stored it, so each has a real, re-parseable manifest.
 func seedDecideControls(t *testing.T, app *pgxpool.Pool, tenant string) map[string]uuid.UUID {
 	t.Helper()
-	store := control.NewStore(app)
+	admin := dbtest.NewMigratePool(t)
 	out := map[string]uuid.UUID{}
 	for _, code := range decideCodes {
-		b, err := control.FinalizeBundleForHTTP([]byte(decideBundleYAML(code)))
-		if err != nil {
-			t.Fatalf("bundle %s: %v", code, err)
-		}
-		res, err := store.Upload(withTenant(t, tenant), b, "seed-1776")
-		if err != nil {
-			t.Fatalf("upload %s: %v", code, err)
-		}
-		out[code] = res.ControlID
+		out[code] = seedUnpinned(t, admin, app, tenant, decideBundleYAML(code), "seed-1776").ControlID
 	}
 	return out
 }

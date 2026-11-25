@@ -327,6 +327,8 @@ func TestOverlay_CreateRefusals(t *testing.T) {
 		// AST-09 is in release A only: unknown in the declared release B.
 		{"anchor not in declared release", with("anchor_code", "AST-09"), 422, "unknown_anchor", scfreleasetest.ReleaseB},
 		{"unknown SCF release", with("scf_release", "1999.1"), 422, "unknown_scf_release", "1999.1"},
+		// #1774: no release is refused, never bound in the current one (B).
+		{"missing SCF release", with("scf_release", nil), 400, "invalid_overlay_edge", "scf_release is required"},
 		{"missing rationale", with("rationale", nil), 400, "invalid_overlay_edge", "rationale is required"},
 		{"blank rationale", with("rationale", "   "), 400, "invalid_overlay_edge", "rationale is required"},
 		{"missing source", with("source_ref", nil), 400, "invalid_overlay_edge", "source_ref is required"},
@@ -412,11 +414,10 @@ func TestOverlay_FrozenVersionAcceptsEdgeWithoutChangingRequirements(t *testing.
 	}
 	b := f.body("C3", "IAC-06")
 	delete(b, "framework_version")
-	delete(b, "scf_release")
 	code, body := call(t, f.tenantA, http.MethodPost, "/v1/mapping-overlays", f.tenantA.admin, b)
 	if code != http.StatusCreated || edgeOf(t, body)["framework_version"] != f.version ||
 		edgeOf(t, body)["scf_release"] != scfreleasetest.ReleaseB {
-		t.Fatalf("create with current version and release: status %d (%v)", code, body)
+		t.Fatalf("create with current version: status %d (%v)", code, body)
 	}
 	if after := snapshot(); after != before {
 		t.Fatalf("framework requirements changed:\nbefore %s\nafter  %s", before, after)

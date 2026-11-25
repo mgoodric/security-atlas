@@ -184,6 +184,7 @@ test.describe("OSCAL vendor-claims view", () => {
         description: "second test anchor",
       },
     ],
+    scf_release: "test-2026.3",
   };
 
   test("AC-5 (slice 620): the unmapped claim shows the SCF-anchor picker; the mapped claim does not", async ({
@@ -238,12 +239,14 @@ test.describe("OSCAL vendor-claims view", () => {
       }),
     );
 
-    let patchBody: { scf_anchor_id?: string } | null = null;
+    let patchBody: { scf_anchor_id?: string; scf_release?: string } | null =
+      null;
     await page.route(
       `**/api/oscal/component-claims/${CLAIM_UNMAPPED}/scf-anchor`,
       async (route) => {
         patchBody = JSON.parse(route.request().postData() ?? "{}") as {
           scf_anchor_id?: string;
+          scf_release?: string;
         };
         mapped = true;
         await route.fulfill({
@@ -270,8 +273,14 @@ test.describe("OSCAL vendor-claims view", () => {
       .filter({ hasText: "TST-02" })
       .click();
 
-    // The PATCH carried the chosen anchor code.
-    await expect.poll(() => patchBody).toEqual({ scf_anchor_id: "TST-02" });
+    // The PATCH carried the chosen anchor code and the release the picker's
+    // anchors were read in (#1774).
+    await expect
+      .poll(() => patchBody)
+      .toEqual({
+        scf_anchor_id: "TST-02",
+        scf_release: "test-2026.3",
+      });
     // After the invalidated refetch returns the mapped claim, the unmapped
     // badge is gone and the picker no longer renders for that claim.
     await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(0);

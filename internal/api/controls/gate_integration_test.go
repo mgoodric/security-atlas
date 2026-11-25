@@ -136,7 +136,7 @@ func TestGate_DefaultTenantStrictRejectsRed(t *testing.T) {
         observed_at: 2026-06-01T00:00:00Z
         payload: { bucket: dev, encrypted: false }
 `
-	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), map[string]string{"t.yaml": tests})
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusBadRequest {
 		t.Fatalf("default (no policy row) tenant must hard-block a red bundle; got %d body=%s", code, raw)
@@ -158,7 +158,7 @@ func TestGate_AdvisoryTenantAcceptsRed(t *testing.T) {
         observed_at: 2026-06-01T00:00:00Z
         payload: { bucket: dev, encrypted: false }
 `
-	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), map[string]string{"t.yaml": tests})
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("advisory tenant must ACCEPT a red bundle; got %d body=%s", code, raw)
@@ -190,7 +190,7 @@ func TestGate_AdvisoryTenantAcceptsRed(t *testing.T) {
 func TestGate_MandatoryTestsTenantRejectsNoTests(t *testing.T) {
 	s := setupHTTP(t)
 	setTenantGateMode(t, s.tenant, "mandatory_tests")
-	tarBytes := gateTarball(t, gateJSONPathManifest, nil) // no tests
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), nil) // no tests
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusBadRequest {
 		t.Fatalf("mandatory_tests tenant must reject a no-tests bundle; got %d body=%s", code, raw)
@@ -252,7 +252,7 @@ func TestGate_PassingTestsAccepted(t *testing.T) {
         observed_at: 2026-06-01T00:00:00Z
         payload: { bucket: prod, encrypted: true }
 `
-	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), map[string]string{"t.yaml": tests})
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("expected the passing bundle to upload; got %d body=%s", code, raw)
@@ -283,7 +283,7 @@ func TestGate_FailingTestsRejected(t *testing.T) {
         observed_at: 2026-06-01T00:00:00Z
         payload: { bucket: dev, encrypted: false }
 `
-	tarBytes := gateTarball(t, gateJSONPathManifest, map[string]string{"t.yaml": tests})
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), map[string]string{"t.yaml": tests})
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusBadRequest {
 		t.Fatalf("expected 400 (gate block); got %d body=%s", code, raw)
@@ -308,7 +308,7 @@ func TestGate_FailingTestsRejected(t *testing.T) {
 
 func TestGate_NoTestsAcceptedWithWarning(t *testing.T) {
 	s := setupHTTP(t)
-	tarBytes := gateTarball(t, gateJSONPathManifest, nil)
+	tarBytes := gateTarball(t, withSCFRelease(gateJSONPathManifest, s.scfRelease), nil)
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("expected a no-tests bundle to upload; got %d body=%s", code, raw)
@@ -355,7 +355,7 @@ evidence_queries:
         observed_at: 2026-06-01T00:00:00Z
         payload: { encrypted: true }
 `
-	code, raw := postGateTarball(t, s, gateTarball(t, manifest, map[string]string{"t.yaml": tests}))
+	code, raw := postGateTarball(t, s, gateTarball(t, withSCFRelease(manifest, s.scfRelease), map[string]string{"t.yaml": tests}))
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("expected the green bundle to upload; got %d body=%s", code, raw)
 	}
@@ -403,7 +403,7 @@ evidence_queries:
         observed_at: 2026-06-01T00:00:00Z
         payload: { any: value }
 `
-	tarBytes := gateTarball(t, sqlManifest, map[string]string{"t.yaml": tests})
+	tarBytes := gateTarball(t, withSCFRelease(sqlManifest, s.scfRelease), map[string]string{"t.yaml": tests})
 	code, raw := postGateTarball(t, s, tarBytes)
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("expected the SQL-fixture bundle to upload (sql ran on the upload tx); got %d body=%s", code, raw)
@@ -431,7 +431,7 @@ evidence_queries:
         observed_at: 2026-06-01T00:00:00Z
         payload: { any: value }
 `
-	tarBytes2 := gateTarball(t, sqlManifestFail, map[string]string{"t.yaml": testsFail})
+	tarBytes2 := gateTarball(t, withSCFRelease(sqlManifestFail, s.scfRelease), map[string]string{"t.yaml": testsFail})
 	code2, raw2 := postGateTarball(t, s, tarBytes2)
 	if code2 != http.StatusBadRequest {
 		t.Fatalf("expected a SQL fixture mismatch to be rejected 400; got %d body=%s", code2, raw2)

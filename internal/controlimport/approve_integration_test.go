@@ -19,6 +19,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 )
 
 // seedRaceFixture writes one SCF anchor into the current SCF release (made
@@ -66,6 +67,68 @@ func seedRaceFixture(t *testing.T, admin *pgxpool.Pool) (string, SCFRelease, Fra
 	exec(`INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, 'Race', $2, 'test')`, fwID, slug)
 	exec(`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status) VALUES ($1, NULL, $2, '1', 'current')`, fwVer, fwID)
 	return code, rel, FrameworkRef{Slug: slug, VersionID: fwVer.String(), Version: "1"}
+}
+
+// #1774 D7: staging records the release that is current at staging time on
+// the batch (a deliberate exclusion, Matt 2026-11-24). Approval binds in that
+// recorded release, never in whatever is current at approval. Fixture
+// releases A and B each carry their own IAC-06 row; the batch is staged
+// while B is current, then A is made current, and the approved control must
+// still be on B's IAC-06.
+func TestApproveRow_BindsInTheStagedReleaseAfterTheCurrentReleaseChanges(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	// The framework fixture first: it makes an SCF release current when
+	// none is. LoadAB then leaves only B current (A legacy).
+	_, _, fw := seedRaceFixture(t, admin)
+	scfreleasetest.LoadAB(t, admin)
+	tenant := dbtest.SeedTenant(t, admin,
+		"control_import_candidates", "control_import_rejected_rows", "control_import_rows",
+		"control_import_batches", "controls")
+	ctx := dbtest.WithTenantCtx(t, tenant)
+	store := NewStore(app)
+
+	staged, ok, err := store.ResolveSCFRelease(ctx)
+	if err != nil || !ok || staged.Version != scfreleasetest.ReleaseB {
+		t.Fatalf("staging release = %+v ok=%v err=%v; want the current release %s", staged, ok, err, scfreleasetest.ReleaseB)
+	}
+	b, err := store.CreateBatch(ctx, Batch{
+		Framework: fw, SourceFilename: "release.csv", SourceFormat: "csv", Status: BatchStatusStaged,
+		TotalRows: 1, StagedCount: 1, SCFRelease: &staged, SuggestionsStatus: SuggestionsReady,
+		Staged: []BatchControl{{RowNumber: 2, ExternalID: "MFA 01", Title: "MFA", Description: "d", Status: RowStatusPending}},
+	})
+	if err != nil {
+		t.Fatalf("CreateBatch: %v", err)
+	}
+
+	// Release A becomes current between staging and approval.
+	for _, s := range []struct{ release, status string }{
+		{scfreleasetest.ReleaseB, "legacy"}, {scfreleasetest.ReleaseA, "current"},
+	} {
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE framework_versions SET status = $2 WHERE tenant_id IS NULL AND version = $1`, s.release, s.status); err != nil {
+			t.Fatalf("set %s %s: %v", s.release, s.status, err)
+		}
+	}
+
+	d, err := store.ApproveRow(ctx, ApproveRowInput{BatchID: b.ID, RowID: b.Staged[0].ID, Approver: uuid.NewString(), SCFID: "IAC-06"})
+	if err != nil {
+		t.Fatalf("ApproveRow: %v", err)
+	}
+	var bound, inB, inA uuid.UUID
+	if err := admin.QueryRow(context.Background(), `SELECT scf_anchor_id FROM controls WHERE id = $1`, d.ControlID).Scan(&bound); err != nil {
+		t.Fatalf("read control: %v", err)
+	}
+	for release, dst := range map[string]*uuid.UUID{scfreleasetest.ReleaseB: &inB, scfreleasetest.ReleaseA: &inA} {
+		if err := admin.QueryRow(context.Background(), `
+			SELECT a.id FROM scf_anchors a JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = 'IAC-06'`, release).Scan(dst); err != nil {
+			t.Fatalf("IAC-06 in %s: %v", release, err)
+		}
+	}
+	if bound != inB {
+		t.Fatalf("approved control bound to %s; want the staged release B's IAC-06 %s (A's, now current, is %s)", bound, inB, inA)
+	}
 }
 
 func TestApproveRow_ConcurrentBundleIDCollisionRollsBack(t *testing.T) {

@@ -44,10 +44,9 @@ type Manifest struct {
 	Description         string `yaml:"description,omitempty"  json:"description,omitempty"`
 	SCFAnchorID         string `yaml:"scf_anchor_id"          json:"scf_anchor_id"`
 	// SCFRelease names the SCF release SCFAnchorID is a code in, e.g.
-	// "2025.2" (#1770). The SCF reuses codes between releases, so upload
-	// binds the anchor within this release. Optional for now: without it
-	// the code binds in the current release and the upload returns a
-	// deprecation warning.
+	// "test-2026.3" (#1770). The SCF reuses codes between releases, so
+	// upload binds the anchor within this release. Required whenever
+	// SCFAnchorID is a code (MissingSCFRelease, #1774).
 	SCFRelease string `yaml:"scf_release,omitempty" json:"scf_release,omitempty"`
 	// AnchorFit states how well SCFAnchorID fits the control's intent:
 	// exact (the default when omitted), partial, or none (issue #1736).
@@ -323,6 +322,19 @@ func (m *Manifest) LifecycleStateOrDefault() string {
 		return "draft"
 	}
 	return m.LifecycleState
+}
+
+// MissingSCFRelease reports whether the manifest names scf_anchor_id as an
+// SCF code without declaring scf_release (#1774), which upload refuses with
+// ErrSCFReleaseRequired. An unanchored bundle, and an scf_anchor_id written
+// as an anchor UUID, need no release.
+func (m *Manifest) MissingSCFRelease() bool {
+	ref := strings.TrimSpace(m.SCFAnchorID)
+	if ref == "" || strings.TrimSpace(m.SCFRelease) != "" {
+		return false
+	}
+	_, err := uuid.Parse(ref)
+	return err != nil
 }
 
 // AnchorFitOrDefault returns the manifest's anchor_fit, or "exact" when

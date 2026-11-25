@@ -101,11 +101,13 @@ export default function ComponentDefinitionDetailPage({
   // The bundled SCF-anchor catalog backing the picker. Fetched once; the
   // picker filters client-side. Only loaded lazily is unnecessary here — the
   // catalog is small and shared across every unmapped claim on the page.
+  // scf_release is the release the anchors are in; a mapping names it, so
+  // the picked code binds in the release it was picked from (#1774).
   const anchorsQ = useQuery({
-    queryKey: ["anchors", "catalog"],
+    queryKey: ["anchors", "catalog", "with-release"],
     queryFn: () =>
-      bffControlFetch<{ anchors: Anchor[] }>(`/api/anchors`).then(
-        (b) => b.anchors,
+      bffControlFetch<{ anchors: Anchor[]; scf_release?: string }>(
+        `/api/anchors`,
       ),
   });
 
@@ -154,7 +156,10 @@ export default function ComponentDefinitionDetailPage({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scf_anchor_id: args.scfAnchorId }),
+          body: JSON.stringify({
+            scf_anchor_id: args.scfAnchorId,
+            scf_release: anchorsQ.data?.scf_release ?? "",
+          }),
         },
       );
       if (!res.ok) {
@@ -354,7 +359,7 @@ export default function ComponentDefinitionDetailPage({
               {c.unmapped && (
                 <ScfAnchorPicker
                   prompt="Map this claim to a canonical SCF anchor. Setting the crosswalk does not satisfy a control on its own."
-                  anchors={anchorsQ.data ?? []}
+                  anchors={anchorsQ.data?.anchors ?? []}
                   loading={anchorsQ.isLoading}
                   query={anchorQuery[c.id] ?? ""}
                   onQueryChange={(v) =>

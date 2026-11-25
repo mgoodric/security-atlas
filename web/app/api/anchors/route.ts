@@ -13,8 +13,7 @@ export async function GET() {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    const anchors = await listAnchors(bearer);
-    return NextResponse.json({ anchors });
+    return NextResponse.json(await listAnchors(bearer));
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(

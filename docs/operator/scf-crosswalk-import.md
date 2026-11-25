@@ -184,15 +184,24 @@ Load the release first with `atlas-cli catalog import-scf`. A declared release
 (`SCF code not in release`). Either way nothing is written. A `--scf-release`
 that contradicts the file is refused.
 
-A release read only from a workbook's sheet name is looser for now. When that
-release is loaded, codes bind in it. When it is not, the import binds in the
-current SCF release as it did before and prints a warning naming the sheet's
-release. Pass `--scf-release <release>` to make an unloaded sheet release an
-error instead.
+A release read from a workbook's sheet name binds just as strictly (#1774): when
+it is not loaded, the import fails, names the sheet, and writes nothing. To
+import a workbook into a different loaded release than its sheet names, rename
+the sheet to `SCF <release>`, or convert the workbook to crosswalk YAML that
+declares that `scf_release`. A sheet name can only spell an `SCF <yyyy>.<n>`
+release, so the bundled sample (`test-2026.3`) is reachable only through YAML.
+`--scf-release` cannot override the sheet.
 
-A crosswalk that declares no release still binds in the current SCF release and
-prints a deprecation warning. The declaration becomes required in a later
-release.
+A crosswalk that declares no release is refused (#1774), and nothing is
+written. Its codes are never bound in the current release instead. The fix is
+one line at the top level of the YAML:
+
+```yaml
+scf_release: "test-2026.3" # the SCF release the scf_anchor codes are from
+```
+
+For an OLIR STRM workbook, which has no `SCF <release>` sheet, pass
+`--scf-release <release>`.
 
 **After a new SCF release import (#2315).** A crosswalk that declares a release
 keeps its edges on that release's anchors. Requirement coverage reads the

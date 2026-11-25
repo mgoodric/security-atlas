@@ -26,7 +26,7 @@ func loadRolledUpWorkbook(t *testing.T, version string) *soc2import.Crosswalk {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
-	return cw
+	return inSample(cw)
 }
 
 // preRollUp rebuilds cw the way the workbook importer wrote it before #1731:

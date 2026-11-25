@@ -141,6 +141,7 @@ bundle_id: ` + bundleID + `
 title: "Quarterly access review (1739)"
 implementation_type: manual_attested
 scf_anchor_id: IAC-37
+scf_release: ` + scfReleaseOf(t, s.admin, "IAC-37") + `
 owner_role: ` + ownerRole + `
 freshness_class: quarterly
 manual_evidence_schema:
