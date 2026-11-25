@@ -418,6 +418,13 @@ func TestSlice135_AuditPeriodFreezingClampsWindow(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert frozen audit_period: %v", err)
 	}
+	// #3066: a frozen period carries its control set in the same
+	// transaction. atlas_app may record only source 'freeze'.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+		 VALUES ($1, $2, '{}', 'freeze')`, tenant, periodID); err != nil {
+		t.Fatalf("record frozen controls: %v", err)
+	}
 
 	// Pre-frozen row — MUST appear in the export.
 	preID := uuid.New()

@@ -116,7 +116,7 @@ func removeSnapshot(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 	}
 }
 
-// runBackfill executes section 3 of the migration file verbatim as the
+// runBackfill executes section 6 of the migration file verbatim as the
 // migrate role.
 func runBackfill(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
@@ -124,7 +124,7 @@ func runBackfill(t *testing.T, admin *pgxpool.Pool) {
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
-	_, section, ok := strings.Cut(string(b), "-- ===== 3. backfill already-frozen periods =====")
+	_, section, ok := strings.Cut(string(b), "-- ===== 6. backfill already-frozen periods =====")
 	if !ok {
 		t.Fatal("migration has no backfill section")
 	}
@@ -307,5 +307,111 @@ func TestFrozenControls_WriteOnce(t *testing.T) {
 	var n int
 	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_period_frozen_controls WHERE audit_period_id = $1`, p.ID).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("snapshot after period delete: n=%d err=%v, want 0", n, err)
+	}
+}
+
+// openPeriod creates an open period in a fresh tenant as atlas_app.
+func openPeriod(t *testing.T, admin, app *pgxpool.Pool) (string, period.Period) {
+	t.Helper()
+	tenant := freshTenant(t, admin)
+	fwID := seedFrameworkVersion(t, admin)
+	seedControl(t, admin, tenant)
+	start := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	p, err := period.NewStore(app).Create(dbtest.WithTenantCtx(t, tenant), period.CreateInput{
+		Name:               "#3066 open period",
+		FrameworkVersionID: fwID,
+		PeriodStart:        start,
+		PeriodEnd:          start.Add(72 * time.Hour),
+		CreatedBy:          "key_test_3066",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return tenant, p
+}
+
+// #3077 review B1: a binary older than the migration freezes with a bare
+// UPDATE and records no control set. The deferred commit check refuses it,
+// so the window between migration and rollout cannot leave a period that
+// never replays.
+func TestFrozenControls_CommitRefusesFrozenPeriodWithoutSnapshot(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant, p := openPeriod(t, admin, app)
+
+	_, err := execAsApp(t, app, tenant,
+		`UPDATE audit_periods
+		 SET status = 'frozen', frozen_at = now(), frozen_hash = sha256('old-binary'::bytea),
+		     frozen_by = 'key_test_3066', updated_at = now()
+		 WHERE id = $1`, p.ID)
+	wantCheckViolation(t, "old-binary freeze at commit", err)
+
+	got, gerr := period.NewStore(app).Get(dbtest.WithTenantCtx(t, tenant), p.ID)
+	if gerr != nil || got.Status != period.StatusOpen {
+		t.Fatalf("period after refused freeze: status=%v err=%v, want open", got.Status, gerr)
+	}
+
+	// The same holds for a direct INSERT of a frozen row, even by the owner.
+	fwID := seedFrameworkVersion(t, admin)
+	_, err = admin.Exec(context.Background(), `
+		INSERT INTO audit_periods
+		  (id, tenant_id, name, framework_version_id, period_start, period_end,
+		   status, frozen_at, frozen_hash, frozen_by, created_by)
+		VALUES ($1, $2, '#3066 bare frozen insert', $3, '2026-04-01', '2026-04-03',
+		        'frozen', now(), sha256('bare'::bytea), 'key_test_3066', 'key_test_3066')`,
+		uuid.New(), tenant, fwID)
+	wantCheckViolation(t, "owner frozen insert without snapshot", err)
+}
+
+// #3077 review N1: atlas_app records only source 'freeze', and only for a
+// frozen period.
+func TestFrozenControls_InsertGuard(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant, open := openPeriod(t, admin, app)
+	_, err := execAsApp(t, app, tenant,
+		`INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+		 VALUES ($1, $2, '{}', 'freeze')`, tenant, open.ID)
+	wantCheckViolation(t, "app snapshot for an open period", err)
+
+	ftenant, frozen, _ := frozenPeriod(t, admin, app)
+	removeSnapshot(t, admin, frozen.ID)
+	for _, src := range []string{"seed", "migration_backfill"} {
+		_, err := execAsApp(t, app, ftenant,
+			`INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+			 VALUES ($1, $2, '{}', $3)`, ftenant, frozen.ID, src)
+		wantCheckViolation(t, "app snapshot with source "+src, err)
+	}
+	// The migrate role may record the other sources.
+	if _, err := admin.Exec(context.Background(),
+		`SELECT audit_period_record_catalog_controls($1, $2, 'seed')`, ftenant, frozen.ID); err != nil {
+		t.Fatalf("migrate role records seed: %v", err)
+	}
+	if src := snapshotSource(t, admin, frozen.ID); src != "seed" {
+		t.Fatalf("snapshot source = %q, want seed", src)
+	}
+}
+
+// #3077 review N3: a tenant cannot read another tenant's control set.
+func TestFrozenControls_TenantIsolation(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	_, p, _ := frozenPeriod(t, admin, app)
+	other := freshTenant(t, admin)
+
+	ctx, err := tenancy.WithTenant(context.Background(), other)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	var n int
+	err = pgx.BeginTxFunc(ctx, app, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT count(*) FROM audit_period_frozen_controls WHERE audit_period_id = $1`, p.ID).Scan(&n)
+	})
+	if err != nil || n != 0 {
+		t.Fatalf("other tenant sees the snapshot: n=%d err=%v, want 0", n, err)
 	}
 }

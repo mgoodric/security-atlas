@@ -62,6 +62,12 @@ func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 			 WHERE id = $1`, id); err != nil {
 			return err
 		}
+		// The UPDATE queued the deferred frozen-has-controls check; fire it
+		// now (the row is open, so it passes) so the ALTER below does not
+		// meet pending trigger events.
+		if _, err := tx.Exec(ctx, `SET CONSTRAINTS audit_periods_frozen_has_controls_trg IMMEDIATE`); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg`)
 		return err
 	})

@@ -163,7 +163,7 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool, beforeFreeze 
 	for _, hook := range beforeFreeze {
 		hook(f)
 	}
-	if _, err := admin.Exec(ctx,
+	if err := dbtest.FreezeRaw(ctx, admin, tenant, periodID,
 		`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 		        frozen_hash=decode('00','hex') WHERE id=$1`,
 		periodID, frozenAt); err != nil {

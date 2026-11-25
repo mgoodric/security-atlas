@@ -10,6 +10,8 @@
 - `populations_frozen_at_immutable_trg` refuses changes to `populations.frozen_at` once it is set.
 - `audit_period_frozen_controls_immutable_trg` (#3066, migration `20261311000000_audit_period_frozen_controls`) refuses any UPDATE of the control set the freeze recorded, and its DELETE while the period exists. Freeze records one row per period, so a reopen must remove it or the next freeze fails on the primary key.
 
+- `audit_periods_frozen_has_controls_trg` (same migration) is a deferred check that refuses a commit leaving a frozen period without its control set. The procedure below reopens the period in the same transaction it removes the row, so the check passes.
+
 These triggers apply to every role, the owner included. A reopen has to disable them inside its own transaction.
 
 ---
@@ -39,6 +41,10 @@ UPDATE audit_periods
 SET status = 'open', frozen_at = NULL, frozen_hash = NULL, frozen_by = NULL, updated_at = now()
 WHERE id = '<period id>' AND status = 'frozen';
 -- expect UPDATE 1
+
+-- Run the deferred frozen-has-controls check now (the row is open, so it
+-- passes); ALTER TABLE refuses to run while trigger events are pending.
+SET CONSTRAINTS audit_periods_frozen_has_controls_trg IMMEDIATE;
 
 ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg;
 
