@@ -100,6 +100,9 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 			if len(report.MissingAnchors) > 0 {
 				_, _ = fmt.Fprintf(out, "missing SCF anchors (control not yet imported): %v\n", report.MissingAnchors)
 			}
+			for _, f := range report.ReleaseFallbacks {
+				_, _ = fmt.Fprintf(out, "warning: %s\n", f)
+			}
 			return nil
 		},
 	}
