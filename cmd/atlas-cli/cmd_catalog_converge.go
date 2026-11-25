@@ -86,6 +86,14 @@ func printConvergeResults(stdout, stderr io.Writer, results []soc2import.Converg
 			_, _ = fmt.Fprintf(stdout, "converge framework=%s edge retired %s->%s: no longer in %s (source=%s source_attribution=%s mapping_tier=%s)\n",
 				r.FrameworkSlug, re.RequirementCode, re.SCFAnchor, r.File, re.Source, re.Attribution, re.Tier)
 		}
+		for _, ce := range rep.EdgesCarriedRetired {
+			_, _ = fmt.Fprintf(stdout, "converge framework=%s edge retired %s->%s: carried by an SCF edge remap from an edge no longer in %s (source=%s mapping_tier=%s)\n",
+				r.FrameworkSlug, ce.RequirementCode, ce.SCFAnchor, r.File, ce.Source, ce.Tier)
+		}
+		for _, ce := range rep.EdgesCarriedRestored {
+			_, _ = fmt.Fprintf(stdout, "converge framework=%s edge restored %s->%s: carried by an SCF edge remap from an edge listed again in %s (source=%s mapping_tier=%s)\n",
+				r.FrameworkSlug, ce.RequirementCode, ce.SCFAnchor, r.File, ce.Source, ce.Tier)
+		}
 		for _, w := range rep.Warnings {
 			_, _ = fmt.Fprintf(stderr, "warning: converge framework=%s: %s\n", r.FrameworkSlug, w)
 		}
