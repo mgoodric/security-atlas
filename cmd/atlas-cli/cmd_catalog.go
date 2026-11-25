@@ -244,6 +244,14 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				fmt.Printf("edge restored %s->%s: listed again (mapping_tier=%s)\n",
 					rs.RequirementCode, rs.SCFAnchor, rs.Tier)
 			}
+			for _, ce := range report.EdgesCarriedRetired {
+				fmt.Printf("edge retired %s->%s: carried by an SCF edge remap from an edge no longer in the crosswalk (source=%s mapping_tier=%s)\n",
+					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
+			}
+			for _, ce := range report.EdgesCarriedRestored {
+				fmt.Printf("edge restored %s->%s: carried by an SCF edge remap from an edge listed again (source=%s mapping_tier=%s)\n",
+					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
+			}
 			for _, un := range report.EdgesUnlisted {
 				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
 					un.RequirementCode, un.SCFAnchor, un.Source, un.Attribution)

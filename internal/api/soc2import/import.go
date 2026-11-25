@@ -88,6 +88,16 @@ type Report struct {
 	// retired_at is cleared (#1971).
 	EdgesRestored []CatalogEdge
 
+	// EdgesCarriedRetired lists the edges an SCF edge remap carried from an
+	// edge this import retired, which it retired with their source (#3065).
+	// A carried edge's crosswalk_source is the remap ('scf-remap:<proposal>'),
+	// so the retire pass never owns it directly; see settleCarriedEdges.
+	EdgesCarriedRetired []CatalogEdge
+
+	// EdgesCarriedRestored lists the carried edges this import's retire pass
+	// had retired and restores now that their source is listed again (#3065).
+	EdgesCarriedRestored []CatalogEdge
+
 	// EdgesUnlisted lists live edges the crosswalk does not list but did not
 	// retire, because another source wrote them (another crosswalk_source or
 	// source_attribution). They are reported so an operator can see them.
@@ -746,7 +756,17 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 			report.LegacyPointsOfFocusEdgesRetired++
 		}
 	}
+
+	// 7. Retire the copies an SCF edge remap carried from the edges just
+	//    retired, and restore the ones whose source is listed again (#3065).
+	carriedRetired, err := settleCarriedEdges(ctx, tx, q, version.ID, cw.Source, owned, listedCodes, &report)
+	if err != nil {
+		return Report{}, err
+	}
 	for _, e := range keep {
+		if carriedRetired[e.ID.Bytes] {
+			continue
+		}
 		report.EdgesUnlisted = append(report.EdgesUnlisted, catalogEdge(e))
 	}
 
