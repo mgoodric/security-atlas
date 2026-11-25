@@ -287,6 +287,10 @@ func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, er
 		httpresp.WriteError(w, http.StatusConflict, "postmortem evidence already recorded with different content")
 	case errors.Is(err, ingest.ErrUnavailable):
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: an audit period froze while the close was open; nothing
+		// was written, and a retry starts after the freeze.
+		httpresp.WriteConcurrentFreeze(w, "an audit period was frozen while the incident closed; nothing was written, retry")
 	default:
 		if strings.Contains(err.Error(), "target does not exist in tenant") {
 			httpresp.WriteError(w, http.StatusBadRequest, "linked target does not exist in tenant")

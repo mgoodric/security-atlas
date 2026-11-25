@@ -9,6 +9,9 @@ package eval_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,5 +88,66 @@ func TestEvaluateControl_LiveAndReplayShareTheDatabaseClock(t *testing.T) {
 	}
 	if live != 1 || replay != 1 {
 		t.Fatalf("live counted %d, replay of T counted %d; want the row ingested just before T in both", live, replay)
+	}
+}
+
+// laggingDBClockPool is an app-role pool whose sessions resolve an
+// unqualified clock_timestamp() to a shadow function that runs lag behind
+// the real one: a database clock the app host's clock disagrees with. Only
+// clock_timestamp is shadowed; ingested_at's DEFAULT now() is unaffected.
+func laggingDBClockPool(t *testing.T, admin *pgxpool.Pool, lag time.Duration) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_URL_APP")
+	if dsn == "" {
+		t.Skip("DATABASE_URL_APP not set; skipping integration test")
+	}
+	schema := "clock3060_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`CREATE SCHEMA ` + schema,
+		fmt.Sprintf(`CREATE FUNCTION %s.clock_timestamp() RETURNS timestamptz LANGUAGE sql VOLATILE
+			AS $$ SELECT pg_catalog.clock_timestamp() - interval '%d seconds' $$`, schema, int(lag.Seconds())),
+		`GRANT USAGE ON SCHEMA ` + schema + ` TO PUBLIC`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`); err != nil {
+			t.Logf("drop %s: %v", schema, err)
+		}
+	})
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse DATABASE_URL_APP: %v", err)
+	}
+	// pg_catalog is searched where it is listed, so the shadow schema ahead
+	// of it wins for an unqualified call.
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema + `, pg_catalog, "$user", public`
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// #3060: the test above cannot tell the engine's database clock from the app
+// clock when the two agree, so a revert to the app clock would pass it. Here
+// the database clock lags the app's by half an hour. The engine must take T
+// from the database: T is then before the row's ingested_at, and neither the
+// live result nor a replay of T counts the row. An engine on the app clock
+// would take T as now and count it.
+func TestEvaluateControl_EvaluatedAtIsTheDatabaseClock(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	const lag = 30 * time.Minute
+	live, replay, at, ingested := liveThenReplay(t, admin, newEngine(laggingDBClockPool(t, admin, lag)), tenant)
+	if behind := time.Since(at); behind < lag-5*time.Minute {
+		t.Fatalf("evaluated_at %s is %s behind now; want about %s, the lagging database clock (the engine read the app clock?)", at, behind, lag)
+	}
+	if !ingested.After(at) || live != 0 || replay != 0 {
+		t.Fatalf("ingested_at %s, T %s, live %d, replay %d; want the row after T and counted by neither", ingested, at, live, replay)
 	}
 }

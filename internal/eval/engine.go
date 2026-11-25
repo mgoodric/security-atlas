@@ -182,16 +182,23 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		// replay does (the SQL bound when asOf is a past instant). A row
 		// that committed between the clock read and the ledger read has
 		// ingested_at after evaluatedAt; a replay of evaluatedAt would not
-		// count it, so the live result does not either. Its own ingest
-		// triggers a later evaluation that does.
+		// count it, so the live result does not either. A later evaluation
+		// does (see the backstop below).
 		//
 		// What one clock does not close: a row whose transaction began
 		// before evaluatedAt (so ingested_at <= evaluatedAt) but committed
 		// after the ledger read. The live result at T misses it and a replay
 		// of T counts it. Freeze closes that window with the tenant
 		// evidence-freeze lock. Live evaluation does not take it: that would
-		// serialise every evaluation against every ingest in the tenant, and
-		// the row's own ingest triggers a later evaluation that counts it.
+		// serialise every evaluation against every ingest in the tenant.
+		//
+		// The backstop for a missed row is the Scheduler's sweep, which
+		// re-evaluates every active control on DefaultRecomputeInterval
+		// (hourly unless ATLAS_EVAL_RECOMPUTE_INTERVAL says otherwise). A
+		// row pushed through the JetStream EVIDENCE_INGEST stream is also
+		// re-evaluated sooner by IngestSubscriber, but domain-writer
+		// (ProcessInTx), MCP-applied and direct-publisher rows publish
+		// nothing, so for them the sweep is the only one (#3060).
 		records = ingestedBy(records, instant)
 		// #3037: a replay of an earlier instant applies the exceptions in
 		// force then, not today's active set. Live evaluation (instant is
