@@ -345,14 +345,15 @@ func openEdgeProposals(t *testing.T, pool *pgxpool.Pool, release, code string) i
 // changed, or whose code the release lacks, is flagged for re-anchoring;
 // the title-only stock re-bind (#2321) does not apply off the sample
 // (Matt's call, 2026-11-24). Each such SOC 2 edge waits in the edge-remap
-// queue.
+// queue. A stock control whose code and title both match still moves onto
+// the release (#3068).
 func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
 	pool, app, tenant := byoFixture(t)
 	codes := stockCrosswalkCodes(t)
-	if len(codes) < 2 {
-		t.Fatalf("need two codes shared by a stock control and the SOC 2 crosswalk; have %v", codes)
+	if len(codes) < 3 {
+		t.Fatalf("need three codes shared by a stock control and the SOC 2 crosswalk; have %v", codes)
 	}
-	retitled, removed := codes[0], codes[1]
+	retitled, removed, exact := codes[0], codes[1], codes[len(codes)-1]
 	byo := realReleaseCatalog(t)
 	byo.ReleaseVersion = "2027.1" // the 2026.3 IDs and titles, under another release
 	var kept []scfimport.Control
@@ -388,20 +389,26 @@ func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
 			t.Errorf("needs re-anchoring = %v; want the stock control on %s", reanchor, code)
 		}
 	}
-	if got := strings.Join(queryStrings(t, pool, `
-		SELECT DISTINCT fv.version FROM controls c
-		JOIN scf_anchors a ON a.id = c.scf_anchor_id
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		WHERE c.tenant_id = $1 AND c.superseded_by IS NULL AND a.scf_id = $2`, tenant, retitled), ","); got != sample {
+	stockRelease := func(code string) string {
+		return strings.Join(queryStrings(t, pool, `
+			SELECT DISTINCT fv.version FROM controls c
+			JOIN scf_anchors a ON a.id = c.scf_anchor_id
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE c.tenant_id = $1 AND c.superseded_by IS NULL AND a.scf_id = $2`, tenant, code), ",")
+	}
+	if got := stockRelease(retitled); got != sample {
 		t.Errorf("stock control on %s is on an anchor in %q; want it left on %s", retitled, got, sample)
+	}
+	if got := stockRelease(exact); got != byo.ReleaseVersion {
+		t.Errorf("stock control on %s, whose code and title match, is on an anchor in %q; want %s", exact, got, byo.ReleaseVersion)
 	}
 	for _, code := range []string{retitled, removed} {
 		if n := openEdgeProposals(t, pool, sample, code); n == 0 {
 			t.Errorf("no open edge-remap proposal for the SOC 2 edge on %s", code)
 		}
 	}
-	if n := openEdgeProposals(t, pool, sample, codes[len(codes)-1]); n != 0 && len(codes) > 2 {
-		t.Errorf("%d open edge-remap proposals on %s, whose code and title match", n, codes[len(codes)-1])
+	if n := openEdgeProposals(t, pool, sample, exact); n != 0 {
+		t.Errorf("%d open edge-remap proposals on %s, whose code and title match", n, exact)
 	}
 }
 

@@ -38,8 +38,8 @@ import (
 const stockCC81Bundle = "soc2_cc8_1_change_management"
 
 // shippedStockRelease is the SCF release the shipped stock bundles pin
-// (#1773).
-const shippedStockRelease = "test-2026.3"
+// (#1773): the bundled sample's.
+const shippedStockRelease = scfimport.BundledSampleRelease
 
 // stockManifestShipped returns the shipped control.yaml of bundleID: a stock
 // revision that pins shippedStockRelease.

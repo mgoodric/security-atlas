@@ -15,7 +15,9 @@ package scfimport
 // stored control.yaml is byte-identical to a revision the platform shipped
 // under controls/soc2/, also moves when the code is unchanged and only its
 // title differs. The platform chose that anchor, and the code still names
-// the same concept. Tenant-authored controls keep the D3 rule.
+// the same concept. Tenant-authored controls keep the D3 rule. The
+// exception does not apply off the bundled sample (#3061): there a stock
+// control moves only on an exact code and title match.
 
 import (
 	"context"
@@ -23,6 +25,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -53,7 +56,8 @@ type ControlOnLegacyAnchor struct {
 type RebindReport struct {
 	// Rebound controls moved to the current release's anchor with the same
 	// code and title, or with the same code when the control is stock
-	// (#2321).
+	// (#2321) and its legacy anchor is not in a bundled-sample release
+	// (#3061).
 	Rebound []ControlOnLegacyAnchor
 	// NeedsReanchoring controls stay on their legacy anchor: the code is
 	// gone from the current release or now names a different control.
@@ -132,6 +136,19 @@ func IsStockManifest(bundleID, manifestYAML string) bool {
 // TestBundledSampleReleaseMatchesTheFixture holds the two together.
 const BundledSampleRelease = "test-2026.3"
 
+// bundledSampleReleases is every label the bundled sample has shipped
+// under, current one included (#3068). An install can still hold anchors
+// from an older sample after a re-pin, and moves off those need the same
+// exact match as moves off the current one. A re-pin appends here; it never
+// removes a label. TestBundledSampleReleases_KeepsEveryLabel holds that.
+var bundledSampleReleases = []string{"test-2026.3"}
+
+// IsBundledSampleRelease reports whether release is a label the bundled SCF
+// sample has shipped under (#3068).
+func IsBundledSampleRelease(release string) bool {
+	return slices.Contains(bundledSampleReleases, release)
+}
+
 // StockTitleOnlyRebindable reports whether a stock control on a legacy
 // anchor can move to the current release's anchor with the same code whose
 // title changed (#2321). The code must still continue the legacy anchor: SCF
@@ -148,7 +165,7 @@ func StockTitleOnlyRebindable(r dbx.ListControlsOnLegacySCFAnchorsRow) (bool, er
 	if !r.CurrentAnchorID.Valid || r.CurrentAnchorTitle == nil {
 		return false, nil
 	}
-	if r.LegacyRelease == BundledSampleRelease {
+	if IsBundledSampleRelease(r.LegacyRelease) {
 		return false, nil
 	}
 	if r.CurrentAnchorLegacyScfID != "" && r.CurrentAnchorLegacyScfID != r.LegacyScfID {
@@ -202,7 +219,8 @@ const (
 	outcomeUnknown Outcome = iota
 	// OutcomeRebindable: the current release has the same code with the
 	// same title, or the control is stock and only the title changed
-	// (#2321), so the control can move there in place.
+	// (#2321) on an anchor outside the bundled sample (#3061), so the
+	// control can move there in place.
 	OutcomeRebindable
 	// OutcomeNeedsReanchoring: the code is gone or now means something
 	// else, or the stored manifest does not parse; a person re-anchors it.
