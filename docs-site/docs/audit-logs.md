@@ -77,6 +77,10 @@ whether the record was accepted or rejected.
 - `rejected_oversized` — payload exceeded the per-record cap.
 - `rejected_rate_limit` — the pusher exceeded its rate limit.
 - `rejected_unauthenticated` — bearer / OIDC token did not validate.
+- `rejected_concurrent_freeze` — an audit period in the tenant was
+  frozen while the write was in flight. Nothing was written; the
+  request answers `409` with code `concurrent_freeze`, and a retry
+  succeeds.
 - `rejected_internal_error` — the platform itself failed; receipt
   carries an opaque error.
 

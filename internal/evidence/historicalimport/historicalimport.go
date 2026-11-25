@@ -57,14 +57,13 @@ var (
 	// transaction began, on every attempt. The import's rows would carry an
 	// ingested_at at or before that frozen_at, so they would join a frozen
 	// population the freeze never hashed. Nothing was written; re-run it.
-	ErrConcurrentFreeze = errors.New("historicalimport: an audit period was frozen while the import ran; nothing was written, re-run the import")
+	// It wraps ingest.ErrConcurrentFreeze, the live-ingest refusal for the
+	// same race (#3060).
+	ErrConcurrentFreeze = fmt.Errorf("historicalimport: an audit period was frozen while the import ran; nothing was written, re-run the import: %w", ingest.ErrConcurrentFreeze)
 )
 
 // MaxAmendReasonLen caps the amend reason.
 const MaxAmendReasonLen = 2000
-
-// maxAttempts bounds the retries after a concurrent freeze.
-const maxAttempts = 3
 
 // Request is one import batch.
 type Request struct {
@@ -177,16 +176,15 @@ func (im *Importer) Import(ctx context.Context, cred credstore.Credential, req R
 		res     Result
 		refused error
 	)
-	for attempt := 1; ; attempt++ {
-		res, refused, err = im.attempt(tenantCtx, svc, batch, cred, req, attempt)
-		if !errors.Is(err, ErrConcurrentFreeze) || attempt == maxAttempts {
-			break
-		}
-		// A freeze committed between this attempt's BEGIN and its lock.
-		// The attempt refused before processing a record, so it wrote and
-		// audited nothing and added nothing to the outbox; a new
-		// transaction gets an ingested_at after that freeze.
-	}
+	// A freeze committed between an attempt's BEGIN and its lock. The
+	// attempt refused before processing a record, so it wrote and audited
+	// nothing and added nothing to the outbox; a new transaction gets an
+	// ingested_at after that freeze.
+	err = ingest.RetryConcurrentFreeze(func(attempt int) error {
+		var aerr error
+		res, refused, aerr = im.attempt(tenantCtx, svc, batch, cred, req, attempt)
+		return aerr
+	})
 	if err != nil {
 		if refused != nil {
 			var fpe *FrozenPeriodError
@@ -228,12 +226,11 @@ func (im *Importer) attempt(ctx context.Context, svc *ingest.Service, batch inge
 		if im.afterLock != nil {
 			im.afterLock(n)
 		}
-		since, err := q.CountPeriodsFrozenSinceTxStart(ctx, tenant)
-		if err != nil {
-			return fmt.Errorf("count periods frozen since start: %w", err)
-		}
-		if since > 0 {
-			return ErrConcurrentFreeze
+		if err := ingest.CheckNoFreezeSinceTxStart(ctx, q, tenant); err != nil {
+			if errors.Is(err, ingest.ErrConcurrentFreeze) {
+				return ErrConcurrentFreeze
+			}
+			return err
 		}
 		first, last := dayRange(req.Records)
 		periods, err := q.LockAuditPeriodsOverlapping(ctx, dbx.LockAuditPeriodsOverlappingParams{

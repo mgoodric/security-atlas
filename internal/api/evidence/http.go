@@ -312,6 +312,10 @@ func writeBatchError(w http.ResponseWriter, index int, decision ingest.Decision,
 	case errors.Is(err, ingest.ErrOversized):
 		statusCode = http.StatusRequestEntityTooLarge
 		code = "oversized_payload"
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt.
+		statusCode = http.StatusConflict
+		code = httpresp.CodeConcurrentFreeze
 	}
 	httpresp.WriteJSON(w, statusCode, errorBody{
 		Error: fmt.Sprintf("record[%d] %s: %s", index, decision.String(), err.Error()),

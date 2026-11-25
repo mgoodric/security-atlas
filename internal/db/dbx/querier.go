@@ -301,7 +301,14 @@ type Querier interface {
 	// LockTenantEvidenceFreeze would admit them to its frozen population
 	// without having hashed them. The import refuses (and retries) when this
 	// is non-zero.
-	CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	//
+	// #3060: the check is sound only under READ COMMITTED, where this
+	// statement takes a fresh snapshot after the lock is granted. Under
+	// REPEATABLE READ or SERIALIZABLE the snapshot is the transaction's first
+	// statement's, which can predate a freeze that committed before the lock,
+	// so the count would read zero. isolation is returned so the caller fails
+	// closed on any other level.
+	CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (CountPeriodsFrozenSinceTxStartRow, error)
 	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
 	// notified about this overdue checklist? The notification row itself is the

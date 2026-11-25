@@ -12,10 +12,12 @@ package ingest_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -26,10 +28,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type freezeFixture struct {
 	admin   *pgxpool.Pool
+	app     *pgxpool.Pool
 	tenant  string
 	ctrl    uuid.UUID
 	svc     *ingest.Service
@@ -81,7 +85,7 @@ func setupFreezeFixture(t *testing.T) *freezeFixture {
 		t.Fatalf("NewEmbedded: %v", err)
 	}
 	f := &freezeFixture{
-		admin: admin, tenant: tenant, ctrl: ctrl,
+		admin: admin, app: app, tenant: tenant, ctrl: ctrl,
 		svc:     ingest.New(app, reg),
 		periods: period.NewStore(app),
 		ctx:     dbtest.WithTenantCtx(t, tenant),
@@ -231,4 +235,71 @@ func TestProcess_FreezeDuringOpenIngestWaits(t *testing.T) {
 		t.Fatalf("period_frozen evidence_n = %d, want the ingested row counted", n)
 	}
 	f.assertHashReplays(t)
+}
+
+// processInDomainTx runs ProcessInTx the way a domain writer does: in its own
+// tenant transaction at iso, rolled back when ProcessInTx fails.
+func (f *freezeFixture) processInDomainTx(t *testing.T, rec *evidencev1.EvidenceRecord, iso pgx.TxIsoLevel) (ingest.Decision, error) {
+	t.Helper()
+	ctx, _ := ingest.WithAuditOutbox(f.ctx)
+	tx, err := f.app.BeginTx(ctx, pgx.TxOptions{IsoLevel: iso})
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("apply tenant: %v", err)
+	}
+	_, decision, perr := f.svc.ProcessInTx(ctx, tx, rec, f.cred(), ingest.LedgerOptions{})
+	if perr != nil {
+		return decision, perr
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return decision, nil
+}
+
+// A domain writer's transaction cannot be retried by ingest, so a freeze
+// that commits between its BEGIN and the lock refuses the write: nothing
+// lands, the refusal is audited as rejected_concurrent_freeze rather than an
+// internal error, and the period's hash still replays (#3060).
+func TestProcessInTx_FreezeBetweenBeginAndLockRefuses(t *testing.T) {
+	f := setupFreezeFixture(t)
+	ingest.SetTestHooks(f.svc, func(int) {
+		if _, err := f.periods.Freeze(f.ctx, f.period.ID, "key_test_3060", time.Time{}); err != nil {
+			t.Errorf("Freeze inside the domain transaction: %v", err)
+		}
+	}, nil)
+	rec := f.attestation(t)
+	decision, err := f.processInDomainTx(t, rec, pgx.ReadCommitted)
+	if !errors.Is(err, ingest.ErrConcurrentFreeze) || decision != ingest.DecisionRejectedConcurrentFreeze {
+		t.Fatalf("ProcessInTx: decision %s, err %v; want rejected_concurrent_freeze / ErrConcurrentFreeze", decision, err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM evidence_records WHERE tenant_id = $1 AND idempotency_key = $2`, f.tenant, rec.IdempotencyKey); n != 0 {
+		t.Fatalf("evidence rows = %d, want 0", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM evidence_audit_log WHERE tenant_id = $1 AND idempotency_key = $2 AND decision = 'rejected_concurrent_freeze'`, f.tenant, rec.IdempotencyKey); n != 1 {
+		t.Fatalf("rejected_concurrent_freeze audit rows = %d, want 1", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM evidence_audit_log WHERE tenant_id = $1 AND idempotency_key = $2 AND decision <> 'rejected_concurrent_freeze'`, f.tenant, rec.IdempotencyKey); n != 0 {
+		t.Fatalf("other audit rows = %d, want 0", n)
+	}
+	f.assertHashReplays(t)
+}
+
+// The concurrent-freeze check reads a snapshot taken after the lock, which
+// only READ COMMITTED gives. A domain transaction at a higher level fails
+// closed instead of writing a row the check could not vouch for (#3060).
+func TestProcessInTx_RefusesAboveReadCommitted(t *testing.T) {
+	f := setupFreezeFixture(t)
+	for _, iso := range []pgx.TxIsoLevel{pgx.RepeatableRead, pgx.Serializable} {
+		rec := f.attestation(t)
+		if _, err := f.processInDomainTx(t, rec, iso); !errors.Is(err, ingest.ErrIsolationLevel) {
+			t.Fatalf("%s: err %v, want ErrIsolationLevel", iso, err)
+		}
+		if n := f.count(t, `SELECT count(*) FROM evidence_records WHERE tenant_id = $1 AND idempotency_key = $2`, f.tenant, rec.IdempotencyKey); n != 0 {
+			t.Fatalf("%s: evidence rows = %d, want 0", iso, n)
+		}
+	}
 }

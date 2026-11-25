@@ -61,6 +61,7 @@ import (
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -632,7 +633,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	pathed := h.ingest.WithPath(IngestionPath)
 	receipt, _, perr := pathed.Process(r.Context(), rec, cred)
 	if perr != nil {
-		writeAttestError(w, ingestErrorToStatus(perr), perr.Error())
+		writeIngestError(w, perr)
 		return
 	}
 	out := attestSubmitResponse{
@@ -818,6 +819,10 @@ func ingestErrorToStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, ingest.ErrOversized):
 		return http.StatusRequestEntityTooLarge
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt;
+		// nothing was written, and a retry succeeds.
+		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }
@@ -826,6 +831,17 @@ func writeAttestJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// writeIngestError answers an ingest refusal of the attestation. A concurrent
+// freeze carries the concurrent_freeze code the other ledger writers send,
+// so a client can retry on the code (#3060).
+func writeIngestError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ingest.ErrConcurrentFreeze) {
+		httpresp.WriteConcurrentFreeze(w, err.Error())
+		return
+	}
+	writeAttestError(w, ingestErrorToStatus(err), err.Error())
 }
 
 func writeAttestError(w http.ResponseWriter, status int, msg string) {

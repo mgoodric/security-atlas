@@ -68,6 +68,23 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
+// CodeConcurrentFreeze is the stable `code` on a write refused because an
+// audit period in the tenant froze while the write's transaction was open
+// (ingest.ErrConcurrentFreeze, #3038). Nothing was written; the client
+// retries (#3060).
+const CodeConcurrentFreeze = "concurrent_freeze"
+
+// WriteConcurrentFreeze writes a 409 {"error": msg, "code":
+// "concurrent_freeze"}. 409, not 500: the request is sound and the server is
+// healthy; a freeze that committed mid-write refused it, and a retry starts
+// after that freeze.
+func WriteConcurrentFreeze(w http.ResponseWriter, msg string) {
+	WriteJSON(w, http.StatusConflict, map[string]string{
+		"error": msg,
+		"code":  CodeConcurrentFreeze,
+	})
+}
+
 // CodeFeatureNotEnabled is the stable `code` on a refusal for a feature this
 // deployment has switched off (an unset env gate, an unwired AI service). A
 // client branches on the code, not on the wording (#2730).
