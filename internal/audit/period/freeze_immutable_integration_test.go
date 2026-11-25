@@ -37,8 +37,9 @@ const insertRevisionSQL = `INSERT INTO audit_period_freeze_revisions (
 
 // reopenFrozenPeriod resets a frozen period to open as the table owner, the
 // recovery path the AC-7 tests use (docs/runbooks/audit-period-reopen.md).
-// The freeze-immutability trigger refuses it for every role, so the owner
-// disables the trigger for its own transaction only.
+// The freeze-immutability triggers refuse it for every role, so the owner
+// disables them for its own transaction only. The recorded control set goes
+// with the freeze (#3066), so the next Freeze records its own.
 func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -46,10 +47,25 @@ func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 		if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER audit_periods_freeze_immutable_trg`); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls DISABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM audit_period_frozen_controls WHERE audit_period_id = $1`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls ENABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE audit_periods
 			 SET status = 'open', frozen_at = NULL, frozen_hash = NULL, frozen_by = NULL, updated_at = now()
 			 WHERE id = $1`, id); err != nil {
+			return err
+		}
+		// The UPDATE queued the deferred frozen-has-controls check; fire it
+		// now (the row is open, so it passes) so the ALTER below does not
+		// meet pending trigger events.
+		if _, err := tx.Exec(ctx, `SET CONSTRAINTS audit_periods_frozen_has_controls_trg IMMEDIATE`); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg`)

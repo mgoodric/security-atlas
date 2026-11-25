@@ -418,7 +418,7 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		t.Fatalf("seed framework version: %v", err)
 	}
 	frozenAt := time.Now().UTC().Add(-24 * time.Hour)
-	if _, err := e.migrate.Exec(ctx, `
+	if err := dbtest.FreezeRaw(ctx, e.migrate, e.tenant, period, `
 		INSERT INTO audit_periods (id, tenant_id, name, framework_version_id, period_start, period_end, status, created_by,
 		                           frozen_at, frozen_by, frozen_hash)
 		VALUES ($1, $2, '#2171 period', $3, $4, $5, 'frozen', 'tester', $6, 'tester', decode('00','hex'))`,

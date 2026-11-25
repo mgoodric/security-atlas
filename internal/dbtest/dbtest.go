@@ -42,11 +42,13 @@ package dbtest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -170,4 +172,24 @@ func WithTenantCtx(t *testing.T, tenant string) context.Context {
 		t.Fatalf("dbtest: WithTenant(%q): %v", tenant, err)
 	}
 	return ctx
+}
+
+// FreezeRaw runs stmt, a raw INSERT or UPDATE that leaves audit period
+// periodID of tenant frozen without going through period.Store.Freeze, and
+// records the tenant's current control catalog for that period in the same
+// transaction. Since #3066 a deferred check refuses any commit that leaves a
+// frozen period without its recorded control set
+// (audit_periods_frozen_has_controls_trg). pool must be BYPASSRLS (the
+// migrate pool): the row is recorded with source 'seed', which atlas_app
+// may not write. tenant and periodID may be a string or a uuid.UUID.
+func FreezeRaw(ctx context.Context, pool *pgxpool.Pool, tenant, periodID any, stmt string, args ...any) error {
+	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, stmt, args...); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`SELECT audit_period_record_catalog_controls($1::text::uuid, $2::text::uuid, 'seed')`,
+			fmt.Sprint(tenant), fmt.Sprint(periodID))
+		return err
+	})
 }

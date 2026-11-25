@@ -108,7 +108,7 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 	periodEnd := now.Add(-1 * 24 * time.Hour).Format("2006-01-02")
 
 	if frozenAt != nil {
-		if _, err := admin.Exec(ctx,
+		if err := dbtest.FreezeRaw(ctx, admin, tenantUUID, periodID,
 			`INSERT INTO audit_periods
 			 (id, tenant_id, name, framework_version_id, period_start, period_end,
 			  status, frozen_at, frozen_hash, frozen_by, created_by)

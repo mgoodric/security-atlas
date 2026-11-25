@@ -266,6 +266,23 @@ func TestApply_Happy(t *testing.T) {
 		t.Errorf("frozen audit_periods: got %d; want 1 (AC-10)", frozen)
 	}
 
+	// #3066: the seed inserts the frozen period directly, so it records
+	// the period's control set itself; without it replay fails closed.
+	var unsnapshotted int
+	if err := adminPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM audit_periods ap
+		WHERE ap.tenant_id = $1 AND ap.status = 'frozen'
+		  AND NOT EXISTS (SELECT 1 FROM audit_period_frozen_controls fc
+		                  WHERE fc.tenant_id = ap.tenant_id AND fc.audit_period_id = ap.id
+		                    AND fc.source = 'seed')`,
+		res.TenantID,
+	).Scan(&unsnapshotted); err != nil {
+		t.Fatalf("count frozen periods without a control snapshot: %v", err)
+	}
+	if unsnapshotted != 0 {
+		t.Errorf("frozen audit_periods without a seed control snapshot: %d; want 0 (#3066)", unsnapshotted)
+	}
+
 	// #1699: the frozen period holds evidence. A frozen horizon bounds
 	// ingested_at as well as observed_at, so a seed that stamped every
 	// record ingested now() would leave the frozen period, and its

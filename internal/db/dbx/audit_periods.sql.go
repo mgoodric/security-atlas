@@ -229,6 +229,26 @@ func (q *Queries) GetAuditPeriodByID(ctx context.Context, arg GetAuditPeriodByID
 	return i, err
 }
 
+const getFrozenControlIDs = `-- name: GetFrozenControlIDs :one
+SELECT control_ids
+FROM audit_period_frozen_controls
+WHERE tenant_id = $1 AND audit_period_id = $2
+`
+
+type GetFrozenControlIDsParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+// #3066: the control set recorded for a frozen period. No row means the
+// period cannot be replayed (period.ErrNoControlSnapshot).
+func (q *Queries) GetFrozenControlIDs(ctx context.Context, arg GetFrozenControlIDsParams) ([]pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getFrozenControlIDs, arg.TenantID, arg.AuditPeriodID)
+	var control_ids []pgtype.UUID
+	err := row.Scan(&control_ids)
+	return control_ids, err
+}
+
 const getPopulationFreezeRevision = `-- name: GetPopulationFreezeRevision :one
 SELECT ap.status,
        COALESCE((SELECT max(r.revision) FROM audit_period_freeze_revisions r
@@ -319,6 +339,24 @@ func (q *Queries) InsertAuditPeriodFreezeRevision(ctx context.Context, arg Inser
 		&i.EvidenceRecordIds,
 	)
 	return i, err
+}
+
+const insertFrozenControls = `-- name: InsertFrozenControls :exec
+INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+VALUES ($1, $2, $3::uuid[], 'freeze')
+`
+
+type InsertFrozenControlsParams struct {
+	TenantID      pgtype.UUID   `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID   `json:"audit_period_id"`
+	ControlIds    []pgtype.UUID `json:"control_ids"`
+}
+
+// #3066: record the control set a freeze hashed, in the freeze's own
+// transaction. Write-once (trigger audit_period_frozen_controls_immutable).
+func (q *Queries) InsertFrozenControls(ctx context.Context, arg InsertFrozenControlsParams) error {
+	_, err := q.db.Exec(ctx, insertFrozenControls, arg.TenantID, arg.AuditPeriodID, arg.ControlIds)
+	return err
 }
 
 const listAmendedEvidenceIDsForPeriod = `-- name: ListAmendedEvidenceIDsForPeriod :many
@@ -574,7 +612,9 @@ ORDER BY id
 // Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 // tenant's catalog. v1 takes the full tenant catalog; a future slice may
 // narrow to controls satisfied by the period's framework_version_id once
-// canvas §8 audit-scope-narrowing lands.
+// canvas §8 audit-scope-narrowing lands. Only Freeze reads it: the list is
+// recorded in audit_period_frozen_controls and every replay reads that
+// (#3066), never the live catalog.
 func (q *Queries) ListControlIDsForPeriodHash(ctx context.Context, tenantID pgtype.UUID) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listControlIDsForPeriodHash, tenantID)
 	if err != nil {
