@@ -36,11 +36,17 @@ func (q *Queries) AttachPopulationToPeriod(ctx context.Context, arg AttachPopula
 }
 
 const countPeriodsFrozenSinceTxStart = `-- name: CountPeriodsFrozenSinceTxStart :one
-SELECT count(*)::bigint
-FROM audit_periods
-WHERE tenant_id = $1
-  AND frozen_at >= transaction_timestamp()
+SELECT (SELECT count(*)
+        FROM audit_periods
+        WHERE tenant_id = $1
+          AND frozen_at >= transaction_timestamp())::bigint AS frozen_since,
+       current_setting('transaction_isolation')::text AS isolation
 `
+
+type CountPeriodsFrozenSinceTxStartRow struct {
+	FrozenSince int64  `json:"frozen_since"`
+	Isolation   string `json:"isolation"`
+}
 
 // #1742: the tenant's periods frozen at or after this transaction began.
 // An import's rows carry ingested_at = its transaction start, so a freeze
@@ -48,11 +54,18 @@ WHERE tenant_id = $1
 // LockTenantEvidenceFreeze would admit them to its frozen population
 // without having hashed them. The import refuses (and retries) when this
 // is non-zero.
-func (q *Queries) CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
+//
+// #3060: the check is sound only under READ COMMITTED, where this
+// statement takes a fresh snapshot after the lock is granted. Under
+// REPEATABLE READ or SERIALIZABLE the snapshot is the transaction's first
+// statement's, which can predate a freeze that committed before the lock,
+// so the count would read zero. isolation is returned so the caller fails
+// closed on any other level.
+func (q *Queries) CountPeriodsFrozenSinceTxStart(ctx context.Context, tenantID pgtype.UUID) (CountPeriodsFrozenSinceTxStartRow, error) {
 	row := q.db.QueryRow(ctx, countPeriodsFrozenSinceTxStart, tenantID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+	var i CountPeriodsFrozenSinceTxStartRow
+	err := row.Scan(&i.FrozenSince, &i.Isolation)
+	return i, err
 }
 
 const createAuditPeriod = `-- name: CreateAuditPeriod :one

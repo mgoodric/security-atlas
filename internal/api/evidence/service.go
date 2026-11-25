@@ -142,6 +142,9 @@ func decisionToGRPC(d ingest.Decision, err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ingest.ErrOversized):
 		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt.
+		return status.Error(codes.Aborted, err.Error())
 	}
 	return status.Errorf(codes.Internal, "ingest: decision=%s err=%v", d, err)
 }

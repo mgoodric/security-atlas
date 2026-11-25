@@ -272,10 +272,18 @@ SELECT pg_advisory_xact_lock_shared(14, hashtext(sqlc.arg(tenant_id)::uuid::text
 -- LockTenantEvidenceFreeze would admit them to its frozen population
 -- without having hashed them. The import refuses (and retries) when this
 -- is non-zero.
-SELECT count(*)::bigint
-FROM audit_periods
-WHERE tenant_id = $1
-  AND frozen_at >= transaction_timestamp();
+--
+-- #3060: the check is sound only under READ COMMITTED, where this
+-- statement takes a fresh snapshot after the lock is granted. Under
+-- REPEATABLE READ or SERIALIZABLE the snapshot is the transaction's first
+-- statement's, which can predate a freeze that committed before the lock,
+-- so the count would read zero. isolation is returned so the caller fails
+-- closed on any other level.
+SELECT (SELECT count(*)
+        FROM audit_periods
+        WHERE tenant_id = $1
+          AND frozen_at >= transaction_timestamp())::bigint AS frozen_since,
+       current_setting('transaction_isolation')::text AS isolation;
 
 -- name: GetPopulationFreezeRevision :one
 -- #1742: the period a population is attached to, its status, and its

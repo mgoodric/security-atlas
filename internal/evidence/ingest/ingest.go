@@ -144,6 +144,10 @@ const (
 	DecisionRejectedUnauthenticated
 	DecisionRejectedRateLimit
 	DecisionRejectedInternalError
+	// DecisionRejectedConcurrentFreeze is ErrConcurrentFreeze: an audit
+	// period froze while the write's transaction was open, and nothing was
+	// written (#3060). It is not a server fault; the caller retries.
+	DecisionRejectedConcurrentFreeze
 )
 
 // String returns the audit-log decision token for d. Must match the
@@ -170,6 +174,8 @@ func (d Decision) String() string {
 		return "rejected_unauthenticated"
 	case DecisionRejectedRateLimit:
 		return "rejected_rate_limit"
+	case DecisionRejectedConcurrentFreeze:
+		return "rejected_concurrent_freeze"
 	default:
 		return "rejected_internal_error"
 	}
@@ -198,14 +204,58 @@ var (
 	// (the transaction start) before that frozen_at, so it would join a
 	// frozen population whose hash never covered it. Nothing was written.
 	// Process retries in a new transaction; ProcessInTx returns it, and the
-	// caller's whole transaction can be retried.
+	// caller's whole transaction can be retried. A domain writer's handler
+	// answers 409 concurrent_freeze (httpresp.WriteConcurrentFreeze, #3060).
 	ErrConcurrentFreeze = errors.New("ingest: an audit period was frozen while this write's transaction was open; nothing was written, retry")
 )
 
-// maxFreezeAttempts bounds Process's retries after ErrConcurrentFreeze. Each
-// retry follows a freeze that committed during the previous attempt, so a
-// third in a row is not expected.
-const maxFreezeAttempts = 3
+// MaxFreezeAttempts bounds the retries after ErrConcurrentFreeze, in Process
+// and in the historical import (RetryConcurrentFreeze). Each retry follows a
+// freeze that committed during the previous attempt, so a third in a row is
+// not expected.
+const MaxFreezeAttempts = 3
+
+// RetryConcurrentFreeze runs attempt, numbered from 1, until it returns
+// anything other than ErrConcurrentFreeze or MaxFreezeAttempts have run, and
+// returns the last error. Each attempt must open its own transaction: a new
+// transaction's start, and so its rows' ingested_at, is after the freeze
+// that refused the previous one.
+func RetryConcurrentFreeze(attempt func(n int) error) error {
+	for n := 1; ; n++ {
+		err := attempt(n)
+		if !errors.Is(err, ErrConcurrentFreeze) || n == MaxFreezeAttempts {
+			return err
+		}
+	}
+}
+
+// CheckNoFreezeSinceTxStart returns ErrConcurrentFreeze when a tenant audit
+// period was frozen at or after q's transaction began (#3038). Call it after
+// the tenant evidence-freeze lock is granted, as its own statement.
+//
+// It is sound only under READ COMMITTED: there the statement's snapshot is
+// taken after the lock, so it sees every freeze that committed before the
+// lock was granted. Under REPEATABLE READ or SERIALIZABLE the snapshot is
+// the transaction's first statement's and can miss such a freeze, so any
+// other level fails closed (#3060).
+func CheckNoFreezeSinceTxStart(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
+	row, err := q.CountPeriodsFrozenSinceTxStart(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("count periods frozen since start: %w", err)
+	}
+	if row.Isolation != "read committed" {
+		return fmt.Errorf("%w: the concurrent-freeze check needs READ COMMITTED, transaction is %s", ErrIsolationLevel, row.Isolation)
+	}
+	if row.FrozenSince > 0 {
+		return ErrConcurrentFreeze
+	}
+	return nil
+}
+
+// ErrIsolationLevel is a write attempted in a transaction above READ
+// COMMITTED, where CheckNoFreezeSinceTxStart cannot see a concurrent freeze
+// (#3060). It is a caller bug and answers 500.
+var ErrIsolationLevel = errors.New("ingest: transaction isolation level not supported")
 
 // DomainWriterPath is the ingestion_path a platform-internal domain writer
 // (change register, incident register, personnel security, access review)
@@ -335,7 +385,8 @@ type Service struct {
 	// afterBegin and beforeCommit are test hooks around Process's write
 	// transaction (#3038): afterBegin runs once the transaction is open and
 	// before the freeze lock, beforeCommit once the row is written and the
-	// lock is held. Both are nil outside tests.
+	// lock is held. ProcessInTx runs afterBegin(1) in the caller's
+	// transaction (#3060). Both are nil outside tests.
 	afterBegin   func(attempt int)
 	beforeCommit func(attempt int)
 }
@@ -545,8 +596,11 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 
 	var newRecord dbx.EvidenceRecord
 	var deduped bool
-	for attempt := 1; ; attempt++ {
-		err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	// #3038: a freeze committed between an attempt's BEGIN and its lock, and
+	// nothing was written. A new transaction's ingested_at is after that
+	// freeze, so the row stays out of its population.
+	err = RetryConcurrentFreeze(func(attempt int) error {
+		return pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 			if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
 				return fmt.Errorf("apply tenant: %w", terr)
 			}
@@ -560,13 +614,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 			}
 			return perr
 		})
-		// #3038: a freeze committed between this attempt's BEGIN and its
-		// lock, and nothing was written. A new transaction's ingested_at is
-		// after that freeze, so the row stays out of its population.
-		if !errors.Is(err, ErrConcurrentFreeze) || attempt == maxFreezeAttempts {
-			break
-		}
-	}
+	})
 	if err != nil {
 		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
 	}
@@ -596,7 +644,16 @@ type LedgerOptions struct {
 // and writes the record into the caller's transaction instead of its own.
 //
 // tx must already carry the tenant GUC for cred.TenantID, and ctx must
-// carry the same tenant. Audit rows land as follows:
+// carry the same tenant. tx must be READ COMMITTED, the pgx default: the
+// concurrent-freeze check needs a snapshot taken after the freeze lock, and
+// any other level fails the call with ErrIsolationLevel (#3060).
+//
+// When an audit period froze after tx began, ProcessInTx returns
+// ErrConcurrentFreeze and audits rejected_concurrent_freeze. Nothing was
+// written: the caller rolls back, and its handler answers 409
+// concurrent_freeze so the client retries the whole operation.
+//
+// Audit rows land as follows:
 //
 //   - a refusal is audited in its own short transaction, so the
 //     rejected_* row survives the caller rolling back on the returned
@@ -637,6 +694,10 @@ func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.Ev
 	p, decision, err := s.prepare(ctx, rec, cred, pgtype.UUID{})
 	if err != nil {
 		return Receipt{}, decision, err
+	}
+	if s.afterBegin != nil {
+		// The caller's transaction is open; this call is its only attempt.
+		s.afterBegin(1)
 	}
 	newRecord, deduped, err := s.persist(ctx, tx, p, opts)
 	if err != nil {
@@ -999,16 +1060,13 @@ func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts Ledg
 	// Then refuse if a freeze already committed after the start: its
 	// frozen_at is later than this row's ingested_at, so its frozen reads
 	// would admit a row its hash never covered. The count is its own
-	// statement so its snapshot is taken after the lock is granted.
+	// statement so its snapshot is taken after the lock is granted, which
+	// holds under READ COMMITTED only (CheckNoFreezeSinceTxStart, #3060).
 	if err := q.LockTenantEvidenceFreezeShared(ctx, pgUUID(p.cred.TenantID)); err != nil {
 		return dbx.EvidenceRecord{}, false, fmt.Errorf("lock tenant evidence freeze: %w", err)
 	}
-	since, err := q.CountPeriodsFrozenSinceTxStart(ctx, pgUUID(p.cred.TenantID))
-	if err != nil {
-		return dbx.EvidenceRecord{}, false, fmt.Errorf("count periods frozen since start: %w", err)
-	}
-	if since > 0 {
-		return dbx.EvidenceRecord{}, false, ErrConcurrentFreeze
+	if err := CheckNoFreezeSinceTxStart(ctx, q, pgUUID(p.cred.TenantID)); err != nil {
+		return dbx.EvidenceRecord{}, false, err
 	}
 
 	observedAtNanos := p.observedAtNanos
@@ -1070,6 +1128,12 @@ func (s *Service) auditPersistFailure(ctx context.Context, p *prepared, err erro
 		s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
 			"hash mismatch for idempotency_key", p.recordID)
 		return DecisionRejectedIdempotencyMismatch
+	}
+	if errors.Is(err, ErrConcurrentFreeze) {
+		// #3060: a refusal the caller retries, not a server fault.
+		s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedConcurrentFreeze,
+			"audit period frozen while the write's transaction was open", p.recordID)
+		return DecisionRejectedConcurrentFreeze
 	}
 	s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), p.recordID)
 	return DecisionRejectedInternalError

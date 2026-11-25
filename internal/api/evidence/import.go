@@ -162,7 +162,7 @@ func writeImportError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, historicalimport.ErrNotAdmin):
 		httpresp.WriteJSON(w, http.StatusForbidden, errorBody{Error: "admin credential required", Code: "forbidden"})
 	case errors.Is(err, historicalimport.ErrConcurrentFreeze):
-		httpresp.WriteJSON(w, http.StatusConflict, errorBody{Error: err.Error(), Code: "concurrent_freeze"})
+		httpresp.WriteConcurrentFreeze(w, err.Error())
 	case errors.Is(err, historicalimport.ErrInvalid):
 		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: err.Error(), Code: "invalid_request"})
 	case errors.As(err, &fpe):
