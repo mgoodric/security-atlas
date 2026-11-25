@@ -122,5 +122,11 @@ test also asserts `ControlState` still serves the live run at T. The AC-7
 test's initial run pins the same past horizon, so it is an as-of run too and
 is read the same way.
 
+The four as-of cases in `internal/control/stock_sql_checks_integration_test.go`
+("replay measures from the as-of instant" and its siblings) evaluate with a
+past horizon and then read `ControlState`. They now read the as-of row
+directly (`evaluatedState`). Their live cases still go through
+`ControlState`.
+
 `isa/probes/ledger-replay.sh` (ISC-3) reads rows by trigger, not through
 `ControlState`, and is unaffected.
