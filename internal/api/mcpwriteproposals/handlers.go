@@ -371,6 +371,10 @@ func applyErrStatus(err error) (int, string, bool) {
 		return http.StatusForbidden, "scope_violation", true
 	case errors.Is(err, ingest.ErrIdempotencyMismatch):
 		return http.StatusConflict, "idempotency_mismatch", true
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt;
+		// nothing was written, and a retry succeeds.
+		return http.StatusConflict, httpresp.CodeConcurrentFreeze, true
 	case errors.Is(err, writeproposals.ErrInvalidInput):
 		return http.StatusBadRequest, "invalid_input", true
 	case errors.Is(err, writeproposals.ErrIngestUnavailable):

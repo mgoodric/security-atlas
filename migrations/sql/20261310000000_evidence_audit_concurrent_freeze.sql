@@ -25,4 +25,12 @@ ALTER TABLE evidence_audit_log
             'rejected_unauthenticated',
             'rejected_concurrent_freeze',
             'rejected_internal_error'
-        ));
+        )) NOT VALID;
+
+-- NOT VALID: the new set is the old one plus one token, so every existing
+-- row already satisfies it. Validating would only scan the whole audit log
+-- under the ACCESS EXCLUSIVE lock this ALTER holds (to commit, under
+-- psql --single-transaction), stalling every ingest, to prove nothing. New
+-- rows are checked either way. A later VALIDATE CONSTRAINT, outside this
+-- migration, takes only SHARE UPDATE EXCLUSIVE if an operator wants the
+-- constraint marked validated.
