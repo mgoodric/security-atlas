@@ -67,9 +67,9 @@ func seedControlLinks(t *testing.T, admin *pgxpool.Pool, tenant string, controlI
 		  VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, 'pass', $6)`,
 			[]any{uuid.New(), tenant, controlID, controlID.String(), now, hashOf(controlID.String())}},
 		{`INSERT INTO exceptions (id, tenant_id, control_id, scope_cell_predicate, justification,
-		      requested_by, approved_by, approved_at, expires_at, status)
+		      requested_by, approved_by, approved_at, activated_at, expires_at, status)
 		  VALUES ($1, $2, $3, '{"op":"true"}'::jsonb, 'compensated', 'requester', 'approver',
-		      $4, $5, 'active')`,
+		      $4, $4, $5, 'active')`,
 			[]any{uuid.New(), tenant, controlID, now, now.Add(30 * 24 * time.Hour)}},
 	}
 	for _, s := range stmts {

@@ -212,6 +212,7 @@ type exceptionFixture struct {
 	ActivatedAt       *time.Time
 	EffectiveFrom     *time.Time
 	ExpiresAt         time.Time
+	ExpiredAt         *time.Time
 	Status            string // requested | approved | denied | active | expired
 }
 
@@ -848,10 +849,18 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 				ex.EffectiveFrom = &ts2
 			}
 		case "expired":
+			// An expired row was active first: it carries activated_at and
+			// the expired_at the sweep stamps (#3056).
 			a := "approver@" + personEmailDomain
 			ts := req.AddDate(0, 0, 7)
 			ex.ApprovedBy = &a
 			ex.ApprovedAt = &ts
+			a2 := fs.user.Email
+			ts2 := ts.AddDate(0, 0, 1)
+			ex.ActivatedBy = &a2
+			ex.ActivatedAt = &ts2
+			ex.EffectiveFrom = &ts2
+			ex.ExpiredAt = &exp
 		case "denied":
 			// approved_by must differ from requested_by (slice 021 SoD).
 			// denied path leaves approved fields NULL, denied_by set.

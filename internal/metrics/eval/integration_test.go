@@ -238,11 +238,11 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO exceptions (
 			id, tenant_id, control_id, scope_cell_predicate,
-			justification, requested_by, expires_at, status
+			justification, requested_by, expires_at, activated_at, status
 		)
 		VALUES ($1, $2, $3, '{}'::jsonb,
 		        'slice 294 test exception', 'requester',
-		        now() + INTERVAL '15 days', 'active')
+		        now() + INTERVAL '15 days', now(), 'active')
 	`, exID, tenant, ctrlID); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}

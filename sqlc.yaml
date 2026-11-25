@@ -198,6 +198,8 @@ sql:
       - "migrations/sql/20261305000000_policy_sync_unreadable.sql"
       # #1742: historical evidence import, and audit-period freeze revisions.
       - "migrations/sql/20261306000000_evidence_historical_import.sql"
+      # #3056: the instant a replay row judged.
+      - "migrations/sql/20261308000000_control_evaluation_evaluated_as_of.sql"
     queries: "internal/db/queries"
     gen:
       go:

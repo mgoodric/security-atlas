@@ -29,6 +29,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -999,11 +1000,12 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 		INSERT INTO exceptions (
 			id, tenant_id, control_id, scope_cell_predicate, justification,
 			requested_by, requested_at, approved_by, approved_at,
-			activated_by, activated_at, effective_from, expires_at, status
+			activated_by, activated_at, effective_from, expires_at, expired_at, status
 		)
 		VALUES ($1, $2, $3, $4::jsonb, 'test waiver',
 		        'requester', $5, 'approver', $5,
-		        'approver', $5, $5, $6, $7)
+		        'approver', $5, $5, $6,
+		        CASE WHEN $7 = 'expired' THEN $6::timestamptz END, $7)
 	`, uuid.New(), tenant, ctrlID, predicate, effectiveFrom, expiresAt, status); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
@@ -1147,7 +1149,9 @@ func seedActiveException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlI
 // The replay of T reproduces the result recorded at T, whatever happens to
 // the control's exceptions after T: one granted after T (with an
 // effective_from backdated before T), one revoked after T, and one the
-// expiry cron flipped after T. Live evaluation sees each change.
+// expiry cron flipped after T. Live evaluation sees each change. The revoke
+// and the expiry go through exception.Store.Revoke and Expirer.SweepOnce,
+// the paths that make them in production (#3056).
 func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -1170,19 +1174,13 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 		seedEvidence(t, admin, tenant, id, "fail", now.Add(-24*time.Hour))
 		return id
 	}
-	exec := func(t *testing.T, sql string, args ...any) {
-		t.Helper()
-		if _, err := admin.Exec(context.Background(), sql, args...); err != nil {
-			t.Fatalf("%s: %v", sql, err)
-		}
-	}
-
 	granted := newControl()
 	revoked := newControl()
 	revokedEx := seedActiveException(t, admin, tenant, revoked, now.Add(-2*time.Hour), now.Add(-2*time.Hour), now.Add(30*24*time.Hour))
 	expired := newControl()
-	// In force at T, and past its expires_at by the time the cron runs.
-	expiresAt := now.Add(2 * time.Second)
+	// In force at T. The sweep runs with its clock past expires_at, so no
+	// test waits for the wall clock to get there.
+	expiresAt := now.Add(time.Minute)
 	expiredEx := seedActiveException(t, admin, tenant, expired, now.Add(-2*time.Hour), now.Add(-2*time.Hour), expiresAt)
 
 	controls := []control{
@@ -1198,7 +1196,9 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 			name: "revoked after T",
 			id:   revoked,
 			change: func(t *testing.T) {
-				exec(t, `UPDATE exceptions SET status = 'revoked', revoked_by = 'approver', revoked_at = now() WHERE id = $1`, revokedEx)
+				if _, err := exception.NewStore(app).Revoke(ctx, revokedEx, "approver", "test revoke"); err != nil {
+					t.Fatalf("revoke exception: %v", err)
+				}
 			},
 			live: eval.ResultFail,
 		},
@@ -1206,9 +1206,10 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 			name: "expired after T",
 			id:   expired,
 			change: func(t *testing.T) {
-				// ExpireActiveExceptionsBefore's write, once expires_at has passed.
-				time.Sleep(time.Until(expiresAt) + 50*time.Millisecond)
-				exec(t, `UPDATE exceptions SET status = 'expired', expired_at = now() WHERE id = $1 AND status = 'active' AND expires_at < now()`, expiredEx)
+				sweep := exception.NewExpirer(admin, nil).WithNow(func() time.Time { return expiresAt.Add(time.Millisecond) })
+				if _, err := sweep.SweepOnce(context.Background()); err != nil {
+					t.Fatalf("expiry sweep: %v", err)
+				}
 				var status string
 				if err := admin.QueryRow(context.Background(), `SELECT status FROM exceptions WHERE id = $1`, expiredEx).Scan(&status); err != nil || status != "expired" {
 					t.Fatalf("expire exception: status = %q, %v", status, err)
@@ -1257,6 +1258,17 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 		if got.Trigger != eval.TriggerReplay {
 			t.Fatalf("%s: latest row trigger = %q, want replay", c.name, got.Trigger)
 		}
+		// #3056: the replay row records the instant it judged, so the AR
+		// can name the exception in force then.
+		var asOf *time.Time
+		if err := admin.QueryRow(context.Background(), `
+			SELECT evaluated_as_of FROM control_evaluations
+			WHERE tenant_id = $1 AND control_id = $2 AND trigger = 'replay'`, tenant, c.id).Scan(&asOf); err != nil {
+			t.Fatalf("%s: read replay row: %v", c.name, err)
+		}
+		if asOf == nil || !asOf.Equal(at) {
+			t.Errorf("%s: replay evaluated_as_of = %v, want %s", c.name, asOf, at)
+		}
 		if got.Result != want.Result || got.FreshnessStatus != want.FreshnessStatus {
 			t.Errorf("%s: replay of T = (%s, %s), recorded at T = (%s, %s)",
 				c.name, got.Result, got.FreshnessStatus, want.Result, want.FreshnessStatus)
@@ -1268,6 +1280,67 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 		}
 		if got := resultsByCell(ctx, t, eng, c.id)[prod]; got != c.live {
 			t.Errorf("%s: live result after the change = %q, want %q", c.name, got, c.live)
+		}
+	}
+}
+
+// #3056: a lifecycle state carries the stamp that dates it. An active row
+// with no activated_at would be excepted live and never on replay, and an
+// expired row with no expired_at has no end the board brief can count.
+func TestExceptions_LifecycleStatesCarryTheirStamps(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", "")
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM exceptions WHERE tenant_id = $1`, tenant)
+	})
+	insert := func(status string, activatedAt, expiredAt, revokedAt *time.Time) error {
+		var revokedBy *string
+		if revokedAt != nil {
+			by := "approver"
+			revokedBy = &by
+		}
+		_, err := admin.Exec(context.Background(), `
+			INSERT INTO exceptions (
+				id, tenant_id, control_id, scope_cell_predicate, justification,
+				requested_by, expires_at, activated_at, expired_at,
+				revoked_by, revoked_at, status
+			)
+			VALUES ($1, $2, $3, '{}'::jsonb, 'stamp check', 'requester',
+			        now() + INTERVAL '30 days', $4, $5, $6, $7, $8)
+		`, uuid.New(), tenant, ctrlID, activatedAt, expiredAt, revokedBy, revokedAt, status)
+		return err
+	}
+	now := time.Now().UTC()
+	rejected := []struct {
+		name                            string
+		status                          string
+		activatedAt, expiredAt, revoked *time.Time
+		constraint                      string
+	}{
+		{"active without activated_at", "active", nil, nil, nil, "exceptions_activated_has_stamp"},
+		{"expired without activated_at", "expired", nil, &now, nil, "exceptions_activated_has_stamp"},
+		{"revoked without activated_at", "revoked", nil, nil, &now, "exceptions_activated_has_stamp"},
+		{"expired without expired_at", "expired", &now, nil, nil, "exceptions_expired_has_stamp"},
+		{"revoked without revoked_at", "revoked", &now, nil, nil, "exceptions_revoked_has_actor"},
+	}
+	for _, c := range rejected {
+		err := insert(c.status, c.activatedAt, c.expiredAt, c.revoked)
+		if err == nil || !strings.Contains(err.Error(), c.constraint) {
+			t.Errorf("%s: want %s to reject the row, got %v", c.name, c.constraint, err)
+		}
+	}
+	for _, c := range []struct {
+		status                          string
+		activatedAt, expiredAt, revoked *time.Time
+	}{
+		{"requested", nil, nil, nil},
+		{"active", &now, nil, nil},
+		{"expired", &now, &now, nil},
+		{"revoked", &now, nil, &now},
+	} {
+		if err := insert(c.status, c.activatedAt, c.expiredAt, c.revoked); err != nil {
+			t.Errorf("%s with its stamps: %v", c.status, err)
 		}
 	}
 }

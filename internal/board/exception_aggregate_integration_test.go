@@ -57,19 +57,22 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	requestedAt := anchor.Add(-s.requestedAgo)
 	expiresAt := requestedAt.Add(s.expiresFromReq)
 
-	var effectiveFrom, approvedAt, activatedAt *time.Time
+	var effectiveFrom, approvedAt, activatedAt, expiredAt *time.Time
 	var approvedBy, activatedBy *string
 	if s.effectiveAgo > 0 {
 		ef := anchor.Add(-s.effectiveAgo)
 		effectiveFrom = &ef
 	}
-	if s.status == "approved" || s.status == "active" {
+	if s.status == "approved" || s.status == "active" || s.status == "expired" {
 		ap := requestedAt.Add(time.Hour)
 		approvedAt = &ap
 		approver := "approver@example.test"
 		approvedBy = &approver
 	}
-	if s.status == "active" {
+	if s.status == "expired" {
+		expiredAt = &expiresAt
+	}
+	if s.status == "active" || s.status == "expired" {
 		ac := requestedAt.Add(2 * time.Hour)
 		activatedAt = &ac
 		activator := "approver@example.test"
@@ -81,15 +84,15 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 			id, tenant_id, control_id, scope_cell_predicate,
 			justification, requested_by, requested_at,
 			approved_by, approved_at, activated_by, activated_at,
-			effective_from, expires_at, status
+			effective_from, expires_at, expired_at, status
 		)
 		VALUES ($1, $2, $3, '{}'::jsonb,
 		        'slice 751 fixture waiver', 'requester@example.test', $4,
 		        $5, $6, $7, $8,
-		        $9, $10, $11)
+		        $9, $10, $11, $12)
 	`, id, tenant, ctrlID, requestedAt,
 		approvedBy, approvedAt, activatedBy, activatedAt,
-		effectiveFrom, expiresAt, s.status); err != nil {
+		effectiveFrom, expiresAt, expiredAt, s.status); err != nil {
 		t.Fatalf("seed exception (%s): %v", s.status, err)
 	}
 	return id
