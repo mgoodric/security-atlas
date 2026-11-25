@@ -42,10 +42,10 @@ func TestControlCoverage2590_NamesNoException(t *testing.T) {
 		if _, err := migrate.Exec(context.Background(), `
 			INSERT INTO exceptions (
 				id, tenant_id, control_id, scope_cell_predicate,
-				justification, requested_by, expires_at, status
+				justification, requested_by, expires_at, activated_at, status
 			)
 			VALUES ($1, $2, $3, '{}'::jsonb, '#2590 test exception', 'requester',
-			        now() + INTERVAL '15 days', 'active')
+			        now() + INTERVAL '15 days', now(), 'active')
 		`, exID, tenant, cid); err != nil {
 			t.Fatalf("seed exception: %v", err)
 		}

@@ -34,6 +34,17 @@ type Expirer struct {
 	// reevaluate, when set, re-evaluates each expired exception's control
 	// after the tenant's sweep commits (#2269).
 	reevaluate Reevaluator
+	// now is the sweep's clock: an active row whose expires_at is before
+	// it is expired.
+	now func() time.Time
+}
+
+// WithNow replaces the sweep's clock, for tests. It moves only the
+// threshold rows are compared against; expired_at is still stamped by the
+// database clock.
+func (e *Expirer) WithNow(now func() time.Time) *Expirer {
+	e.now = now
+	return e
 }
 
 // WithReevaluate makes the sweep re-evaluate the control of every exception
@@ -53,7 +64,7 @@ func NewExpirer(pool *pgxpool.Pool, logger *slog.Logger) *Expirer {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}
-	return &Expirer{pool: pool, logger: logger}
+	return &Expirer{pool: pool, logger: logger, now: time.Now}
 }
 
 // Run executes the tick loop until ctx is cancelled. Each tick sweeps all
@@ -90,7 +101,7 @@ func (e *Expirer) SweepOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("list tenants: %w", err)
 	}
-	now := time.Now().UTC()
+	now := e.now().UTC()
 	total := 0
 	for _, tenantID := range tenantIDs {
 		select {

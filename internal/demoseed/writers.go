@@ -525,16 +525,16 @@ func writeExceptions(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error
 			 (id, tenant_id, control_id, scope_cell_predicate, justification,
 			  compensating_controls, requested_by, requested_at,
 			  approved_by, approved_at, activated_by, activated_at,
-			  effective_from, expires_at, status)
+			  effective_from, expires_at, expired_at, status)
 			 VALUES ($1, $2, $3, $4::jsonb, $5,
 			         $6, $7, $8,
 			         $9, $10, $11, $12,
-			         $13, $14, $15)`,
+			         $13, $14, $15, $16)`,
 			e.ID, fs.tenant.ID, e.ControlID,
 			`{"op":"true"}`, e.Justification,
 			e.CompensatingCtrls, e.RequestedBy, e.RequestedAt,
 			e.ApprovedBy, e.ApprovedAt, e.ActivatedBy, e.ActivatedAt,
-			e.EffectiveFrom, e.ExpiresAt, e.Status,
+			e.EffectiveFrom, e.ExpiresAt, e.ExpiredAt, e.Status,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("demoseed: insert exception: %w", err)

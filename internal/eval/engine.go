@@ -225,7 +225,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 				return err
 			}
 			row.triggeredBy = actor
-			if err := e.store.appendEvaluation(ctx, q, tenantID, row, evaluatedAt); err != nil {
+			if err := e.store.appendEvaluation(ctx, q, tenantID, row, evaluatedAt, instant); err != nil {
 				return err
 			}
 			written++

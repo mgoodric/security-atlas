@@ -73,8 +73,8 @@ func seedEveryCalendarType(t *testing.T, tenant string) {
 		{"control", `INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id, evidence_queries, applicability_expr, lifecycle_state)
 			VALUES ($1, $2, 'Export access control', 'AAA', 'automated', $3, '[]'::jsonb, 'true', 'active')`,
 			[]any{controlID, tenant, "test-bundle-2234-" + controlID.String()}},
-		{"exception", `INSERT INTO exceptions (id, tenant_id, control_id, scope_cell_predicate, justification, requested_by, requested_at, expires_at, status)
-			VALUES ($1, $2, $3, '{}'::jsonb, 'export access', 'tester', now(), $4, 'active')`,
+		{"exception", `INSERT INTO exceptions (id, tenant_id, control_id, scope_cell_predicate, justification, requested_by, requested_at, expires_at, activated_at, status)
+			VALUES ($1, $2, $3, '{}'::jsonb, 'export access', 'tester', now(), $4, now(), 'active')`,
 			[]any{uuid.New(), tenant, controlID, now.Add(8 * day)}},
 		{"offboarding", `INSERT INTO personnel_security_checklists (id, tenant_id, workflow_kind, source, person_external_id, person_work_email, due_at, status)
 			VALUES ($1, $2, 'offboarding', 'manual', 'emp-2234', 'departing-2234@test.example', $3, 'open')`,

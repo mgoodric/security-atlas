@@ -234,10 +234,10 @@ WITH control_latest_run AS (
       AND evaluated_at <= $2
     ORDER BY control_id, evaluated_at DESC, created_at DESC
 )
-SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result FROM (
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, evaluated_as_of, result FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
         ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
-        ce.evaluated_at, ce.result
+        ce.evaluated_at, ce.evaluated_as_of, ce.result
     FROM control_evaluations ce
     JOIN control_latest_run lr
       ON lr.control_id = ce.control_id
@@ -256,13 +256,14 @@ type ListExceptedEvaluationsAsOfParams struct {
 }
 
 type ListExceptedEvaluationsAsOfRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	ControlID   pgtype.UUID        `json:"control_id"`
-	ScopeCellID pgtype.UUID        `json:"scope_cell_id"`
-	EvalRunID   pgtype.UUID        `json:"eval_run_id"`
-	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
-	Result      EvidenceResult     `json:"result"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	ScopeCellID   pgtype.UUID        `json:"scope_cell_id"`
+	EvalRunID     pgtype.UUID        `json:"eval_run_id"`
+	EvaluatedAt   pgtype.Timestamptz `json:"evaluated_at"`
+	EvaluatedAsOf pgtype.Timestamptz `json:"evaluated_as_of"`
+	Result        EvidenceResult     `json:"result"`
 }
 
 // #2269: the AR's risk-accepted observations. The latest evaluation per
@@ -273,6 +274,8 @@ type ListExceptedEvaluationsAsOfRow struct {
 // the dashboard's control_excepted_now.
 // An excepted cell is never a finding: the export links it to the
 // exception that accepted the risk instead.
+// #3056: evaluated_as_of is the instant a replay row judged; the export
+// names the exception in force then, not at evaluated_at.
 func (q *Queries) ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error) {
 	rows, err := q.db.Query(ctx, listExceptedEvaluationsAsOf, arg.TenantID, arg.EvaluatedAt)
 	if err != nil {
@@ -289,6 +292,7 @@ func (q *Queries) ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExcep
 			&i.ScopeCellID,
 			&i.EvalRunID,
 			&i.EvaluatedAt,
+			&i.EvaluatedAsOf,
 			&i.Result,
 		); err != nil {
 			return nil, err

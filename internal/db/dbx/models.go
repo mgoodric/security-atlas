@@ -2037,6 +2037,7 @@ type ControlEvaluation struct {
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	TriggeredBy           *string            `json:"triggered_by"`
+	EvaluatedAsOf         pgtype.Timestamptz `json:"evaluated_as_of"`
 }
 
 type ControlImportAuditLog struct {
