@@ -53,6 +53,13 @@ const pgErrForeignKeyViolation = "23503"
 // RetainedLedger is the reason given for an append-only ledger table.
 const RetainedLedger = "append-only ledger (ADR-0012, tombstone only)"
 
+// RetainedDeleteTrigger is the reason given for a table atlas_app may
+// delete from but a BEFORE DELETE row trigger guards, so some of its rows
+// cannot be deleted. audit_periods is the case today: its trigger refuses a
+// frozen period for every role (#3081), and a purge never disables it, so
+// it keeps the table whole rather than delete open periods only (#3081 D5).
+const RetainedDeleteTrigger = "a BEFORE DELETE trigger guards its rows (e.g. a frozen audit period, #3081)"
+
 // RetainedNoAppRole is the reason given for every table when the database
 // has no atlas_app role. Two of the three ledger signals ask what atlas_app
 // may delete, so without the role no table can be told apart from a ledger,
@@ -82,18 +89,21 @@ var ErrPurgeNotConfirmed = errors.New("oauthclient: purge not confirmed")
 
 // tenantTablesSQL lists every ordinary or partitioned table (never a single
 // partition, which its parent already counts) outside the system schemas
-// that has a uuid tenant_id column, and whether it is an append-only
-// ledger. Any one of three signals makes it a ledger, so an unsure
-// classification retains:
+// that has a uuid tenant_id column, and whether a purge keeps it. Any one
+// of three signals keeps it, so an unsure classification retains:
 //
 //   - no permissive RLS policy allows DELETE (a restrictive policy only
 //     narrows what a permissive one grants; on its own it allows nothing);
 //   - atlas_app has no DELETE privilege on it, or there is no atlas_app
 //     role to ask about;
 //   - a user BEFORE DELETE row trigger.
+//
+// The first two make it 'ledger'. The trigger alone makes it
+// 'delete_trigger': atlas_app may delete from it, but the trigger can
+// refuse a row. Any other table gets the empty string.
 const tenantTablesSQL = `
 SELECT n.nspname, c.relname,
-       NOT EXISTS (
+       CASE WHEN NOT EXISTS (
            SELECT 1 FROM pg_policy p
            WHERE p.polrelid = c.oid AND p.polcmd IN ('d', '*')
              AND p.polpermissive
@@ -101,13 +111,15 @@ SELECT n.nspname, c.relname,
            SELECT 1 FROM pg_roles r
            WHERE r.rolname = 'atlas_app'
              AND has_table_privilege(r.oid, c.oid, 'DELETE')
-       ) OR EXISTS (
+       ) THEN 'ledger'
+       WHEN EXISTS (
            SELECT 1 FROM pg_trigger tg
            WHERE tg.tgrelid = c.oid AND NOT tg.tgisinternal
              AND (tg.tgtype & 1) <> 0  -- ROW
              AND (tg.tgtype & 2) <> 0  -- BEFORE
              AND (tg.tgtype & 8) <> 0  -- DELETE
-       ) AS ledger
+       ) THEN 'delete_trigger'
+       ELSE '' END AS ledger
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = c.oid
@@ -164,7 +176,8 @@ func ListUnboundRows(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, error
 }
 
 // LedgerTables returns the display names of the tenant-scoped tables a
-// purge never deletes from because they are append-only ledgers.
+// purge never deletes from because they are append-only ledgers or a
+// BEFORE DELETE trigger guards them.
 func LedgerTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
 	tables, ledger, err := tenantTables(ctx, tx)
 	if err != nil {
@@ -172,7 +185,7 @@ func LedgerTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
 	}
 	var out []string
 	for _, t := range tables {
-		if ledger[t] {
+		if ledger[t] != "" {
 			out = append(out, t.String())
 		}
 	}
@@ -305,7 +318,7 @@ func ledgerTotals(ctx context.Context, tx pgx.Tx) (map[string]int64, error) {
 	}
 	out := map[string]int64{}
 	for _, t := range tables {
-		if !ledger[t] {
+		if ledger[t] == "" {
 			continue
 		}
 		var n int64
@@ -415,24 +428,27 @@ func appRoleExists(ctx context.Context, tx pgx.Tx) (bool, error) {
 	return ok, nil
 }
 
-func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]bool, error) {
+// tenantTables returns every tenant-scoped table and, keyed by each, the
+// reason a purge keeps it (RetainedLedger or RetainedDeleteTrigger), or ""
+// when a purge may delete from it.
+func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]string, error) {
 	rows, err := tx.Query(ctx, tenantTablesSQL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("oauthclient: list tenant-scoped tables: %w", err)
 	}
 	defer rows.Close()
 	var tables []tableRef
-	ledger := map[tableRef]bool{}
+	ledger := map[tableRef]string{}
 	for rows.Next() {
 		var (
-			t      tableRef
-			isLedg bool
+			t    tableRef
+			kind string
 		)
-		if err := rows.Scan(&t.schema, &t.name, &isLedg); err != nil {
+		if err := rows.Scan(&t.schema, &t.name, &kind); err != nil {
 			return nil, nil, fmt.Errorf("oauthclient: list tenant-scoped tables: %w", err)
 		}
 		tables = append(tables, t)
-		ledger[t] = isLedg
+		ledger[t] = retainedReason(kind)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("oauthclient: list tenant-scoped tables: %w", err)
@@ -440,18 +456,32 @@ func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]bool
 	return tables, ledger, nil
 }
 
+// retainedReason maps tenantTablesSQL's ledger column to a Retained reason.
+// An unknown kind retains as a ledger, so a classification this code does
+// not recognise fails closed.
+func retainedReason(kind string) string {
+	switch kind {
+	case "":
+		return ""
+	case "delete_trigger":
+		return RetainedDeleteTrigger
+	default:
+		return RetainedLedger
+	}
+}
+
 // retainedTables returns, for every tenant-scoped table a purge keeps, the
 // reason. It starts from the ledger tables and adds, until nothing changes,
 // each table whose all-zeros rows a kept table references.
-func retainedTables(ctx context.Context, tx pgx.Tx, ledger map[tableRef]bool) (map[tableRef]string, error) {
+func retainedTables(ctx context.Context, tx pgx.Tx, ledger map[tableRef]string) (map[tableRef]string, error) {
 	fks, err := tenantForeignKeys(ctx, tx, ledger)
 	if err != nil {
 		return nil, err
 	}
 	retained := map[tableRef]string{}
-	for t, isLedger := range ledger {
-		if isLedger {
-			retained[t] = RetainedLedger
+	for t, reason := range ledger {
+		if reason != "" {
+			retained[t] = reason
 		}
 	}
 	for changed := true; changed; {
@@ -473,7 +503,7 @@ func retainedTables(ctx context.Context, tx pgx.Tx, ledger map[tableRef]bool) (m
 	return retained, nil
 }
 
-func tenantForeignKeys(ctx context.Context, tx pgx.Tx, tenantTables map[tableRef]bool) ([]foreignKey, error) {
+func tenantForeignKeys(ctx context.Context, tx pgx.Tx, tenantTables map[tableRef]string) ([]foreignKey, error) {
 	rows, err := tx.Query(ctx, tenantForeignKeysSQL)
 	if err != nil {
 		return nil, fmt.Errorf("oauthclient: list foreign keys: %w", err)

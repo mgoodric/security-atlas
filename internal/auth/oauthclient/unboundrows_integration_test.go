@@ -485,3 +485,51 @@ func TestUnboundRows_MissingAppRoleKeepsAllWithItsOwnReason(t *testing.T) {
 		t.Errorf("all-zeros risks after purge = %d, want %d (nothing is purged without atlas_app)", got, risksBefore)
 	}
 }
+
+// TestPurgeUnboundRows_KeepsAuditPeriods pins #3081 D5: audit_periods'
+// BEFORE DELETE trigger refuses a frozen period for every role, so the purge
+// keeps the table whole, open periods included, with RetainedDeleteTrigger
+// as the reason rather than RetainedLedger, and keeps the framework version
+// the period references.
+func TestPurgeUnboundRows_KeepsAuditPeriods(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+	fw, version := uuid.New(), uuid.New()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
+		 VALUES ($1, $2, 'unbound-rows test', $3, 'test')`, fw, uuid.Nil, "unbound-rows-"+fw.String()[:8],
+	); err != nil {
+		t.Fatalf("insert framework: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO framework_versions (id, tenant_id, framework_id, version) VALUES ($1, $2, $3, '1.0')`,
+		version, uuid.Nil, fw,
+	); err != nil {
+		t.Fatalf("insert framework_version: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO audit_periods (id, tenant_id, name, framework_version_id, period_start, period_end, status, created_by)
+		 VALUES ($1, $2, 'unbound-rows test', $3, now() - interval '90 days', now(), 'open', 'tester')`,
+		uuid.New(), uuid.Nil, version,
+	); err != nil {
+		t.Fatalf("insert audit period: %v", err)
+	}
+
+	periodsBefore := countTenantRows(t, tx, "audit_periods", uuid.Nil)
+	listed, err := oauthclient.ListUnboundRows(ctx, tx)
+	if err != nil {
+		t.Fatalf("ListUnboundRows: %v", err)
+	}
+	if got := find(listed, "audit_periods").Retained; got != oauthclient.RetainedDeleteTrigger {
+		t.Errorf("audit_periods retained = %q, want %q", got, oauthclient.RetainedDeleteTrigger)
+	}
+	if got := find(listed, "framework_versions").Retained; !strings.Contains(got, "audit_periods") {
+		t.Errorf("framework_versions retained = %q, want referenced by audit_periods", got)
+	}
+	if _, err := oauthclient.PurgeUnboundRows(ctx, tx, oauthclient.PurgeableRows(listed), "tester"); err != nil {
+		t.Fatalf("PurgeUnboundRows: %v", err)
+	}
+	if got := countTenantRows(t, tx, "audit_periods", uuid.Nil); got != periodsBefore {
+		t.Errorf("all-zeros audit_periods after purge = %d, want %d (an open period is kept too)", got, periodsBefore)
+	}
+}

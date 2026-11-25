@@ -10,6 +10,7 @@ package period_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,18 @@ func wantCheckViolation(t *testing.T, what string, err error) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
 		t.Fatalf("%s: want check_violation (23514), got %v", what, err)
+	}
+}
+
+// wantCheckViolationMsg is wantCheckViolation that also requires the error
+// message to contain msg, for a guard that raises 23514 on more than one
+// branch.
+func wantCheckViolationMsg(t *testing.T, what string, err error, msg string) {
+	t.Helper()
+	wantCheckViolation(t, what, err)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && !strings.Contains(pgErr.Message, msg) {
+		t.Fatalf("%s: want a check_violation containing %q, got %q", what, msg, pgErr.Message)
 	}
 }
 

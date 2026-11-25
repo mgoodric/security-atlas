@@ -51,6 +51,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -201,23 +202,18 @@ func FreezeRaw(ctx context.Context, pool *pgxpool.Pool, tenant, periodID any, st
 	})
 }
 
-// DeleteAuditPeriods runs `DELETE FROM audit_periods WHERE <where>` with
-// audit_periods_frozen_no_delete_trg disabled for that transaction only, so
-// a test cleanup can remove frozen periods. Since #3081 that trigger refuses
-// to delete a frozen period for every role, the owner included; the cascade
-// to audit_period_frozen_controls still runs. pool must be the table owner
-// (the migrate pool): only the owner may disable a trigger. The disable
-// takes an ACCESS EXCLUSIVE lock on audit_periods until the transaction
-// ends, and no other session ever sees the trigger disabled.
+// DeleteAuditPeriods runs `DELETE FROM audit_periods WHERE <where>` through
+// period.OwnerDelete, which disables period.FrozenNoDeleteTrigger for that
+// transaction only, so a test cleanup can remove frozen periods. Since #3081
+// that trigger refuses to delete a frozen period for every role, the owner
+// included; the cascade to audit_period_frozen_controls still runs. pool
+// must be the table owner (the migrate pool): only the owner may disable a
+// trigger. The disable takes a SHARE ROW EXCLUSIVE lock on audit_periods,
+// held until the transaction ends, and no other session ever sees the
+// trigger disabled. No lock_timeout: a cleanup waits for the lock.
 func DeleteAuditPeriods(ctx context.Context, pool *pgxpool.Pool, where string, args ...any) error {
 	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER audit_periods_frozen_no_delete_trg`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM audit_periods WHERE `+where, args...); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_frozen_no_delete_trg`)
+		_, err := period.OwnerDelete(ctx, tx, 0, `DELETE FROM audit_periods WHERE `+where, args...)
 		return err
 	})
 }
