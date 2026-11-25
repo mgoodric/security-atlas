@@ -170,3 +170,49 @@ func TestCarriedNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestDecideCarriedSync(t *testing.T) {
+	t.Parallel()
+	stored := strmContent{relType: "intersects_with", strength: 0.7, attribution: "community_draft", rationale: "old"}
+	changed := strmContent{relType: "subset_of", strength: 0.9, attribution: "community_draft", rationale: "new"}
+	weaker := changed
+	weaker.attribution = "org_internal"
+	stronger := changed
+	stronger.attribution = "scf_official"
+	cases := []struct {
+		name       string
+		row        strmContent
+		listed     bool
+		humanMoved bool
+		want       carriedSync
+	}{
+		{"not listed", changed, false, false, carriedSyncNone},
+		{"same content", stored, true, false, carriedSyncNone},
+		{"changed content", changed, true, false, carriedSyncApply},
+		{"stronger attribution", stronger, true, false, carriedSyncApply},
+		{"weaker attribution", weaker, true, false, carriedSyncHeldBack},
+		{"moved by a person", changed, true, true, carriedSyncHeldBack},
+		{"moved by a person, same content", stored, true, true, carriedSyncNone},
+	}
+	for _, tc := range cases {
+		e := carriedEdge{content: stored, humanMoved: tc.humanMoved}
+		if got := decideCarriedSync(e, tc.row, tc.listed); got != tc.want {
+			t.Errorf("%s: decideCarriedSync = %v; want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCarriedSyncNote(t *testing.T) {
+	t.Parallel()
+	if got, want := carriedSyncMarker("yaml:soc2.yaml"), `carried-sync:"yaml:soc2.yaml"`; got != want {
+		t.Errorf("carriedSyncMarker = %q; want %q", got, want)
+	}
+	note := carriedSyncNote("yaml:soc2.yaml", strmContent{relType: "intersects_with", strength: 0.7, attribution: "community_draft", rationale: "R-1->GOV-02"})
+	if want := `carried-sync:"yaml:soc2.yaml" content set from crosswalk yaml:soc2.yaml; was intersects_with 0.7 community_draft "R-1->GOV-02"`; note != want {
+		t.Errorf("carriedSyncNote = %q; want %q", note, want)
+	}
+	// A sync note never reads as this import's retire note.
+	if carriedRetiredBy(note, "yaml:soc2.yaml") {
+		t.Errorf("carriedRetiredBy(sync note) = true; want false")
+	}
+}

@@ -98,6 +98,17 @@ type Report struct {
 	// had retired and restores now that their source is listed again (#3065).
 	EdgesCarriedRestored []CatalogEdge
 
+	// EdgesCarriedSynced lists the live carried edges whose code the
+	// crosswalk lists for their requirement and whose STRM content
+	// (relationship, strength, attribution, rationale) this import rewrote to
+	// the crosswalk's, in place (#3073). Tier is the content's as reported.
+	EdgesCarriedSynced []CatalogEdge
+
+	// EdgesCarriedHeldBack lists the carried edges the sync above left alone:
+	// a person has moved them through the tier workflow, or they carry a
+	// higher-precedence source_attribution than the crosswalk's row (#3073).
+	EdgesCarriedHeldBack []CatalogEdge
+
 	// EdgesUnlisted lists live edges the crosswalk does not list but did not
 	// retire, because another source wrote them (another crosswalk_source or
 	// source_attribution). They are reported so an operator can see them.
@@ -590,6 +601,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	//    crosswalk names, skipped rows included, for the retire pass (6).
 	listed := make(map[edgeKey]bool, len(cw.Mappings))
 	listedCodes := make(map[requirementCode]bool, len(cw.Mappings))
+	listedContent := make(map[requirementCode]strmContent, len(cw.Mappings))
 	for _, m := range cw.Mappings {
 		reqID, ok := reqIDByCode[m.RequirementCode]
 		if !ok {
@@ -609,6 +621,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 
 		listed[edgeKey{reqID.Bytes, anchor.ID.Bytes}] = true
 		listedCodes[requirementCode{reqID.Bytes, m.SCFAnchor}] = true
+		listedContent[requirementCode{reqID.Bytes, m.SCFAnchor}] = strmContent{relType, m.Strength, srcAttr, m.Rationale}
 
 		// The anchor row id is in the seed: a new SCF release mints new
 		// anchor rows under the same codes, and the edge to the new row must
@@ -756,7 +769,9 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 
 	// 7. Retire the copies an SCF edge remap carried from the edges just
 	//    retired, and restore the ones whose source is listed again (#3065).
-	carriedRetired, err := settleCarriedEdges(ctx, tx, q, version.ID, cw.Source, owned, listedCodes, &report)
+	//    A live copy whose own code is listed takes the crosswalk's content
+	//    (#3073).
+	carriedRetired, err := settleCarriedEdges(ctx, tx, q, version.ID, cw.Source, owned, listedCodes, listedContent, &report)
 	if err != nil {
 		return Report{}, err
 	}
