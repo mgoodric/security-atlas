@@ -65,3 +65,17 @@ func TestSampleFixtureContentIsPinnedToItsRelease(t *testing.T) {
 			scfSamplePath, cat.ReleaseVersion, got, want, got)
 	}
 }
+
+// Every label the sample has carried is a bundled sample label to scfimport,
+// so a re-pin that drops an older label from bundledSampleReleases fails here
+// rather than reopening title-only moves off that sample's anchors (#3068,
+// #3076). fixtureContentByRelease is the frozen, append-only record of those
+// labels.
+func TestBundledSampleReleases_CoverEveryFixtureLabel(t *testing.T) {
+	t.Parallel()
+	for label := range fixtureContentByRelease {
+		if !scfimport.IsBundledSampleRelease(label) {
+			t.Errorf("scfimport.IsBundledSampleRelease(%q) = false; the sample shipped under %q (fixtureContentByRelease), so bundledSampleReleases must keep it", label, label)
+		}
+	}
+}
