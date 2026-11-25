@@ -13,7 +13,7 @@
 - `audit_periods_frozen_has_controls_trg` (same migration) is a deferred check that refuses a commit leaving a frozen period without its control set. The procedure below reopens the period in the same transaction it removes the row, so the check passes.
 - `audit_periods_frozen_no_delete_trg` (#3081, migration `20261313000000_audit_period_frozen_no_delete`) refuses DELETE of a row with `status = 'frozen'`. A reopen does not delete, so it does not touch this trigger. It matters to teardown; see "Deleting a frozen period" below.
 
-These triggers apply to every role, the owner included. A reopen has to disable them inside its own transaction.
+The three immutability triggers (`audit_periods_freeze_immutable_trg`, `populations_frozen_at_immutable_trg` and `audit_period_frozen_controls_immutable_trg`) apply to every role, the owner included. A reopen disables the ones it must cross inside its own transaction: the first and the third, and the second only to move a population's horizon. It leaves `audit_periods_frozen_has_controls_trg` and `audit_periods_frozen_no_delete_trg` enabled.
 
 ---
 
