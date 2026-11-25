@@ -92,14 +92,13 @@ func TestBundledSampleReleaseMatchesTheFixture(t *testing.T) {
 	}
 }
 
-// Every label the sample has shipped under stays recognised, so a re-pin
-// cannot reopen title-only moves off an older sample's anchors (#3068).
+// The current sample label is recognised, and non-sample labels are not.
+// That every past label stays recognised is held against the frozen fixture
+// record by scfseed's TestBundledSampleReleases_CoverEveryFixtureLabel (#3076).
 func TestBundledSampleReleases_KeepsEveryLabel(t *testing.T) {
 	t.Parallel()
-	for _, label := range []string{"test-2026.3", BundledSampleRelease} {
-		if !IsBundledSampleRelease(label) {
-			t.Errorf("IsBundledSampleRelease(%q) = false; a sample label is never dropped", label)
-		}
+	if !IsBundledSampleRelease(BundledSampleRelease) {
+		t.Errorf("IsBundledSampleRelease(%q) = false; the current sample label is a sample label", BundledSampleRelease)
 	}
 	for _, label := range []string{"2026.3", "2027.1", ""} {
 		if IsBundledSampleRelease(label) {
