@@ -19,5 +19,8 @@ ALTER TABLE control_evaluations
     ADD COLUMN IF NOT EXISTS evaluated_as_of TIMESTAMPTZ NULL;
 
 ALTER TABLE control_evaluations
+    DROP CONSTRAINT IF EXISTS control_evaluations_as_of_before_evaluated;
+
+ALTER TABLE control_evaluations
     ADD CONSTRAINT control_evaluations_as_of_before_evaluated
         CHECK (evaluated_as_of IS NULL OR evaluated_as_of < evaluated_at);

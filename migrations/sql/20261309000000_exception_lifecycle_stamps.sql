@@ -15,36 +15,58 @@
 -- A revoked row already carries revoked_at (exceptions_revoked_has_actor,
 -- 20261127000000).
 --
--- Existing rows missing a stamp take it from the exception_audit_log row
--- that recorded the transition, the only record of when it happened. A row
--- with no such audit row is not given an invented stamp: the migration
--- fails and says how many rows need one.
-
-UPDATE exceptions e
-SET activated_at = (
-    SELECT min(l.occurred_at) FROM exception_audit_log l
-    WHERE l.tenant_id = e.tenant_id AND l.exception_id = e.id
-      AND l.action = 'activated')
-WHERE e.activated_at IS NULL
-  AND e.status IN ('active', 'expired', 'revoked');
-
-UPDATE exceptions e
-SET expired_at = (
-    SELECT min(l.occurred_at) FROM exception_audit_log l
-    WHERE l.tenant_id = e.tenant_id AND l.exception_id = e.id
-      AND l.action = 'expired')
-WHERE e.expired_at IS NULL
-  AND e.status = 'expired';
+-- Backfill of existing rows missing a stamp, in order of preference (D-log
+-- docs/audit-log/3037-replay-exceptions-as-of-decisions.md D4, after the
+-- #2078 precedent in 20261258000000_framework_scope_activated_at.sql):
+--   1. the exception_audit_log row that recorded the transition
+--      (`activated`, `expired`), the recorded time;
+--   2. otherwise a documented stand-in, so the upgrade never refuses to
+--      run. The demo seeder wrote `expired` rows with no stamps and no
+--      audit rows before #3056, and every install that ran it has them.
+--        activated_at := COALESCE(effective_from, approved_at, requested_at)
+--        expired_at   := LEAST(expires_at, updated_at)
+--      activated_at is the earliest lifecycle time the row records; the
+--      sweep expires a row only after its expires_at, and updated_at is at
+--      or after the expiry write.
+-- A NOTICE gives how many rows took a stand-in. Every UPDATE touches only
+-- rows whose stamp is NULL, so re-running the migration is a no-op.
 
 DO $$
 DECLARE
-    missing bigint;
+    fallback_activated bigint;
+    fallback_expired   bigint;
 BEGIN
-    SELECT count(*) INTO missing FROM exceptions
-    WHERE (status IN ('active', 'expired', 'revoked') AND activated_at IS NULL)
-       OR (status = 'expired' AND expired_at IS NULL);
-    IF missing > 0 THEN
-        RAISE EXCEPTION '#3056: % exception row(s) are active, expired or revoked with no activated_at or expired_at, and no audit row dates the transition; stamp them before applying this migration', missing;
+    UPDATE exceptions e
+    SET activated_at = (
+        SELECT min(l.occurred_at) FROM exception_audit_log l
+        WHERE l.tenant_id = e.tenant_id AND l.exception_id = e.id
+          AND l.action = 'activated')
+    WHERE e.activated_at IS NULL
+      AND e.status IN ('active', 'expired', 'revoked');
+
+    UPDATE exceptions e
+    SET expired_at = (
+        SELECT min(l.occurred_at) FROM exception_audit_log l
+        WHERE l.tenant_id = e.tenant_id AND l.exception_id = e.id
+          AND l.action = 'expired')
+    WHERE e.expired_at IS NULL
+      AND e.status = 'expired';
+
+    UPDATE exceptions
+    SET activated_at = COALESCE(effective_from, approved_at, requested_at)
+    WHERE activated_at IS NULL
+      AND status IN ('active', 'expired', 'revoked');
+    GET DIAGNOSTICS fallback_activated = ROW_COUNT;
+
+    UPDATE exceptions
+    SET expired_at = LEAST(expires_at, updated_at)
+    WHERE expired_at IS NULL
+      AND status = 'expired';
+    GET DIAGNOSTICS fallback_expired = ROW_COUNT;
+
+    IF fallback_activated > 0 OR fallback_expired > 0 THEN
+        RAISE NOTICE '#3056: no audit row dated % activated_at and % expired_at stamp(s); set from effective_from/approved_at/requested_at and LEAST(expires_at, updated_at)',
+            fallback_activated, fallback_expired;
     END IF;
 END
 $$;

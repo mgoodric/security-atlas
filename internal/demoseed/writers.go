@@ -517,7 +517,10 @@ func writeWalkthroughs(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, err
 }
 
 // writeExceptions inserts the exception rows + a matching
-// exception_audit_log row per state transition.
+// exception_audit_log row per state transition the row's stamps record
+// (#3056): requested, then approved, activated and expired as far as the
+// row got. A denied demo row records no denier, so it carries only its
+// request.
 func writeExceptions(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 	for _, e := range fs.exceptions {
 		_, err := tx.Exec(ctx,
@@ -539,8 +542,58 @@ func writeExceptions(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error
 		if err != nil {
 			return 0, fmt.Errorf("demoseed: insert exception: %w", err)
 		}
+		for _, a := range exceptionAuditTrail(e) {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO exception_audit_log
+				 (id, tenant_id, exception_id, action, actor, from_state, to_state, occurred_at)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				uuid.New(), fs.tenant.ID, e.ID, a.action, a.actor, a.fromState, a.toState, a.at,
+			); err != nil {
+				return 0, fmt.Errorf("demoseed: insert exception audit row: %w", err)
+			}
+		}
 	}
 	return len(fs.exceptions), nil
+}
+
+// exceptionAuditEntry is one exception_audit_log row of a demo exception.
+type exceptionAuditEntry struct {
+	action    string
+	actor     string
+	fromState *string
+	toState   string
+	at        time.Time
+}
+
+// exceptionAuditSystemActor is internal/exception.SystemActor, the actor
+// the expiry sweep writes.
+const exceptionAuditSystemActor = "system:exception-expiry"
+
+// exceptionAuditTrail is the audit trail the lifecycle would have written
+// for e: one entry per transition whose stamp e carries, in order.
+func exceptionAuditTrail(e exceptionFixture) []exceptionAuditEntry {
+	from := func(s string) *string { return &s }
+	out := []exceptionAuditEntry{{
+		action: "requested", actor: e.RequestedBy, toState: "requested", at: e.RequestedAt,
+	}}
+	if e.ApprovedAt == nil || e.ApprovedBy == nil {
+		return out
+	}
+	out = append(out, exceptionAuditEntry{
+		action: "approved", actor: *e.ApprovedBy, fromState: from("requested"), toState: "approved", at: *e.ApprovedAt,
+	})
+	if e.ActivatedAt == nil || e.ActivatedBy == nil {
+		return out
+	}
+	out = append(out, exceptionAuditEntry{
+		action: "activated", actor: *e.ActivatedBy, fromState: from("approved"), toState: "active", at: *e.ActivatedAt,
+	})
+	if e.ExpiredAt == nil {
+		return out
+	}
+	return append(out, exceptionAuditEntry{
+		action: "expired", actor: exceptionAuditSystemActor, fromState: from("active"), toState: "expired", at: *e.ExpiredAt,
+	})
 }
 
 // writeBoardReports inserts board_briefs + board_packs.

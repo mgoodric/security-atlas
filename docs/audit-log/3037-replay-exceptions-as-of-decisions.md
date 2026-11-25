@@ -72,16 +72,44 @@ call and is not made here. As the ledger stands, a replay row becomes the
 control's latest state, as it did before #3056, and now its AR attribution
 is right.
 
-### D4 — the migration backfills only from the audit log
+### D4 — the migration backfills from the audit log, then a stand-in
 
-Existing rows missing a stamp take it from the `exception_audit_log` row
-that recorded the transition (`activated`, `expired`). A row with no audit
-row is not given an invented stamp such as `updated_at` or `expires_at`: the
-migration raises and says how many rows need one. Every write path pairs
-the state change with an audit row in one transaction, so only rows written
-by hand or by an old fixture can hit this. The demo seeder now stamps its
-`expired` rows (`activated_at` and `expired_at`), and the test fixtures that
-seeded `active` rows with no `activated_at` now set it.
+The migration never refuses to run (Matt, 2026-11-24, on the #3070
+review). Existing rows missing a stamp take it, in order of preference:
+
+1. from the `exception_audit_log` row that recorded the transition
+   (`activated`, `expired`), the recorded time;
+2. otherwise from a documented stand-in, as #2078 did for
+   `framework_scopes.activated_at`:
+   - `activated_at := COALESCE(effective_from, approved_at, requested_at)`,
+     the earliest lifecycle time the row records;
+   - `expired_at := LEAST(expires_at, updated_at)`. The sweep expires a row
+     only after its `expires_at`, and `updated_at` is at or after the
+     expiry write.
+
+The migration raises a NOTICE with how many stamps took a stand-in.
+
+Every write path pairs the state change with an audit row in one
+transaction, so only rows written by hand or by the demo seeder reach step 2. Before #3056 the demo seeder wrote `expired` rows with no `activated_at`,
+`effective_from` or `expired_at`, and no audit rows, despite its doc
+comment. Every install that ran it has such rows, and `atlas-migrate` is
+fail-closed with `atlas` gated on it, so a refusing migration would have
+stopped the backend on upgrade. The stand-in is approximate:
+`effective_from` is operator-chosen and can be later than the real
+activation, and `approved_at` or `requested_at` earlier. `LEAST(expires_at,
+updated_at)` is never later than the real expiry, because nothing updates a
+row after it expires. For demo data that is enough, and the NOTICE says how
+many rows carry a stand-in.
+
+The demo seeder now stamps its `expired` rows (`activated_at` and
+`expired_at`) and writes the audit rows its doc comment promised: one per
+transition the row's stamps record. A denied demo row records no denier, so
+it carries only its request. The test fixtures that seeded `active` rows
+with no `activated_at` now set it.
+`TestExceptionLifecycleStampsMigration_OldDemoSeedRows` (`internal/db`)
+applies the migration over rows shaped like the old seed and asserts the
+stamps and the CHECKs; it was observed failing against the refusing
+version.
 
 ### D5 — the replay test drives the real revoke and expiry paths
 
