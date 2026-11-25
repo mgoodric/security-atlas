@@ -18,7 +18,7 @@ The bootstrap now:
 3. imports the SOC 2 crosswalk and uploads the stock controls, which bind in `test-2026.3` as their pin says;
 4. after the uploads, imports `SCF_CATALOG` again.
 
-The step 4 import is a frozen no-op (#1768). `import-scf` runs `RebindControls` (#1971, #2321) and `QueueEdgeRemapProposals` (#2315) after every import, and those two move the stock controls and SOC 2 edges onto the operator's release wherever the code and title match. All 98 sample titles equal the SCF 2026.3 titles (checked against `scf-pin.json`), so on a 2026.3 install everything moves. On another release, anything whose code or title differs stays on the sample's anchor: controls are listed at `/v1/controls/needs-reanchoring`, and edges stay open in the edge-remap queue for a super-admin.
+The step 4 import is a frozen no-op (#1768). `import-scf` runs `RebindControls` (#1971, #2321) and `QueueEdgeRemapProposals` (#2315) after every import, and those two move the stock controls and SOC 2 edges onto the operator's release wherever the code and title match. All 98 sample titles equal the SCF 2026.3 titles (checked against `scf-pin.json`), so on a 2026.3 install everything moves. On another release, only an exact code and title match moves. Anything whose code is missing or whose title differs stays on the sample's anchor, including a stock control whose title alone changed, which the #2321 title-only re-bind does not move off the sample (D10). Controls are listed at `/v1/controls/needs-reanchoring`, and edges stay open in the edge-remap queue for a super-admin.
 
 The stock bytes are not touched, so `IsStockManifest` and the #1773 D3 (in-place) and D4 (re-bind carve-out) rules keep applying.
 
@@ -79,7 +79,7 @@ Rewriting each stock manifest's `scf_release` to the operator's release at boots
 
 Measured in `TestBYOBootstrap_FreshInstallBindsStockContentOnTheOperatorRelease` on a 2026.3 install:
 
-- `seed.Seed` with the shipped `policies/stock/` resolves the declared `test-2026.3` with no `SCFReleaseWarnings`;
+- `seed.Seed` with the shipped `policies/stock/` resolves the declared `test-2026.3` (no error);
 - every policy links 0 controls;
 - `MissingAnchors` lists all 15 linked codes.
 
@@ -99,16 +99,17 @@ The script's own new lines are three `atlas-cli catalog import-scf` invocations,
 
 Each test was observed failing before it passed:
 
-| Mutation                                  | Tests that fail                                                     |
-| ----------------------------------------- | ------------------------------------------------------------------- |
-| `KeepCurrent` disabled                    | fresh install, re-run, upgrade                                      |
-| Sample load dropped (the original defect) | fresh install: `unknown SCF release "test-2026.3"` at the crosswalk |
-| Final re-import dropped                   | fresh install: controls left on `test-2026.3`                       |
-| `spareCurrentReleaseEdges` absent         | upgrade (D3)                                                        |
-| `listed[...]` check dropped (D3)          | `TestSpareCurrentRelease_DroppedMappingIsStillRetired`              |
-| anchor-ID equality dropped (D3)           | `TestSpareCurrentRelease_EdgeOnAnotherReleaseAnchorIsStillRetired`  |
-| freeze loop breaks before the scan (D8)   | `TestImportKeepCurrent_AnchorlessRowAheadOfTheCurrentRelease`       |
-| BYO fixture title left unchanged (D10)    | `TestBYOBootstrap_DifferingAnchorsAreLeftForReview`                 |
+| Mutation                                                 | Tests that fail                                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `KeepCurrent` disabled                                   | fresh install, re-run, upgrade                                                                               |
+| Sample load dropped (the original defect)                | fresh install: `unknown SCF release "test-2026.3"` at the crosswalk                                          |
+| Final re-import dropped                                  | fresh install: controls left on `test-2026.3`                                                                |
+| `spareCurrentReleaseEdges` absent                        | upgrade (D3)                                                                                                 |
+| `listed[...]` check dropped (D3)                         | `TestSpareCurrentRelease_DroppedMappingIsStillRetired`                                                       |
+| anchor-ID equality dropped (D3)                          | `TestSpareCurrentRelease_EdgeOnAnotherReleaseAnchorIsStillRetired`                                           |
+| freeze loop breaks before the scan (D8)                  | `TestImportKeepCurrent_AnchorlessRowAheadOfTheCurrentRelease`                                                |
+| BYO fixture title left unchanged (D10)                   | `TestBYOBootstrap_DifferingAnchorsAreLeftForReview`                                                          |
+| sample rule in `StockTitleOnlyRebindable` disabled (D10) | `TestBYOBootstrap_DifferingAnchorsAreLeftForReview`, `TestStockTitleOnlyRebindable_NeverOffTheBundledSample` |
 
 ## Review of #3063 (head 42274034)
 
@@ -132,12 +133,25 @@ This is the existing #2315 provenance rule. It is not new with #3061, but every 
 
 ### D10 — Differing anchors are left for review (N5)
 
-`TestBYOBootstrap_DifferingAnchorsAreLeftForReview` boots against the 2026.3 fixture with two codes that a stock control and the SOC 2 crosswalk share (chosen in sorted order). One code's title is reworded and the other code is removed.
+**Decided by Matt (2026-11-24, relayed by the dispatcher after the re-review):** a move off the bundled sample needs an exact code and title match. The #2321 title-only re-bind does not apply to it.
 
-| Code           | Stock control                                                                                       | SOC 2 edge                                                                       |
-| -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Reworded title | moves: stock controls re-bind on a title-only change (#2321), so it is not on the re-anchoring list | waits as an open edge-remap proposal: edges carry only on code and title (#2315) |
-| Removed        | listed for re-anchoring                                                                             | waits as an open proposal                                                        |
+The sample's titles are SCF 2026.3's. On an install whose own release is not 2026.3, a different title means a different SCF text, not a reworded one, so the control stays on the sample's anchor and is flagged for re-anchoring. A 2026.3 install is unchanged: every title matches.
+
+**The rule.** `StockTitleOnlyRebindable` returns false when the legacy anchor is in `scfimport.BundledSampleRelease` (`test-2026.3`). It is scoped to that release only:
+
+- It covers the bootstrap's sample-to-BYO move.
+- It also covers a sample install whose operator later imports a real release, which is the same move.
+- A forward import from one real release to the next keeps #2321.
+- `TestBundledSampleReleaseMatchesTheFixture` ties the constant to `scf-sample.json`'s label, so a fixture re-pin (#1773 D2) has to move both together.
+
+`TestBYOBootstrap_DifferingAnchorsAreLeftForReview` boots against the SCF 2026.3 IDs and titles under the label `2027.1`. It picks two codes that a stock control and the SOC 2 crosswalk share (in sorted order), rewords one code's title and removes the other code:
+
+| Code           | Stock control                                                    | SOC 2 edge                                                                       |
+| -------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Reworded title | stays on its `test-2026.3` anchor and is listed for re-anchoring | waits as an open edge-remap proposal: edges carry only on code and title (#2315) |
+| Removed        | stays and is listed for re-anchoring                             | waits as an open proposal                                                        |
+
+With the rule disabled, the test fails: the reworded control moves to `2027.1` and is not listed. `TestStockTitleOnlyRebindable_NeverOffTheBundledSample` pins the rule at the unit level. From `2026.3` the title-only move holds; from `test-2026.3` it does not.
 
 ### D11 — D5 is asserted, not just described (N6)
 

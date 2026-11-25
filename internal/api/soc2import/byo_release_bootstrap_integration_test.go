@@ -316,11 +316,12 @@ func openEdgeProposals(t *testing.T, pool *pgxpool.Pool, release, code string) i
 		WHERE legacy_release = $1 AND legacy_scf_id = $2 AND status = 'open'`, release, code)
 }
 
-// (5) Where the operator's release differs from the sample, nothing moves on
-// its own: a code missing from the release leaves the stock control for
-// re-anchoring, and an edge whose title changed or whose code is gone waits
-// in the edge-remap queue. A stock control whose title alone changed still
-// moves (#2321).
+// (5) On a release other than 2026.3, whatever differs from the sample
+// stays on the sample's anchor for review. A stock control whose title
+// changed, or whose code the release lacks, is flagged for re-anchoring;
+// the title-only stock re-bind (#2321) does not apply off the sample
+// (Matt's call, 2026-11-24). Each such SOC 2 edge waits in the edge-remap
+// queue.
 func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
 	pool, app, tenant := byoFixture(t)
 	codes := stockCrosswalkCodes(t)
@@ -329,6 +330,7 @@ func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
 	}
 	retitled, removed := codes[0], codes[1]
 	byo := realReleaseCatalog(t)
+	byo.ReleaseVersion = "2027.1" // the 2026.3 IDs and titles, under another release
 	var kept []scfimport.Control
 	for _, c := range byo.Controls {
 		switch c.SCFID {
@@ -357,11 +359,17 @@ func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
 			reanchor = append(reanchor, c.LegacySCFID)
 		}
 	}
-	if !slices.Contains(reanchor, removed) {
-		t.Errorf("needs re-anchoring = %v; want the stock control on %s, which the release lacks", reanchor, removed)
+	for _, code := range []string{retitled, removed} {
+		if !slices.Contains(reanchor, code) {
+			t.Errorf("needs re-anchoring = %v; want the stock control on %s", reanchor, code)
+		}
 	}
-	if slices.Contains(reanchor, retitled) {
-		t.Errorf("needs re-anchoring = %v; the stock control on %s changed title only and should have moved (#2321)", reanchor, retitled)
+	if got := strings.Join(queryStrings(t, pool, `
+		SELECT DISTINCT fv.version FROM controls c
+		JOIN scf_anchors a ON a.id = c.scf_anchor_id
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		WHERE c.tenant_id = $1 AND c.superseded_by IS NULL AND a.scf_id = $2`, tenant, retitled), ","); got != sample {
+		t.Errorf("stock control on %s is on an anchor in %q; want it left on %s", retitled, got, sample)
 	}
 	for _, code := range []string{retitled, removed} {
 		if n := openEdgeProposals(t, pool, sample, code); n == 0 {

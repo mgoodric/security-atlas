@@ -127,14 +127,28 @@ func IsStockManifest(bundleID, manifestYAML string) bool {
 	return ok && id == bundleID
 }
 
+// BundledSampleRelease is the release label of the bundled SCF sample,
+// migrations/fixtures/scf-sample.json, which the stock content pins (#1773).
+// TestBundledSampleReleaseMatchesTheFixture holds the two together.
+const BundledSampleRelease = "test-2026.3"
+
 // StockTitleOnlyRebindable reports whether a stock control on a legacy
 // anchor can move to the current release's anchor with the same code whose
 // title changed (#2321). The code must still continue the legacy anchor: SCF
 // lists no other code as its legacy ID, and the bundled remap table moves
 // nothing off it. A code reused for another control's lineage, or remapped
 // elsewhere, is not a title-only change.
+//
+// Never off the bundled sample (#3061, Matt's call, 2026-11-24): the
+// sample's titles are SCF 2026.3's, so on an install whose own release is
+// not 2026.3 a different title means a different SCF text, not a reworded
+// one. Such a control stays on the sample's anchor and is flagged for
+// re-anchoring; only an exact code and title match moves it (Rebindable).
 func StockTitleOnlyRebindable(r dbx.ListControlsOnLegacySCFAnchorsRow) (bool, error) {
 	if !r.CurrentAnchorID.Valid || r.CurrentAnchorTitle == nil {
+		return false, nil
+	}
+	if r.LegacyRelease == BundledSampleRelease {
 		return false, nil
 	}
 	if r.CurrentAnchorLegacyScfID != "" && r.CurrentAnchorLegacyScfID != r.LegacyScfID {

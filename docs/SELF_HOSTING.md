@@ -252,10 +252,13 @@ What the bootstrap does with your release (#3061):
    Each stock control and each SOC 2 edge whose SCF code has the same
    title in your release moves onto your release's anchor. Every sample
    title is the SCF 2026.3 title, so on a 2026.3 release everything moves.
-   On another release, a control whose code or title changed stays on its
-   `test-2026.3` anchor and is listed at `GET /v1/controls/needs-reanchoring`,
-   and such an edge waits in the crosswalk-edge remap queue for a
-   super-admin.
+   On another release, only an exact code and title match moves. A stock
+   control whose code is missing or whose title differs, even by wording
+   alone, stays on its `test-2026.3` anchor and is listed at
+   `GET /v1/controls/needs-reanchoring`. (A later import of a newer SCF
+   release does move a stock control whose title alone changed; moves off
+   the sample do not.) Such an edge waits in the crosswalk-edge remap
+   queue for a super-admin.
 
 Every later boot repeats these steps, and each one is a no-op.
 
