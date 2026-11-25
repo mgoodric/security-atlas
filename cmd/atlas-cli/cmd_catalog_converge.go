@@ -99,8 +99,8 @@ func printConvergeResults(stdout, stderr io.Writer, results []soc2import.Converg
 				r.FrameworkSlug, ce.RequirementCode, ce.SCFAnchor, r.File, ce.Source, ce.Attribution, ce.Tier)
 		}
 		for _, ce := range rep.EdgesCarriedHeldBack {
-			_, _ = fmt.Fprintf(stdout, "converge framework=%s edge kept %s->%s: carried by an SCF edge remap, content differs from %s but a reviewer moved it or it has higher precedence (source=%s source_attribution=%s mapping_tier=%s)\n",
-				r.FrameworkSlug, ce.RequirementCode, ce.SCFAnchor, r.File, ce.Source, ce.Attribution, ce.Tier)
+			_, _ = fmt.Fprintf(stdout, "converge framework=%s edge kept %s->%s: carried by an SCF edge remap, content differs from %s but is held back (reason=%s source=%s source_attribution=%s mapping_tier=%s)\n",
+				r.FrameworkSlug, ce.RequirementCode, ce.SCFAnchor, r.File, ce.Reason, ce.Source, ce.Attribution, ce.Tier)
 		}
 		for _, w := range rep.Warnings {
 			_, _ = fmt.Fprintf(stderr, "warning: converge framework=%s: %s\n", r.FrameworkSlug, w)
