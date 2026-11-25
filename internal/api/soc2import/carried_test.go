@@ -1,6 +1,9 @@
 package soc2import
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Pure-Go coverage for decideCarried (#3065); the integration tests in
 // carried_integration_test.go run it against real remaps.
@@ -136,13 +139,34 @@ func TestDecideCarried(t *testing.T) {
 
 func TestCarriedNotes(t *testing.T) {
 	t.Parallel()
-	if got := carriedRetireNote(""); got != "retired: carried from an edge dropped by crosswalk "+LegacySource {
-		t.Errorf("carriedRetireNote(\"\") = %q", got)
+	// The marker is a stable format: carriedRetiredBy matches on it, so a
+	// change here strands copies already retired under the old one.
+	if got, want := carriedRetireMarker("yaml:soc2.yaml"), `carried-retire:"yaml:soc2.yaml"`; got != want {
+		t.Errorf("carriedRetireMarker = %q; want %q", got, want)
 	}
-	if carriedRetireNote("yaml:a") == carriedRetireNote("yaml:b") {
-		t.Error("retire notes of two sources are equal; a restore could revive another import's retirement")
+	if got, want := carriedRetireMarker(""), `carried-retire:"`+LegacySource+`"`; got != want {
+		t.Errorf("carriedRetireMarker(empty) = %q; want %q", got, want)
 	}
-	if carriedRestoreNote("yaml:a") == carriedRetireNote("yaml:a") {
-		t.Error("restore note equals retire note")
+	note := carriedRetireNote("yaml:soc2.yaml")
+	if !strings.HasPrefix(note, carriedRetireMarker("yaml:soc2.yaml")+" ") {
+		t.Errorf("carriedRetireNote = %q; want the marker, a space, then human text", note)
+	}
+	cases := []struct {
+		note, source string
+		want         bool
+	}{
+		{note, "yaml:soc2.yaml", true},
+		{`carried-retire:"yaml:soc2.yaml" any wording at all`, "yaml:soc2.yaml", true},
+		{note, "yaml:soc2", false},
+		{carriedRetireNote("yaml:a"), "yaml:ab", false},
+		{carriedRetireNote("yaml:ab"), "yaml:a", false},
+		{carriedRestoreNote("yaml:soc2.yaml"), "yaml:soc2.yaml", false},
+		{retireNote("yaml:soc2.yaml"), "yaml:soc2.yaml", false},
+		{"", "yaml:soc2.yaml", false},
+	}
+	for _, tc := range cases {
+		if got := carriedRetiredBy(tc.note, tc.source); got != tc.want {
+			t.Errorf("carriedRetiredBy(%q, %q) = %v; want %v", tc.note, tc.source, got, tc.want)
+		}
 	}
 }

@@ -16,12 +16,14 @@ package soc2import
 // retired when its root is an edge this import owns, the root is retired,
 // and the crosswalk lists none of the chain's codes for the requirement. It
 // is restored when that stops being true, but only if this pass retired it
-// (its newest tier-transition note is carriedRetireNote).
+// (its newest tier-transition note starts with carriedRetireMarker).
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -79,12 +81,31 @@ type carriedEdge struct {
 	sourceRetired          bool
 }
 
-// carriedRetireNote and carriedRestoreNote are the tier-transition notes
-// for a carried edge retired or restored with its source.
-func carriedRetireNote(source string) string {
-	return "retired: carried from an edge dropped by crosswalk " + sourceLabel(sourceParam(source))
+// carriedRetireMarker is the machine-readable start of the tier-transition
+// note this pass writes when it retires a carried edge: "carried-retire:"
+// and the import's source, Go-quoted. Stable format: the restore matches on
+// this prefix alone (carriedRetiredBy), so changing it strands every copy
+// already retired under the old one. The quoting closes the source, so
+// "yaml:a" never matches a note written for "yaml:ab". Pinned by
+// TestCarriedNotes.
+func carriedRetireMarker(source string) string {
+	return "carried-retire:" + strconv.Quote(sourceLabel(sourceParam(source)))
 }
 
+// carriedRetireNote is carriedRetireMarker followed by human text, which is
+// free to change.
+func carriedRetireNote(source string) string {
+	return carriedRetireMarker(source) + " retired: carried from an edge dropped by crosswalk " + sourceLabel(sourceParam(source))
+}
+
+// carriedRetiredBy reports whether note is a carried-retire note this
+// import's source wrote.
+func carriedRetiredBy(note, source string) bool {
+	return strings.HasPrefix(note, carriedRetireMarker(source))
+}
+
+// carriedRestoreNote is the tier-transition note for a carried edge restored
+// with its source.
 func carriedRestoreNote(source string) string {
 	return "restored: carried from an edge listed again by crosswalk " + sourceLabel(sourceParam(source))
 }
@@ -210,7 +231,7 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 			if err := q.RetireFwToScfEdge(ctx, id); err != nil {
 				return nil, fmt.Errorf("crosswalk: retire carried edge %s->%s: %w", e.requirementCode, e.scfID, err)
 			}
-			if err := auditCarried(ctx, q, id, tier, carriedRetireNote(source)); err != nil {
+			if err := auditSystemTransition(ctx, q, id, tier, tier, carriedRetireNote(source)); err != nil {
 				return nil, fmt.Errorf("crosswalk: audit retire carried %s->%s: %w", e.requirementCode, e.scfID, err)
 			}
 			report.EdgesCarriedRetired = append(report.EdgesCarriedRetired, edge)
@@ -220,13 +241,13 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 			if err := tx.QueryRow(ctx, latestTransitionNoteSQL, id).Scan(&note); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, fmt.Errorf("crosswalk: read retire note of carried %s->%s: %w", e.requirementCode, e.scfID, err)
 			}
-			if note != carriedRetireNote(source) {
+			if !carriedRetiredBy(note, source) {
 				continue
 			}
 			if err := q.RestoreFwToScfEdge(ctx, id); err != nil {
 				return nil, fmt.Errorf("crosswalk: restore carried edge %s->%s: %w", e.requirementCode, e.scfID, err)
 			}
-			if err := auditCarried(ctx, q, id, tier, carriedRestoreNote(source)); err != nil {
+			if err := auditSystemTransition(ctx, q, id, tier, tier, carriedRestoreNote(source)); err != nil {
 				return nil, fmt.Errorf("crosswalk: audit restore carried %s->%s: %w", e.requirementCode, e.scfID, err)
 			}
 			report.EdgesCarriedRestored = append(report.EdgesCarriedRestored, edge)
@@ -234,15 +255,4 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 		}
 	}
 	return retired, nil
-}
-
-func auditCarried(ctx context.Context, q *dbx.Queries, id pgtype.UUID, tier dbx.CrosswalkMappingTier, note string) error {
-	_, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
-		EdgeID:     id,
-		ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
-		FromTier:   tier,
-		ToTier:     tier,
-		Note:       note,
-	})
-	return err
 }

@@ -318,6 +318,20 @@ var ErrSCFReleaseRequired = fmt.Errorf("crosswalk: %w: the crosswalk declares no
 // sheet (#1771).
 const sheetReleaseNotLoaded = "workbook sheet \"SCF %s\" names SCF release %q, which is not loaded, so nothing was written; load it with `atlas-cli catalog import-scf`, or rename the sheet to \"SCF <release>\" for a loaded release (or convert the workbook to crosswalk YAML declaring that scf_release) and import again"
 
+// auditSystemTransition appends a tier-transition row by SystemReviewerID:
+// the importer's record of a move it made (a retire, restore or re-seed), in
+// the same transaction as the move.
+func auditSystemTransition(ctx context.Context, q *dbx.Queries, edgeID pgtype.UUID, from, to dbx.CrosswalkMappingTier, note string) error {
+	_, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+		EdgeID:     edgeID,
+		ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+		FromTier:   from,
+		ToTier:     to,
+		Note:       note,
+	})
+	return err
+}
+
 // SystemReviewerID is the reviewer_id on a tier-transition audit row written
 // by the importer rather than a person. fw_to_scf_edge_tier_transitions has a
 // NOT NULL uuid reviewer column, and no atlas user has the nil uuid, so the
@@ -620,13 +634,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				if err := q.RestoreFwToScfEdge(ctx, existing.ID); err != nil {
 					return Report{}, fmt.Errorf("crosswalk: restore edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 				}
-				if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
-					EdgeID:     existing.ID,
-					ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
-					FromTier:   existing.MappingTier,
-					ToTier:     existing.MappingTier,
-					Note:       restoreNote(cw.Source),
-				}); err != nil {
+				if err := auditSystemTransition(ctx, q, existing.ID, existing.MappingTier, existing.MappingTier, restoreNote(cw.Source)); err != nil {
 					return Report{}, fmt.Errorf("crosswalk: audit restore %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 				}
 				report.EdgesRestored = append(report.EdgesRestored, CatalogEdge{
@@ -667,13 +675,8 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				if err := q.SetFwToScfEdgeTier(ctx, dbx.SetFwToScfEdgeTierParams{ID: existing.ID, MappingTier: target}); err != nil {
 					return Report{}, fmt.Errorf("crosswalk: reseed tier %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 				}
-				if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
-					EdgeID:     existing.ID,
-					ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
-					FromTier:   existing.MappingTier,
-					ToTier:     target,
-					Note:       fmt.Sprintf("crosswalk import %s@%s (%s) changed the mapping content; tier re-seeded per ADR 0018 §2", cw.FrameworkSlug, cw.FrameworkVersion, attribution),
-				}); err != nil {
+				if err := auditSystemTransition(ctx, q, existing.ID, existing.MappingTier, target,
+					fmt.Sprintf("crosswalk import %s@%s (%s) changed the mapping content; tier re-seeded per ADR 0018 §2", cw.FrameworkSlug, cw.FrameworkVersion, attribution)); err != nil {
 					return Report{}, fmt.Errorf("crosswalk: audit tier reseed %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 				}
 				report.EdgesTierReseeded = append(report.EdgesTierReseeded, ReseededEdge{
@@ -742,13 +745,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		if err := q.RetireFwToScfEdge(ctx, e.ID); err != nil {
 			return Report{}, fmt.Errorf("crosswalk: retire edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
 		}
-		if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
-			EdgeID:     e.ID,
-			ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
-			FromTier:   e.MappingTier,
-			ToTier:     e.MappingTier,
-			Note:       retireNote(cw.Source),
-		}); err != nil {
+		if err := auditSystemTransition(ctx, q, e.ID, e.MappingTier, e.MappingTier, retireNote(cw.Source)); err != nil {
 			return Report{}, fmt.Errorf("crosswalk: audit retire %s->%s: %w", e.RequirementCode, e.ScfID, err)
 		}
 		report.EdgesRetired = append(report.EdgesRetired, catalogEdge(e))

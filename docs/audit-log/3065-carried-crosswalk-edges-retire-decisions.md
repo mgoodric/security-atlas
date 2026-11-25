@@ -61,8 +61,13 @@ its edges are left alone (`TestDecideCarried`).
 ## D4 — A restore undoes only the import's own retirement
 
 A retired copy is restored when the conditions in D3 stop holding, but only
-if its newest tier-transition note is the carried-retire note for this
-import's source. A copy retired any other way stays retired
+if its newest tier-transition note starts with the carried-retire marker for
+this import's source: `carried-retire:"<source>"`, the source Go-quoted so
+`yaml:a` never matches a note written for `yaml:ab`, then free human text.
+The restore matches on the marker alone, so the human wording can change;
+the marker is a stable format, pinned by `TestCarriedNotes`. (From the
+review of #3072: matching the whole free-text note was brittle.) A copy
+retired any other way stays retired
 (`TestCarriedEdges_RestoreLeavesAnEdgeRetiredOtherwise`). Today the importer
 is the only code path that retires an edge; the note check keeps that true
 for any path added later.

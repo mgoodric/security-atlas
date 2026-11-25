@@ -167,8 +167,8 @@ func TestCarriedEdges_BYODroppedMappingRetiresTheCarriedCopy(t *testing.T) {
 	if n := countRows(t, pool, `
 		SELECT count(*) FROM fw_to_scf_edge_tier_transitions t
 		JOIN fw_to_scf_edges e ON e.id = t.edge_id
-		WHERE e.crosswalk_source LIKE 'scf-remap:%' AND t.note = $1`,
-		"retired: carried from an edge dropped by crosswalk "+carriedSource); n != 1 {
+		WHERE e.crosswalk_source LIKE 'scf-remap:%' AND starts_with(t.note, $1)`,
+		`carried-retire:"`+carriedSource+`" `); n != 1 {
 		t.Errorf("%d carried-retire audit rows; want 1", n)
 	}
 
