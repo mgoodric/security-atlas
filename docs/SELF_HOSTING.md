@@ -278,12 +278,14 @@ Things to know:
   container sees:
   `docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-scf /repo/local/scf.json`.
   The next boot does the same.
-- **Stock policies link nothing on your release yet.**
+- **Stock policies link through your release, by code and title.**
   `atlas-cli policy seed-stock` resolves the policies' declared release
-  (`test-2026.3`) and links each code to the control bound in that
-  release. After step 4 the stock controls are on your release, so every
-  policy seeds with no linked controls and the seed reports the codes as
-  missing.
+  (`test-2026.3`). After step 4 the stock controls are on your release,
+  so a code with no control in `test-2026.3` links the control bound to
+  your release's anchor with the same code and the same title, and the
+  seed prints a `warning:` line naming your release. A code whose title
+  differs in your release stays unlinked, with a `warning:` line naming
+  it. Link those by hand once you have reviewed them.
 - **Set these before first boot.** Control upload and SCF import both
   upsert; neither deletes. Changing `CONTROLS_DIR` after the stock
   controls are uploaded does not remove them.

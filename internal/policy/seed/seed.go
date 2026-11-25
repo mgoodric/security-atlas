@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -67,6 +68,10 @@ type Report struct {
 	Loaded         []LoadedPolicy
 	MissingAnchors []string // SCF codes that did not resolve
 	OrphanWarnings []string // titles whose linked_control_ids ended up empty
+	// ReleaseFallbacks has one line per code the seed linked, or left
+	// unlinked, through the current SCF release because the declared one is
+	// loaded but not current (#3064). Each line names the release used.
+	ReleaseFallbacks []string
 }
 
 // ErrSCFReleaseRequired is returned for a stock policy that links SCF codes
@@ -186,7 +191,7 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 		if release == "" && len(sp.FrontMatter.LinkedControlIDs) > 0 {
 			return Report{}, fmt.Errorf("%w (policy %q)", ErrSCFReleaseRequired, sp.FrontMatter.Title)
 		}
-		linkedIDs, missing, err := anchorResolver.Resolve(ctx, release, sp.FrontMatter.LinkedControlIDs)
+		linkedIDs, missing, fallbacks, err := anchorResolver.Resolve(ctx, release, sp.FrontMatter.LinkedControlIDs)
 		switch {
 		case errors.Is(err, scfrelease.ErrUnknownRelease):
 			return Report{}, fmt.Errorf("seed: %s declares SCF release %q, which is not loaded; load it with `atlas-cli catalog import-scf`, then seed again: %w",
@@ -195,6 +200,9 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 			return Report{}, fmt.Errorf("seed: resolve anchors for %s: %w", sp.FrontMatter.Title, err)
 		}
 		report.MissingAnchors = append(report.MissingAnchors, missing...)
+		for _, f := range fallbacks {
+			report.ReleaseFallbacks = append(report.ReleaseFallbacks, sp.FrontMatter.Title+": "+f)
+		}
 		linkedControlIDs := make([]pgtype.UUID, len(linkedIDs))
 		for i, u := range linkedIDs {
 			linkedControlIDs[i] = pgtype.UUID{Bytes: u, Valid: true}
@@ -245,10 +253,12 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 // AnchorResolver maps SCF codes (e.g., "GOV-01") of one SCF release to the
 // UUID of the `controls` row bound to that code's anchor in that release.
 // Seed never passes an empty release with codes (#1774). Returns the
-// resolved UUIDs (in stable order) and the list of unresolved codes for
-// reporting; a release that is not loaded is scfrelease.ErrUnknownRelease.
+// resolved UUIDs (in stable order), the list of unresolved codes for
+// reporting, and one note per code linked or left unlinked through the
+// current release (#3064); a release that is not loaded is
+// scfrelease.ErrUnknownRelease.
 type AnchorResolver interface {
-	Resolve(ctx context.Context, release string, scfCodes []string) (resolved []uuid.UUID, missing []string, err error)
+	Resolve(ctx context.Context, release string, scfCodes []string) (resolved []uuid.UUID, missing []string, fallbacks []string, err error)
 }
 
 // NoopAnchorResolver always returns "missing" for every code. Used when
@@ -258,8 +268,8 @@ type AnchorResolver interface {
 type NoopAnchorResolver struct{}
 
 // Resolve implements AnchorResolver.
-func (NoopAnchorResolver) Resolve(_ context.Context, _ string, scfCodes []string) ([]uuid.UUID, []string, error) {
-	return nil, append([]string{}, scfCodes...), nil
+func (NoopAnchorResolver) Resolve(_ context.Context, _ string, scfCodes []string) ([]uuid.UUID, []string, []string, error) {
+	return nil, append([]string{}, scfCodes...), nil, nil
 }
 
 // SQLAnchorResolver resolves SCF codes to control UUIDs in two steps: each
@@ -268,6 +278,16 @@ func (NoopAnchorResolver) Resolve(_ context.Context, _ string, scfCodes []string
 // control bound to it (controls.scf_anchor_id). A code never matches an
 // anchor of another release, so with two releases loaded a policy links the
 // controls bound in the release it declares (#1772).
+//
+// When the declared release is loaded but not current (a bring-your-own
+// release install, where the bootstrap carried the stock controls onto the
+// operator's release, #3061), a code with no control bound in the declared
+// release falls back to the current release: the anchor with the same code
+// AND the same title there, and the control bound to it (#3064). A code
+// whose title differs, or that the current release lacks, stays unlinked.
+// Each such code gets a fallback note. The fallback only reads. It is a
+// scoped exception to #1774 ("a code binds only in the release it names")
+// for this seed alone: docs/audit-log/3064-stock-policy-seed-release-fallback-decisions.md.
 //
 // Returns missing codes verbatim so the report can record them.
 type SQLAnchorResolver struct {
@@ -283,56 +303,32 @@ func NewSQLAnchorResolver(pool *pgxpool.Pool) *SQLAnchorResolver {
 
 // Resolve implements AnchorResolver. Tenant context MUST already be
 // applied on the ctx so RLS scopes the controls lookup.
-func (r *SQLAnchorResolver) Resolve(ctx context.Context, release string, scfCodes []string) ([]uuid.UUID, []string, error) {
+func (r *SQLAnchorResolver) Resolve(ctx context.Context, release string, scfCodes []string) ([]uuid.UUID, []string, []string, error) {
 	if len(scfCodes) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if release == "" {
-		return nil, nil, ErrSCFReleaseRequired
+		return nil, nil, nil, ErrSCFReleaseRequired
 	}
 	q := dbx.New(r.pool)
 	rel, err := scfrelease.Lookup(ctx, q, release)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	codeOfAnchor := make(map[uuid.UUID]string, len(scfCodes))
-	anchorIDs := make([]pgtype.UUID, 0, len(scfCodes))
-	for _, code := range scfCodes {
-		anchor, _, err := scfrelease.Resolve(ctx, q, rel.Version, code)
-		if errors.Is(err, scfrelease.ErrCodeNotInRelease) {
-			continue
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("seed: resolve %s in SCF release %s: %w", code, rel.Version, err)
-		}
-		id := uuid.UUID(anchor.ID.Bytes)
-		if _, dup := codeOfAnchor[id]; !dup {
-			anchorIDs = append(anchorIDs, anchor.ID)
-		}
-		codeOfAnchor[id] = code
-	}
-	// The first control bound to each anchor -- v1 has at most one control
-	// per SCF anchor per tenant.
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (scf_anchor_id) scf_anchor_id, id
-		FROM controls
-		WHERE scf_anchor_id = ANY($1)
-		ORDER BY scf_anchor_id, created_at ASC
-	`, anchorIDs)
+	declared, err := anchorsIn(ctx, q, rel, scfCodes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("seed: controls lookup: %w", err)
+		return nil, nil, nil, err
 	}
-	defer rows.Close()
-	byCode := make(map[string]uuid.UUID)
-	for rows.Next() {
-		var anchorID, ctrlID pgtype.UUID
-		if err := rows.Scan(&anchorID, &ctrlID); err != nil {
-			return nil, nil, fmt.Errorf("seed: scan: %w", err)
+	byCode, err := r.controlsBoundTo(ctx, declared)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var fallbacks []string
+	if rel.Status != string(dbx.FrameworkVersionStatusCurrent) {
+		fallbacks, err = r.fallBackToCurrent(ctx, q, rel, scfCodes, declared, byCode)
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		byCode[codeOfAnchor[uuid.UUID(anchorID.Bytes)]] = uuid.UUID(ctrlID.Bytes)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("seed: rows iter: %w", err)
 	}
 	var resolved []uuid.UUID
 	var missing []string
@@ -343,5 +339,112 @@ func (r *SQLAnchorResolver) Resolve(ctx context.Context, release string, scfCode
 		}
 		missing = append(missing, code)
 	}
-	return resolved, missing, nil
+	return resolved, missing, fallbacks, nil
+}
+
+// anchorsIn resolves each code to its anchor in rel. A code rel lacks is
+// absent from the result.
+func anchorsIn(ctx context.Context, q *dbx.Queries, rel scfrelease.Release, scfCodes []string) (map[string]dbx.ScfAnchor, error) {
+	out := make(map[string]dbx.ScfAnchor, len(scfCodes))
+	for _, code := range scfCodes {
+		anchor, _, err := scfrelease.Resolve(ctx, q, rel.Version, code)
+		if errors.Is(err, scfrelease.ErrCodeNotInRelease) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("seed: resolve %s in SCF release %s: %w", code, rel.Version, err)
+		}
+		out[code] = anchor
+	}
+	return out, nil
+}
+
+// controlsBoundTo maps each code to the first control bound to its anchor
+// -- v1 has at most one control per SCF anchor per tenant. A code whose
+// anchor has no control is absent from the result.
+func (r *SQLAnchorResolver) controlsBoundTo(ctx context.Context, anchors map[string]dbx.ScfAnchor) (map[string]uuid.UUID, error) {
+	codeOfAnchor := make(map[uuid.UUID]string, len(anchors))
+	anchorIDs := make([]pgtype.UUID, 0, len(anchors))
+	for code, a := range anchors {
+		codeOfAnchor[uuid.UUID(a.ID.Bytes)] = code
+		anchorIDs = append(anchorIDs, a.ID)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (scf_anchor_id) scf_anchor_id, id
+		FROM controls
+		WHERE scf_anchor_id = ANY($1)
+		ORDER BY scf_anchor_id, created_at ASC
+	`, anchorIDs)
+	if err != nil {
+		return nil, fmt.Errorf("seed: controls lookup: %w", err)
+	}
+	defer rows.Close()
+	byCode := make(map[string]uuid.UUID)
+	for rows.Next() {
+		var anchorID, ctrlID pgtype.UUID
+		if err := rows.Scan(&anchorID, &ctrlID); err != nil {
+			return nil, fmt.Errorf("seed: scan: %w", err)
+		}
+		byCode[codeOfAnchor[uuid.UUID(anchorID.Bytes)]] = uuid.UUID(ctrlID.Bytes)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("seed: rows iter: %w", err)
+	}
+	return byCode, nil
+}
+
+// fallBackToCurrent handles each code that has an anchor in the declared,
+// non-current release but no control bound to it (#3064). It adds to byCode
+// the control bound to the current release's anchor with the same code and
+// title, and returns one note per code it linked or left unlinked. A code
+// the declared release lacks gets no fallback: there is no title to match.
+func (r *SQLAnchorResolver) fallBackToCurrent(ctx context.Context, q *dbx.Queries, declared scfrelease.Release, scfCodes []string, declaredAnchors map[string]dbx.ScfAnchor, byCode map[string]uuid.UUID) ([]string, error) {
+	var pending []string
+	for _, code := range scfCodes {
+		if _, linked := byCode[code]; linked {
+			continue
+		}
+		if _, ok := declaredAnchors[code]; ok && !slices.Contains(pending, code) {
+			pending = append(pending, code)
+		}
+	}
+	if len(pending) == 0 {
+		return nil, nil
+	}
+	current, err := scfrelease.Lookup(ctx, q, "")
+	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	currentAnchors, err := anchorsIn(ctx, q, current, pending)
+	if err != nil {
+		return nil, err
+	}
+	matched := make(map[string]dbx.ScfAnchor, len(currentAnchors))
+	for code, a := range currentAnchors {
+		if a.Title == declaredAnchors[code].Title {
+			matched[code] = a
+		}
+	}
+	bound, err := r.controlsBoundTo(ctx, matched)
+	if err != nil {
+		return nil, err
+	}
+	var notes []string
+	for _, code := range pending {
+		a, inCurrent := currentAnchors[code]
+		id, isBound := bound[code]
+		switch {
+		case !inCurrent:
+			notes = append(notes, fmt.Sprintf("%s left unlinked: the declared SCF release %s is not current, and the current release %s has no %s", code, declared.Version, current.Version, code))
+		case a.Title != declaredAnchors[code].Title:
+			notes = append(notes, fmt.Sprintf("%s left unlinked: the declared SCF release %s is not current, and %s in the current release %s has a different title (%q, not %q)", code, declared.Version, code, current.Version, a.Title, declaredAnchors[code].Title))
+		case isBound:
+			byCode[code] = id
+			notes = append(notes, fmt.Sprintf("%s linked in the current SCF release %s: the declared release %s is not current, and the code and title match", code, current.Version, declared.Version))
+		}
+	}
+	return notes, nil
 }

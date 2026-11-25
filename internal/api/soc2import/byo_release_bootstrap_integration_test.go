@@ -248,38 +248,62 @@ func TestBYOBootstrap_FreshInstallBindsStockContentOnTheOperatorRelease(t *testi
 	bootSequence(t, pool, app, tenant, realReleaseCatalog(t))
 	assertBYOEndState(t, pool, tenant)
 
-	// `atlas-cli policy seed-stock`: the policies' declared release is loaded.
+	// `atlas-cli policy seed-stock`. The stock controls moved to the
+	// operator's release, so the declared test-2026.3 binds none of them
+	// (docs/audit-log/3061 D5). Each code falls back to the 2026.3 anchor
+	// with the same code and title (#3064), and the policies link what a
+	// default install links (#3033 D4).
+	rep := seedStock(t, pool, app, tenant)
+	assertStockPolicyLinks(t, rep)
+	if len(rep.ReleaseFallbacks) != stockPolicyLinks {
+		t.Errorf("ReleaseFallbacks = %v; want one note per linked code", rep.ReleaseFallbacks)
+	}
+	for _, f := range rep.ReleaseFallbacks {
+		if !strings.Contains(f, "linked in the current SCF release "+byoRelease) {
+			t.Errorf("fallback note %q does not name %s as the release used", f, byoRelease)
+		}
+	}
+}
+
+// stockPolicyLinks is the number of stock policy links a default install
+// makes (#3033 D4), and stockPolicyMissing the codes no stock control
+// bundle carries, which no install links.
+const stockPolicyLinks = 11
+
+var stockPolicyMissing = []string{"CFG-04", "IRO-02", "IRO-14", "TPM-14"}
+
+// seedStock is `atlas-cli policy seed-stock` with the shipped policies.
+func seedStock(t *testing.T, pool, app *pgxpool.Pool, tenant string) seed.Report {
+	t.Helper()
 	policies, err := seed.LoadFromFS(os.DirFS(filepath.Join("..", "..", "..")), "policies/stock")
 	if err != nil {
 		t.Fatalf("LoadFromFS: %v", err)
 	}
-	rep, err := seed.Seed(context.Background(), app, uuid.MustParse(tenant), policies, seed.NewSQLAnchorResolver(pool))
 	// Since #1774 a declared release that is not loaded is an error, so a
 	// nil error means test-2026.3 resolved.
+	rep, err := seed.Seed(context.Background(), app, uuid.MustParse(tenant), policies, seed.NewSQLAnchorResolver(pool))
 	if err != nil {
 		t.Fatalf("seed-stock: %v", err)
 	}
 	if len(rep.Loaded) != len(policies) {
 		t.Errorf("seed-stock loaded %d policies; want %d", len(rep.Loaded), len(policies))
 	}
-	// The known gap (docs/audit-log/3061 D5): the seed links a code to the
-	// control bound in the declared release (#1772), and the stock controls
-	// moved to the operator's release, so every link drops. Pinned here so a
-	// fix to the resolver shows up as this test failing, and is updated with
-	// it.
-	codes := map[string]bool{}
-	for _, p := range policies {
-		for _, c := range p.FrontMatter.LinkedControlIDs {
-			codes[c] = true
-		}
-	}
+	return rep
+}
+
+func assertStockPolicyLinks(t *testing.T, rep seed.Report) {
+	t.Helper()
+	linked := 0
 	for _, p := range rep.Loaded {
-		if p.LinkedControlCount != 0 {
-			t.Errorf("%s linked %d controls; D5 measured 0", p.Title, p.LinkedControlCount)
-		}
+		linked += p.LinkedControlCount
 	}
-	if len(rep.MissingAnchors) != 15 || len(codes) != 15 {
-		t.Errorf("MissingAnchors = %v (%d distinct codes linked); D5 measured all 15 missing", rep.MissingAnchors, len(codes))
+	if linked != stockPolicyLinks {
+		t.Errorf("stock policies linked %d controls; want %d", linked, stockPolicyLinks)
+	}
+	missing := slices.Clone(rep.MissingAnchors)
+	slices.Sort(missing)
+	if !slices.Equal(missing, stockPolicyMissing) {
+		t.Errorf("MissingAnchors = %v; want %v", missing, stockPolicyMissing)
 	}
 }
 
@@ -487,5 +511,11 @@ func TestBYOBootstrap_DefaultInstallIsUnchanged(t *testing.T) {
 		if release := s[strings.LastIndex(s, " ")+1:]; release != "-" && release != sample {
 			t.Errorf("%s: control on an anchor in %q; want %q", bundle, release, sample)
 		}
+	}
+	// The declared release is current, so seed-stock binds in it alone.
+	rep := seedStock(t, pool, app, tenant)
+	assertStockPolicyLinks(t, rep)
+	if len(rep.ReleaseFallbacks) != 0 {
+		t.Errorf("ReleaseFallbacks = %v; want none on the default install", rep.ReleaseFallbacks)
 	}
 }

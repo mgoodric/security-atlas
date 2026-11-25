@@ -400,7 +400,7 @@ Body.
 // non-nil pool would mask the bug.
 func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 	r := seed.NewSQLAnchorResolver(nil)
-	resolved, missing, err := r.Resolve(context.Background(), "", nil)
+	resolved, missing, _, err := r.Resolve(context.Background(), "", nil)
 	if err != nil {
 		t.Fatalf("Resolve(nil): %v", err)
 	}
@@ -411,7 +411,7 @@ func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 		t.Fatalf("expected 0 missing, got %d", len(missing))
 	}
 	// Also exercise the explicit-empty-slice variant.
-	resolved, missing, err = r.Resolve(context.Background(), "", []string{})
+	resolved, missing, _, err = r.Resolve(context.Background(), "", []string{})
 	if err != nil {
 		t.Fatalf("Resolve([]): %v", err)
 	}
@@ -429,7 +429,7 @@ func TestSQLResolver_AllMissing(t *testing.T) {
 
 	r := seed.NewSQLAnchorResolver(admin)
 	codes := []string{"DOES-NOT-EXIST-1", "DOES-NOT-EXIST-2"}
-	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
+	resolved, missing, _, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
 
 	r := seed.NewSQLAnchorResolver(admin)
 	codes := []string{"IAC-06", "MIX-MISSING-B", "CRY-03", "GOV-01"}
-	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
+	resolved, missing, _, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestSQLResolver_DuplicateInputCode(t *testing.T) {
 
 	r := seed.NewSQLAnchorResolver(admin)
 	codes := []string{"IAC-06", "IAC-06", "DUP-MISS", "DUP-MISS"}
-	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
+	resolved, missing, _, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
