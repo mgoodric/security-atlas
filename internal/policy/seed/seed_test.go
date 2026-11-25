@@ -149,7 +149,7 @@ func TestParseStockPolicy_NoFrontMatter(t *testing.T) {
 func TestNoopAnchorResolver_AllMissing(t *testing.T) {
 	resolver := seed.NoopAnchorResolver{}
 	codes := []string{"GOV-02", "IAC-04", "CHG-02"}
-	resolved, missing, err := resolver.Resolve(context.TODO(), "", codes)
+	resolved, missing, _, err := resolver.Resolve(context.TODO(), "", codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
