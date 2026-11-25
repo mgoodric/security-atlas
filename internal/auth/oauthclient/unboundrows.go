@@ -119,7 +119,7 @@ SELECT n.nspname, c.relname,
              AND (tg.tgtype & 2) <> 0  -- BEFORE
              AND (tg.tgtype & 8) <> 0  -- DELETE
        ) THEN 'delete_trigger'
-       ELSE '' END AS ledger
+       ELSE '' END AS retained_kind
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = c.oid
@@ -175,17 +175,17 @@ func ListUnboundRows(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, error
 	return counts, err
 }
 
-// LedgerTables returns the display names of the tenant-scoped tables a
+// SelfRetainedTables returns the display names of the tenant-scoped tables a
 // purge never deletes from because they are append-only ledgers or a
 // BEFORE DELETE trigger guards them.
-func LedgerTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
-	tables, ledger, err := tenantTables(ctx, tx)
+func SelfRetainedTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
+	tables, selfRetained, err := tenantTables(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, t := range tables {
-		if ledger[t] != "" {
+		if selfRetained[t] != "" {
 			out = append(out, t.String())
 		}
 	}
@@ -312,13 +312,13 @@ func compareLedgerTotals(before, after map[string]int64) error {
 // ledgerTotals counts every row, in every tenant, of each ledger table, so
 // a purge can prove no foreign-key cascade reached a ledger by any path.
 func ledgerTotals(ctx context.Context, tx pgx.Tx) (map[string]int64, error) {
-	tables, ledger, err := tenantTables(ctx, tx)
+	tables, selfRetained, err := tenantTables(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]int64{}
 	for _, t := range tables {
-		if ledger[t] == "" {
+		if selfRetained[t] == "" {
 			continue
 		}
 		var n int64
@@ -384,7 +384,7 @@ func nonNil(c []UnboundTableCount) []UnboundTableCount {
 
 // listUnbound is ListUnboundRows, also returning each row's table ref.
 func listUnbound(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, []tableRef, error) {
-	tables, ledger, err := tenantTables(ctx, tx)
+	tables, selfRetained, err := tenantTables(ctx, tx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,7 +394,7 @@ func listUnbound(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, []tableRe
 	}
 	retained := map[tableRef]string{}
 	if hasAppRole {
-		if retained, err = retainedTables(ctx, tx, ledger); err != nil {
+		if retained, err = retainedTables(ctx, tx, selfRetained); err != nil {
 			return nil, nil, err
 		}
 	} else {
@@ -438,7 +438,7 @@ func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]stri
 	}
 	defer rows.Close()
 	var tables []tableRef
-	ledger := map[tableRef]string{}
+	selfRetained := map[tableRef]string{}
 	for rows.Next() {
 		var (
 			t    tableRef
@@ -448,15 +448,15 @@ func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]stri
 			return nil, nil, fmt.Errorf("oauthclient: list tenant-scoped tables: %w", err)
 		}
 		tables = append(tables, t)
-		ledger[t] = retainedReason(kind)
+		selfRetained[t] = retainedReason(kind)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("oauthclient: list tenant-scoped tables: %w", err)
 	}
-	return tables, ledger, nil
+	return tables, selfRetained, nil
 }
 
-// retainedReason maps tenantTablesSQL's ledger column to a Retained reason.
+// retainedReason maps tenantTablesSQL's retained_kind column to a Retained reason.
 // An unknown kind retains as a ledger, so a classification this code does
 // not recognise fails closed.
 func retainedReason(kind string) string {
@@ -473,13 +473,13 @@ func retainedReason(kind string) string {
 // retainedTables returns, for every tenant-scoped table a purge keeps, the
 // reason. It starts from the ledger tables and adds, until nothing changes,
 // each table whose all-zeros rows a kept table references.
-func retainedTables(ctx context.Context, tx pgx.Tx, ledger map[tableRef]string) (map[tableRef]string, error) {
-	fks, err := tenantForeignKeys(ctx, tx, ledger)
+func retainedTables(ctx context.Context, tx pgx.Tx, selfRetained map[tableRef]string) (map[tableRef]string, error) {
+	fks, err := tenantForeignKeys(ctx, tx, selfRetained)
 	if err != nil {
 		return nil, err
 	}
 	retained := map[tableRef]string{}
-	for t, reason := range ledger {
+	for t, reason := range selfRetained {
 		if reason != "" {
 			retained[t] = reason
 		}

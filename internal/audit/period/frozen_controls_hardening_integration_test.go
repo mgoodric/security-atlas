@@ -142,8 +142,9 @@ func TestFrozenControls_RecordFunctionNotPublic(t *testing.T) {
 
 // #3089: the SECURITY DEFINER commit check holds no PUBLIC EXECUTE, so
 // atlas_app has none; the owner keeps it. Firing the trigger does not check
-// EXECUTE, which the freeze tests above (an app-role freeze that commits)
-// already exercise.
+// EXECUTE: in TestFrozenControls_CommitCheckIgnoresTenantSwitch above the
+// deferred check fires on an atlas_app commit, with the revoke applied, and
+// refuses it.
 func TestFrozenControls_CommitCheckNotPublic(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	for role, want := range map[string]bool{"atlas_app": false, "atlas_migrate": true} {

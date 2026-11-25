@@ -580,11 +580,11 @@ func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug s
 	// Now cascade-delete, bottom-up, then the tenant row itself.
 	deleted := make(map[string]int64, len(teardownTables)+1)
 	for _, table := range append(teardownTables, "tenants") {
-		stmt := fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1`, pgx.Identifier{table}.Sanitize())
+		where := `tenant_id = $1`
 		if table == "tenants" {
-			stmt = `DELETE FROM tenants WHERE id = $1`
+			where = `id = $1`
 		}
-		tag, err := execTeardownDelete(ctx, tx, table, stmt, tenantID)
+		tag, err := execTeardownDelete(ctx, tx, table, where, tenantID)
 		if err != nil {
 			// An undefined-table error is skipped here, but it is not
 			// best-effort: Postgres has already aborted tx, so the next

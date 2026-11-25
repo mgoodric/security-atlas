@@ -506,7 +506,7 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 		return 0, false, fmt.Errorf("demoseed: teardown savepoint: %w", err)
 	}
 	tag, err := execTeardownDelete(ctx, sp, table,
-		fmt.Sprintf(`DELETE FROM %s t WHERE t.tenant_id::text = $1 AND to_jsonb(t.*) @> ANY($2::text[]::jsonb[])`,
+		fmt.Sprintf(`tenant_id::text = $1 AND to_jsonb(%s.*) @> ANY($2::text[]::jsonb[])`,
 			pgx.Identifier{table}.Sanitize()),
 		tenantID.String(), keys,
 	)
@@ -530,19 +530,35 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 // teardownLockTimeout bounds how long a teardown waits for the SHARE ROW
 // EXCLUSIVE lock that disabling period.FrozenNoDeleteTrigger takes on
 // audit_periods. On a live install a teardown that cannot get it fails with
-// lock_not_available and can be retried, rather than queueing every
-// tenant's audit_periods writes behind its ALTER (#3089).
+// ErrTeardownBusy and can be retried, rather than queueing every tenant's
+// audit_periods writes behind its ALTER (#3089).
 const teardownLockTimeout = 2 * time.Second
 
-// execTeardownDelete runs stmt on tx. The demo seed writes a frozen period,
-// and since #3081 a trigger refuses to delete one for every role, so when
-// table is audit_periods the DELETE goes through period.OwnerDelete, which
-// disables the trigger for this transaction only. Its lock is held until tx
-// commits, which is why audit_periods sits as late in teardownTables as its
-// foreign keys allow.
-func execTeardownDelete(ctx context.Context, tx pgx.Tx, table, stmt string, args ...any) (pgconn.CommandTag, error) {
+// ErrTeardownBusy is returned, wrapped, when a teardown gave up waiting
+// teardownLockTimeout for the audit_periods lock because other sessions
+// were writing to the table. The teardown's transaction is rolled back, so
+// nothing was deleted, and the caller can retry (#3094).
+var ErrTeardownBusy = errors.New("demoseed: audit_periods is busy; retry")
+
+// pgErrLockNotAvailable is the SQLSTATE a statement raises when it gives up
+// waiting lock_timeout for a lock.
+const pgErrLockNotAvailable = "55P03"
+
+// execTeardownDelete runs `DELETE FROM <table> WHERE <where>` on tx. The
+// demo seed writes a frozen period, and since #3081 a trigger refuses to
+// delete one for every role, so when table is audit_periods the DELETE goes
+// through period.OwnerDelete, which disables the trigger for this
+// transaction only. Its lock is held until tx commits, which is why
+// audit_periods sits as late in teardownTables as its foreign keys allow.
+// A lock wait that runs out is returned wrapping ErrTeardownBusy.
+func execTeardownDelete(ctx context.Context, tx pgx.Tx, table, where string, args ...any) (pgconn.CommandTag, error) {
 	if table != "audit_periods" {
-		return tx.Exec(ctx, stmt, args...)
+		return tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE `, pgx.Identifier{table}.Sanitize())+where, args...)
 	}
-	return period.OwnerDelete(ctx, tx, teardownLockTimeout, stmt, args...)
+	tag, err := period.OwnerDelete(ctx, tx, teardownLockTimeout, where, args...)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgErrLockNotAvailable {
+		return tag, fmt.Errorf("%w: %w", ErrTeardownBusy, err)
+	}
+	return tag, err
 }

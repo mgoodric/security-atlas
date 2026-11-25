@@ -3,7 +3,7 @@
 // Integration tests for security-atlas#1876: rows left in the all-zeros
 // tenant by OAuth clients that were unbound before #1739.
 //
-//   - LedgerTables classifies every append-only table (the evidence ledger,
+//   - SelfRetainedTables classifies every append-only table (the evidence ledger,
 //     every *_audit / *_audit_log / *_log table) as a ledger, so a new one
 //     the schema rule misses fails here.
 //   - ListUnboundRows counts all-zeros rows per tenant-scoped table, ignores
@@ -144,7 +144,7 @@ var (
 )
 
 // tenantTableNames lists the tables with a tenant_id column in every
-// non-system schema, by LedgerTables' display name: bare in public,
+// non-system schema, by SelfRetainedTables' display name: bare in public,
 // schema-qualified elsewhere (privacy.erasure_audit_log, say).
 func tenantTableNames(t *testing.T, tx pgx.Tx) []string {
 	t.Helper()
@@ -167,16 +167,16 @@ func tenantTableNames(t *testing.T, tx pgx.Tx) []string {
 	return names
 }
 
-func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
+func TestSelfRetainedTables_CoverAppendOnlyTables(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
 
-	ledger, err := oauthclient.LedgerTables(ctx, tx)
+	selfRetained, err := oauthclient.SelfRetainedTables(ctx, tx)
 	if err != nil {
-		t.Fatalf("LedgerTables: %v", err)
+		t.Fatalf("SelfRetainedTables: %v", err)
 	}
 	isLedger := map[string]bool{}
-	for _, l := range ledger {
+	for _, l := range selfRetained {
 		isLedger[l] = true
 	}
 	want := append([]string{}, knownLedgers...)
@@ -197,11 +197,11 @@ func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
 	}
 }
 
-// TestLedgerTables_ClassifiesBySignal builds scratch tables, each missing
+// TestSelfRetainedTables_ClassifiesBySignal builds scratch tables, each missing
 // one way the application could delete from it, and checks each is a
 // ledger; the control table has every way and must stay purgeable. The
 // DDL rolls back with the test transaction.
-func TestLedgerTables_ClassifiesBySignal(t *testing.T) {
+func TestSelfRetainedTables_ClassifiesBySignal(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
 
@@ -235,12 +235,12 @@ func TestLedgerTables_ClassifiesBySignal(t *testing.T) {
 	scratch("scratch_1897_no_delete_grant", "AS PERMISSIVE", false)
 	scratch("scratch_1897.erasure_audit_log", "", true)
 
-	ledger, err := oauthclient.LedgerTables(ctx, tx)
+	selfRetained, err := oauthclient.SelfRetainedTables(ctx, tx)
 	if err != nil {
-		t.Fatalf("LedgerTables: %v", err)
+		t.Fatalf("SelfRetainedTables: %v", err)
 	}
 	isLedger := map[string]bool{}
-	for _, l := range ledger {
+	for _, l := range selfRetained {
 		isLedger[l] = true
 	}
 	for table, want := range map[string]bool{
@@ -433,8 +433,8 @@ func TestUnboundRows_FailOnAbortedTransaction(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT 1/0"); err == nil {
 		t.Fatal("SELECT 1/0 succeeded; the transaction must be aborted for this test")
 	}
-	if got, err := oauthclient.LedgerTables(ctx, tx); err == nil || !strings.HasPrefix(err.Error(), "oauthclient: ") {
-		t.Errorf("LedgerTables = %v, %v; want a wrapped error", got, err)
+	if got, err := oauthclient.SelfRetainedTables(ctx, tx); err == nil || !strings.HasPrefix(err.Error(), "oauthclient: ") {
+		t.Errorf("SelfRetainedTables = %v, %v; want a wrapped error", got, err)
 	}
 	if got, err := oauthclient.ListUnboundRows(ctx, tx); err == nil || !strings.HasPrefix(err.Error(), "oauthclient: ") {
 		t.Errorf("ListUnboundRows = %v, %v; want a wrapped error", got, err)
