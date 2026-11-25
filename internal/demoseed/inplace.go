@@ -503,7 +503,7 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 	if err != nil {
 		return 0, false, fmt.Errorf("demoseed: teardown savepoint: %w", err)
 	}
-	tag, err := sp.Exec(ctx,
+	tag, err := execTeardownDelete(ctx, sp, table,
 		fmt.Sprintf(`DELETE FROM %s t WHERE t.tenant_id::text = $1 AND to_jsonb(t.*) @> ANY($2::text[]::jsonb[])`,
 			pgx.Identifier{table}.Sanitize()),
 		tenantID.String(), keys,
@@ -523,4 +523,33 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 		return 0, false, fmt.Errorf("demoseed: teardown release savepoint: %w", err)
 	}
 	return tag.RowsAffected(), false, nil
+}
+
+// frozenNoDeleteTrigger refuses DELETE of a frozen audit period for every
+// role, the owner included (#3081, migration 20261313000000). The demo seed
+// writes a frozen period, so teardown disables it around its audit_periods
+// DELETE, as the owner, inside its own transaction.
+const frozenNoDeleteTrigger = "audit_periods_frozen_no_delete_trg"
+
+// execTeardownDelete runs stmt on tx. When table is audit_periods it first
+// disables frozenNoDeleteTrigger and enables it again after the DELETE. ALTER
+// TABLE is transactional, so no other session sees the trigger disabled, and
+// a failed DELETE rolls the disable back with the transaction or savepoint.
+// The ACCESS EXCLUSIVE lock the ALTER takes holds audit_periods until tx
+// commits.
+func execTeardownDelete(ctx context.Context, tx pgx.Tx, table, stmt string, args ...any) (pgconn.CommandTag, error) {
+	if table != "audit_periods" {
+		return tx.Exec(ctx, stmt, args...)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER `+frozenNoDeleteTrigger); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	tag, err := tx.Exec(ctx, stmt, args...)
+	if err != nil {
+		return tag, err
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER `+frozenNoDeleteTrigger); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return tag, nil
 }

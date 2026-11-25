@@ -51,7 +51,6 @@ func setupFreezeFixture(t *testing.T) *freezeFixture {
 		ctx := context.Background()
 		for _, stmt := range []string{
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
@@ -59,6 +58,9 @@ func setupFreezeFixture(t *testing.T) *freezeFixture {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
+		}
+		if err := dbtest.DeleteAuditPeriods(ctx, admin, `tenant_id = $1`, tenant); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
 		}
 	})
 

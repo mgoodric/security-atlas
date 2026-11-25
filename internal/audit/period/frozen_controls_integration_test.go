@@ -294,14 +294,15 @@ func TestFrozenControls_WriteOnce(t *testing.T) {
 	_, err = admin.Exec(ctx, `DELETE FROM audit_period_frozen_controls WHERE audit_period_id = $1`, p.ID)
 	wantCheckViolation(t, "owner delete", err)
 
-	// Deleting the period cascades to its snapshot.
+	// Deleting the period cascades to its snapshot. A frozen period is
+	// deleted only with audit_periods_frozen_no_delete_trg disabled (#3081).
 	if _, err := admin.Exec(ctx, `DELETE FROM audit_period_audit_log WHERE audit_period_id = $1`, p.ID); err != nil {
 		t.Fatalf("delete period log: %v", err)
 	}
 	if _, err := admin.Exec(ctx, `UPDATE populations SET audit_period_id = NULL WHERE audit_period_id = $1`, p.ID); err != nil {
 		t.Fatalf("detach populations: %v", err)
 	}
-	if _, err := admin.Exec(ctx, `DELETE FROM audit_periods WHERE id = $1`, p.ID); err != nil {
+	if err := dbtest.DeleteAuditPeriods(ctx, admin, `id = $1`, p.ID); err != nil {
 		t.Fatalf("delete period: %v", err)
 	}
 	var n int

@@ -584,7 +584,7 @@ func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug s
 		if table == "tenants" {
 			stmt = `DELETE FROM tenants WHERE id = $1`
 		}
-		tag, err := tx.Exec(ctx, stmt, tenantID)
+		tag, err := execTeardownDelete(ctx, tx, table, stmt, tenantID)
 		if err != nil {
 			// An undefined-table error is skipped here, but it is not
 			// best-effort: Postgres has already aborted tx, so the next

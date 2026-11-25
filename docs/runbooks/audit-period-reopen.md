@@ -11,6 +11,7 @@
 - `audit_period_frozen_controls_immutable_trg` (#3066, migration `20261311000000_audit_period_frozen_controls`) refuses any UPDATE of the control set the freeze recorded, and its DELETE while the period exists. Freeze records one row per period, so a reopen must remove it or the next freeze fails on the primary key.
 
 - `audit_periods_frozen_has_controls_trg` (same migration) is a deferred check that refuses a commit leaving a frozen period without its control set. The procedure below reopens the period in the same transaction it removes the row, so the check passes.
+- `audit_periods_frozen_no_delete_trg` (#3081, migration `20261313000000_audit_period_frozen_no_delete`) refuses DELETE of a row with `status = 'frozen'`. A reopen does not delete, so it does not touch this trigger. It matters to teardown; see "Deleting a frozen period" below.
 
 These triggers apply to every role, the owner included. A reopen has to disable them inside its own transaction.
 
@@ -62,12 +63,28 @@ Attached populations keep the `frozen_at` they were stamped with, because `popul
 
 Then freeze again through the product (`POST /v1/audit-periods/{id}/freeze`) so the new freeze is hashed, logged and stamped under the tenant evidence-freeze lock.
 
+## Deleting a frozen period
+
+The product never deletes a frozen period, and `audit_periods_frozen_no_delete_trg` refuses it for every role. Deleting the period would erase its `frozen_hash` and, through `ON DELETE CASCADE`, the control set its freeze recorded. Reopen it first if the freeze was the mistake.
+
+Owner-run teardown that must remove frozen periods disables the trigger in its own transaction, the same way:
+
+```sql
+BEGIN;
+ALTER TABLE audit_periods DISABLE TRIGGER audit_periods_frozen_no_delete_trg;
+DELETE FROM audit_periods WHERE id = '<period id>';
+ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_frozen_no_delete_trg;
+COMMIT;
+```
+
+The demo teardown (`internal/demoseed`, `execTeardownDelete`) and integration-test cleanups (`dbtest.DeleteAuditPeriods`) do exactly this. Populations, audit notes, walkthroughs, freeze revisions and historical imports still block the DELETE through their `ON DELETE RESTRICT` foreign keys; remove or detach them first.
+
 ## Verify
 
 ```sql
 SELECT tgname, tgenabled FROM pg_trigger
 WHERE tgname IN ('audit_periods_freeze_immutable_trg', 'populations_frozen_at_immutable_trg',
-                 'audit_period_frozen_controls_immutable_trg');
+                 'audit_period_frozen_controls_immutable_trg', 'audit_periods_frozen_no_delete_trg');
 -- every row tgenabled = 'O'
 ```
 

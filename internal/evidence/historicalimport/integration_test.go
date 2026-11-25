@@ -61,7 +61,6 @@ func setup(t *testing.T) *fixture {
 			`DELETE FROM sample_evidence WHERE tenant_id = $1`,
 			`DELETE FROM samples WHERE tenant_id = $1`,
 			`DELETE FROM populations WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
@@ -69,6 +68,9 @@ func setup(t *testing.T) *fixture {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
+		}
+		if err := dbtest.DeleteAuditPeriods(ctx, admin, `tenant_id = $1`, tenant); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
 		}
 	})
 
