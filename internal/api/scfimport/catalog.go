@@ -247,12 +247,16 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog, opts Options) (R
 		return Report{}, fmt.Errorf("scfimport: list versions: %w", err)
 	}
 	isNew := true
+	// Scanned in full first: the loop below can break before it has seen
+	// every version (an anchor-less row for this release).
 	otherCurrent := false
 	for _, v := range versions {
+		if v.Version != cat.ReleaseVersion && v.Status == dbx.FrameworkVersionStatusCurrent {
+			otherCurrent = true
+		}
+	}
+	for _, v := range versions {
 		if v.Version != cat.ReleaseVersion {
-			if v.Status == dbx.FrameworkVersionStatusCurrent {
-				otherCurrent = true
-			}
 			continue
 		}
 		isNew = false

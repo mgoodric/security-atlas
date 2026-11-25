@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -253,18 +254,123 @@ func TestBYOBootstrap_FreshInstallBindsStockContentOnTheOperatorRelease(t *testi
 		t.Fatalf("LoadFromFS: %v", err)
 	}
 	rep, err := seed.Seed(context.Background(), app, uuid.MustParse(tenant), policies, seed.NewSQLAnchorResolver(pool))
+	// Since #1774 a declared release that is not loaded is an error, so a
+	// nil error means test-2026.3 resolved.
 	if err != nil {
 		t.Fatalf("seed-stock: %v", err)
-	}
-	if len(rep.SCFReleaseWarnings) != 0 {
-		t.Errorf("seed-stock warned: %v", rep.SCFReleaseWarnings)
 	}
 	if len(rep.Loaded) != len(policies) {
 		t.Errorf("seed-stock loaded %d policies; want %d", len(rep.Loaded), len(policies))
 	}
-	// The links drop: the seed links a code to the control bound in the
-	// declared release (#1772), and the stock controls moved to the
-	// operator's release. Recorded in docs/audit-log/3061 D5.
+	// The known gap (docs/audit-log/3061 D5): the seed links a code to the
+	// control bound in the declared release (#1772), and the stock controls
+	// moved to the operator's release, so every link drops. Pinned here so a
+	// fix to the resolver shows up as this test failing, and is updated with
+	// it.
+	codes := map[string]bool{}
+	for _, p := range policies {
+		for _, c := range p.FrontMatter.LinkedControlIDs {
+			codes[c] = true
+		}
+	}
+	for _, p := range rep.Loaded {
+		if p.LinkedControlCount != 0 {
+			t.Errorf("%s linked %d controls; D5 measured 0", p.Title, p.LinkedControlCount)
+		}
+	}
+	if len(rep.MissingAnchors) != 15 || len(codes) != 15 {
+		t.Errorf("MissingAnchors = %v (%d distinct codes linked); D5 measured all 15 missing", rep.MissingAnchors, len(codes))
+	}
+}
+
+// stockCrosswalkCodes returns, sorted, the SCF codes both a stock control
+// bundle and the SOC 2 crosswalk name.
+func stockCrosswalkCodes(t *testing.T) []string {
+	t.Helper()
+	inCrosswalk := map[string]bool{}
+	for _, m := range loadCrosswalk(t).Mappings {
+		inCrosswalk[m.SCFAnchor] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, dir := range stockBundleDirs(t) {
+		b, err := control.ParseDirectory(dir)
+		if err != nil {
+			t.Fatalf("parse %s: %v", dir, err)
+		}
+		if c := b.Manifest.SCFAnchorID; c != "" && inCrosswalk[c] && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// openEdgeProposals counts the open edge-remap proposals for edges on the
+// sample's anchor with this code.
+func openEdgeProposals(t *testing.T, pool *pgxpool.Pool, release, code string) int {
+	t.Helper()
+	return countRows(t, pool, `
+		SELECT count(*) FROM scf_edge_remap_proposals
+		WHERE legacy_release = $1 AND legacy_scf_id = $2 AND status = 'open'`, release, code)
+}
+
+// (5) Where the operator's release differs from the sample, nothing moves on
+// its own: a code missing from the release leaves the stock control for
+// re-anchoring, and an edge whose title changed or whose code is gone waits
+// in the edge-remap queue. A stock control whose title alone changed still
+// moves (#2321).
+func TestBYOBootstrap_DifferingAnchorsAreLeftForReview(t *testing.T) {
+	pool, app, tenant := byoFixture(t)
+	codes := stockCrosswalkCodes(t)
+	if len(codes) < 2 {
+		t.Fatalf("need two codes shared by a stock control and the SOC 2 crosswalk; have %v", codes)
+	}
+	retitled, removed := codes[0], codes[1]
+	byo := realReleaseCatalog(t)
+	var kept []scfimport.Control
+	for _, c := range byo.Controls {
+		switch c.SCFID {
+		case removed:
+			continue
+		case retitled:
+			c.Title += " (reworded)"
+		}
+		kept = append(kept, c)
+	}
+	if len(kept) != len(byo.Controls)-1 {
+		t.Fatalf("%s is not in the 2026.3 fixture", removed)
+	}
+	byo.Controls = kept
+
+	bootSequence(t, pool, app, tenant, byo)
+	sample := loadSCFSample(t).ReleaseVersion
+
+	rep, err := scfimport.RebindControls(context.Background(), pool)
+	if err != nil {
+		t.Fatalf("RebindControls: %v", err)
+	}
+	var reanchor []string
+	for _, c := range rep.NeedsReanchoring {
+		if c.TenantID.String() == tenant {
+			reanchor = append(reanchor, c.LegacySCFID)
+		}
+	}
+	if !slices.Contains(reanchor, removed) {
+		t.Errorf("needs re-anchoring = %v; want the stock control on %s, which the release lacks", reanchor, removed)
+	}
+	if slices.Contains(reanchor, retitled) {
+		t.Errorf("needs re-anchoring = %v; the stock control on %s changed title only and should have moved (#2321)", reanchor, retitled)
+	}
+	for _, code := range []string{retitled, removed} {
+		if n := openEdgeProposals(t, pool, sample, code); n == 0 {
+			t.Errorf("no open edge-remap proposal for the SOC 2 edge on %s", code)
+		}
+	}
+	if n := openEdgeProposals(t, pool, sample, codes[len(codes)-1]); n != 0 && len(codes) > 2 {
+		t.Errorf("%d open edge-remap proposals on %s, whose code and title match", n, codes[len(codes)-1])
+	}
 }
 
 // (4) Every later boot is a no-op.

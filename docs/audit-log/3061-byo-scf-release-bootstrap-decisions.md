@@ -105,3 +105,46 @@ Each test was observed failing before it passed:
 | Sample load dropped (the original defect) | fresh install: `unknown SCF release "test-2026.3"` at the crosswalk |
 | Final re-import dropped                   | fresh install: controls left on `test-2026.3`                       |
 | `spareCurrentReleaseEdges` absent         | upgrade (D3)                                                        |
+| `listed[...]` check dropped (D3)          | `TestSpareCurrentRelease_DroppedMappingIsStillRetired`              |
+| anchor-ID equality dropped (D3)           | `TestSpareCurrentRelease_EdgeOnAnotherReleaseAnchorIsStillRetired`  |
+| freeze loop breaks before the scan (D8)   | `TestImportKeepCurrent_AnchorlessRowAheadOfTheCurrentRelease`       |
+| BYO fixture title left unchanged (D10)    | `TestBYOBootstrap_DifferingAnchorsAreLeftForReview`                 |
+
+## Review of #3063 (head 42274034)
+
+### D7 — `--keep-current` is documented as one-way, not limited to the sample label (N1)
+
+A release loaded with `--keep-current` stays legacy. A re-import is a frozen no-op, and nothing promotes a legacy release, so only SQL can recover from a wrong use. The review offered two options: document it, or refuse the flag for any label but the sample's.
+
+The worker chose to document it, in the flag help and in `docs/SELF_HOSTING.md`. Refusing other labels would hard-code the sample's label into the CLI, and that label moves with each fixture re-pin (#1773 D2). The bootstrap is the only caller, and it passes only the sample's path.
+
+### D8 — The freeze loop scans every version before deciding `otherCurrent` (N2)
+
+The loop that finds the incoming label `break`s on an anchor-less version row. If that row sorted ahead of the current release, `otherCurrent` stayed false, and `KeepCurrent` marked the row `current` beside the real current release.
+
+`otherCurrent` is now computed in a full pass of its own before that loop. `TestImportKeepCurrent_AnchorlessRowAheadOfTheCurrentRelease` seeds such a row and fails without the fix (`Status:current`).
+
+### D9 — A dropped mapping leaves the carried copy live on a BYO install (N4, not fixed)
+
+A carried edge has `crosswalk_source = scf-remap:<proposal>` (#2315), and `ownsEdge` needs an exact source match. Suppose a later bundled crosswalk drops a mapping. Its import retires the sample-anchor edge, which it wrote, but not the carried copy on the operator's release, which the remap wrote. That copy keeps counting toward default coverage.
+
+This is the existing #2315 provenance rule. It is not new with #3061, but every BYO install now meets it on every crosswalk change. The fix would decide which source owns a carried edge, which is an ownership-model change. The dispatcher is filing it as a follow-up, and this PR does not change it.
+
+### D10 — Differing anchors are left for review (N5)
+
+`TestBYOBootstrap_DifferingAnchorsAreLeftForReview` boots against the 2026.3 fixture with two codes that a stock control and the SOC 2 crosswalk share (chosen in sorted order). One code's title is reworded and the other code is removed.
+
+| Code           | Stock control                                                                                       | SOC 2 edge                                                                       |
+| -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Reworded title | moves: stock controls re-bind on a title-only change (#2321), so it is not on the re-anchoring list | waits as an open edge-remap proposal: edges carry only on code and title (#2315) |
+| Removed        | listed for re-anchoring                                                                             | waits as an open proposal                                                        |
+
+### D11 — D5 is asserted, not just described (N6)
+
+The fresh-install test now asserts the measured gap: every stock policy links 0 controls, and `MissingAnchors` holds all 15 linked codes. A resolver fix for D5 makes the test fail, and the fix updates it. The dispatcher is filing D5 as a follow-up that needs Matt's decision on #1772.
+
+### D12 — Smaller items
+
+- **N7:** `docs/SELF_HOSTING.md` tells operators to re-import their catalog after a hand-run `import-crosswalk`, so the new edges move onto their release. The other bundled crosswalks are not covered by a D3 upgrade test. They go through the same `importIntoTx` retire pass as SOC 2, which the `TestSpareCurrentRelease_*` tests exercise directly.
+- **N8:** after #3055, `declaredSCFRelease` never returns an empty release, so the `release == ""` guard in `spareCurrentReleaseEdges` is removed.
+- **N9:** `Report.Status` stays a `string`. It is printed as is, and `IsNewVersion` and the other `Report` fields are plain types too.

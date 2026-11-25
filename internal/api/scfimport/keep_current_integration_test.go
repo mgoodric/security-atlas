@@ -10,6 +10,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
@@ -89,6 +90,42 @@ func TestImportKeepCurrent_LoadsANewReleaseAsLegacy(t *testing.T) {
 	}
 	if again, latest := scfVersions(t, pool); again[operator.ReleaseVersion] != "current" || again[sample.ReleaseVersion] != "legacy" || latest != operator.ReleaseVersion {
 		t.Fatalf("after re-imports: versions = %v, latest = %s", again, latest)
+	}
+}
+
+// An anchor-less version row for the incoming label (a load that never
+// inserted anchors) sorts ahead of the current release here. KeepCurrent
+// must still see the current release and load the label as legacy.
+func TestImportKeepCurrent_AnchorlessRowAheadOfTheCurrentRelease(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	truncateCatalog(t, pool)
+	ctx := context.Background()
+
+	operator := operatorRelease(t)
+	operator.ReleaseDate = "2026-01-01"
+	if _, err := scfimport.Import(ctx, pool, operator); err != nil {
+		t.Fatalf("import operator release: %v", err)
+	}
+	sample := loadFixture(t)
+	// The id is the importer's own (uuidFromString("scf-" + release)), so
+	// the import upserts this row instead of adding a second one.
+	id := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("security-atlas/scfimport/scf-"+sample.ReleaseVersion))
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, effective_from, status, requirement_count)
+		SELECT $1, NULL, f.id, $2, DATE '2099-01-01', 'legacy', 0
+		FROM frameworks f WHERE f.slug = 'scf' AND f.tenant_id IS NULL`, id, sample.ReleaseVersion); err != nil {
+		t.Fatalf("seed anchor-less version row: %v", err)
+	}
+
+	rep, err := scfimport.ImportWithOptions(ctx, pool, sample, scfimport.Options{KeepCurrent: true})
+	if err != nil {
+		t.Fatalf("import sample with KeepCurrent: %v", err)
+	}
+	if rep.Status != "legacy" || rep.Created != len(sample.Controls) {
+		t.Fatalf("report = %+v; want legacy with %d anchors", rep, len(sample.Controls))
+	}
+	if versions, latest := scfVersions(t, pool); versions[operator.ReleaseVersion] != "current" || versions[sample.ReleaseVersion] != "legacy" || latest != operator.ReleaseVersion {
+		t.Fatalf("versions = %v, latest = %s; want %s current and latest", versions, latest, operator.ReleaseVersion)
 	}
 }
 

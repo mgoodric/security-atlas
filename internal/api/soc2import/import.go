@@ -164,7 +164,8 @@ type requirementCode struct {
 // other direction: an edge left on an older release than the one the
 // crosswalk binds in (#1971).
 func spareCurrentReleaseEdges(ctx context.Context, q *dbx.Queries, release string, retire []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[requirementCode]bool) ([]dbx.ListFwToScfEdgesForVersionForUpdateRow, error) {
-	if release == "" || len(retire) == 0 {
+	// declaredSCFRelease never returns an empty release (#1774).
+	if len(retire) == 0 {
 		return retire, nil
 	}
 	bound, err := scfrelease.Lookup(ctx, q, release)

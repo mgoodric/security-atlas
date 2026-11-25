@@ -121,7 +121,7 @@ func newCatalogImportSCFCmd() *cobra.Command {
 	cmd.Flags().StringVar(&releaseDate, "release-date", "", "release date (YYYY-MM-DD) for .xlsx workbooks, which do not carry one")
 	// #3061: the docker bootstrap loads the bundled sample this way beside
 	// an operator's own release, so the stock content's pin resolves.
-	cmd.Flags().BoolVar(&keepCurrent, "keep-current", false, "load a new release as legacy when another SCF release is current, instead of making it current")
+	cmd.Flags().BoolVar(&keepCurrent, "keep-current", false, "load a new release as legacy when another SCF release is current, instead of making it current; a re-import never promotes it, so use it only for a release that must stay legacy (the bootstrap's bundled sample)")
 	return cmd
 }
 

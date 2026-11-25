@@ -264,6 +264,17 @@ Things to know:
 - **The sample stays loaded.** `GET /v1/frameworks?include=versions` lists
   `test-2026.3` as a legacy SCF release beside yours. Default coverage reads
   the current release, so the sample's anchors don't count toward it.
+- **`--keep-current` is one-way.** A release loaded with it stays legacy:
+  re-importing it is a no-op that never promotes it, and only SQL can.
+  Use the flag only for a release that must stay legacy, as the bootstrap
+  does for the sample. Load your own release without it.
+- **Re-import your catalog after adding a crosswalk by hand.** The other
+  bundled crosswalks (the `import-crosswalk` commands the bootstrap
+  prints) also bind in `test-2026.3`. After importing one, import your
+  catalog again so its edges move onto your release, with the path the
+  container sees:
+  `docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-scf /repo/local/scf.json`.
+  The next boot does the same.
 - **Stock policies link nothing on your release yet.**
   `atlas-cli policy seed-stock` resolves the policies' declared release
   (`test-2026.3`) and links each code to the control bound in that
