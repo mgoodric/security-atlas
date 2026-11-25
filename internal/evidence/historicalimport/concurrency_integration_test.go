@@ -71,15 +71,17 @@ func TestImport_FreezeBetweenBeginAndLockRetries(t *testing.T) {
 	f.assertRevision1Replays(t, p.ID)
 }
 
-// waitForAdvisoryLockWaiter blocks until some session is waiting on an
-// advisory lock in namespace 14 (advisorylock.TenantEvidenceFreeze): the
-// freeze under test has reached the lock the open import holds.
+// waitForAdvisoryLockWaiter blocks until a session is waiting on this
+// test's tenant key in namespace 14 (advisorylock.TenantEvidenceFreeze): the
+// freeze under test has reached the lock the open import holds. The objid
+// match keeps a concurrent test's tenant from satisfying the wait (#3053).
 func (f *fixture) waitForAdvisoryLockWaiter(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		n := f.count(t, `SELECT count(*) FROM pg_locks
-			WHERE locktype = 'advisory' AND classid = 14 AND NOT granted`)
+			WHERE locktype = 'advisory' AND classid = 14
+			  AND objid = hashtext($1::uuid::text)::oid AND NOT granted`, f.tenant)
 		if n > 0 {
 			return
 		}

@@ -251,7 +251,8 @@ func frameworkLabel(name, version *string) string {
 // held (#1742): every row committed before the lock was granted has an
 // ingested_at before it, and an import still waiting on the lock refuses
 // and retries because this frozen_at is after its transaction start. An
-// explicit `at` (tests and replays of a past instant) is used as given.
+// explicit `at` (tests and replays of a past instant) is used as given;
+// TestProductionFreezeCallersPassZeroAt keeps production callers at zero.
 func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at time.Time) (Period, error) {
 	if frozenBy == "" {
 		return Period{}, fmt.Errorf("auditperiod: frozen_by must be non-empty")

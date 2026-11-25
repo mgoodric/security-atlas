@@ -182,14 +182,16 @@ func TestProcess_FreezeBetweenBeginAndLockRetries(t *testing.T) {
 	}
 }
 
-// waitForFreezeLockWaiter blocks until some session waits on an advisory
-// lock in namespace 14 (advisorylock.TenantEvidenceFreeze).
+// waitForFreezeLockWaiter blocks until a session waits on this test's
+// tenant key in namespace 14 (advisorylock.TenantEvidenceFreeze); the objid
+// match keeps a concurrent test's tenant from satisfying the wait (#3053).
 func (f *freezeFixture) waitForFreezeLockWaiter(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if f.count(t, `SELECT count(*) FROM pg_locks
-			WHERE locktype = 'advisory' AND classid = 14 AND NOT granted`) > 0 {
+			WHERE locktype = 'advisory' AND classid = 14
+			  AND objid = hashtext($1::uuid::text)::oid AND NOT granted`, f.tenant) > 0 {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

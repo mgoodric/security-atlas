@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,15 +33,29 @@ func recipeBlock(t *testing.T) string {
 	return ""
 }
 
+// recipeTools are the stock tools the verify-export recipe runs.
+var recipeTools = []string{"bash", "jq", "sha256sum"}
+
+// requireRecipeTools skips when a recipe tool is missing, except in CI,
+// where a missing tool fails the test: a CI runner that silently skipped
+// would leave the published recipe unchecked (#3053).
+func requireRecipeTools(t testing.TB, inCI bool) {
+	t.Helper()
+	for _, tool := range recipeTools {
+		if _, err := exec.LookPath(tool); err != nil {
+			if inCI {
+				t.Fatalf("%s not on PATH in CI: %v", tool, err)
+			}
+			t.Skipf("%s not on PATH: %v", tool, err)
+		}
+	}
+}
+
 // #1742 review B3: the published stock-tools recipe must recompute exactly
 // the digest bundleDigest signs, for a bundle with a freeze revision (every
 // export since #1742) and for one without (exported before).
 func TestVerifyExportRecipe(t *testing.T) {
-	for _, tool := range []string{"bash", "jq", "sha256sum"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s not on PATH: %v", tool, err)
-		}
-	}
+	requireRecipeTools(t, os.Getenv("CI") != "")
 	script := recipeBlock(t)
 	members := []BundleMember{
 		newMember("ssp.json", "system-security-plan", []byte(`{"ssp":1}`)),
@@ -81,5 +96,45 @@ func TestVerifyExportRecipe(t *testing.T) {
 				t.Fatalf("recipe recomputed %q, manifest digest %q\n%s", got["recomputed"], got["manifest"], out)
 			}
 		})
+	}
+}
+
+// recordTB captures whether requireRecipeTools skipped or failed.
+type recordTB struct {
+	testing.TB
+	failed, skipped bool
+}
+
+func (r *recordTB) Helper() {}
+
+func (r *recordTB) Fatalf(string, ...any) {
+	r.failed = true
+	runtime.Goexit()
+}
+
+func (r *recordTB) Skipf(string, ...any) {
+	r.skipped = true
+	runtime.Goexit()
+}
+
+// #3053 N-G: with a recipe tool missing, the check fails in CI and skips
+// elsewhere.
+func TestRequireRecipeTools_FailsInCIWhenToolMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, tc := range []struct {
+		inCI               bool
+		wantFail, wantSkip bool
+	}{{true, true, false}, {false, false, true}} {
+		r := &recordTB{TB: t}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			requireRecipeTools(r, tc.inCI)
+		}()
+		<-done
+		if r.failed != tc.wantFail || r.skipped != tc.wantSkip {
+			t.Errorf("inCI=%v: failed=%v skipped=%v, want failed=%v skipped=%v",
+				tc.inCI, r.failed, r.skipped, tc.wantFail, tc.wantSkip)
+		}
 	}
 }
