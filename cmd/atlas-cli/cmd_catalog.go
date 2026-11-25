@@ -257,8 +257,8 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Attribution, ce.Tier)
 			}
 			for _, ce := range report.EdgesCarriedHeldBack {
-				fmt.Printf("edge kept %s->%s: carried by an SCF edge remap, content differs from the crosswalk but a reviewer moved it or it has higher precedence (source=%s source_attribution=%s mapping_tier=%s)\n",
-					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Attribution, ce.Tier)
+				fmt.Printf("edge kept %s->%s: carried by an SCF edge remap, content differs from the crosswalk but is held back (reason=%s source=%s source_attribution=%s mapping_tier=%s)\n",
+					ce.RequirementCode, ce.SCFAnchor, ce.Reason, ce.Source, ce.Attribution, ce.Tier)
 			}
 			for _, un := range report.EdgesUnlisted {
 				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
