@@ -147,6 +147,60 @@ type CatalogEdge struct {
 // that does not set it.
 const LegacySource = "(none)"
 
+// requirementCode is one (requirement row, SCF code) pair a crosswalk lists.
+type requirementCode struct {
+	requirementID [16]byte
+	scfID         string
+}
+
+// spareCurrentReleaseEdges drops from retire every edge that is the
+// current-release counterpart of a listed mapping, when the crosswalk binds
+// in an older release (#3061). The bundled crosswalks bind in the sample's
+// release, which an install on its own SCF release loads as legacy; an edge
+// the same crosswalk wrote on the current release's anchor with the same code
+// (before #1773 it bound in the current release) still stands for the listed
+// mapping, and retiring it would drop the requirement from default coverage,
+// which reads the current release (#2203). The retire pass exists for the
+// other direction: an edge left on an older release than the one the
+// crosswalk binds in (#1971).
+func spareCurrentReleaseEdges(ctx context.Context, q *dbx.Queries, release string, retire []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[requirementCode]bool) ([]dbx.ListFwToScfEdgesForVersionForUpdateRow, error) {
+	// declaredSCFRelease never returns an empty release (#1774).
+	if len(retire) == 0 {
+		return retire, nil
+	}
+	bound, err := scfrelease.Lookup(ctx, q, release)
+	if err != nil {
+		return nil, fmt.Errorf("crosswalk: scf_release: %w", err)
+	}
+	if bound.Status == string(dbx.FrameworkVersionStatusCurrent) {
+		return retire, nil
+	}
+	current, err := scfrelease.Lookup(ctx, q, "")
+	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
+		return retire, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("crosswalk: current SCF release: %w", err)
+	}
+	out := retire[:0:0]
+	for _, e := range retire {
+		if listed[requirementCode{e.FrameworkRequirementID.Bytes, e.ScfID}] {
+			anchor, err := q.GetSCFAnchorByVersionAndSCFID(ctx, dbx.GetSCFAnchorByVersionAndSCFIDParams{
+				FrameworkVersionID: current.ID,
+				ScfID:              e.ScfID,
+			})
+			switch {
+			case err == nil && anchor.ID.Bytes == e.ScfAnchorID.Bytes:
+				continue
+			case err != nil && !errors.Is(err, pgx.ErrNoRows):
+				return nil, fmt.Errorf("crosswalk: lookup scf_anchor %s in SCF release %s: %w", e.ScfID, current.Version, err)
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
 // edgeKey identifies an edge the way the edges table does: one edge per
 // (requirement row, anchor row) pair. It is keyed on row ids, not codes, so
 // an edge on the same SCF code in an older SCF release (a different anchor
@@ -511,6 +565,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	//    listed collects every (requirement row, anchor row) pair the
 	//    crosswalk names, skipped rows included, for the retire pass (6).
 	listed := make(map[edgeKey]bool, len(cw.Mappings))
+	listedCodes := make(map[requirementCode]bool, len(cw.Mappings))
 	for _, m := range cw.Mappings {
 		reqID, ok := reqIDByCode[m.RequirementCode]
 		if !ok {
@@ -529,6 +584,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
 
 		listed[edgeKey{reqID.Bytes, anchor.ID.Bytes}] = true
+		listedCodes[requirementCode{reqID.Bytes, m.SCFAnchor}] = true
 
 		// The anchor row id is in the seed: a new SCF release mints new
 		// anchor rows under the same codes, and the edge to the new row must
@@ -668,6 +724,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		return Report{}, fmt.Errorf("crosswalk: list edges to retire: %w", err)
 	}
 	retire, keep := staleEdges(stored, listed, cw.Source, owned)
+	retire, err = spareCurrentReleaseEdges(ctx, q, release, retire, listedCodes)
+	if err != nil {
+		return Report{}, err
+	}
 	for _, e := range retire {
 		if err := q.RetireFwToScfEdge(ctx, e.ID); err != nil {
 			return Report{}, fmt.Errorf("crosswalk: retire edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
