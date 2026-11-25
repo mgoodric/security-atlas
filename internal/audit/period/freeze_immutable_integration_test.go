@@ -43,23 +43,15 @@ const insertRevisionSQL = `INSERT INTO audit_period_freeze_revisions (
 func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
+	// The runbook's Procedure, step for step and in its order (#3085 N-d).
 	err := pgx.BeginTxFunc(ctx, admin, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER audit_periods_freeze_immutable_trg`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls DISABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM audit_period_frozen_controls WHERE audit_period_id = $1`, id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls ENABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE audit_periods
 			 SET status = 'open', frozen_at = NULL, frozen_hash = NULL, frozen_by = NULL, updated_at = now()
-			 WHERE id = $1`, id); err != nil {
+			 WHERE id = $1 AND status = 'frozen'`, id); err != nil {
 			return err
 		}
 		// The UPDATE queued the deferred frozen-has-controls check; fire it
@@ -68,7 +60,16 @@ func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 		if _, err := tx.Exec(ctx, `SET CONSTRAINTS audit_periods_frozen_has_controls_trg IMMEDIATE`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg`)
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls DISABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM audit_period_frozen_controls WHERE audit_period_id = $1`, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls ENABLE TRIGGER audit_period_frozen_controls_immutable_trg`)
 		return err
 	})
 	if err != nil {

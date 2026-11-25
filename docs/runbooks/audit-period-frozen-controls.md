@@ -17,7 +17,9 @@ Deploy the migration and the binary that ships with it together, with no freezes
 
 ## Detecting a frozen period without a control set
 
-The commit check makes this impossible while it is enabled. It can still happen if the trigger was disabled, for example during a manual recovery. Run as the owner:
+While it is enabled, the commit check refuses any commit that would leave such a period. It runs as `atlas_migrate`, not as the committer, so a session that clears or switches `app.current_tenant` before `COMMIT` is refused too (#3085). It can still happen if the owner disabled the trigger, for example during a manual recovery.
+
+Run the query as `atlas_migrate` (`$DATABASE_URL`). That role has BYPASSRLS, so it sees every tenant's rows. As `atlas_app`, RLS hides every row outside the session's tenant, and the query returns 0 rows even when periods are missing their control sets:
 
 ```sql
 SELECT ap.tenant_id, ap.id, ap.name, ap.frozen_at
@@ -40,4 +42,4 @@ WHERE ap.status = 'frozen';
 
 Then check the result: replay the period (the integration tests call `period.Store.ReplayHash`) and compare it with its `frozen_hash`. A match means the catalog is the one the freeze hashed. A mismatch means the catalog changed after the freeze; the recorded set is not freeze-time, and its `source` says so. Record which periods were recovered, and their outcome, in your program's change records.
 
-`atlas_app` cannot do this: the insert guard (`audit_period_frozen_controls_insert_guard_trg`) accepts a source other than `freeze` only from a superuser or BYPASSRLS role.
+`atlas_app` cannot do this. It holds no `EXECUTE` on `audit_period_record_catalog_controls` (#3085), and the insert guard (`audit_period_frozen_controls_insert_guard_trg`) accepts a source other than `freeze` only when both `current_user` and `session_user` are superuser or BYPASSRLS roles, so `SET ROLE atlas_service_account` from an `atlas_app` session does not pass.
