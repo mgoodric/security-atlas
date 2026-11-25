@@ -471,8 +471,9 @@ func retainedReason(kind string) string {
 }
 
 // retainedTables returns, for every tenant-scoped table a purge keeps, the
-// reason. It starts from the ledger tables and adds, until nothing changes,
-// each table whose all-zeros rows a kept table references.
+// reason. It starts from the self-retained tables (ledgers and tables with
+// a delete-refusing trigger) and adds, until nothing changes, each table
+// whose all-zeros rows a kept table references.
 func retainedTables(ctx context.Context, tx pgx.Tx, selfRetained map[tableRef]string) (map[tableRef]string, error) {
 	fks, err := tenantForeignKeys(ctx, tx, selfRetained)
 	if err != nil {

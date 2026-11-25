@@ -471,6 +471,11 @@ export async function revokeAdminUser(
 // env-var gate is unset (#2730; a 503 before). The frontend shows the
 // "feature disabled" banner from the /status probe; a 409 that races it
 // shows its wording in the error Alert, and a 5xx shows the status line.
+//
+// One 503 is not a failure: {code: "teardown_busy"} with Retry-After means
+// the teardown gave up waiting for the audit_periods lock, rolled back and
+// deleted nothing (#3094). The BFF passes the code and Retry-After through
+// and the page tells the operator to retry (#3096).
 
 export type DemoStatusResponse = {
   enabled: boolean;
@@ -533,10 +538,39 @@ export async function postAdminDemoTeardown(
     },
   });
   if (!res.ok) {
-    const msg = await upstreamErrorMessage(res);
-    throw new APIError(res.status, msg);
+    const msg = await upstreamErrorMessage(res.clone());
+    let code: string | undefined;
+    try {
+      code = ((await res.json()) as { code?: string }).code;
+    } catch {
+      /* body not JSON — no code */
+    }
+    throw new DemoTeardownError(
+      res.status,
+      msg,
+      code,
+      res.headers.get("Retry-After") ?? undefined,
+    );
   }
   return (await res.json()) as DemoTeardownResponse;
+}
+
+// DEMO_TEARDOWN_BUSY is the code on the teardown's lock-timeout 503.
+export const DEMO_TEARDOWN_BUSY = "teardown_busy";
+
+// DemoTeardownError is an APIError that also carries the upstream
+// Retry-After, so the BFF can pass it through on teardown_busy.
+export class DemoTeardownError extends APIError {
+  retryAfter?: string;
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    retryAfter?: string,
+  ) {
+    super(status, message, code);
+    this.retryAfter = retryAfter;
+  }
 }
 
 // ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====

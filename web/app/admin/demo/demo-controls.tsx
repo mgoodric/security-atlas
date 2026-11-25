@@ -90,6 +90,16 @@ type EnabledState =
 // itself takes precedence visually once it appears.
 const CLICK_FEEDBACK_MS = 80;
 
+// teardownBusyMessage is the error text for a teardown_busy 503 (#3094,
+// DEMO_TEARDOWN_BUSY in lib/api/admin.ts): the teardown timed out on the
+// audit_periods lock and deleted nothing, so the operator retries (#3096).
+function teardownBusyMessage(retryAfter: string | null): string {
+  const secs = retryAfter && /^\d+$/.test(retryAfter) ? retryAfter : null;
+  return secs
+    ? `Teardown is busy, retry in ${secs} seconds. Nothing was deleted.`
+    : "Teardown is busy, retry shortly. Nothing was deleted.";
+}
+
 type ClickFeedback = "idle" | "seed" | "teardown";
 
 export function DemoControls() {
@@ -240,8 +250,15 @@ export function DemoControls() {
     try {
       const res = await fetch("/api/admin/demo/teardown", { method: "POST" });
       if (!res.ok) {
-        const message = await upstreamErrorMessage(res.clone());
-        warnInDev("teardown", res, await res.json().catch(() => null));
+        const body = (await res
+          .clone()
+          .json()
+          .catch(() => null)) as { code?: string } | null;
+        const message =
+          body?.code === "teardown_busy"
+            ? teardownBusyMessage(res.headers.get("Retry-After"))
+            : await upstreamErrorMessage(res.clone());
+        warnInDev("teardown", res, body);
         setState({ kind: "error", message });
         return;
       }

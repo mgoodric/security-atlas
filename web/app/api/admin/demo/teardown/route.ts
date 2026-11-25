@@ -6,7 +6,8 @@
 // hard-codes the demo tenant slug. Per slice 205, the seeder's
 // Teardown refuses to operate on a tenant that does not carry
 // the demo_seed_apply forensic mark; this BFF surfaces upstream
-// errors as their original status code.
+// errors as their original status code. A teardown_busy 503 keeps its
+// code and Retry-After (#3096).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -24,10 +25,23 @@ export async function POST() {
     const body = await postAdminDemoTeardown(bearer);
     return NextResponse.json(body);
   } catch (err) {
-    const e = err as { status?: number; message?: string };
+    const e = err as {
+      status?: number;
+      message?: string;
+      code?: string;
+      retryAfter?: string;
+    };
+    // teardown_busy (#3094) keeps its code and Retry-After, so the page
+    // can say "busy, retry" instead of a bare 503 (#3096).
     return NextResponse.json(
-      { error: e.message ?? "upstream error" },
-      { status: e.status ?? 500 },
+      {
+        error: e.message ?? "upstream error",
+        ...(e.code ? { code: e.code } : {}),
+      },
+      {
+        status: e.status ?? 500,
+        ...(e.retryAfter ? { headers: { "Retry-After": e.retryAfter } } : {}),
+      },
     );
   }
 }

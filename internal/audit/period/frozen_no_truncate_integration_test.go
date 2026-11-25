@@ -11,6 +11,7 @@ package period_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -181,4 +182,42 @@ func TestFrozenNoTruncate_FunctionNotPublic(t *testing.T) {
 			t.Errorf("%s EXECUTE on audit_period_frozen_no_truncate() = %v, want %v", role, got, want)
 		}
 	}
+}
+
+// #3096: both SECURITY DEFINER guards carry row_security = off, so if their
+// owner ever lacks BYPASSRLS a query inside them raises instead of seeing
+// only the session tenant's rows (or none) under FORCE RLS and passing.
+func TestFrozenGuards_RowSecurityOff(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	for _, fn := range []string{"audit_periods_frozen_has_controls()", "audit_period_frozen_no_truncate()"} {
+		var config []string
+		var definer bool
+		if err := admin.QueryRow(context.Background(),
+			`SELECT coalesce(proconfig, '{}'), prosecdef FROM pg_proc WHERE oid = $1::regprocedure`, fn,
+		).Scan(&config, &definer); err != nil {
+			t.Fatalf("read %s: %v", fn, err)
+		}
+		if !definer {
+			t.Errorf("%s is not SECURITY DEFINER", fn)
+		}
+		if !slices.Contains(config, "row_security=off") {
+			t.Errorf("%s proconfig = %v, want row_security=off", fn, config)
+		}
+	}
+}
+
+// #3096: TRUNCATE audit_period_freeze_revisions runs the revisions branch
+// of the guard. Whether a revision row exists depends on what else is in the
+// shared database, so either outcome is accepted: success (no revisions) or
+// the guard's refusal. Any other error fails, so a broken branch cannot hide.
+func TestFrozenNoTruncate_RevisionsBranch(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	const stmt = `TRUNCATE audit_period_freeze_revisions`
+	inRolledBackTx(t, admin, func(tx pgx.Tx) {
+		_, err := tx.Exec(context.Background(), stmt)
+		if err == nil {
+			return
+		}
+		wantCheckViolationMsg(t, stmt, err, "audit_period_freeze_revisions holds a frozen audit's rows")
+	})
 }

@@ -212,7 +212,9 @@ func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
 // users CASCADE on the shared database, which deleted every other suite's
 // tenants, users and everything cascading from them (#3094). Each now reads
 // and writes empty copies of the two tables through
-// dbtest.NewShadowMigratePool, and the shared tables are not touched.
+// dbtest.NewShadowMigratePool, and the shared tables are not touched. The
+// RequiresWritePool test is the exception: it seeds and deletes one row of
+// its own in public.tenants (#3096).
 
 // TestStatus_BootstrapTenantID_RequiresWritePool guards the
 // fix-forward 2026-05-23 invariant: the method MUST use the writePool
@@ -222,28 +224,47 @@ func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
 // rows without a tenant GUC set, and the unauth install-state
 // surface has none.
 //
-// Concretely: seed a tenants row, then construct a Status with
-// writePool=nil but readPool=app. Assert (uuid.Nil, nil) is returned
+// Concretely: seed a tenants row in the shared public table, confirm
+// atlas_app cannot see it (RLS, no tenant GUC), then construct a Status
+// with writePool=nil but readPool=app. Assert (uuid.Nil, nil) is returned
 // — anything else (an error OR a returned UUID) means the method
 // regressed back to readPool-based RLS-vulnerable behavior.
+//
+// Unlike its siblings this test does not use a shadow pool: the RLS check
+// needs the row where atlas_app reads, in public.tenants. It seeds one row
+// with a fresh id and deletes only that row (#3096), so no other suite's
+// tenants are touched.
 func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
-	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
+	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
+	ctx := context.Background()
 
-	// Seed a tenants row that atlas_app cannot see due to RLS.
-	want := uuid.MustParse("f0000000-0000-4000-8000-000000000001")
-	_, err := admin.Exec(context.Background(),
-		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, 'Default Tenant', TRUE)`,
-		want)
-	if err != nil {
+	seeded := uuid.New()
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, TRUE)`,
+		seeded, "status-requires-write-pool-"+seeded.String()); err != nil {
 		t.Fatalf("seed tenants row: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, seeded); err != nil {
+			t.Errorf("delete seeded tenant %s: %v", seeded, err)
+		}
+	})
+
+	// The RLS precondition: atlas_app, with no tenant GUC, cannot see it.
+	var visible int
+	if err := app.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id = $1`, seeded).Scan(&visible); err != nil {
+		t.Fatalf("app read of seeded tenant: %v", err)
+	}
+	if visible != 0 {
+		t.Fatalf("atlas_app sees %d seeded tenants rows without a tenant GUC; want 0 (RLS)", visible)
 	}
 
 	// Construct Status with writePool=nil. The method must NOT try to
 	// read via readPool (where RLS hides the row), and must return
 	// (uuid.Nil, nil) for graceful degradation.
 	s := platform.NewStatus(app, nil)
-	got, err := s.BootstrapTenantID(context.Background())
+	got, err := s.BootstrapTenantID(ctx)
 	if err != nil {
 		t.Fatalf("BootstrapTenantID with nil writePool: err = %v; want nil (graceful degradation)", err)
 	}

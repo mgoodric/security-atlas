@@ -175,9 +175,9 @@ func TestSelfRetainedTables_CoverAppendOnlyTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelfRetainedTables: %v", err)
 	}
-	isLedger := map[string]bool{}
+	isSelfRetained := map[string]bool{}
 	for _, l := range selfRetained {
-		isLedger[l] = true
+		isSelfRetained[l] = true
 	}
 	want := append([]string{}, knownLedgers...)
 	for _, n := range tenantTableNames(t, tx) {
@@ -186,13 +186,13 @@ func TestSelfRetainedTables_CoverAppendOnlyTables(t *testing.T) {
 		}
 	}
 	for _, table := range want {
-		if !isLedger[table] {
-			t.Errorf("%s is append-only but not classified as a ledger; a purge would delete from it", table)
+		if !isSelfRetained[table] {
+			t.Errorf("%s is append-only but not self-retained; a purge would delete from it", table)
 		}
 	}
 	for _, purgeable := range []string{"controls", "risks", "populations", "samples"} {
-		if isLedger[purgeable] {
-			t.Errorf("%s is classified as a ledger, want purgeable", purgeable)
+		if isSelfRetained[purgeable] {
+			t.Errorf("%s is self-retained, want purgeable", purgeable)
 		}
 	}
 }
@@ -239,9 +239,9 @@ func TestSelfRetainedTables_ClassifiesBySignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelfRetainedTables: %v", err)
 	}
-	isLedger := map[string]bool{}
+	isSelfRetained := map[string]bool{}
 	for _, l := range selfRetained {
-		isLedger[l] = true
+		isSelfRetained[l] = true
 	}
 	for table, want := range map[string]bool{
 		"scratch_1897_deletable":         false,
@@ -249,8 +249,8 @@ func TestSelfRetainedTables_ClassifiesBySignal(t *testing.T) {
 		"scratch_1897_no_delete_grant":   true, // append-only by grant
 		"scratch_1897.erasure_audit_log": true, // outside public
 	} {
-		if isLedger[table] != want {
-			t.Errorf("%s ledger = %v, want %v", table, isLedger[table], want)
+		if isSelfRetained[table] != want {
+			t.Errorf("%s self-retained = %v, want %v", table, isSelfRetained[table], want)
 		}
 	}
 	found := false
