@@ -225,57 +225,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			for _, line := range cw.PointsOfFocusRollUp.Summary() {
 				fmt.Println(line)
 			}
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d retired=%d restored=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesRetired), len(report.EdgesRestored))
-			for _, re := range report.EdgesRetired {
-				fmt.Printf("edge retired %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
-					re.RequirementCode, re.SCFAnchor, re.Source, re.Attribution, re.Tier)
-			}
-			retired := report.RetiredBySource()
-			sources := make([]string, 0, len(retired))
-			for s := range retired {
-				sources = append(sources, s)
-			}
-			sort.Strings(sources)
-			for _, s := range sources {
-				fmt.Printf("edges retired by source[%s]=%d\n", s, retired[s])
-			}
-			for _, rs := range report.EdgesRestored {
-				fmt.Printf("edge restored %s->%s: listed again (mapping_tier=%s)\n",
-					rs.RequirementCode, rs.SCFAnchor, rs.Tier)
-			}
-			for _, ce := range report.EdgesCarriedRetired {
-				fmt.Printf("edge retired %s->%s: carried by an SCF edge remap from an edge no longer in the crosswalk (source=%s mapping_tier=%s)\n",
-					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
-			}
-			for _, ce := range report.EdgesCarriedRestored {
-				fmt.Printf("edge restored %s->%s: carried by an SCF edge remap from an edge listed again (source=%s mapping_tier=%s)\n",
-					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
-			}
-			for _, ce := range report.EdgesCarriedSynced {
-				fmt.Printf("edge updated %s->%s: carried by an SCF edge remap, content set from the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
-					ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Attribution, ce.Tier)
-			}
-			for _, ce := range report.EdgesCarriedHeldBack {
-				fmt.Printf("edge kept %s->%s: carried by an SCF edge remap, content differs from the crosswalk but is held back (reason=%s source=%s source_attribution=%s mapping_tier=%s)\n",
-					ce.RequirementCode, ce.SCFAnchor, ce.Reason, ce.Source, ce.Attribution, ce.Tier)
-			}
-			for _, un := range report.EdgesUnlisted {
-				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
-					un.RequirementCode, un.SCFAnchor, un.Source, un.Attribution)
-			}
-			for _, sk := range report.EdgesSkipped {
-				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
-					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
-			}
-			for _, up := range report.EdgesUpgradedOntoRejected {
-				fmt.Printf("edge upgraded onto rejected tier %s->%s: source_attribution %s -> %s; mapping_tier stays rejected\n",
-					up.RequirementCode, up.SCFAnchor, up.PreviousAttribution, up.IncomingAttribution)
-			}
-			for _, rs := range report.EdgesTierReseeded {
-				fmt.Printf("edge tier re-seeded %s->%s: content changed; mapping_tier %s -> %s\n",
-					rs.RequirementCode, rs.SCFAnchor, rs.PreviousTier, rs.NewTier)
-			}
+			printImportEdges(os.Stdout, report)
 			keys := make([]string, 0, len(report.MappingsByAttribution))
 			for k := range report.MappingsByAttribution {
 				keys = append(keys, k)
@@ -407,5 +357,60 @@ func printRebindReport(w io.Writer, r scfimport.RebindReport) {
 	for _, c := range r.NeedsReanchoring {
 		_, _ = fmt.Fprintf(w, "control needs re-anchoring tenant=%s bundle=%s anchor=%s@%s: %s\n",
 			c.TenantID, c.BundleID, c.LegacySCFID, c.LegacyRelease, c.Note)
+	}
+}
+
+// printImportEdges writes import-crosswalk's per-edge lines for report.
+func printImportEdges(w io.Writer, report soc2import.Report) {
+	_, _ = fmt.Fprintf(w, "edges        created=%d updated=%d unchanged=%d skipped=%d retired=%d restored=%d\n",
+		report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesRetired), len(report.EdgesRestored))
+	for _, re := range report.EdgesRetired {
+		_, _ = fmt.Fprintf(w, "edge retired %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
+			re.RequirementCode, re.SCFAnchor, re.Source, re.Attribution, re.Tier)
+	}
+	retired := report.RetiredBySource()
+	sources := make([]string, 0, len(retired))
+	for s := range retired {
+		sources = append(sources, s)
+	}
+	sort.Strings(sources)
+	for _, s := range sources {
+		_, _ = fmt.Fprintf(w, "edges retired by source[%s]=%d\n", s, retired[s])
+	}
+	for _, rs := range report.EdgesRestored {
+		_, _ = fmt.Fprintf(w, "edge restored %s->%s: listed again (mapping_tier=%s)\n",
+			rs.RequirementCode, rs.SCFAnchor, rs.Tier)
+	}
+	for _, ce := range report.EdgesCarriedRetired {
+		_, _ = fmt.Fprintf(w, "edge retired %s->%s: carried by an SCF edge remap from an edge no longer in the crosswalk (source=%s mapping_tier=%s)\n",
+			ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
+	}
+	for _, ce := range report.EdgesCarriedRestored {
+		_, _ = fmt.Fprintf(w, "edge restored %s->%s: carried by an SCF edge remap from an edge listed again (source=%s mapping_tier=%s)\n",
+			ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Tier)
+	}
+	for _, ce := range report.EdgesCarriedSynced {
+		_, _ = fmt.Fprintf(w, "edge updated %s->%s: carried by an SCF edge remap, content set from the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
+			ce.RequirementCode, ce.SCFAnchor, ce.Source, ce.Attribution, ce.Tier)
+	}
+	for _, ce := range report.EdgesCarriedHeldBack {
+		_, _ = fmt.Fprintf(w, "edge kept %s->%s: carried by an SCF edge remap, content differs from the crosswalk but is held back (reason=%s source=%s source_attribution=%s mapping_tier=%s)\n",
+			ce.RequirementCode, ce.SCFAnchor, ce.Reason, ce.Source, ce.Attribution, ce.Tier)
+	}
+	for _, un := range report.EdgesUnlisted {
+		_, _ = fmt.Fprintf(w, "edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
+			un.RequirementCode, un.SCFAnchor, un.Source, un.Attribution)
+	}
+	for _, sk := range report.EdgesSkipped {
+		_, _ = fmt.Fprintf(w, "edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
+			sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
+	}
+	for _, up := range report.EdgesUpgradedOntoRejected {
+		_, _ = fmt.Fprintf(w, "edge upgraded onto rejected tier %s->%s: source_attribution %s -> %s; mapping_tier stays rejected\n",
+			up.RequirementCode, up.SCFAnchor, up.PreviousAttribution, up.IncomingAttribution)
+	}
+	for _, rs := range report.EdgesTierReseeded {
+		_, _ = fmt.Fprintf(w, "edge tier re-seeded %s->%s: content changed; mapping_tier %s -> %s\n",
+			rs.RequirementCode, rs.SCFAnchor, rs.PreviousTier, rs.NewTier)
 	}
 }

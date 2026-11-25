@@ -65,19 +65,20 @@ type Report struct {
 	// untouched, provenance and mapping_tier included.
 	EdgesSkipped []SkippedEdge
 
-	// EdgesUpgradedOntoRejected lists edges whose provenance this import
-	// raised while their mapping_tier is 'rejected'. A rejection is a human
-	// judgment the importer never overrides, so these stay hidden from
+	// EdgesUpgradedOntoRejected lists edges this import rewrote with raised
+	// provenance while their mapping_tier is 'rejected'. A rejection is a
+	// human judgment the importer never overrides, so these stay hidden from
 	// coverage until a reviewer reopens them (rejected -> draft, #1849). A
-	// rejected carried edge whose content the sync rewrote is listed too
-	// (#3079).
+	// rejected carried edge the sync rewrote with raised provenance is
+	// listed too (#3079).
 	EdgesUpgradedOntoRejected []UpgradedEdge
 
 	// EdgesTierReseeded lists edges whose content this import changed and
 	// whose mapping_tier it therefore re-seeded per ADR 0018 §2 (#1849): a
 	// tier vouches for the content a reviewer saw, so changed content restarts
 	// at the tier its new source would seed at. Each re-seed also appends an
-	// audit row by SystemReviewerID.
+	// audit row by SystemReviewerID. A carried edge whose tier the content
+	// sync moved is listed here too (#3083).
 	EdgesTierReseeded []ReseededEdge
 
 	// EdgesRetired lists the catalog edges this import retired because the
