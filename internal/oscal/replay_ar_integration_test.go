@@ -1,9 +1,9 @@
 //go:build integration
 
 // #3071: the AR ranks a control's runs by the instant each judged
-// (COALESCE(evaluated_as_of, evaluated_at)), so a replay of an earlier
-// instant does not displace a later live run, and an excepted cell taken
-// from a replay run carries evaluated_as_of.
+// (COALESCE(evaluated_as_of, evaluated_at)), live first on a tie, so a
+// replay of an earlier or the same instant does not displace a live run,
+// and an excepted cell taken from a replay run carries evaluated_as_of.
 //
 // Run with: go test -tags=integration -p 1 ./internal/oscal/...
 
@@ -59,6 +59,14 @@ func TestExport_ReplayRunsRankByTheirJudgedInstant(t *testing.T) {
 	asOfB := frozenAt.Add(-3 * time.Hour)
 	replayB := seedRow(ctrlB, "excepted", frozenAt.Add(-time.Hour), &asOfB, "replay")
 
+	// Control C: live excepted at frozen-4h, then a replay written at
+	// frozen-1h of that same instant. The judged instants tie; the live run
+	// wins.
+	ctrlC := seedControl(t, admin, tenant, "BCD")
+	liveAtC := frozenAt.Add(-4 * time.Hour)
+	liveC := seedRow(ctrlC, "excepted", liveAtC, nil, "manual")
+	replayC := seedRow(ctrlC, "excepted", frozenAt.Add(-time.Hour), &liveAtC, "replay")
+
 	signer, _ := oscal.NewEphemeralSigner()
 	bundle, err := oscal.NewExporter(app, &captureBridge{}, signer).Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:     periodID,
@@ -99,6 +107,12 @@ func TestExport_ReplayRunsRankByTheirJudgedInstant(t *testing.T) {
 	}
 	if _, ok := byID[replayA.String()]; ok {
 		t.Errorf("control A: replay row %s of an earlier instant displaced the later live run\n%s", replayA, ar)
+	}
+	if asOf, ok := byID[liveC.String()]; !ok || asOf != "" {
+		t.Errorf("control C: live row %s in AR = (%q, %v), want present with no evaluated_as_of\n%s", liveC, asOf, ok, ar)
+	}
+	if _, ok := byID[replayC.String()]; ok {
+		t.Errorf("control C: replay row %s of the live run's own instant displaced it\n%s", replayC, ar)
 	}
 	want := asOfB.UTC().Format(time.RFC3339)
 	if asOf, ok := byID[replayB.String()]; !ok || asOf != want {

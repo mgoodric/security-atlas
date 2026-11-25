@@ -356,6 +356,26 @@ func TestReplay_ReproducesIdenticalStateFromLedger(t *testing.T) {
 	if after2[0].Result != "fail" {
 		t.Fatalf("AC-7: c2 expected fail, got %q", after2[0].Result)
 	}
+
+	// #3071: the recovery form. A replay at a horizon at or after now writes
+	// live rows (evaluated_as_of NULL), so ControlState serves the rebuilt
+	// state, identical to what the ledger gave before the delete.
+	if _, err := eng.Replay(ctx, eval.FarFuture); err != nil {
+		t.Fatalf("Replay(FarFuture): %v", err)
+	}
+	live1, err := eng.ControlState(ctx, c1, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState c1 after Replay(FarFuture): %v", err)
+	}
+	live2, err := eng.ControlState(ctx, c2, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState c2 after Replay(FarFuture): %v", err)
+	}
+	assertSameState(t, "AC-7 recovery c1", before1, live1)
+	assertSameState(t, "AC-7 recovery c2", before2, live2)
+	if live1[0].Trigger != eval.TriggerReplay || live2[0].Trigger != eval.TriggerReplay {
+		t.Fatalf("AC-7 recovery: ControlState triggers = %q, %q, want replay", live1[0].Trigger, live2[0].Trigger)
+	}
 }
 
 func assertSameState(t *testing.T, label string, before, after []eval.State) {

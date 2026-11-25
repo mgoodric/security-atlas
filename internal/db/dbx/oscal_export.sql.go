@@ -229,13 +229,15 @@ const listExceptedEvaluationsAsOf = `-- name: ListExceptedEvaluationsAsOf :many
 WITH control_latest_run AS (
     -- #3071: ranked by the instant a run judged, not the clock that wrote
     -- it, so a replay of an earlier instant does not displace a later live
-    -- run. A run must still have been written by the horizon.
+    -- run. On a tie (a replay of a live run's own instant) the live run
+    -- wins. A run must still have been written by the horizon.
     SELECT DISTINCT ON (control_id)
         control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC,
+             (evaluated_as_of IS NULL) DESC, evaluated_at DESC, created_at DESC
 )
 SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, evaluated_as_of, result FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
@@ -395,13 +397,15 @@ const listFailingEvaluationsAsOf = `-- name: ListFailingEvaluationsAsOf :many
 WITH control_latest_run AS (
     -- #3071: ranked by the instant a run judged, not the clock that wrote
     -- it, so a replay of an earlier instant does not displace a later live
-    -- run. A run must still have been written by the horizon.
+    -- run. On a tie (a replay of a live run's own instant) the live run
+    -- wins. A run must still have been written by the horizon.
     SELECT DISTINCT ON (control_id)
         control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC,
+             (evaluated_as_of IS NULL) DESC, evaluated_at DESC, created_at DESC
 )
 SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)

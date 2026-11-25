@@ -39,20 +39,33 @@ import (
 // evaluatedState is the state the evaluation just written computed. A live
 // run (asOf FarFuture) is the control's latest state, read through
 // ControlState. A run as of an earlier instant is not latest state (#3071),
-// so its row is read directly.
+// so every row of its run is read directly, one per cell, as ControlState
+// would return them.
 func evaluatedState(ctx context.Context, engine *eval.Engine, admin *pgxpool.Pool, tenant string, ctrl uuid.UUID, asOf time.Time) ([]eval.State, error) {
 	if asOf.Equal(eval.FarFuture) {
 		return engine.ControlState(ctx, ctrl, "", eval.FarFuture)
 	}
-	s := eval.State{ControlID: ctrl}
-	err := admin.QueryRow(ctx, `
+	rows, err := admin.Query(ctx, `
 		SELECT result::text, freshness_status FROM control_evaluations
-		WHERE tenant_id = $1 AND control_id = $2 AND evaluated_as_of IS NOT NULL
-		ORDER BY evaluated_at DESC, created_at DESC LIMIT 1`, tenant, ctrl).Scan(&s.Result, &s.FreshnessStatus)
+		WHERE tenant_id = $1 AND control_id = $2
+		  AND eval_run_id = (
+		      SELECT eval_run_id FROM control_evaluations
+		      WHERE tenant_id = $1 AND control_id = $2 AND evaluated_as_of IS NOT NULL
+		      ORDER BY evaluated_at DESC, created_at DESC LIMIT 1)
+		ORDER BY scope_cell_id`, tenant, ctrl)
 	if err != nil {
-		return nil, fmt.Errorf("read as-of row: %w", err)
+		return nil, fmt.Errorf("read as-of run: %w", err)
 	}
-	return []eval.State{s}, nil
+	defer rows.Close()
+	var out []eval.State
+	for rows.Next() {
+		s := eval.State{ControlID: ctrl}
+		if err := rows.Scan(&s.Result, &s.FreshnessStatus); err != nil {
+			return nil, fmt.Errorf("scan as-of row: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func TestStockSQLBundleTests_PassAgainstPostgres(t *testing.T) {

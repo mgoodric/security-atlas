@@ -57,25 +57,30 @@ is which row they come from.
 Every read that picks a control's latest row or latest run, or counts rows
 as current activity:
 
-| Read                                                                 | Surface                                                  |
-| -------------------------------------------------------------------- | -------------------------------------------------------- |
-| `ListLatestControlEvaluations`                                       | `ControlState`, `GET /v1/controls/{id}/state`            |
-| `ListActiveControlsWithState`, `CountActiveControls`                 | controls list, needs-attention                           |
-| `ListInconclusiveStreaks`                                            | needs-attention "inconclusive since"                     |
-| `ListControlEvaluationsForEffectiveness`                             | rolling 30-day effectiveness                             |
-| `FrameworkPosture` (all four latest CTEs)                            | dashboard posture, coverage, trend, covered-by-exception |
-| `ListFailingEvaluationsForPack`                                      | board pack open findings                                 |
-| `ListCalendarEvents`                                                 | periodic-review "last evaluated"                         |
-| `ListPassingControlsForDay`                                          | freshness drift                                          |
-| `ListFrameworkScopeContradictions`                                   | framework-scope exclusions that still pass               |
-| `ListSCFAnchorsLatestWithState`, `ListSCFAnchorsForVersionWithState` | anchor rollups                                           |
-| `program_effectiveness` evaluator (inline SQL)                       | metrics                                                  |
-| `action_plan_linked_controls_pass` (migration `20261312000000`)      | action-plan completed <-> verified                       |
+| Read                                                                                                                        | Surface                                                  |
+| --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `ListLatestControlEvaluations`                                                                                              | `ControlState`, `GET /v1/controls/{id}/state`            |
+| `ListActiveControlsWithState`, `CountActiveControls`                                                                        | controls list, needs-attention                           |
+| `ListInconclusiveStreaks`                                                                                                   | needs-attention "inconclusive since"                     |
+| `ListControlEvaluationsForEffectiveness`                                                                                    | rolling 30-day effectiveness                             |
+| `FrameworkPosture` (its three latest-row and latest-run CTEs; the two excepted CTEs join on the run and inherit the filter) | dashboard posture, coverage, trend, covered-by-exception |
+| `ListFailingEvaluationsForPack`                                                                                             | board pack open findings                                 |
+| `ListCalendarEvents`                                                                                                        | periodic-review "last evaluated"                         |
+| `ListPassingControlsForDay`                                                                                                 | freshness drift                                          |
+| `ListFrameworkScopeContradictions`                                                                                          | framework-scope exclusions that still pass               |
+| `ListSCFAnchorsLatestWithState`, `ListSCFAnchorsForVersionWithState`                                                        | anchor rollups                                           |
+| `program_effectiveness` evaluator (inline SQL)                                                                              | metrics                                                  |
+| `action_plan_linked_controls_pass` (migration `20261312000000`)                                                             | action-plan completed <-> verified                       |
 
-The last one matters beyond display: the engine calls
+The last one matters beyond display: the engine called
 `ReconcileVerification` after every run, replays included, and the function
 read the latest run. A replay of T could have verified or un-verified a
-plan on how its controls stood at T.
+plan on how its controls stood at T. Two guards now hold, either one enough
+alone: the engine skips `ReconcileVerification` when the run's instant is
+before its clock (a replay moves no plan at all), and the function reads only
+live runs, so a later live reconcile never counts a replay row
+(`TestReconcile_ReplayDoesNotReconcileLinkedPlans`,
+`TestReconcile_ReplayOfAnEarlierInstantDoesNotMoveThePlan`).
 
 The `eval_cells` skip scans that enumerate a control's cells are left
 unfiltered. A cell seen only in replay rows has no live row, so the
@@ -88,13 +93,16 @@ per-cell probe that follows returns nothing and the cell drops out.
   history, not state. It does not return `evaluated_as_of`; adding it would
   change the history API's shape, so it is left for a follow-up if wanted.
 - `ListFailingEvaluationsAsOf`, `ListExceptedEvaluationsAsOf` (OSCAL AR and
-  POA&M): see D4.
+  POA&M): see D4. `ListFailingEvaluationsAsOf` does not select
+  `evaluated_as_of`, so a POA&M item taken from a replay run does not say it
+  judged an earlier instant. Follow-up, not in this ticket's acceptance.
 
 ### D4 — the AR ranks runs by the instant each judged
 
 The AR's `control_latest_run` now orders by
-`COALESCE(evaluated_as_of, evaluated_at) DESC`, then `evaluated_at`, then
-`created_at`. The `evaluated_at <= horizon` bound stays: a run must have
+`COALESCE(evaluated_as_of, evaluated_at) DESC`, then
+`(evaluated_as_of IS NULL) DESC` so a live run wins a tie with a replay of
+its own instant, then `evaluated_at`, then `created_at`. The `evaluated_at <= horizon` bound stays: a run must have
 been written by the frozen horizon to be in the AR at all.
 
 So a replay of an earlier instant written after a live run does not
