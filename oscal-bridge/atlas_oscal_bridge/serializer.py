@@ -551,6 +551,12 @@ def _excepted_observations(cells):
         ]
         if cell.scope_cell_id:
             props.append(_prop("scope-cell-id", cell.scope_cell_id))
+        # #3071: a replay row was written at evaluated_at (collected) but
+        # judged an earlier instant, and its exceptions are the ones in force
+        # then. The prop says which instant, so an exception revoked between
+        # the two does not read as a contradiction.
+        if cell.evaluated_as_of:
+            props.append(_prop("evaluated-as-of", cell.evaluated_as_of))
         links = []
         expiries = []
         for exc in cell.exceptions:

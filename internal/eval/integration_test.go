@@ -325,14 +325,11 @@ func TestReplay_ReproducesIdenticalStateFromLedger(t *testing.T) {
 	if _, err := eng.EvaluateAll(ctx, eval.TriggerScheduled, evidenceHorizon); err != nil {
 		t.Fatalf("EvaluateAll (initial): %v", err)
 	}
-	before1, err := eng.ControlState(ctx, c1, "", eval.FarFuture)
-	if err != nil {
-		t.Fatalf("ControlState c1 before: %v", err)
-	}
-	before2, err := eng.ControlState(ctx, c2, "", eval.FarFuture)
-	if err != nil {
-		t.Fatalf("ControlState c2 before: %v", err)
-	}
+	// #3071: both runs pin evidenceHorizon, which is before the clock that
+	// stamps them, so both are as-of runs and neither is latest state. Each
+	// run's computed state is read from its own rows.
+	before1 := runStates(t, admin, tenant, c1, eval.TriggerScheduled)
+	before2 := runStates(t, admin, tenant, c2, eval.TriggerScheduled)
 
 	// AC-7: delete EVERY control_evaluations row, then Replay.
 	if _, err := admin.Exec(ctx, `DELETE FROM control_evaluations WHERE tenant_id = $1`, tenant); err != nil {
@@ -346,14 +343,8 @@ func TestReplay_ReproducesIdenticalStateFromLedger(t *testing.T) {
 		t.Fatalf("Replay: %v", err)
 	}
 
-	after1, err := eng.ControlState(ctx, c1, "", eval.FarFuture)
-	if err != nil {
-		t.Fatalf("ControlState c1 after: %v", err)
-	}
-	after2, err := eng.ControlState(ctx, c2, "", eval.FarFuture)
-	if err != nil {
-		t.Fatalf("ControlState c2 after: %v", err)
-	}
+	after1 := runStates(t, admin, tenant, c1, eval.TriggerReplay)
+	after2 := runStates(t, admin, tenant, c2, eval.TriggerReplay)
 
 	// The derived state must be IDENTICAL — the engine holds no hidden
 	// state; everything derives from the immutable ledger.
@@ -1250,14 +1241,17 @@ func TestReplay_AppliesExceptionsInForceAtTheHorizon(t *testing.T) {
 		if _, err := eng.EvaluateControl(ctx, c.id, eval.TriggerReplay, at); err != nil {
 			t.Fatalf("%s: replay of T: %v", c.name, err)
 		}
+		// #3071: the replay is not the control's latest state; the live
+		// run at T still is.
 		states, err := eng.ControlState(ctx, c.id, "", eval.FarFuture)
-		if err != nil || len(states) != 1 {
-			t.Fatalf("%s: ControlState after replay = %+v, %v", c.name, states, err)
+		if err != nil || len(states) != 1 || states[0].Trigger != eval.TriggerManual {
+			t.Fatalf("%s: ControlState after replay = %+v, %v; want the live run at T", c.name, states, err)
 		}
-		got, want := states[0], original[c.id]
-		if got.Trigger != eval.TriggerReplay {
-			t.Fatalf("%s: latest row trigger = %q, want replay", c.name, got.Trigger)
+		replayed := runStates(t, admin, tenant, c.id, eval.TriggerReplay)
+		if len(replayed) != 1 {
+			t.Fatalf("%s: replay rows = %+v, want one", c.name, replayed)
 		}
+		got, want := replayed[0], original[c.id]
 		// #3056: the replay row records the instant it judged, so the AR
 		// can name the exception in force then.
 		var asOf *time.Time

@@ -61,12 +61,15 @@ ORDER BY created_at ASC, id ASC;
 -- A failing control evaluation IS a finding for v1 — there is no separate
 -- findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
 WITH control_latest_run AS (
+    -- #3071: ranked by the instant a run judged, not the clock that wrote
+    -- it, so a replay of an earlier instant does not displace a later live
+    -- run. A run must still have been written by the horizon.
     SELECT DISTINCT ON (control_id)
         control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC, evaluated_at DESC, created_at DESC
 )
 SELECT * FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
@@ -95,12 +98,15 @@ ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
 -- #3056: evaluated_as_of is the instant a replay row judged; the export
 -- names the exception in force then, not at evaluated_at.
 WITH control_latest_run AS (
+    -- #3071: ranked by the instant a run judged, not the clock that wrote
+    -- it, so a replay of an earlier instant does not displace a later live
+    -- run. A run must still have been written by the horizon.
     SELECT DISTINCT ON (control_id)
         control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC, evaluated_at DESC, created_at DESC
 )
 SELECT * FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)

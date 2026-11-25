@@ -73,6 +73,8 @@ FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2
   AND evaluated_at <= $3
+  -- #3071: a replay of an earlier instant is not the control's state now.
+  AND evaluated_as_of IS NULL
 ORDER BY scope_cell_id, evaluated_at DESC, created_at DESC;
 
 -- name: ListControlEvaluationsForEffectiveness :many
@@ -86,6 +88,7 @@ WHERE tenant_id = $1
   AND control_id = $2
   AND evaluated_at >= $3
   AND evaluated_at <= $4
+  AND evaluated_as_of IS NULL
 ORDER BY evaluated_at DESC;
 
 -- name: ListTenantsWithActiveControls :many
@@ -149,6 +152,7 @@ LEFT JOIN LATERAL (
       AND ce.scope_cell_id = c.scope_cell_id
       AND ce.result <> 'inconclusive'
       AND ce.evaluated_at <= sqlc.arg(as_of)
+      AND ce.evaluated_as_of IS NULL
     ORDER BY ce.evaluated_at DESC
     LIMIT 1
 ) b ON true
@@ -159,6 +163,7 @@ CROSS JOIN LATERAL (
       AND ce.scope_cell_id = c.scope_cell_id
       AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
       AND ce.evaluated_at <= sqlc.arg(as_of)
+      AND ce.evaluated_as_of IS NULL
     ORDER BY ce.evaluated_at
     LIMIT 1
 ) s
@@ -172,6 +177,7 @@ LEFT JOIN LATERAL (
       AND ce.scope_cell_id IS NULL
       AND ce.result <> 'inconclusive'
       AND ce.evaluated_at <= sqlc.arg(as_of)
+      AND ce.evaluated_as_of IS NULL
     -- Leading scope_cell_id (constant here) lets the planner read the
     -- index in order: IS NULL does not make it a pathkey constant.
     ORDER BY ce.scope_cell_id, ce.evaluated_at DESC
@@ -184,6 +190,7 @@ CROSS JOIN LATERAL (
       AND ce.scope_cell_id IS NULL
       AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
       AND ce.evaluated_at <= sqlc.arg(as_of)
+      AND ce.evaluated_as_of IS NULL
     -- DESC so a backward scan of the index (evaluated_at DESC) serves
     -- the ascending evaluated_at with no sort.
     ORDER BY ce.scope_cell_id DESC, ce.evaluated_at

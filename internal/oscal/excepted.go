@@ -78,8 +78,11 @@ func exceptedCells(
 		// #3056: a replay row judged an earlier instant than the clock
 		// that wrote it. The exception that waived it is the one in force
 		// at that instant.
+		// #3071: the AR says so, so an auditor does not read the row as
+		// judged at evaluated_at against exceptions in force then.
 		if r.EvaluatedAsOf.Valid {
 			at = r.EvaluatedAsOf.Time
+			ec.EvaluatedAsOf = at.UTC().Format(time.RFC3339)
 		}
 
 		var cell *scope.Cell

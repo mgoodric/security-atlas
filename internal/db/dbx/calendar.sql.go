@@ -234,6 +234,8 @@ FROM (
         FROM control_evaluations ce
         WHERE ce.tenant_id = c.tenant_id
           AND ce.control_id = c.id
+          -- #3071: a replay does not count as the control's last review.
+          AND ce.evaluated_as_of IS NULL
     ) le ON TRUE
     WHERE c.tenant_id = $1
       AND c.superseded_by IS NULL

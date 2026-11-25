@@ -157,4 +157,22 @@ func TestExceptedCells_ReplayRowAttributesAtItsInstant(t *testing.T) {
 	if got[0].EvaluatedAt != written.Format(time.RFC3339) {
 		t.Fatalf("evaluated_at = %q, want the write instant %s", got[0].EvaluatedAt, written.Format(time.RFC3339))
 	}
+	// #3071: the AR carries the instant the row judged.
+	if got[0].EvaluatedAsOf != judged.Format(time.RFC3339) {
+		t.Fatalf("evaluated_as_of = %q, want the judged instant %s", got[0].EvaluatedAsOf, judged.Format(time.RFC3339))
+	}
+}
+
+// #3071: a live row (evaluated_as_of NULL) carries no evaluated_as_of.
+func TestExceptedCells_LiveRowHasNoEvaluatedAsOf(t *testing.T) {
+	t.Parallel()
+	rows := []dbx.ListExceptedEvaluationsAsOfRow{{
+		ID:          pgUUID(uuid.New()),
+		ControlID:   pgUUID(uuid.New()),
+		EvaluatedAt: ts(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)),
+	}}
+	got := exceptedCells(rows, nil, map[uuid.UUID]scope.Cell{})
+	if len(got) != 1 || got[0].EvaluatedAsOf != "" {
+		t.Fatalf("live row evaluated_as_of = %q, want empty", got[0].EvaluatedAsOf)
+	}
 }

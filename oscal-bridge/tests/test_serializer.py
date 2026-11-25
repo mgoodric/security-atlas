@@ -382,6 +382,39 @@ def test_serialize_assessment_emits_excepted_cells_as_risk_accepted_observations
     assert valid, errors
 
 
+def test_serialize_assessment_excepted_replay_cell_carries_evaluated_as_of():
+    # #3071: a replay row is written at evaluated_at but judged an earlier
+    # instant; the observation names that instant. A live row has no such
+    # prop.
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        excepted_cells=[
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-replay",
+                control_id="ctrl-1",
+                evaluated_at="2026-05-11T00:00:00+00:00",
+                evaluated_as_of="2026-05-01T00:00:00+00:00",
+            ),
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-live",
+                control_id="ctrl-2",
+                evaluated_at="2026-05-11T00:00:00+00:00",
+            ),
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    obs = json.loads(ar_json)["assessment-results"]["results"][0]["observations"]
+    props = [{p["name"]: p["value"] for p in o["props"]} for o in obs]
+    assert props[0]["evaluated-as-of"] == "2026-05-01T00:00:00+00:00"
+    assert obs[0]["collected"].startswith("2026-05-11")
+    assert "evaluated-as-of" not in props[1]
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
+
+
 def test_serialize_assessment_emits_valid_ap_and_ar():
     inp = oscal_pb2.AssessmentInput(
         metadata=_metadata(),

@@ -491,6 +491,8 @@ latest_eval AS (
         FROM control_evaluations ce
         WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
           AND ce.scope_cell_id = ec.scope_cell_id
+          -- #3071: a replay of an earlier instant is not today's state.
+          AND ce.evaluated_as_of IS NULL
         ORDER BY ce.evaluated_at DESC, ce.created_at DESC
         LIMIT 1
     ) l
@@ -507,6 +509,7 @@ latest_eval AS (
         FROM control_evaluations ce
         WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
           AND ce.scope_cell_id IS NULL
+          AND ce.evaluated_as_of IS NULL
         -- Leading scope_cell_id (constant here) lets the planner read the
         -- index in order: IS NULL does not make the column a pathkey
         -- constant the way = does, so without it this sorts every row.
@@ -691,6 +694,8 @@ latest_eval AS (
         FROM control_evaluations ce
         WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
           AND ce.scope_cell_id = ec.scope_cell_id
+          -- #3071: a replay of an earlier instant is not today's state.
+          AND ce.evaluated_as_of IS NULL
         ORDER BY ce.evaluated_at DESC, ce.created_at DESC
         LIMIT 1
     ) l
@@ -707,6 +712,7 @@ latest_eval AS (
         FROM control_evaluations ce
         WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
           AND ce.scope_cell_id IS NULL
+          AND ce.evaluated_as_of IS NULL
         -- Leading scope_cell_id (constant here) lets the planner read the
         -- index in order: IS NULL does not make the column a pathkey
         -- constant the way = does, so without it this sorts every row.

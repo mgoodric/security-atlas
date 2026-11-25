@@ -323,9 +323,15 @@ message ExceptedCell {
   string scope_cell_id = 3;
   // RFC-3339 instant of the evaluation.
   string evaluated_at = 4;
-  // The exceptions in force for this cell at evaluated_at. Empty only when
-  // the exception can no longer be resolved; the observation says so.
+  // The exceptions in force for this cell at the instant the row judged:
+  // evaluated_as_of when set, else evaluated_at. Empty only when the
+  // exception can no longer be resolved; the observation says so.
   repeated AcceptedException exceptions = 5;
+  // RFC-3339 instant a replay judged the cell as of (#3056, #3071). Empty
+  // for a live evaluation, which judged at evaluated_at. When set, the
+  // observation was written at evaluated_at but describes this earlier
+  // instant, and its exceptions are the ones in force then.
+  string evaluated_as_of = 6;
 }
 
 message AssessmentInput {
