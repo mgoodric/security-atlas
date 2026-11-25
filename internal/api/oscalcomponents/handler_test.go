@@ -39,6 +39,7 @@ type stubStore struct {
 
 	gotMapClaimID uuid.UUID
 	gotMapAnchor  string
+	gotMapRelease string
 	gotMapActor   string
 }
 
@@ -58,9 +59,10 @@ func (s *stubStore) Disposition(_ context.Context, claimID uuid.UUID, toStatus, 
 	return s.dispResult, s.dispErr
 }
 
-func (s *stubStore) MapScfAnchor(_ context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error) {
+func (s *stubStore) MapScfAnchor(_ context.Context, claimID uuid.UUID, scfAnchorID, scfRelease, actor string) (dbx.ImportedComponentClaim, error) {
 	s.gotMapClaimID = claimID
 	s.gotMapAnchor = scfAnchorID
+	s.gotMapRelease = scfRelease
 	s.gotMapActor = actor
 	return s.mapResult, s.mapErr
 }
@@ -371,7 +373,7 @@ func TestMapScfAnchor_OK(t *testing.T) {
 		ScfAnchorID: &mapped,
 	}}
 	h := newHandlerWithStore(st)
-	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37"}`, approverCred(testTenant))
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37","scf_release":" test-2026.3 "}`, approverCred(testTenant))
 	rec := routeMap(h, r, claimID)
 
 	if rec.Code != http.StatusOK {
@@ -382,6 +384,9 @@ func TestMapScfAnchor_OK(t *testing.T) {
 	}
 	if st.gotMapAnchor != "IAC-37" {
 		t.Fatalf("anchor = %q, want IAC-37", st.gotMapAnchor)
+	}
+	if st.gotMapRelease != "test-2026.3" {
+		t.Fatalf("release = %q, want trimmed test-2026.3", st.gotMapRelease)
 	}
 	if st.gotMapActor != "grc-1" {
 		t.Fatalf("actor = %q, want grc-1", st.gotMapActor)
@@ -475,6 +480,23 @@ func TestMapScfAnchor_ClaimNotFound(t *testing.T) {
 	rec := routeMap(h, r, claimID)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestMapScfAnchor_ReleaseRequired_Unprocessable: a mapping with no
+// scf_release is refused with the fix in the message (#1774).
+func TestMapScfAnchor_ReleaseRequired_Unprocessable(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	st := &stubStore{mapErr: ErrSCFReleaseRequired}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37"}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "scf_release is required") {
+		t.Fatalf("body = %s, want the scf_release fix", rec.Body.String())
 	}
 }
 

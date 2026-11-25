@@ -210,7 +210,19 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list anchors latest", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
+	resp := map[string]any{"anchors": rowsToWire(rows)}
+	// #1774: say which SCF release these anchors are in, so a caller that
+	// binds one of their codes (a vendor-claim mapping) can name it. Read
+	// from the listed rows, so it is the release actually served.
+	if len(rows) > 0 {
+		v, err := h.q.GetFrameworkVersionByID(ctx, rows[0].FrameworkVersionID)
+		if err != nil {
+			httperr.WriteInternal(w, r, "list anchors latest: release", err)
+			return
+		}
+		resp["scf_release"] = v.Version
+	}
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // inTenantTx opens a tx on the pool, sets the `app.current_tenant` GUC

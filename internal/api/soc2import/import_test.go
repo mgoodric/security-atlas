@@ -73,6 +73,20 @@ func ensureSCFLoaded(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// sampleSCFRelease is the label of the sample catalog ensureSCFLoaded
+// loads (migrations/fixtures/scf-sample.json; frozen since #1773, and
+// asserted by internal/api/scfseed's stock pin tests).
+const sampleSCFRelease = "test-2026.3"
+
+// inSample declares cw in the sample's SCF release, as a converted YAML
+// crosswalk would. A workbook fixture's "SCF 2026.3" sheet names the real
+// release, which these tests do not load, and no "SCF <yyyy.n>" sheet can
+// name the sample's "test-" label; a release is required since #1774.
+func inSample(cw *soc2import.Crosswalk) *soc2import.Crosswalk {
+	cw.SCFRelease, cw.SCFReleaseFromSheet = sampleSCFRelease, false
+	return cw
+}
+
 func loadCrosswalk(t *testing.T) *soc2import.Crosswalk {
 	t.Helper()
 	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "soc2-tsc-2017.yaml"))
@@ -171,6 +185,7 @@ func TestImport_SCFWorkbookCreatesCommunityDraftEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
+	inSample(cw)
 
 	report, err := soc2import.Import(context.Background(), pool, cw)
 	if err != nil {

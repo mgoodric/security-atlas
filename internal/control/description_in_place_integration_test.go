@@ -30,14 +30,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// manifestWith builds a bundle on anchor (an SCF code, or "<code>@<release>"
+// to declare the release the code is from, as upload requires, #1774).
 func manifestWith(bundleID, anchor, title, description string) []byte {
-	return []byte(`bundle_schema_version: "1"
+	release := ""
+	if i := strings.Index(anchor, "@"); i >= 0 {
+		anchor, release = anchor[:i], anchor[i+1:]
+	}
+	y := `bundle_schema_version: "1"
 bundle_id: ` + bundleID + `
 title: "` + title + `"
 description: "` + description + `"
 scf_anchor_id: ` + anchor + `
 implementation_type: manual_attested
-`)
+`
+	if release != "" {
+		y += "scf_release: " + release + "\n"
+	}
+	return []byte(y)
 }
 
 // seedControlLinks attaches an owner, an evidence record, an active
@@ -108,7 +118,8 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-1908", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-1908", "IAC")
+	code += "@" + releaseOfAnchor(t, admin, seeded)
 	tenant := dbtest.SeedTenant(t, admin,
 		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
 		"control_owner_assignments", "evidence_records", "controls",
@@ -227,7 +238,8 @@ func TestUpload_ExternalRefsOnlyChangeUpdatesInPlace(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-1958", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-1958", "IAC")
+	code += "@" + releaseOfAnchor(t, admin, seeded)
 	tenant := dbtest.SeedTenant(t, admin,
 		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
 		"control_owner_assignments", "evidence_records", "controls",
@@ -350,7 +362,8 @@ func TestUpload_ConcurrentInPlaceUploadsKeepEveryRevision(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-1958C", "IAC")
+	seeded, code := seedSCFAnchor(t, admin, "IAC-1958C", "IAC")
+	code += "@" + releaseOfAnchor(t, admin, seeded)
 	tenant := dbtest.SeedTenant(t, admin, "control_manifest_revisions", "controls")
 	store := control.NewStore(app)
 	ctx, err := tenancy.WithTenant(context.Background(), tenant)

@@ -7,7 +7,8 @@ import (
 )
 
 // demoSCFPinPath is the verbatim SCF ID + title extract the #1717 guard
-// reads. DemoSCFRelease names the release it was extracted from.
+// reads. DemoSCFRelease is the sample catalog's label for the release it
+// was extracted from: "test-" + that release (#1773, #1774).
 const demoSCFPinPath = "../api/scfseed/testdata/scf-pin.json"
 
 func loadDemoSCFPin(t *testing.T) (release string, titles map[string]string) {
@@ -39,8 +40,8 @@ func loadDemoSCFPin(t *testing.T) (release string, titles map[string]string) {
 // seed adopts the loaded catalog (#2302).
 func TestDemoSCFAnchors_MatchPinnedRelease(t *testing.T) {
 	release, titles := loadDemoSCFPin(t)
-	if release != DemoSCFRelease {
-		t.Fatalf("pin is SCF %s; DemoSCFRelease is %s", release, DemoSCFRelease)
+	if "test-"+release != DemoSCFRelease {
+		t.Fatalf("pin is SCF %s; DemoSCFRelease is %s, want test-%s", release, DemoSCFRelease, release)
 	}
 	for i, a := range demoSCFAnchors {
 		want, ok := titles[a.SCFID]

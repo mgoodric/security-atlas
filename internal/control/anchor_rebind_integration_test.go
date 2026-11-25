@@ -3,26 +3,30 @@
 // Issue #1971: a new SCF release mints new anchor rows under the same codes
 // (#1768 freezes each release). Coverage joins controls to edges by anchor
 // row, so a control left on the previous release's row drops out of
-// coverage. The bootstrap re-uploads every stock bundle on each boot. Matt's
-// call (D3): an unchanged bundle moves to the current release's anchor in
-// place only when that anchor has the same code AND the same title; when the
-// title changed (the code now means something else) the control stays on its
-// legacy anchor and is flagged for re-anchoring.
+// coverage. Matt's call (D3): an unchanged control moves to the current
+// release's anchor only when that anchor has the same code AND the same
+// title; otherwise it stays on its legacy anchor and is flagged.
+//
+// #1774: an unchanged bundle that names its code with no scf_release is no
+// longer re-bound by re-uploading it, because the upload itself is refused.
+// A control an install stored that way before #1774 keeps its anchor until
+// the boot-time re-bind (scfimport.RebindControls, covered in
+// scf_release_rebind_integration_test.go) moves or flags it.
 
 package control_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func TestUpload_UnchangedBundleRebindsOnlyWhenTheAnchorMeansTheSame(t *testing.T) {
+func TestUpload_UnchangedUnpinnedBundleIsRefusedAndLeftInPlace(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
@@ -31,7 +35,11 @@ func TestUpload_UnchangedBundleRebindsOnlyWhenTheAnchorMeansTheSame(t *testing.T
 	oldSame, _ := seedSCFAnchor(t, admin, same, "TST")
 	oldChanged, _ := seedSCFAnchor(t, admin, changed, "TST")
 	var oldVersion uuid.UUID
-	if err := admin.QueryRow(ctx, `SELECT framework_version_id FROM scf_anchors WHERE id = $1`, oldSame).Scan(&oldVersion); err != nil {
+	var oldRelease string
+	if err := admin.QueryRow(ctx, `
+		SELECT a.framework_version_id, fv.version FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		WHERE a.id = $1`, oldSame).Scan(&oldVersion, &oldRelease); err != nil {
 		t.Fatalf("read anchor version: %v", err)
 	}
 
@@ -49,36 +57,10 @@ func TestUpload_UnchangedBundleRebindsOnlyWhenTheAnchorMeansTheSame(t *testing.T
 	})
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
-	tctx, err := tenancy.WithTenant(ctx, tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	upload := func(bundleID, code string) control.UploadResult {
-		t.Helper()
-		b, err := control.FinalizeBundleForHTTP([]byte(yamlFor(bundleID, code, "automated")))
-		if err != nil {
-			t.Fatalf("FinalizeBundleForHTTP: %v", err)
-		}
-		res, err := store.Upload(tctx, b, "key_admin")
-		if err != nil {
-			t.Fatalf("Upload %s: %v", bundleID, err)
-		}
-		return res
-	}
-	boundTo := func(id uuid.UUID) uuid.UUID {
-		t.Helper()
-		var a uuid.UUID
-		if err := admin.QueryRow(ctx, `SELECT scf_anchor_id FROM controls WHERE id = $1`, id).Scan(&a); err != nil {
-			t.Fatalf("read control anchor: %v", err)
-		}
-		return a
-	}
 
-	firstSame := upload("rebind_1971_same", same)
-	firstChanged := upload("rebind_1971_changed", changed)
-	if boundTo(firstSame.ControlID) != oldSame || boundTo(firstChanged.ControlID) != oldChanged {
-		t.Fatal("initial uploads are not bound to the current release's anchors")
-	}
+	// Controls an install before #1774 stored unpinned on the old release.
+	sameID := storedUnpinned(t, admin, store, tenant, "rebind_1971_same", same, oldRelease)
+	changedID := storedUnpinned(t, admin, store, tenant, "rebind_1971_changed", changed, oldRelease)
 
 	// A new SCF release: the old version goes legacy; the new current
 	// version carries both codes, one with the same title (seedSCFAnchor's
@@ -95,36 +77,43 @@ func TestUpload_UnchangedBundleRebindsOnlyWhenTheAnchorMeansTheSame(t *testing.T
 		VALUES ($1, NULL, $2, 'test-rebind-1971', 'current')`, newVersion, frameworkID); err != nil {
 		t.Fatalf("insert new release: %v", err)
 	}
-	newSame, newChanged := uuid.New(), uuid.New()
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title)
 		VALUES ($1, $3, $4, 'TST', 'Test anchor '||$4), ($2, $3, $5, 'TST', 'A different control')`,
-		newSame, newChanged, newVersion, same, changed); err != nil {
+		uuid.New(), uuid.New(), newVersion, same, changed); err != nil {
 		t.Fatalf("insert new anchors: %v", err)
 	}
 
-	// The boot-time re-upload of the unchanged bundles.
-	second := upload("rebind_1971_same", same)
-	if second.ControlID != firstSame.ControlID || second.Version != firstSame.Version || !second.AnchorRebound || second.NeedsReanchoring {
-		t.Fatalf("same-meaning re-upload = %+v; want the control kept and rebound in place", second)
-	}
-	if got := boundTo(firstSame.ControlID); got != newSame {
-		t.Fatalf("same-meaning control bound to %s; want the new release's anchor %s", got, newSame)
-	}
-	flagged := upload("rebind_1971_changed", changed)
-	if flagged.ControlID != firstChanged.ControlID || flagged.AnchorRebound || !flagged.NeedsReanchoring {
-		t.Fatalf("changed-meaning re-upload = %+v; want the control kept, not rebound, and flagged", flagged)
-	}
-	if got := boundTo(firstChanged.ControlID); got != oldChanged {
-		t.Fatalf("changed-meaning control moved to %s; want it left on its legacy anchor %s", got, oldChanged)
+	// Re-uploading either unchanged bundle is refused, and neither control
+	// moves: the code is never bound in the new current release.
+	for _, tc := range []struct {
+		bundleID, code string
+		id, legacy     uuid.UUID
+	}{
+		{"rebind_1971_same", same, sameID, oldSame},
+		{"rebind_1971_changed", changed, changedID, oldChanged},
+	} {
+		_, err := uploadYAML(t, store, tenant, releaseBundleYAML(tc.bundleID, tc.code, ""))
+		if !errors.Is(err, control.ErrSCFReleaseRequired) {
+			t.Fatalf("re-upload %s: err = %v; want ErrSCFReleaseRequired", tc.bundleID, err)
+		}
+		if got := boundAnchor(t, admin, tc.id); got != tc.legacy {
+			t.Fatalf("refused re-upload moved %s to %s; want it on its legacy anchor %s", tc.bundleID, got, tc.legacy)
+		}
 	}
 
-	// Idempotent: the next boot finds the first already on the current
-	// anchor and flags the second again.
-	if third := upload("rebind_1971_same", same); third.AnchorRebound || third.NeedsReanchoring {
-		t.Fatalf("third same-meaning upload = %+v; want a no-op", third)
+	// Declaring the new release is the fix: the same-title control then
+	// binds there (a new version, since scf_release changed).
+	res, err := uploadYAML(t, store, tenant, releaseBundleYAML("rebind_1971_same", same, "test-rebind-1971"))
+	if err != nil {
+		t.Fatalf("re-upload declaring the new release: %v", err)
 	}
-	if again := upload("rebind_1971_changed", changed); !again.NeedsReanchoring || boundTo(again.ControlID) != oldChanged {
-		t.Fatalf("second changed-meaning upload = %+v; want it still flagged on its legacy anchor", again)
+	var newSame uuid.UUID
+	if err := admin.QueryRow(ctx, `SELECT id FROM scf_anchors WHERE framework_version_id = $1 AND scf_id = $2`,
+		newVersion, same).Scan(&newSame); err != nil {
+		t.Fatalf("new anchor: %v", err)
+	}
+	if got := boundAnchor(t, admin, res.ControlID); got != newSame || res.SCFRelease != "test-rebind-1971" {
+		t.Fatalf("declared re-upload bound %s in %q; want the new release's anchor %s", got, res.SCFRelease, newSame)
 	}
 }

@@ -34,7 +34,8 @@ func TestValidate(t *testing.T) {
 		reason string
 	}{
 		{"ok", func(*NewEdge) {}, ""},
-		{"empty version and release are allowed", func(e *NewEdge) { e.FrameworkVersion, e.SCFRelease = "", "" }, ""},
+		{"empty framework version is allowed", func(e *NewEdge) { e.FrameworkVersion = "" }, ""},
+		{"no scf_release (#1774)", func(e *NewEdge) { e.SCFRelease = " " }, "scf_release is required"},
 		{"strength 0", func(e *NewEdge) { e.Strength = 0 }, ""},
 		{"strength 1", func(e *NewEdge) { e.Strength = 1 }, ""},
 		{"no framework", func(e *NewEdge) { e.Framework = " " }, "framework is required"},

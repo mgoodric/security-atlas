@@ -74,6 +74,20 @@ func startBridge(t *testing.T) (string, func()) {
 	return bridgetest.Start(t)
 }
 
+// currentSCFRelease returns the label of the current SCF release, where
+// seedCurrentSCFAnchor put the anchor. An import declares it: a release is
+// required since #1774.
+func currentSCFRelease(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`).Scan(&label); err != nil {
+		t.Fatalf("current SCF release: %v", err)
+	}
+	return label
+}
+
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a control id in the
 // valid fixture ("IAC-37"). This proves the deterministic requirement ->
@@ -146,6 +160,7 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 		OscalJSON:   loadFixture(t, "catalog_minimal_valid.json"),
 		SourceLabel: "NIST 800-53 test",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
@@ -250,6 +265,7 @@ func TestImport_MalformedCatalogPersistsNothing(t *testing.T) {
 	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), catalogimport.Request{
 		OscalJSON:   loadFixture(t, "catalog_malformed.json"),
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -303,6 +319,7 @@ func TestImport_TenantIsolation(t *testing.T) {
 		OscalJSON:   loadFixture(t, "catalog_minimal_valid.json"),
 		SourceLabel: "Tenant A catalog",
 		ImportedBy:  "grc-a",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {

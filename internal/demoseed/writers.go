@@ -659,12 +659,16 @@ type demoSCFAnchor struct {
 	Title  string
 }
 
-// DemoSCFRelease is the SCF release the demoSCFAnchors codes are drawn
-// from. The spine adopts global anchors from this release, or from the
-// current one while it is not loaded (#1772); every code below is in SCF
-// 2026.3 (the release pinned in
-// internal/api/scfseed/testdata/scf-pin.json).
-const DemoSCFRelease = "2026.3"
+// DemoSCFRelease is the SCF release the spine adopts global anchors from
+// (#1772): the label of the sample catalog the bootstrap imports
+// (migrations/fixtures/scf-sample.json), "test-" + the real SCF release it
+// was regenerated from, as the other stock content pins it (#1773). Every
+// code below is in that real release, SCF 2026.3 (the release pinned in
+// internal/api/scfseed/testdata/scf-pin.json); a code the 77-row sample
+// lacks is synthesized. When this release is not loaded, nothing is
+// adopted: the spine synthesizes every anchor, never binding a code in
+// whatever release is current (#1774).
+const DemoSCFRelease = "test-2026.3"
 
 // demoSCFAnchors is the fixed thin-slice SCF anchor set the self-contained
 // spine branch synthesizes. The codes/families are drawn verbatim from the
@@ -699,10 +703,10 @@ var demoSCFAnchors = []demoSCFAnchor{
 // (tenant_id IS NULL framework_versions + scf_anchors) is NOT loaded — that
 // is the state of the CI integration DB and of a fresh self-host before any
 // catalog import. So the seed is SELF-CONTAINED: it builds the whole spine on
-// a tenant-scoped demo framework_version. When an SCF release is loaded,
-// the seed ADOPTS its real anchors: the release the slice declares
-// (scfRelease, DemoSCFRelease outside tests), else the current one, and
-// every code resolves in that one release (#1772). It never duplicates
+// a tenant-scoped demo framework_version. When the release the slice
+// declares (scfRelease, DemoSCFRelease outside tests) is loaded, the seed
+// ADOPTS its real anchors, and every code resolves in that one release
+// (#1772); it never adopts from another release (#1774). It never duplicates
 // them; the demo requirements + edges
 // still hang off the tenant-scoped demo framework_version, so the global
 // catalog is never mutated (AC-4 / invariant #6). See
@@ -762,17 +766,16 @@ func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet, 
 	// 2. For each anchor in the thin SCF slice: resolve the real global
 	//    anchor in one SCF release (ADOPT), else synthesize a tenant-scoped
 	//    demo anchor on the demo framework_version (SELF-CONTAINED). The
-	//    release is the one the slice declares (scfRelease) when it is
-	//    loaded, else the current one (the #1771 D5 fallback; #1774 makes
-	//    it strict); with no current release, every anchor is synthesized.
-	//    Every code resolves in that one release (#1772). Build a
-	//    requirement + a STRM edge per anchor.
+	//    release is the one the slice declares (scfRelease); when it is not
+	//    loaded, every anchor is synthesized (#1774: never the current
+	//    release instead). Every code resolves in that one release (#1772).
+	//    Build a requirement + a STRM edge per anchor.
 	q := dbx.New(tx)
-	rel, relErr := scfrelease.Lookup(ctx, q, scfRelease)
-	if errors.Is(relErr, scfrelease.ErrUnknownRelease) {
-		rel, relErr = scfrelease.Lookup(ctx, q, "")
+	if scfRelease == "" {
+		return 0, 0, 0, fmt.Errorf("demoseed: spine: %w", scfrelease.ErrReleaseRequired)
 	}
-	if relErr != nil && !errors.Is(relErr, scfrelease.ErrNoCurrentRelease) {
+	rel, relErr := scfrelease.Lookup(ctx, q, scfRelease)
+	if relErr != nil && !errors.Is(relErr, scfrelease.ErrUnknownRelease) {
 		return 0, 0, 0, fmt.Errorf("demoseed: spine look up SCF release %s: %w", scfRelease, relErr)
 	}
 	reqCount := 0

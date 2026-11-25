@@ -266,3 +266,73 @@ func TestSuggest_AnchorsFromOneStatedRelease(t *testing.T) {
 		t.Fatalf("unloaded release: want ErrUnknownRelease, got %v", err)
 	}
 }
+
+// #1774 D6: a suggestion made with no ?scf_release= reads in the current
+// release (B) and records it: the proposal names B's anchor row
+// (scf_anchor_uuid) and the response says B. CRY-03.1 (Transmission
+// Integrity) exists only in B. When A becomes current before approval, the
+// question is still mapped to CRY-03.1, the code only the recorded release
+// has: an approval that looked the code up in the current release would
+// find no CRY-03.1 in A and could not produce this mapping.
+func TestApprove_KeepsTheRecordedReleaseWhenTheCurrentReleaseChanges(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	scfreleasetest.LoadAB(t, admin)
+	ctx := context.Background()
+	const onlyInB = "CRY-03.1"
+	anchorOf := func(release string) (string, bool) {
+		var id string
+		err := admin.QueryRow(ctx, `
+			SELECT a.id::text FROM scf_anchors a
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = $2`,
+			release, onlyInB).Scan(&id)
+		return id, err == nil
+	}
+	inB, ok := anchorOf(scfreleasetest.ReleaseB)
+	if !ok {
+		t.Fatalf("fixture release B has no %s", onlyInB)
+	}
+	if _, inA := anchorOf(scfreleasetest.ReleaseA); inA {
+		t.Fatalf("fixture release A has %s; the test needs a code only B has", onlyInB)
+	}
+	tenant := freshTenant(t, admin)
+	qID := seedQuestion(t, admin, tenant, "Do you protect the integrity of data in transmission?")
+	svc := serviceWith(app, `{"scf_id":"`+onlyInB+`","rationale":"The question asks about transmission integrity."}`)
+
+	out, err := svc.Suggest(dbtest.WithTenantCtx(t, tenant), qmapsuggest.SuggestParams{QuestionID: qID, Actor: "key_grc"})
+	if err != nil || out.ProposalID == "" {
+		t.Fatalf("Suggest: out=%+v err=%v", out, err)
+	}
+	if out.SCFRelease != scfreleasetest.ReleaseB || out.SCFAnchorUUID != inB {
+		t.Fatalf("suggest read release %q anchor %s; want the current release %s and its %s %s",
+			out.SCFRelease, out.SCFAnchorUUID, scfreleasetest.ReleaseB, onlyInB, inB)
+	}
+
+	// Make A current. LoadAB's cleanup deletes both and restores the
+	// originals' statuses.
+	for _, s := range []struct{ release, status string }{
+		{scfreleasetest.ReleaseB, "legacy"}, {scfreleasetest.ReleaseA, "current"},
+	} {
+		if _, err := admin.Exec(ctx,
+			`UPDATE framework_versions SET status = $2 WHERE tenant_id IS NULL AND version = $1`,
+			s.release, s.status); err != nil {
+			t.Fatalf("set %s %s: %v", s.release, s.status, err)
+		}
+	}
+
+	approved, err := svc.Approve(dbtest.WithTenantCtx(t, tenant), uuid.MustParse(out.ProposalID), "key_grc")
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approved.SCFAnchorID != onlyInB || approved.NeedsMapping {
+		t.Fatalf("approved = %+v; want the question mapped to %s", approved, onlyInB)
+	}
+	var mapped *string
+	if err := admin.QueryRow(ctx, `SELECT scf_anchor_id FROM questionnaire_questions WHERE id = $1`, qID).Scan(&mapped); err != nil {
+		t.Fatalf("read question: %v", err)
+	}
+	if mapped == nil || *mapped != onlyInB {
+		t.Fatalf("question mapped to %v; want %s, the recorded release's code", mapped, onlyInB)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -149,24 +150,24 @@ func TestImportCatalog_SCFReleaseDeclaredBindsInThatRelease(t *testing.T) {
 	}
 }
 
-// With no release declared, control ids match in the current release (B)
-// as before, and the report carries the deprecation warning.
-func TestImportCatalog_SCFReleaseAbsentWarnsAndBindsCurrent(t *testing.T) {
+// #1774: with no release declared, the catalog import is refused with the fix
+// in the message and persists no control. B is current; the old fallback
+// matched control ids in it.
+func TestImportCatalog_SCFReleaseAbsentIsRefused(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 
-	report, err := importCatalogWith(t, tenant, []byte(catalogWithoutProp), "")
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	_, err := importCatalogWith(t, tenant, []byte(catalogWithoutProp), "")
+	if !errors.Is(err, catalogimport.ErrSCFReleaseRequired) || !errors.Is(err, scfrelease.ErrReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
 	}
-	if report.SCFRelease != scfreleasetest.ReleaseB {
-		t.Fatalf("SCFRelease = %q; want current release %q", report.SCFRelease, scfreleasetest.ReleaseB)
+	if !strings.Contains(err.Error(), "--scf-release") {
+		t.Errorf("error %q does not give the fix", err)
 	}
-	if len(report.Warnings) != 1 || report.Warnings[0] != catalogimport.SCFReleaseDeprecationWarning {
-		t.Fatalf("Warnings = %v; want the deprecation warning", report.Warnings)
+	if got := controlAnchors(t, admin, tenant); len(got) != 0 {
+		t.Fatalf("controls persisted after a refused import: %v", got)
 	}
-	assertAnchors(t, controlAnchors(t, admin, tenant), map[string]string{"PRM-07": "", "AST-04.1": "AST-04.1"})
 }
 
 // A prop naming a release that is not loaded is an explicit declaration,

@@ -23,9 +23,12 @@ export async function PATCH(
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  let body: { scf_anchor_id?: string };
+  let body: { scf_anchor_id?: string; scf_release?: string };
   try {
-    body = (await req.json()) as { scf_anchor_id?: string };
+    body = (await req.json()) as {
+      scf_anchor_id?: string;
+      scf_release?: string;
+    };
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
@@ -37,7 +40,14 @@ export async function PATCH(
     );
   }
   try {
-    const result = await mapClaimScfAnchor(bearer, id, scfAnchorID);
+    // scf_release is forwarded as given; the platform refuses a mapping
+    // without one (#1774).
+    const result = await mapClaimScfAnchor(
+      bearer,
+      id,
+      scfAnchorID,
+      (body.scf_release ?? "").trim(),
+    );
     return NextResponse.json(result);
   } catch (err) {
     const e = err as { status?: number; message?: string };

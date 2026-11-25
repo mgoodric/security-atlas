@@ -41,11 +41,12 @@ var ImportColumns = []string{
 	"relationship_type", "strength", "rationale", "source_ref",
 }
 
-// requiredColumns must be present in a CSV header. framework_version and
-// scf_release may be left out: empty means the current version or release,
-// as on single creation.
+// requiredColumns must be present in a CSV header. framework_version may be
+// left out: empty means the framework's current version, as on single
+// creation. scf_release may not (#1774): an anchor code is never bound in
+// the current SCF release.
 var requiredColumns = []string{
-	"framework", "requirement_code", "anchor_code", "relationship_type", "strength", "rationale", "source_ref",
+	"framework", "requirement_code", "scf_release", "anchor_code", "relationship_type", "strength", "rationale", "source_ref",
 }
 
 // tenantColumns are refused outright: the tenant comes from the credential.

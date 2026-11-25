@@ -254,6 +254,8 @@ func newControlsValidateCmd() *cobra.Command {
 			"`catalog import-scf` loads), also flags a scf_anchor_id whose meaning changed in " +
 			"a release later than the declared one: renamed, split, reused for another control, " +
 			"renumbered or withdrawn. Flags are warnings; they do not fail validation. " +
+			"A scf_anchor_id code with no scf_release does fail it, as upload refuses it; " +
+			"every such bundle is listed in one run. " +
 			"A directory with no control.yaml of its own validates every bundle directory " +
 			"directly under it, as `controls import export` writes them.",
 		Args: cobra.ExactArgs(1),
@@ -263,15 +265,20 @@ func newControlsValidateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var noRelease []string
 			for _, p := range paths {
-				if err := validateBundle(out, p, catalogs); err != nil {
+				missing, err := validateBundle(out, p, catalogs)
+				if err != nil {
 					if len(paths) > 1 {
 						return fmt.Errorf("%s: %w", p, err)
 					}
 					return err
 				}
+				if missing {
+					noRelease = append(noRelease, p)
+				}
 			}
-			return nil
+			return missingSCFReleaseError(noRelease)
 		},
 	}
 	cmd.Flags().StringArrayVar(&catalogs, "scf-catalog", nil,
@@ -279,10 +286,23 @@ func newControlsValidateCmd() *cobra.Command {
 	return cmd
 }
 
-func validateBundle(out io.Writer, path string, catalogs []string) error {
+// missingSCFReleaseError is the validate failure naming every bundle whose
+// scf_anchor_id code has no scf_release (#1774), or nil for none.
+func missingSCFReleaseError(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d bundle(s) name scf_anchor_id as an SCF code but declare no scf_release, which upload refuses: %s; add `scf_release: <release>` to each control.yaml, naming the SCF release its code is from (e.g. `scf_release: test-2026.3`)",
+		len(paths), strings.Join(paths, ", "))
+}
+
+// validateBundle validates one bundle and prints its report. missing reports
+// a scf_anchor_id code with no scf_release (#1774); the caller collects
+// those across a directory rather than stopping at the first.
+func validateBundle(out io.Writer, path string, catalogs []string) (missing bool, err error) {
 	bundle, err := loadBundleFromPath(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, _ = fmt.Fprintf(out, "OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
 		bundle.Manifest.BundleID,
@@ -298,15 +318,15 @@ func validateBundle(out io.Writer, path string, catalogs []string) error {
 	}
 	fixtureWarnings, err := kindlessFixtureWarnings(path, bundle)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, w := range fixtureWarnings {
 		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
 	}
 	if err := bundle.ValidateApplicabilityExpr(); err != nil {
-		return err
+		return false, err
 	}
-	return reportSCFRelease(out, &bundle.Manifest, catalogs)
+	return bundle.Manifest.MissingSCFRelease(), reportSCFRelease(out, &bundle.Manifest, catalogs)
 }
 
 // kindlessFixtureWarnings loads the bundle's test cases (tests/ beside a

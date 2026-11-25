@@ -28,7 +28,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/authz"
-	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 )
@@ -689,18 +688,13 @@ func TestOverlayRemapCoverage_SameBeforeAndAfterForAnUnchangedSuccessor(t *testi
 		tenant = uuid.MustParse(dbtest.SeedTenant(t, admin,
 			"scf_overlay_remap_decisions", "scf_overlay_remap_proposals", "fw_to_scf_overlay_edges", "scf_remap_proposals"))
 		app := dbtest.NewAppPool(t)
-		b, err := control.FinalizeBundleForHTTP([]byte(`bundle_schema_version: "1"
+		seedUnpinned(t, admin, app, tenant.String(), `bundle_schema_version: "1"
 bundle_id: overlay_1804_inventory
 title: "Asset inventory"
 scf_anchor_id: TRM-01
 implementation_type: manual_attested
-`))
-		if err != nil {
-			t.Fatalf("bundle: %v", err)
-		}
-		if _, err := control.NewStore(app).Upload(withTenant(t, tenant.String()), b, "seed-1804"); err != nil {
-			t.Fatalf("upload: %v", err)
-		}
+`, "seed-1804")
+		var err error
 		if overlay, err = mappingoverlay.NewStore(app).Create(withTenant(t, tenant.String()),
 			newOverlay(overlayPair{"R-05", "TRM-01", "equal", 1}), "seed-1804"); err != nil {
 			t.Fatalf("overlay: %v", err)

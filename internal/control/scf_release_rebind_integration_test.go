@@ -42,21 +42,13 @@ func TestRebind_PinnedLegacyBundleIsNeverMoved(t *testing.T) {
 		t.Fatal("pinned bundle is not bound to release A's IAC-06")
 	}
 
-	// Two unpinned controls left on release A by an older install: one whose
-	// code kept its title in B, one whose title changed.
-	onLegacy := func(bundleID, code string, legacyAnchor uuid.UUID) uuid.UUID {
-		t.Helper()
-		res, err := uploadYAML(t, store, tenant, releaseBundleYAML(bundleID, code, ""))
-		if err != nil {
-			t.Fatalf("upload %s: %v", bundleID, err)
-		}
-		if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`, res.ControlID, legacyAnchor); err != nil {
-			t.Fatalf("bind %s to release A: %v", bundleID, err)
-		}
-		return res.ControlID
+	// Two unpinned controls left on release A by an install before #1774:
+	// one whose code kept its title in B, one whose title changed.
+	sameTitle := storedUnpinned(t, admin, store, tenant, "legacy_mfa", "IAC-06", scfreleasetest.ReleaseA)
+	changedTitle := storedUnpinned(t, admin, store, tenant, "legacy_gov", "GOV-01", scfreleasetest.ReleaseA)
+	if boundAnchor(t, admin, sameTitle) != mfaA || boundAnchor(t, admin, changedTitle) != govA {
+		t.Fatal("legacy controls are not on release A's anchors")
 	}
-	sameTitle := onLegacy("legacy_mfa", "IAC-06", mfaA)
-	changedTitle := onLegacy("legacy_gov", "GOV-01", govA)
 
 	report, err := scfimport.RebindControls(ctx, admin)
 	if err != nil {
@@ -119,14 +111,12 @@ func TestRebind_UUIDRefAndUnreadableManifestAreNeverMoved(t *testing.T) {
 	}
 
 	// An unpinned same-title control on A whose stored manifest is corrupt.
-	broken, err := uploadYAML(t, store, tenant, releaseBundleYAML("broken_manifest", "IAC-06", ""))
-	if err != nil {
-		t.Fatalf("upload: %v", err)
-	}
-	if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2, bundle_manifest_yaml = 'not: [valid' WHERE id = $1`,
-		broken.ControlID, mfaA); err != nil {
+	brokenID := storedUnpinned(t, admin, store, tenant, "broken_manifest", "IAC-06", scfreleasetest.ReleaseA)
+	if _, err := admin.Exec(ctx, `UPDATE controls SET bundle_manifest_yaml = 'not: [valid' WHERE id = $1`,
+		brokenID); err != nil {
 		t.Fatalf("corrupt stored manifest: %v", err)
 	}
+	broken := control.UploadResult{ControlID: brokenID}
 
 	report, err := scfimport.RebindControls(ctx, admin)
 	if err != nil {

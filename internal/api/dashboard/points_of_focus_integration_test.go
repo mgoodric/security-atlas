@@ -42,6 +42,16 @@ func TestFrameworkPosture_PointsOfFocusNotInDenominator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
+	// The sheet says SCF 2026.3, which this DB does not load; its codes are
+	// in the sample (test-2026.3), a label no "SCF <yyyy.n>" sheet can name.
+	// Declare it as a converted YAML crosswalk would (#1774).
+	var sample string
+	if err := admin.QueryRow(ctx, `
+		SELECT fv.version FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`).Scan(&sample); err != nil {
+		t.Fatalf("current SCF release: %v", err)
+	}
+	cw.SCFRelease, cw.SCFReleaseFromSheet = sample, false
 	if _, err := soc2import.Import(ctx, admin, cw); err != nil {
 		t.Fatalf("Import: %v", err)
 	}

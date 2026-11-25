@@ -6,8 +6,8 @@
 // --scf-release flag, or an "scf-release" prop on the document's metadata.
 // Both are explicit declarations, so a declared release that is not loaded
 // fails the import; it never falls back to the current release. With
-// neither, the import matches in the current release, as before, and
-// reports a deprecation warning until #1774 makes the declaration required.
+// neither, the import fails too (#1774), with the importer's own one-line
+// fix.
 package scfbind
 
 import (
@@ -74,32 +74,27 @@ func Declared(importer, flag string, oscalJSON []byte, root string) (string, err
 
 // Binding is the release an import matches in and that release's codes.
 type Binding struct {
-	// Release is the release matched in; zero when no SCF release is
-	// loaded and none was declared (every control id is then unmapped).
+	// Release is the declared release matched in.
 	Release scfrelease.Release
 	// Anchors is the set of scf_id codes in Release.
 	Anchors map[string]struct{}
-	// Warnings are non-fatal notes for the operator: deprecation when no
-	// release was declared.
+	// Warnings are non-fatal notes for the operator.
 	Warnings []string
 }
 
-// Bind picks the declared release, or the current one when release is "",
-// and loads its codes. A declared release that is not loaded is
-// scfrelease.ErrUnknownRelease. deprecation is the warning reported when
-// nothing declares a release. scf_anchors is the read-only bundled spine;
-// it is never written.
-func Bind(ctx context.Context, tx pgx.Tx, release, deprecation string) (Binding, error) {
+// Bind looks up the declared release and loads its codes. A declared
+// release that is not loaded is scfrelease.ErrUnknownRelease. With none
+// declared it returns missing, the importer's error carrying its one-line
+// fix (it should wrap scfrelease.ErrReleaseRequired); the current release
+// is never used instead (#1774). scf_anchors is the read-only bundled
+// spine; it is never written.
+func Bind(ctx context.Context, tx pgx.Tx, release string, missing error) (Binding, error) {
 	var b Binding
 	if release == "" {
-		b.Warnings = append(b.Warnings, deprecation)
+		return Binding{}, missing
 	}
 	rel, err := scfrelease.Lookup(ctx, dbx.New(tx), release)
-	switch {
-	case err == nil:
-	case release == "" && errors.Is(err, scfrelease.ErrNoCurrentRelease):
-		// No SCF catalog loaded: every control id imports unmapped, as before.
-	default:
+	if err != nil {
 		return Binding{}, err
 	}
 	b.Release = rel

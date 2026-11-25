@@ -97,9 +97,6 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 				}
 				_, _ = fmt.Fprintf(out, "  - %s (linked controls: %d)%s\n", p.Title, p.LinkedControlCount, marker)
 			}
-			for _, w := range report.SCFReleaseWarnings {
-				_, _ = fmt.Fprintf(out, "WARN %s\n", w)
-			}
 			if len(report.MissingAnchors) > 0 {
 				_, _ = fmt.Fprintf(out, "missing SCF anchors (control not yet imported): %v\n", report.MissingAnchors)
 			}

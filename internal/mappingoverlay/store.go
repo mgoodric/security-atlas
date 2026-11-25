@@ -107,7 +107,8 @@ type NewEdge struct {
 	FrameworkVersion string
 	// RequirementCode is the requirement's code in that version.
 	RequirementCode string
-	// SCFRelease is the SCF release label; empty means the current release.
+	// SCFRelease is the SCF release label AnchorCode is in. Required
+	// (#1774): Validate refuses an edge without it.
 	SCFRelease string
 	// AnchorCode is the SCF code (e.g. "HRS-07.1") in that release.
 	AnchorCode       string
@@ -164,6 +165,9 @@ func (in NewEdge) Validate() error {
 		return &InvalidEdgeError{Reason: "requirement_code is required"}
 	case strings.TrimSpace(in.AnchorCode) == "":
 		return &InvalidEdgeError{Reason: "anchor_code is required"}
+	case strings.TrimSpace(in.SCFRelease) == "":
+		// #1774: anchor_code is never bound in the current release.
+		return &InvalidEdgeError{Reason: "scf_release is required: name the SCF release anchor_code is from, e.g. test-2026.3"}
 	case !relationships[dbx.StrmRelationshipType(in.RelationshipType)]:
 		return &InvalidEdgeError{Reason: "relationship_type must be one of equal, subset_of, superset_of, intersects_with"}
 	case in.Strength < 0 || in.Strength > 1:

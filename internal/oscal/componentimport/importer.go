@@ -61,6 +61,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -94,10 +95,11 @@ var (
 // declares the SCF release its control ids belong to (#1771).
 const SCFReleaseProp = scfbind.Prop
 
-// SCFReleaseDeprecationWarning is reported for an import that declares no
-// SCF release (#1771). Claims bind in the current SCF release, as before;
-// the declaration becomes required in a later release (#1774).
-const SCFReleaseDeprecationWarning = "no SCF release declared, so vendor claims were bound in the current SCF release; pass --scf-release or add an \"scf-release\" prop to the document's metadata, which will become required"
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); vendor claims are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("componentimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the document's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import component-definitions. admin
 // is the superset of grc_engineer in the canvas 5-role model.
@@ -144,8 +146,7 @@ type Request struct {
 	// SCFRelease is the SCF release the claims' control ids are bound in
 	// (#1771), from atlas-oscal --scf-release. The document can declare it
 	// instead with an "scf-release" prop on its metadata; when both are
-	// given they must agree. Empty with no prop binds in the current
-	// release, with SCFReleaseDeprecationWarning.
+	// given they must agree. Neither is ErrSCFReleaseRequired (#1774).
 	SCFRelease string
 }
 
@@ -164,11 +165,9 @@ type Report struct {
 	// anchor deterministically (the rest are flagged NULL for operator
 	// mapping).
 	MappedCount int
-	// SCFRelease is the SCF release the mapped claims were bound in, or ""
-	// when no SCF release is loaded (every claim is then unmapped).
+	// SCFRelease is the SCF release the mapped claims were bound in.
 	SCFRelease string
-	// Warnings are non-fatal notes for the operator, such as
-	// SCFReleaseDeprecationWarning.
+	// Warnings are non-fatal notes for the operator.
 	Warnings []string
 }
 
@@ -199,6 +198,11 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	release, err := scfbind.Declared("componentimport", req.SCFRelease, req.OscalJSON, "component-definition")
 	if err != nil {
 		return Report{}, err
+	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
 	}
 
 	// --- Bridge deserialize + validate ---
@@ -265,12 +269,13 @@ func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha
 		return Report{}, fmt.Errorf("componentimport: insert import row: %w", err)
 	}
 
-	// Pick the SCF release the claims bind in (#1771): the declared one, or
-	// the current one when none is declared. A declared release that is not
-	// loaded fails the import (scfrelease.ErrUnknownRelease); it never falls
-	// back to the current release. A claim whose control id is not in the
+	// Pick the SCF release the claims bind in (#1771): the declared one.
+	// None declared fails the import (ErrSCFReleaseRequired, #1774), and so
+	// does a declared release that is not loaded
+	// (scfrelease.ErrUnknownRelease); neither falls back to the current
+	// release, and the transaction rolls back. A claim whose control id is not in the
 	// release stays unmapped, as any non-SCF control id does (slice 512).
-	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
 		return Report{}, fmt.Errorf("componentimport: scf release: %w", err)
 	}
