@@ -56,7 +56,7 @@ func setup(t *testing.T) *fixture {
 		for _, stmt := range []string{
 			`DELETE FROM audit_period_freeze_revisions WHERE tenant_id = $1`,
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`UPDATE populations SET audit_period_id = NULL, frozen_at = NULL WHERE tenant_id = $1`,
+			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
 			`DELETE FROM sample_audit_log WHERE tenant_id = $1`,
 			`DELETE FROM sample_evidence WHERE tenant_id = $1`,
 			`DELETE FROM samples WHERE tenant_id = $1`,
