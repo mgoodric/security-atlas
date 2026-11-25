@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -348,10 +349,12 @@ func cleanupPeriods2817(t *testing.T, admin *pgxpool.Pool, tenant string) {
 		`DELETE FROM sample_evidence WHERE tenant_id = $1`,
 		`DELETE FROM samples WHERE tenant_id = $1`,
 		`DELETE FROM populations WHERE tenant_id = $1`,
-		`DELETE FROM audit_periods WHERE tenant_id = $1`,
 	} {
 		if _, err := admin.Exec(context.Background(), stmt, tenant); err != nil {
 			t.Logf("cleanup %s: %v", stmt, err)
 		}
+	}
+	if err := dbtest.DeleteAuditPeriods(context.Background(), admin, `tenant_id = $1`, tenant); err != nil {
+		t.Logf("cleanup audit_periods: %v", err)
 	}
 }

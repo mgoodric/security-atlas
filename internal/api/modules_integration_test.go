@@ -394,13 +394,18 @@ func TestModules_OSCALOutputIgnoresSwitches(t *testing.T) {
 		// Registered before the inserts, so a failed seed still cleans up.
 		// Runs before SeedTenant's cleanup (LIFO), so the period goes
 		// first, then the global framework rows, which outlive the tenant
-		// otherwise (#3041).
+		// otherwise (#3041). The period is frozen, so it goes through
+		// dbtest.DeleteAuditPeriods (#3081).
+		if _, err := e.migrate.Exec(ctx, `DELETE FROM audit_period_audit_log WHERE tenant_id = $1`, e.tenant); err != nil {
+			t.Errorf("cleanup audit_period_audit_log: %v", err)
+		}
+		if err := dbtest.DeleteAuditPeriods(ctx, e.migrate, `id = $1`, period); err != nil {
+			t.Errorf("cleanup audit_periods: %v", err)
+		}
 		for _, q := range []struct {
 			sql string
 			arg any
 		}{
-			{`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`, e.tenant},
-			{`DELETE FROM audit_periods WHERE id = $1`, period},
 			{`DELETE FROM framework_versions WHERE id = $1`, versionID},
 			{`DELETE FROM frameworks WHERE id = $1`, fwID},
 		} {

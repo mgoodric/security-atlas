@@ -44,7 +44,7 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 		t.Fatalf("seed audit period: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(), `DELETE FROM audit_periods WHERE id = $1`, id); err != nil {
+		if err := dbtest.DeleteAuditPeriods(context.Background(), admin, `id = $1`, id); err != nil {
 			t.Logf("cleanup audit period: %v", err)
 		}
 	})

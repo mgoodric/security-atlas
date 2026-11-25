@@ -124,11 +124,13 @@ func TestRouted2924_PeriodsAndPopulationsPinnedBeforeCutover(t *testing.T) {
 			`DELETE FROM samples WHERE tenant_id = $1`,
 			`DELETE FROM populations WHERE tenant_id = $1`,
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 		} {
 			if _, err := admin.Exec(context.Background(), stmt, tenantA); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
+		}
+		if err := dbtest.DeleteAuditPeriods(context.Background(), admin, `tenant_id = $1`, tenantA); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
 		}
 		if _, err := admin.Exec(context.Background(), `TRUNCATE evidence_records CASCADE`); err != nil {
 			t.Logf("cleanup truncate evidence_records: %v", err)

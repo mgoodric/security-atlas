@@ -64,11 +64,13 @@ func TestDrawSample_RevisionLabelMatchesPopulation(t *testing.T) {
 			`DELETE FROM audit_period_freeze_revisions WHERE tenant_id = $1`,
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
 			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
+		}
+		if err := dbtest.DeleteAuditPeriods(ctx, admin, `tenant_id = $1`, tenant); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
 		}
 	})
 	ctrl := seedControl(t, admin, tenant)
