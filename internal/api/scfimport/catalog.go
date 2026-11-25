@@ -15,6 +15,12 @@
 // content, so a re-import of an imported release fills it on anchors stored
 // without one (#1769). A stored legacy_scf_id is never rewritten; a
 // re-import that gives a different one is a *ReleaseConflictError.
+//
+// Options.KeepCurrent loads a new release as "legacy" when another release
+// is current, and demotes nothing (#3061). The docker bootstrap uses it to
+// load the bundled sample beside an operator's own SCF release, so the
+// stock content's scf_release pin resolves while the operator's release
+// stays current.
 package scfimport
 
 import (
@@ -74,9 +80,13 @@ type Report struct {
 	FrameworkID        string
 	FrameworkVersionID string
 	IsNewVersion       bool
-	Created            int
-	Updated            int
-	Unchanged          int
+	// Status is the version's status after the import: "current", or
+	// "legacy" for a release that KeepCurrent loaded beside a current one
+	// or that a later release had already demoted.
+	Status    string
+	Created   int
+	Updated   int
+	Unchanged int
 }
 
 // Load reads a JSON catalog file from disk.
@@ -119,9 +129,23 @@ func validate(cat *Catalog) error {
 	return nil
 }
 
+// Options changes how Import treats a new release.
+type Options struct {
+	// KeepCurrent loads a new release as "legacy" when another SCF release
+	// is current, instead of demoting that release (#3061). With no current
+	// release, the new one becomes current as usual. A release already
+	// loaded keeps its status either way.
+	KeepCurrent bool
+}
+
 // Import runs the catalog against the database in a single transaction.
 // Returns a Report on success; rolls back on any error.
 func Import(ctx context.Context, db DBTX, cat *Catalog) (Report, error) {
+	return ImportWithOptions(ctx, db, cat, Options{})
+}
+
+// ImportWithOptions is Import with Options.
+func ImportWithOptions(ctx context.Context, db DBTX, cat *Catalog, opts Options) (Report, error) {
 	conn, ok := db.(pgxBeginner)
 	if !ok {
 		return Report{}, errors.New("scfimport: db must support BeginTx (pgx.Conn / pgxpool.Pool)")
@@ -132,7 +156,7 @@ func Import(ctx context.Context, db DBTX, cat *Catalog) (Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	report, err := importIntoTx(ctx, tx, cat)
+	report, err := importIntoTx(ctx, tx, cat, opts)
 	if err != nil {
 		return Report{}, err
 	}
@@ -211,7 +235,7 @@ func diffRelease(release string, stored []dbx.ScfAnchor, incoming []Control) *Re
 	return conflict
 }
 
-func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) {
+func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog, opts Options) (Report, error) {
 	q := dbx.New(tx)
 
 	// 0. A release label that is already imported is frozen: compare before
@@ -223,6 +247,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		return Report{}, fmt.Errorf("scfimport: list versions: %w", err)
 	}
 	isNew := true
+	// Scanned in full first: the loop below can break before it has seen
+	// every version (an anchor-less row for this release).
+	otherCurrent := false
+	for _, v := range versions {
+		if v.Version != cat.ReleaseVersion && v.Status == dbx.FrameworkVersionStatusCurrent {
+			otherCurrent = true
+		}
+	}
 	for _, v := range versions {
 		if v.Version != cat.ReleaseVersion {
 			continue
@@ -251,6 +283,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 			FrameworkID:        uuidString(v.FrameworkID),
 			FrameworkVersionID: uuidString(v.ID),
 			IsNewVersion:       false,
+			Status:             string(v.Status),
 			Updated:            updated,
 			Unchanged:          len(stored) - updated,
 		}, nil
@@ -270,8 +303,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 	}
 
 	// 2. If new, demote previous "current" → "legacy" so the at-most-one-
-	//    current invariant holds.
-	if isNew {
+	//    current invariant holds. KeepCurrent instead loads this release as
+	//    legacy beside the current one (#3061).
+	asLegacy := opts.KeepCurrent && otherCurrent
+	status := dbx.FrameworkVersionStatusCurrent
+	if asLegacy {
+		status = dbx.FrameworkVersionStatusLegacy
+	}
+	if isNew && !asLegacy {
 		if err := q.DemoteCurrentFrameworkVersions(ctx, framework.ID); err != nil {
 			return Report{}, fmt.Errorf("scfimport: demote current: %w", err)
 		}
@@ -285,18 +324,21 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		Version:       cat.ReleaseVersion,
 		EffectiveFrom: effectiveFrom,
 		EffectiveTo:   pgtype.Date{},
-		Status:        dbx.FrameworkVersionStatusCurrent,
+		Status:        status,
 	})
 	if err != nil {
 		return Report{}, fmt.Errorf("scfimport: upsert framework_version: %w", err)
 	}
 
-	// 4. Point frameworks.latest_version_id at this row.
-	if err := q.SetLatestVersion(ctx, dbx.SetLatestVersionParams{
-		ID:              framework.ID,
-		LatestVersionID: pgtype.UUID{Bytes: version.ID.Bytes, Valid: true},
-	}); err != nil {
-		return Report{}, fmt.Errorf("scfimport: set latest version: %w", err)
+	// 4. Point frameworks.latest_version_id at this row, unless it was
+	//    loaded as legacy beside the current one.
+	if !asLegacy {
+		if err := q.SetLatestVersion(ctx, dbx.SetLatestVersionParams{
+			ID:              framework.ID,
+			LatestVersionID: pgtype.UUID{Bytes: version.ID.Bytes, Valid: true},
+		}); err != nil {
+			return Report{}, fmt.Errorf("scfimport: set latest version: %w", err)
+		}
 	}
 
 	// 5. Insert each anchor. Only a new release (or an empty version row)
@@ -308,6 +350,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		FrameworkID:        uuidString(framework.ID),
 		FrameworkVersionID: uuidString(version.ID),
 		IsNewVersion:       isNew,
+		Status:             string(status),
 	}
 	for _, ctl := range cat.Controls {
 		subtopics, err := json.Marshal(ctl.Subtopics)

@@ -79,6 +79,55 @@ func TestIsStockManifest(t *testing.T) {
 	}
 }
 
+// The bundled sample's label in code matches the fixture the bootstrap
+// imports (#3061).
+func TestBundledSampleReleaseMatchesTheFixture(t *testing.T) {
+	t.Parallel()
+	cat, err := Load(filepath.Join("..", "..", "..", "migrations", "fixtures", "scf-sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat.ReleaseVersion != BundledSampleRelease {
+		t.Fatalf("scf-sample.json is release %q; BundledSampleRelease is %q", cat.ReleaseVersion, BundledSampleRelease)
+	}
+}
+
+// #3061: a stock control whose title alone changed moves forward (#2321),
+// except off the bundled sample, whose titles are SCF 2026.3's: there only an
+// exact code and title match moves it.
+func TestStockTitleOnlyRebindable_NeverOffTheBundledSample(t *testing.T) {
+	t.Parallel()
+	reworded := "Configuration Change Control (reworded)"
+	row := func(legacyRelease string) dbx.ListControlsOnLegacySCFAnchorsRow {
+		return dbx.ListControlsOnLegacySCFAnchorsRow{
+			BundleID:           "soc2_cc8_1_change_management",
+			BundleManifestYaml: stockCC81(t),
+			LegacyScfID:        "CHG-02",
+			LegacyAnchorTitle:  "Configuration Change Control",
+			LegacyRelease:      legacyRelease,
+			CurrentRelease:     "2027.1",
+			CurrentAnchorID:    pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+			CurrentAnchorTitle: &reworded,
+		}
+	}
+	cases := []struct {
+		legacyRelease string
+		want          bool
+	}{
+		{"2026.3", true},
+		{BundledSampleRelease, false},
+	}
+	for _, c := range cases {
+		got, err := StockTitleOnlyRebindable(row(c.legacyRelease))
+		if err != nil {
+			t.Fatalf("%s: %v", c.legacyRelease, err)
+		}
+		if got != c.want {
+			t.Errorf("legacy release %s: StockTitleOnlyRebindable = %v; want %v", c.legacyRelease, got, c.want)
+		}
+	}
+}
+
 // #2321: a stock control re-binds when only the anchor's title changed; a
 // tenant-authored one keeps the #1971 D3 rule, and a code that SCF reused
 // or the remap table moved is not a title-only change, stock or not.

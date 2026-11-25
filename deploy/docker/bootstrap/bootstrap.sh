@@ -20,6 +20,10 @@
 #   4. wait for the atlas server's /health to return 200
 #   5. ensure an OAuth client + upload the 65 stock control bundles
 #
+# With SCF_CATALOG set to an operator's own release, step 3 also loads the
+# bundled sample as a legacy release, and step 5 ends by re-importing the
+# operator's catalog to move the stock content onto it (#3061).
+#
 # Why the split (confirmed production incident, 2026-06-05): the old
 # bootstrap was the ONLY migrate path AND was one-shot/un-labelled, so
 # Watchtower advanced the binary while the migrate step never re-ran —
@@ -60,7 +64,8 @@ set -eu
 
 BOOTSTRAP_DIR="$(dirname "$0")"
 REPO_ROOT="${REPO_ROOT:-/repo}"
-SCF_CATALOG="${SCF_CATALOG:-$REPO_ROOT/migrations/fixtures/scf-sample.json}"
+SCF_SAMPLE="$REPO_ROOT/migrations/fixtures/scf-sample.json"
+SCF_CATALOG="${SCF_CATALOG:-$SCF_SAMPLE}"
 CONTROLS_DIR="${CONTROLS_DIR:-$REPO_ROOT/controls/soc2}"
 CROSSWALKS_DIR="${CROSSWALKS_DIR:-$REPO_ROOT/data/crosswalks}"
 
@@ -138,6 +143,20 @@ psql "$PSQL_URL" -v ON_ERROR_STOP=1 \
 # ----- Phase 3: import the SCF catalog -----
 log "importing SCF catalog from $SCF_CATALOG ..."
 atlas-cli catalog import-scf "$SCF_CATALOG"
+
+# security-atlas#3061: the stock controls, crosswalks and policies declare
+# the sample's release (scf_release: test-2026.3, #1773 / #3033), so an
+# install on its own SCF release loads the sample too. --keep-current loads
+# it as legacy: the operator's release stays current, and a sample already
+# loaded is a frozen no-op (#1768). After the stock uploads, the operator's
+# catalog is imported again (below) so the stock controls and SOC 2 edges
+# move onto its anchors wherever the code and title match.
+BYO_CATALOG=0
+if [ "$SCF_CATALOG" != "$SCF_SAMPLE" ]; then
+    BYO_CATALOG=1
+    log "loading the bundled SCF sample beside it, for the stock content's pin ..."
+    atlas-cli catalog import-scf --keep-current "$SCF_SAMPLE"
+fi
 
 # security-atlas#1721: without a crosswalk the stock SOC 2 controls map to
 # zero framework requirements and /v1/frameworks lists only SCF. The SOC 2
@@ -297,6 +316,16 @@ for dir in "$CONTROLS_DIR"/*/; do
     uploaded=$((uploaded + 1))
 done
 log "uploaded $uploaded control bundles"
+
+# security-atlas#3061: the stock controls and the SOC 2 edges just bound in
+# the sample's legacy release. Re-importing the operator's catalog is a
+# frozen no-op that runs the re-bind (#1971) and the edge carry (#2315):
+# each moves onto the current release where the anchor keeps its code and
+# title, and the rest are queued for review.
+if [ "$BYO_CATALOG" = "1" ]; then
+    log "re-binding stock content onto $SCF_CATALOG ..."
+    atlas-cli catalog import-scf "$SCF_CATALOG"
+fi
 
 # Slice 073: emit the grep-friendly bootstrap-token line + write the
 # 0600 file (the platform also writes the file in cmd/atlas; this is
