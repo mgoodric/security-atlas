@@ -394,7 +394,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	if err := seeder.Teardown(ctx, demoTenantSlug, actorID, actorTenantID); err != nil {
-		httperr.WriteInternal(w, r, "teardown failed", err)
+		writeTeardownError(w, r, err)
 		return
 	}
 
@@ -403,6 +403,28 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		Status:     "deleted",
 	})
 
+}
+
+// teardownBusyRetryAfter is the Retry-After, in seconds, on a teardown
+// refused because audit_periods was busy. The teardown waits 2s for its
+// lock, so a retry a few seconds later usually finds the writers gone.
+const teardownBusyRetryAfter = "5"
+
+// teardownBusyCode is the stable machine code on that 503.
+const teardownBusyCode = "teardown_busy"
+
+// writeTeardownError writes the response for a failed Seeder.Teardown. A
+// teardown that gave up waiting for the audit_periods lock
+// (demoseed.ErrTeardownBusy) rolled back and deleted nothing, so it is a 503
+// with Retry-After and the teardown_busy code, not a generic 500 (#3094).
+// Anything else is a 500.
+func writeTeardownError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, demoseed.ErrTeardownBusy) {
+		w.Header().Set("Retry-After", teardownBusyRetryAfter)
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, "teardown busy", err, teardownBusyCode)
+		return
+	}
+	httperr.WriteInternal(w, r, "teardown failed", err)
 }
 
 // requireSuperAdmin gates Seed and Teardown on the verified JWT's

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -57,5 +59,23 @@ func TestDemoTeardownLegacy_PreDatabaseGates(t *testing.T) {
 				t.Errorf("err = %v, want it to contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// #3094: a teardown that gave up on the audit_periods lock tells the
+// operator to retry and keeps the error chain; any other error is only
+// prefixed.
+func TestTeardownError(t *testing.T) {
+	busy := fmt.Errorf("demoseed: teardown exec audit_periods: %w", demoseed.ErrTeardownBusy)
+	got := teardownError("demo teardown", busy)
+	if !strings.HasPrefix(got.Error(), "demo teardown: audit_periods is busy; retry") {
+		t.Errorf("busy teardown error = %q, want it to start with the retry message", got)
+	}
+	if !errors.Is(got, demoseed.ErrTeardownBusy) {
+		t.Errorf("busy teardown error lost ErrTeardownBusy: %v", got)
+	}
+	other := errors.New("boom")
+	if got := teardownError("demo teardown", other); got.Error() != "demo teardown: boom" || !errors.Is(got, other) {
+		t.Errorf("other teardown error = %v, want \"demo teardown: boom\" wrapping it", got)
 	}
 }

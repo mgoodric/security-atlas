@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,7 +143,7 @@ func runDemoTeardownLegacy(cmd *cobra.Command, _ []string) error {
 	}
 	res, err := seeder.TeardownLegacyButtonTenant(ctx, demoLegacyTenantSlug, demoLegacySuperAdminEmail, demoLegacyDryRun)
 	if err != nil {
-		return fmt.Errorf("demo teardown-legacy: %w", err)
+		return teardownError("demo teardown-legacy", err)
 	}
 	printLegacyTeardown(cmd.OutOrStdout(), demoLegacyTenantSlug, res)
 	return nil
@@ -445,7 +446,7 @@ func runDemoTeardown(cmd *cobra.Command, _ []string) error {
 	if demoTeardownTenantSlug == "" {
 		ref, err := seeder.TeardownImplicit(ctx, uuid.Nil, uuid.Nil)
 		if err != nil {
-			return fmt.Errorf("demo teardown: %w", err)
+			return teardownError("demo teardown", err)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 			"demo teardown: demo rows removed from tenant %q; its other rows are unchanged.\n", ref.Name,
@@ -453,12 +454,23 @@ func runDemoTeardown(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	if err := seeder.Teardown(ctx, demoTeardownTenantSlug, uuid.Nil, uuid.Nil); err != nil {
-		return fmt.Errorf("demo teardown: %w", err)
+		return teardownError("demo teardown", err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 		"demo teardown: demo data for tenant %q removed.\n", demoTeardownTenantSlug,
 	)
 	return nil
+}
+
+// teardownError prefixes a failed teardown's error with verb. A teardown
+// that gave up waiting for the audit_periods lock (demoseed.ErrTeardownBusy)
+// deleted nothing, so the operator is told to retry before the raw
+// lock_not_available detail (#3094).
+func teardownError(verb string, err error) error {
+	if errors.Is(err, demoseed.ErrTeardownBusy) {
+		return fmt.Errorf("%s: audit_periods is busy; retry (other sessions are writing to it; nothing was deleted): %w", verb, err)
+	}
+	return fmt.Errorf("%s: %w", verb, err)
 }
 
 // demoEnvEnabled returns true if ATLAS_ENABLE_DEMO_SEED is the

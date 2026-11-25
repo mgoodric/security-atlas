@@ -44,6 +44,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,60 @@ func NewAppPool(t *testing.T) *pgxpool.Pool {
 func NewMigratePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	return openPool(t, requireDSN(t, migrateDSNEnv))
+}
+
+// NewShadowMigratePool is NewMigratePool for a test that needs install-wide
+// state in tables every suite shares: "no tenants at all", "this is the
+// oldest user", an exact tenant count. Emptying the shared tables for that
+// would delete every other suite's rows on the shared CI database (#3094).
+// Instead it creates a schema of its own holding an empty copy of each of
+// tables (CREATE TABLE ... (LIKE public.<t> INCLUDING ALL): columns,
+// defaults, CHECK and NOT NULL constraints, indexes; no foreign keys, RLS
+// policies or triggers), and returns a migrate-role pool whose search_path
+// puts that schema before public. Unqualified reads and writes of tables
+// through the pool hit the copies; every other table is the real one. The
+// schema is dropped when the test ends.
+//
+// So only code that reaches the tables unqualified through this pool is
+// isolated. A query through any other pool, or a foreign key, trigger or
+// SECURITY DEFINER function pinned to public, still sees the shared table.
+func NewShadowMigratePool(t *testing.T, tables ...string) *pgxpool.Pool {
+	t.Helper()
+	dsn := requireDSN(t, migrateDSNEnv)
+	ctx := context.Background()
+	admin := openPool(t, dsn)
+	schema := "dbtest_shadow_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	ident := pgx.Identifier{schema}.Sanitize()
+	if _, err := admin.Exec(ctx, `CREATE SCHEMA `+ident); err != nil {
+		t.Fatalf("dbtest: create shadow schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DROP SCHEMA `+ident+` CASCADE`); err != nil {
+			t.Errorf("dbtest: drop shadow schema %s: %v", schema, err)
+		}
+	})
+	for _, table := range tables {
+		if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s (LIKE %s INCLUDING ALL)`,
+			pgx.Identifier{schema, table}.Sanitize(), pgx.Identifier{"public", table}.Sanitize())); err != nil {
+			t.Fatalf("dbtest: shadow %s: %v", table, err)
+		}
+	}
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("dbtest: parse %s: %v", migrateDSNEnv, err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = ident + ", public"
+	dialCtx, cancel := context.WithTimeout(ctx, poolDialTimeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
+	if err != nil {
+		t.Fatalf("dbtest: shadow pool: %v", err)
+	}
+	// Registered after the drop, so it runs first: the pool's connections
+	// are closed before the schema goes.
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 // requireDSN reads env and skips the test when it is unset — the canonical
@@ -213,7 +268,7 @@ func FreezeRaw(ctx context.Context, pool *pgxpool.Pool, tenant, periodID any, st
 // trigger disabled. No lock_timeout: a cleanup waits for the lock.
 func DeleteAuditPeriods(ctx context.Context, pool *pgxpool.Pool, where string, args ...any) error {
 	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		_, err := period.OwnerDelete(ctx, tx, 0, `DELETE FROM audit_periods WHERE `+where, args...)
+		_, err := period.OwnerDelete(ctx, tx, 0, where, args...)
 		return err
 	})
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -94,7 +95,10 @@ func insertControl(t *testing.T, tenantID uuid.UUID, bundleID string) {
 }
 
 // removeTenant deletes every row under tenantID, then the tenant, retrying
-// tables a foreign key still blocks.
+// tables a foreign key still blocks. audit_periods goes through
+// dbtest.DeleteAuditPeriods: a plain DELETE of the seed's frozen period is
+// refused (#3081), and a frozen period left behind in the shared database
+// then refuses every TRUNCATE that reaches audit_periods (#3094).
 func removeTenant(t *testing.T, tenantID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,9 +106,14 @@ func removeTenant(t *testing.T, tenantID uuid.UUID) {
 	for pass := 0; pass < 10 && len(tables) > 0; pass++ {
 		var blocked []string
 		for _, table := range tables {
-			if _, err := adminPool.Exec(ctx,
-				fmt.Sprintf(`DELETE FROM %q WHERE tenant_id::text = $1`, table), tenantID.String(),
-			); err != nil {
+			var err error
+			if table == "audit_periods" {
+				err = dbtest.DeleteAuditPeriods(ctx, adminPool, `tenant_id::text = $1`, tenantID.String())
+			} else {
+				_, err = adminPool.Exec(ctx,
+					fmt.Sprintf(`DELETE FROM %q WHERE tenant_id::text = $1`, table), tenantID.String())
+			}
+			if err != nil {
 				blocked = append(blocked, table)
 			}
 		}
