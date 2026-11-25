@@ -200,6 +200,8 @@ sql:
       - "migrations/sql/20261306000000_evidence_historical_import.sql"
       # #3056: the instant a replay row judged.
       - "migrations/sql/20261308000000_control_evaluation_evaluated_as_of.sql"
+      # #3066: the control set each freeze hashed.
+      - "migrations/sql/20261311000000_audit_period_frozen_controls.sql"
     queries: "internal/db/queries"
     gen:
       go:

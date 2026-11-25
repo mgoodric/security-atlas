@@ -1819,6 +1819,14 @@ type AuditPeriodFreezeRevision struct {
 	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
 }
 
+type AuditPeriodFrozenControl struct {
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	ControlIds    []pgtype.UUID      `json:"control_ids"`
+	Source        string             `json:"source"`
+	RecordedAt    pgtype.Timestamptz `json:"recorded_at"`
+}
+
 type AuditSinkFailure struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`

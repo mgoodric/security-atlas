@@ -104,6 +104,22 @@ The freeze horizon and `ingested_at` now come from one clock, the database's, an
 
 Upgrade: no stored hash changes. A period frozen before this change keeps the hash it has; the two exceptions above describe when an external recompute of such a period can differ. A period frozen after this change has neither.
 
+## Amendment: the control set is recorded at freeze (#3066)
+
+`control_ids` was read from the tenant's live catalog on every hash, at freeze and at replay (`ListControlIDsForPeriodHash`), with no horizon. Creating or deleting any control after a freeze changed the replay of revision 1 and of every later revision, so the rule above, that the original freeze always replays, did not hold.
+
+- **Recorded, not bounded.** A `created_at <= frozen_at` horizon cannot express deletion: controls are hard-deleted and carry no `deleted_at`. So Freeze records the exact list it hashed in `audit_period_frozen_controls` (one row per period: `control_ids`, `source`, `recorded_at`), in the freeze's own transaction. `ReplayHash`, and every revision hash including the one `AmendInTx` cuts, read that row and never the live catalog. A frozen period with no row fails closed with `period.ErrNoControlSnapshot`; it is never replayed against the current catalog instead.
+- **Hash definition unchanged.** The six-key canonical JSON and its sort are byte-identical. Only where `control_ids` comes from changes, so no stored `frozen_hash` or revision hash changes. The control set is the same for every revision of a period: a revision adds evidence ids only.
+- **Write-once.** `atlas_app` holds SELECT and INSERT only, and RLS has no UPDATE or DELETE policy. The trigger `audit_period_frozen_controls_immutable_trg` refuses UPDATE for every role, and DELETE while the period exists. Deleting the period cascades to its row. The owner-only reopen (`docs/runbooks/audit-period-reopen.md`) removes the row with the trigger disabled, so the next freeze records its own.
+- **Writers that bypass Freeze.** The demo seed and the SQL fixtures (`fixtures/e2e/audit-workspace.sql`, `fixtures/e2e/audits-list.sql`, `fixtures/walkthroughs/oscal-export.sql`) insert frozen periods directly. Each writes the row too, with `source = 'seed'`. Their `frozen_hash` values are placeholders, so these periods were never replayable; the row only keeps a historical import that amends one from failing closed.
+
+Upgrade: migration `20261311000000_audit_period_frozen_controls` backfills one row per period already frozen, from the tenant's catalog as it stands at migration time, with `source = 'migration_backfill'`. For such a period verification is exactly as strong as before the upgrade:
+
+- if the catalog has not changed since the freeze, replay matches, and from then on no catalog change can break it;
+- if it changed before the upgrade, replay already mismatched and still does. The backfill does not hide the drift, and `source` says the recorded set is not freeze-time.
+
+A reimplemented verifier MUST take `control_ids` from the recorded row, and SHOULD report a `migration_backfill` row's match as "catalog unchanged between freeze and upgrade", not as a freeze-time commitment.
+
 ## Alternatives considered
 
 1. **Include `frozen_at`.** Rejected: breaks AC-7 under the wall-clock reading, which is the practitioner-natural reading ("audit said the dashboard hasn't changed since freeze — prove it"). Wall-clock differences between two equivalent freezes are bookkeeping, not content.

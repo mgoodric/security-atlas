@@ -37,13 +37,23 @@ const insertRevisionSQL = `INSERT INTO audit_period_freeze_revisions (
 
 // reopenFrozenPeriod resets a frozen period to open as the table owner, the
 // recovery path the AC-7 tests use (docs/runbooks/audit-period-reopen.md).
-// The freeze-immutability trigger refuses it for every role, so the owner
-// disables the trigger for its own transaction only.
+// The freeze-immutability triggers refuse it for every role, so the owner
+// disables them for its own transaction only. The recorded control set goes
+// with the freeze (#3066), so the next Freeze records its own.
 func reopenFrozenPeriod(t *testing.T, admin *pgxpool.Pool, id uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	err := pgx.BeginTxFunc(ctx, admin, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `ALTER TABLE audit_periods DISABLE TRIGGER audit_periods_freeze_immutable_trg`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls DISABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM audit_period_frozen_controls WHERE audit_period_id = $1`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE audit_period_frozen_controls ENABLE TRIGGER audit_period_frozen_controls_immutable_trg`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx,

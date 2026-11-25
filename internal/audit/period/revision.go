@@ -29,6 +29,11 @@ var ErrNotFrozen = errors.New("auditperiod: not frozen")
 // ErrNoRevision is returned when a period has no revision of the number asked.
 var ErrNoRevision = errors.New("auditperiod: no such freeze revision")
 
+// ErrNoControlSnapshot is returned when a frozen period has no recorded
+// control set (audit_period_frozen_controls, #3066). Its hash cannot be
+// replayed, and it is never replayed against the live catalog instead.
+var ErrNoControlSnapshot = errors.New("auditperiod: frozen period has no recorded control set")
+
 // Revision is one freeze of a frozen period. Revision 1 is the original
 // freeze, read from the audit_periods row, which is never rewritten. Each
 // later revision was cut by an import amendment and adds EvidenceRecordIDs
@@ -162,7 +167,8 @@ func AmendedIDs(ctx context.Context, q *dbx.Queries, tenantID, periodID pgtype.U
 
 // revisionHash is the ADR 0003 hash over p's original horizon plus the
 // amended records: the same inputs Freeze hashes, with the amended ids
-// joined to the evidence set.
+// joined to the evidence set. The control ids are the set Freeze recorded
+// (ErrNoControlSnapshot when there is none).
 func revisionHash(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, amended []uuid.UUID) ([]byte, error) {
 	evIDs, err := q.ListEvidenceIDsForPeriodHash(ctx, dbx.ListEvidenceIDsForPeriodHashParams{
 		TenantID: p.TenantID, ObservedAt: p.FrozenAt,
@@ -170,9 +176,16 @@ func revisionHash(ctx context.Context, q *dbx.Queries, p dbx.AuditPeriod, amende
 	if err != nil {
 		return nil, fmt.Errorf("list evidence ids for hash: %w", err)
 	}
-	ctrlIDs, err := q.ListControlIDsForPeriodHash(ctx, p.TenantID)
+	// #3066: the control set recorded at freeze, never the live catalog,
+	// so a control created or deleted later cannot change any revision.
+	ctrlIDs, err := q.GetFrozenControlIDs(ctx, dbx.GetFrozenControlIDsParams{
+		TenantID: p.TenantID, AuditPeriodID: p.ID,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("list control ids for hash: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNoControlSnapshot
+		}
+		return nil, fmt.Errorf("get frozen control ids: %w", err)
 	}
 	ids := pgUUIDsToUUIDs(evIDs)
 	seen := make(map[uuid.UUID]bool, len(ids))

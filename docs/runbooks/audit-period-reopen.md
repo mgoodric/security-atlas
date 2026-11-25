@@ -8,8 +8,9 @@
 
 - `audit_periods_freeze_immutable_trg` refuses changes to `frozen_at`, `frozen_hash` and `frozen_by` once they are set. On a frozen row it also refuses changes to `id`, `tenant_id`, `period_start`, `period_end` and `framework_version_id`.
 - `populations_frozen_at_immutable_trg` refuses changes to `populations.frozen_at` once it is set.
+- `audit_period_frozen_controls_immutable_trg` (#3066, migration `20261311000000_audit_period_frozen_controls`) refuses any UPDATE of the control set the freeze recorded, and its DELETE while the period exists. Freeze records one row per period, so a reopen must remove it or the next freeze fails on the primary key.
 
-Both triggers apply to every role, the owner included. A reopen has to disable them inside its own transaction.
+These triggers apply to every role, the owner included. A reopen has to disable them inside its own transaction.
 
 ---
 
@@ -41,6 +42,13 @@ WHERE id = '<period id>' AND status = 'frozen';
 
 ALTER TABLE audit_periods ENABLE TRIGGER audit_periods_freeze_immutable_trg;
 
+ALTER TABLE audit_period_frozen_controls DISABLE TRIGGER audit_period_frozen_controls_immutable_trg;
+
+DELETE FROM audit_period_frozen_controls WHERE audit_period_id = '<period id>';
+-- expect DELETE 1
+
+ALTER TABLE audit_period_frozen_controls ENABLE TRIGGER audit_period_frozen_controls_immutable_trg;
+
 COMMIT;
 ```
 
@@ -52,8 +60,9 @@ Then freeze again through the product (`POST /v1/audit-periods/{id}/freeze`) so 
 
 ```sql
 SELECT tgname, tgenabled FROM pg_trigger
-WHERE tgname IN ('audit_periods_freeze_immutable_trg', 'populations_frozen_at_immutable_trg');
--- both rows tgenabled = 'O'
+WHERE tgname IN ('audit_periods_freeze_immutable_trg', 'populations_frozen_at_immutable_trg',
+                 'audit_period_frozen_controls_immutable_trg');
+-- every row tgenabled = 'O'
 ```
 
 The reopen leaves no `audit_period_audit_log` row: it bypasses the product. Record the reason and the old `frozen_hash` wherever your program keeps its change records.

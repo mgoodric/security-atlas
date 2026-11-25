@@ -135,11 +135,26 @@ ORDER BY id;
 -- Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 -- tenant's catalog. v1 takes the full tenant catalog; a future slice may
 -- narrow to controls satisfied by the period's framework_version_id once
--- canvas §8 audit-scope-narrowing lands.
+-- canvas §8 audit-scope-narrowing lands. Only Freeze reads it: the list is
+-- recorded in audit_period_frozen_controls and every replay reads that
+-- (#3066), never the live catalog.
 SELECT id
 FROM controls
 WHERE tenant_id = $1
 ORDER BY id;
+
+-- name: InsertFrozenControls :exec
+-- #3066: record the control set a freeze hashed, in the freeze's own
+-- transaction. Write-once (trigger audit_period_frozen_controls_immutable).
+INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+VALUES ($1, $2, sqlc.arg(control_ids)::uuid[], 'freeze');
+
+-- name: GetFrozenControlIDs :one
+-- #3066: the control set recorded for a frozen period. No row means the
+-- period cannot be replayed (period.ErrNoControlSnapshot).
+SELECT control_ids
+FROM audit_period_frozen_controls
+WHERE tenant_id = $1 AND audit_period_id = $2;
 
 -- name: ListEvidenceForPeriodControl :many
 -- AC-3: control-state read for a period. Returns evidence records for one

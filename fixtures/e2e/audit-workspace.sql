@@ -52,6 +52,18 @@ VALUES (
 )
 ON CONFLICT DO NOTHING;
 
+-- #3066: a frozen period carries its recorded control set; without one,
+-- replay and import amendment fail closed (period.ErrNoControlSnapshot).
+INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+SELECT ap.tenant_id, ap.id,
+       ARRAY(SELECT c.id FROM controls c WHERE c.tenant_id = ap.tenant_id ORDER BY c.id),
+       'seed'
+FROM audit_periods ap
+WHERE ap.tenant_id = '00000000-0000-0000-0000-00000000d3a0'
+  AND ap.id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001'
+  AND ap.status = 'frozen'
+ON CONFLICT DO NOTHING;
+
 COMMIT;
 
 BEGIN;

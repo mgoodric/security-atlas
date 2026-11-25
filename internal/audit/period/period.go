@@ -322,7 +322,8 @@ func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at ti
 		// Compute the content commitment hash BEFORE the UPDATE so a
 		// hash-computation failure aborts the freeze without partial
 		// state. Ingredients: sorted evidence_record_ids visible at
-		// `at` + sorted control_ids in tenant. Per ADR 0003.
+		// `at` + sorted control_ids in tenant. Per ADR 0003. The
+		// control ids are recorded below and replay reads them (#3066).
 		evIDs, err := q.ListEvidenceIDsForPeriodHash(ctx, dbx.ListEvidenceIDsForPeriodHashParams{
 			TenantID:   pgUUID(tenantID),
 			ObservedAt: pgTimestamptz(at),
@@ -361,6 +362,20 @@ func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at ti
 				return ErrAlreadyFrozen
 			}
 			return fmt.Errorf("freeze audit period: %w", err)
+		}
+
+		// #3066: record the control set just hashed, so every replay
+		// reads it instead of the live catalog. An empty catalog is
+		// recorded as an empty array, not NULL.
+		if ctrlIDs == nil {
+			ctrlIDs = []pgtype.UUID{}
+		}
+		if err := q.InsertFrozenControls(ctx, dbx.InsertFrozenControlsParams{
+			TenantID:      pgUUID(tenantID),
+			AuditPeriodID: pgUUID(id),
+			ControlIds:    ctrlIDs,
+		}); err != nil {
+			return fmt.Errorf("record frozen controls: %w", err)
 		}
 
 		// Stamp populations.frozen_at for any populations already

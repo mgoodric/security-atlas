@@ -301,9 +301,21 @@ func tenantScopedTables(ctx context.Context, tx pgx.Tx) ([]tenantTable, error) {
 		if isTenantAuditTable(f.name) {
 			continue // M2: audit rows are a trace, never demo rows
 		}
+		if cascadeOwnedTables[f.name] {
+			continue
+		}
 		tables = append(tables, tenantTable{name: f.name, keyExpr: rowKeyExpr(f.pk)})
 	}
 	return tables, nil
+}
+
+// cascadeOwnedTables hold rows that live exactly as long as a parent row and
+// refuse a direct DELETE, so they are neither recorded nor probed: deleting
+// the parent removes them by ON DELETE CASCADE. audit_period_frozen_controls
+// is a frozen period's recorded control set (#3066), written by the seed
+// with each frozen period and removed with it.
+var cascadeOwnedTables = map[string]bool{
+	"audit_period_frozen_controls": true,
 }
 
 // rowKeyExpr builds jsonb_build_object('col', t."col", ...) over the primary

@@ -357,6 +357,21 @@ func writeAuditPeriodsAndSamples(ctx context.Context, tx pgx.Tx, fs *fixtureSet)
 		if err != nil {
 			return 0, 0, 0, 0, fmt.Errorf("demoseed: insert audit_period %s: %w", ap.Name, err)
 		}
+		// #3066: a frozen period carries its recorded control set, or
+		// replay and import amendment fail closed on it. The seed
+		// inserts frozen rows directly instead of calling Freeze.
+		if ap.Frozen {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO audit_period_frozen_controls
+				 (tenant_id, audit_period_id, control_ids, source)
+				 VALUES ($1, $2,
+				         ARRAY(SELECT id FROM controls WHERE tenant_id = $1 ORDER BY id),
+				         'seed')`,
+				fs.tenant.ID, ap.ID,
+			); err != nil {
+				return 0, 0, 0, 0, fmt.Errorf("demoseed: record frozen controls %s: %w", ap.Name, err)
+			}
+		}
 		apCount++
 
 		// Each audit period gets one population + one sample drawn
