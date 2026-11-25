@@ -35,6 +35,7 @@ func TestImport_WorkbookPointsOfFocusRollUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
+	inSample(cw)
 	report, err := soc2import.Import(ctx, pool, cw)
 	if err != nil {
 		t.Fatalf("Import: %v", err)

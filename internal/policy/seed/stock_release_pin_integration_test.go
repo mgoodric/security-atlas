@@ -16,6 +16,7 @@ package seed_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -150,9 +151,6 @@ func TestSeed_FreshInstallBindsStockPoliciesInTheSampleRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if len(report.SCFReleaseWarnings) != 0 {
-		t.Errorf("fresh install: want no SCF release warnings, got %v", report.SCFReleaseWarnings)
-	}
 	if len(report.MissingAnchors) != 0 {
 		t.Errorf("fresh install: want every linked code to resolve in %s, missing %v", release, report.MissingAnchors)
 	}
@@ -205,14 +203,24 @@ func TestSeed_UpgradeFromPreRepinStockKeepsPolicyHistory(t *testing.T) {
 	bindStockPolicyCodes(t, admin, tenant, release)
 	resolver := seed.NewSQLAnchorResolver(admin)
 
-	// An install seeded from the pre-#3033 files: every policy falls back
-	// to the current release, with a warning.
-	old, err := seed.Seed(ctx, app, tenant, preRepinStockPolicies(t, release), resolver)
-	if err != nil {
-		t.Fatalf("Seed(pre-#3033): %v", err)
+	// The pre-#3033 files declare "2026.3", which is not loaded. Since #1774
+	// they are refused outright, and nothing is written.
+	preRepin := preRepinStockPolicies(t, release)
+	if _, err := seed.Seed(ctx, app, tenant, preRepin, resolver); !errors.Is(err, scfrelease.ErrUnknownRelease) {
+		t.Fatalf("Seed(pre-#3033) after #1774: err = %v; want %v", err, scfrelease.ErrUnknownRelease)
 	}
-	if len(old.SCFReleaseWarnings) != seed.StockPolicyCount {
-		t.Fatalf("pre-#3033 seed: want %d release-fallback warnings, got %v", seed.StockPolicyCount, old.SCFReleaseWarnings)
+	if n := len(readPolicyRows(t, admin, tenant)); n != 0 {
+		t.Fatalf("refused pre-#3033 seed wrote %d policies; want none", n)
+	}
+
+	// An install seeded from them before #1774 fell back to the current
+	// release, which is the sample: emulate that by binding them there.
+	for i := range preRepin {
+		preRepin[i].FrontMatter.SCFRelease = release
+	}
+	old, err := seed.Seed(ctx, app, tenant, preRepin, resolver)
+	if err != nil {
+		t.Fatalf("Seed(pre-#3033, as the fallback bound it): %v", err)
 	}
 
 	// The operator takes one of them through publish and a second version,
@@ -272,8 +280,8 @@ func TestSeed_UpgradeFromPreRepinStockKeepsPolicyHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seed(shipped): %v", err)
 	}
-	if len(again.SCFReleaseWarnings) != 0 {
-		t.Errorf("re-seed after upgrade: want no SCF release warnings, got %v", again.SCFReleaseWarnings)
+	if len(again.Loaded) != seed.StockPolicyCount {
+		t.Errorf("re-seed after upgrade: loaded %d policies; want %d", len(again.Loaded), seed.StockPolicyCount)
 	}
 
 	after := readPolicyRows(t, admin, tenant)

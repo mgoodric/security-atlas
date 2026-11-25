@@ -56,8 +56,9 @@ const (
 const (
 	// SourceBoot: RebindControls, during `atlas-cli catalog import-scf`.
 	SourceBoot = "boot"
-	// SourceUpload: control.Store.Upload, re-binding or flagging an
-	// unchanged manifest in place.
+	// SourceUpload: control.Store.Upload, re-binding or flagging a shipped
+	// stock control upgraded in place from an unpinned stored manifest
+	// (since #1774 the only upload path that re-binds).
 	SourceUpload = "upload"
 )
 

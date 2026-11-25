@@ -70,7 +70,12 @@ func (s *Store) AnchorCoverageWarning(ctx context.Context, anchorRef string) (st
 		parentCode := parentSCFCode(row.ScfID)
 		parentReaches := false
 		if parentCode != "" {
-			parent, perr := q.GetSCFAnchorBySCFID(ctx, parentCode)
+			// The parent in the bound anchor's own release, not the current
+			// one: the SCF reuses codes between releases (#1774).
+			parent, perr := q.GetSCFAnchorByVersionAndSCFID(ctx, dbx.GetSCFAnchorByVersionAndSCFIDParams{
+				FrameworkVersionID: row.FrameworkVersionID,
+				ScfID:              parentCode,
+			})
 			switch {
 			case errors.Is(perr, pgx.ErrNoRows):
 				parentCode = ""

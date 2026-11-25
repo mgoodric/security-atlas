@@ -37,9 +37,9 @@ func TestHeldBack2358_ReviewedStockControlListedAndEditsKept(t *testing.T) {
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	// The pre-#1773 shipped bytes: this test binds the stock control in
-	// synthetic release A, which the pinned bytes cannot.
-	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
+	// The shipped bytes, pinned to test-2026.3: the synthetic release A is
+	// imported under that label so they bind in it (#1774).
+	stockYAML := stockManifestShipped(t, stockCC81Bundle)
 	sum := sha256.Sum256(stockYAML)
 	stockHash := hex.EncodeToString(sum[:])
 	upload := func(tenant string, yaml []byte, by string) control.UploadResult {
@@ -74,7 +74,7 @@ func TestHeldBack2358_ReviewedStockControlListedAndEditsKept(t *testing.T) {
 		return c
 	}
 
-	importRelease(t, admin, load("a"))
+	importAsShippedRelease(t, admin, load("a"))
 	tenant := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
 	other := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
 	legacy := bootSeed(tenant).ControlID
@@ -210,9 +210,9 @@ func TestHeldBack2599_AppliedShippedManifestClearsRow(t *testing.T) {
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	// The pre-#1773 shipped bytes: this test binds the stock control in
-	// synthetic release A, which the pinned bytes cannot.
-	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
+	// The shipped bytes, pinned to test-2026.3: the synthetic release A is
+	// imported under that label so they bind in it (#1774).
+	stockYAML := stockManifestShipped(t, stockCC81Bundle)
 	bootSeed := func(tenant string) control.UploadResult {
 		t.Helper()
 		b, err := control.FinalizeBundleForHTTP(stockYAML)
@@ -229,7 +229,7 @@ func TestHeldBack2599_AppliedShippedManifestClearsRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	importRelease(t, admin, c)
+	importAsShippedRelease(t, admin, c)
 	tenant := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
 	other := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
 	active := bootSeed(tenant).ControlID

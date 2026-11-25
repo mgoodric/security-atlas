@@ -159,8 +159,10 @@ func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 	importSCF(t, pool, old)
 	oldCW := loadHIPAACrosswalk(t)
 	// The pre-#1773 shipped crosswalk declared no scf_release, so its codes
-	// bound in the current release (here the pre-#1971 one).
-	oldCW.SCFRelease = ""
+	// bound in the release current then, the pre-#1971 one. A release is
+	// required since #1774, so the fixture names that release: the same
+	// edges on the same anchors.
+	oldCW.SCFRelease = preRemapRelease
 	for i, m := range oldCW.Mappings {
 		if p, ok := preRemap[m.SCFAnchor]; ok {
 			oldCW.Mappings[i].SCFAnchor = p.id
@@ -518,6 +520,7 @@ func coexistCrosswalk(source string, mappings ...[2]string) *soc2import.Crosswal
 		FrameworkVersion:  "1.0",
 		SourceAttribution: "community_draft",
 		Source:            source,
+		SCFRelease:        sampleSCFRelease,
 		Requirements: []soc2import.Requirement{
 			{Code: "R-1", Title: "First", Body: "Fixture requirement."},
 			{Code: "R-2", Title: "Second", Body: "Fixture requirement."},

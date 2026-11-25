@@ -59,8 +59,14 @@ func TestMappingsOverlayAdd_PostsTheEdge(t *testing.T) {
 func TestMappingsOverlayAdd_RequiresRationaleAndSource(t *testing.T) {
 	api := &taxonomyAPI{}
 	srv := api.server(t, http.StatusCreated, overlayResp("e-1", "active"))
-	base := []string{"add", "soc2", "CC1.1", "HRS-07.1", "--relationship", "equal", "--strength", "1"}
+	base := []string{"add", "soc2", "CC1.1", "HRS-07.1", "--scf-release", "test-2026.3", "--relationship", "equal", "--strength", "1"}
 
+	// #1774: the SCF release is required; the code is never bound in the
+	// current release.
+	if _, err := runOverlay(t, srv, "add", "soc2", "CC1.1", "HRS-07.1", "--relationship", "equal", "--strength", "1",
+		"--rationale", "r", "--source", "s"); err == nil || !strings.Contains(err.Error(), "scf-release") {
+		t.Errorf("missing scf-release: err=%v", err)
+	}
 	if _, err := runOverlay(t, srv, append(base, "--source", "s")...); err == nil || !strings.Contains(err.Error(), "--rationale") {
 		t.Errorf("missing rationale: err=%v", err)
 	}
@@ -78,7 +84,7 @@ func TestMappingsOverlayAdd_SurfacesAPIRefusal(t *testing.T) {
 		"error": "mapping overlay: catalog edge 7f0c (equal, verified) already joins this requirement and anchor",
 		"code":  "catalog_edge_exists",
 	})
-	_, err := runOverlay(t, srv, "add", "soc2", "CC6.1", "IAC-01", "--relationship", "equal", "--strength", "1",
+	_, err := runOverlay(t, srv, "add", "soc2", "CC6.1", "IAC-01", "--scf-release", "test-2026.3", "--relationship", "equal", "--strength", "1",
 		"--rationale", "r", "--source", "s")
 	if err == nil || !strings.Contains(err.Error(), "HTTP 409") || !strings.Contains(err.Error(), "catalog edge 7f0c") {
 		t.Errorf("err = %v", err)

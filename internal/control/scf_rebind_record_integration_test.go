@@ -107,19 +107,9 @@ func TestRebindRecord_BootWritesOneRecordPerMovedControlAndNoneForPinned(t *test
 	if err != nil {
 		t.Fatalf("pinned upload: %v", err)
 	}
-	onLegacy := func(bundleID, code string, legacyAnchor uuid.UUID) uuid.UUID {
-		t.Helper()
-		res, err := uploadYAML(t, store, tenant, releaseBundleYAML(bundleID, code, ""))
-		if err != nil {
-			t.Fatalf("upload %s: %v", bundleID, err)
-		}
-		if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`, res.ControlID, legacyAnchor); err != nil {
-			t.Fatalf("bind %s to release A: %v", bundleID, err)
-		}
-		return res.ControlID
-	}
-	moved := onLegacy("rec_boot_mfa", "IAC-06", mfaA)
-	flagged := onLegacy("rec_boot_gov", "GOV-01", govA)
+	// Controls an install before #1774 left on release A, unpinned.
+	moved := storedUnpinned(t, admin, store, tenant, "rec_boot_mfa", "IAC-06", scfreleasetest.ReleaseA)
+	flagged := storedUnpinned(t, admin, store, tenant, "rec_boot_gov", "GOV-01", scfreleasetest.ReleaseA)
 
 	if _, err := scfimport.RebindControls(ctx, admin); err != nil {
 		t.Fatalf("RebindControls: %v", err)
@@ -138,7 +128,12 @@ func TestRebindRecord_BootWritesOneRecordPerMovedControlAndNoneForPinned(t *test
 	wantFlagged(t, admin, "flagged control after a second boot", flagged, govA, scfimport.SourceBoot)
 }
 
-func TestRebindRecord_UploadInPlaceRebindAndFlagAreRecorded(t *testing.T) {
+// #1774: re-uploading the unchanged bundle of a control stored unpinned
+// before #1774 no longer re-binds it in place: the upload is refused (it
+// names a code with no scf_release), the stored control is untouched, and no
+// upload record is written. The boot-time re-bind still moves or flags it,
+// and records that once.
+func TestRebindRecord_UnpinnedReuploadIsRefusedAndBootStillRebinds(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	scfreleasetest.LoadAB(t, admin) // A legacy, B current
@@ -150,49 +145,26 @@ func TestRebindRecord_UploadInPlaceRebindAndFlagAreRecorded(t *testing.T) {
 	mfaB := anchorIDIn(t, admin, scfreleasetest.ReleaseB, "IAC-06")
 	govA := anchorIDIn(t, admin, scfreleasetest.ReleaseA, "GOV-01")
 
-	// Each control is left on release A by an older install, then its
-	// unchanged bundle is re-uploaded: the upload path's in-place re-bind.
-	reupload := func(bundleID, code string, legacyAnchor uuid.UUID) control.UploadResult {
-		t.Helper()
-		y := releaseBundleYAML(bundleID, code, "")
-		res, err := uploadYAML(t, store, tenant, y)
-		if err != nil {
-			t.Fatalf("upload %s: %v", bundleID, err)
+	moved := storedUnpinned(t, admin, store, tenant, "rec_upload_mfa", "IAC-06", scfreleasetest.ReleaseA)
+	flagged := storedUnpinned(t, admin, store, tenant, "rec_upload_gov", "GOV-01", scfreleasetest.ReleaseA)
+	for id, code := range map[uuid.UUID]string{moved: "IAC-06", flagged: "GOV-01"} {
+		bundleID := map[string]string{"IAC-06": "rec_upload_mfa", "GOV-01": "rec_upload_gov"}[code]
+		if _, err := uploadYAML(t, store, tenant, releaseBundleYAML(bundleID, code, "")); !errors.Is(err, control.ErrSCFReleaseRequired) {
+			t.Fatalf("unchanged unpinned re-upload of %s: err = %v; want ErrSCFReleaseRequired", bundleID, err)
 		}
-		if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`, res.ControlID, legacyAnchor); err != nil {
-			t.Fatalf("bind %s to release A: %v", bundleID, err)
+		if got := boundAnchor(t, admin, id); got != anchorIDIn(t, admin, scfreleasetest.ReleaseA, code) {
+			t.Fatalf("refused re-upload moved %s to %s", bundleID, got)
 		}
-		again, err := uploadYAML(t, store, tenant, y)
-		if err != nil {
-			t.Fatalf("re-upload %s: %v", bundleID, err)
+		if recs := rebindRecords(t, admin, id); len(recs) != 0 {
+			t.Fatalf("refused re-upload of %s wrote %d records: %+v", bundleID, len(recs), recs)
 		}
-		if again.ControlID != res.ControlID {
-			t.Fatalf("re-upload %s superseded the control; want it kept in place", bundleID)
-		}
-		return again
 	}
-	moved := reupload("rec_upload_mfa", "IAC-06", mfaA)
-	if !moved.AnchorRebound || boundAnchor(t, admin, moved.ControlID) != mfaB {
-		t.Fatalf("same-title re-upload = %+v; want it re-bound to release B's IAC-06", moved)
-	}
-	wantMoved(t, admin, "upload-moved control", tenant, moved.ControlID, mfaA, mfaB, scfimport.SourceUpload)
 
-	flagged := reupload("rec_upload_gov", "GOV-01", govA)
-	if !flagged.NeedsReanchoring || boundAnchor(t, admin, flagged.ControlID) != govA {
-		t.Fatalf("changed-title re-upload = %+v; want it flagged and left on release A", flagged)
-	}
-	wantFlagged(t, admin, "upload-flagged control", flagged.ControlID, govA, scfimport.SourceUpload)
-
-	// Uploading the flagged bundle again records nothing more, and a boot
-	// after the uploads does not record the same move a second time.
-	if _, err := uploadYAML(t, store, tenant, releaseBundleYAML("rec_upload_gov", "GOV-01", "")); err != nil {
-		t.Fatalf("third upload: %v", err)
-	}
 	if _, err := scfimport.RebindControls(ctx, admin); err != nil {
 		t.Fatalf("RebindControls: %v", err)
 	}
-	wantMoved(t, admin, "upload-moved control after boot", tenant, moved.ControlID, mfaA, mfaB, scfimport.SourceUpload)
-	wantFlagged(t, admin, "upload-flagged control after boot", flagged.ControlID, govA, scfimport.SourceUpload)
+	wantMoved(t, admin, "boot-moved control", tenant, moved, mfaA, mfaB, scfimport.SourceBoot)
+	wantFlagged(t, admin, "boot-flagged control", flagged, govA, scfimport.SourceBoot)
 }
 
 // insertRecordAsApp inserts a re-bind record through the app role, scoped to
@@ -245,14 +217,7 @@ func TestRebindRecord_AppRoleCannotWriteAnotherTenantsRecord(t *testing.T) {
 
 	mfaA := anchorIDIn(t, admin, scfreleasetest.ReleaseA, "IAC-06")
 	mfaB := anchorIDIn(t, admin, scfreleasetest.ReleaseB, "IAC-06")
-	res, err := uploadYAML(t, store, tenantU, releaseBundleYAML("rec_victim", "IAC-06", ""))
-	if err != nil {
-		t.Fatalf("upload in U: %v", err)
-	}
-	victim := res.ControlID
-	if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`, victim, mfaA); err != nil {
-		t.Fatalf("bind U's control to release A: %v", err)
-	}
+	victim := storedUnpinned(t, admin, store, tenantU, "rec_victim", "IAC-06", scfreleasetest.ReleaseA)
 
 	// 42501: the RLS WITH CHECK refuses a row for tenant U.
 	if err := insertRecordAsApp(t, app, tenantT, tenantU, victim, mfaA, mfaB); pgCode(err) != "42501" {

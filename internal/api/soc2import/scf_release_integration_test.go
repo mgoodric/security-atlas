@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -156,24 +157,29 @@ func TestImport_SCFRelease_NamedErrors(t *testing.T) {
 	}
 }
 
-// With no scf_release, codes bind in the current release as before and the
-// report carries the deprecation warning.
-func TestImport_SCFRelease_AbsentWarnsAndBindsCurrent(t *testing.T) {
+// #1774: with no scf_release the import is refused with the one-line fix,
+// and nothing is written. B is current and has AST-04, so the old fallback
+// would have bound it.
+func TestImport_SCFRelease_AbsentIsRefused(t *testing.T) {
 	pool := setupReleases(t)
+	ctx := context.Background()
 
-	yaml := releaseCrosswalkYAML("")
-	cw := loadReleaseCrosswalk(t, yaml)
+	cw := loadReleaseCrosswalk(t, releaseCrosswalkYAML(""))
 	cw.Mappings = cw.Mappings[:1] // PRM-07 is not in current release B.
 	cw.Requirements = cw.Requirements[:1]
-	report, err := soc2import.Import(context.Background(), pool, cw)
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	_, err := soc2import.Import(ctx, pool, cw)
+	if !errors.Is(err, soc2import.ErrSCFReleaseRequired) || !errors.Is(err, scfrelease.ErrReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
 	}
-	if len(report.Warnings) != 1 || report.Warnings[0] != soc2import.SCFReleaseDeprecationWarning {
-		t.Fatalf("Warnings = %v; want the deprecation warning", report.Warnings)
+	if !strings.Contains(err.Error(), `scf_release: "test-2026.3"`) {
+		t.Errorf("error %q does not give the one-line fix", err)
 	}
-	if got := edgeReleases(t, pool)["R-1"]; got != scfreleasetest.ReleaseB+"/AST-04" {
-		t.Fatalf("edge R-1 bound to %q; want current release B's AST-04", got)
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM frameworks WHERE slug = $1 AND tenant_id IS NULL`, releaseTestSlug).Scan(&n); err != nil {
+		t.Fatalf("count frameworks: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("a refused import left %d framework rows", n)
 	}
 }
 
@@ -253,26 +259,30 @@ func loadReleaseWorkbook(t *testing.T, sheetRelease, optRelease string, codes ..
 // unloadedSheetRelease is a sheet-form release label no test loads.
 const unloadedSheetRelease = "1771.9"
 
-// A workbook whose sheet names a release that is not loaded still imports,
-// as before #1771: its codes bind in the current release (B), and the
-// report warns, naming the sheet release and the remedy.
-func TestImport_SCFRelease_UnloadedSheetReleaseFallsBackWithWarning(t *testing.T) {
+// #1774: a workbook whose sheet names a release that is not loaded is
+// refused like any other declared release, naming the sheet and the rename
+// remedy, and nothing is written. B is current; before #1774 the codes
+// bound in it with a warning.
+func TestImport_SCFRelease_UnloadedSheetReleaseIsRefused(t *testing.T) {
 	pool := setupReleases(t)
+	ctx := context.Background()
 
 	cw := loadReleaseWorkbook(t, unloadedSheetRelease, "", "AST-04")
-	report, err := soc2import.Import(context.Background(), pool, cw)
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	_, err := soc2import.Import(ctx, pool, cw)
+	if !errors.Is(err, scfrelease.ErrUnknownRelease) {
+		t.Fatalf("err = %v; want ErrUnknownRelease", err)
 	}
-	want := fmt.Sprintf(soc2import.SheetReleaseNotLoadedWarning, unloadedSheetRelease, unloadedSheetRelease, unloadedSheetRelease)
-	if len(report.Warnings) != 1 || report.Warnings[0] != want {
-		t.Fatalf("Warnings = %v; want [%q]", report.Warnings, want)
+	for _, want := range []string{`"SCF ` + unloadedSheetRelease + `"`, "rename the sheet", "catalog import-scf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not carry %q", err, want)
+		}
 	}
-	if report.SCFRelease != "" {
-		t.Fatalf("SCFRelease = %q; want empty (bound in the current release)", report.SCFRelease)
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM frameworks WHERE slug = $1 AND tenant_id IS NULL`, releaseTestSlug).Scan(&n); err != nil {
+		t.Fatalf("count frameworks: %v", err)
 	}
-	if got := edgeReleases(t, pool)["R-1"]; got != scfreleasetest.ReleaseB+"/AST-04" {
-		t.Fatalf("edge R-1 bound to %q; want current release B's AST-04", got)
+	if n != 0 {
+		t.Fatalf("a refused import left %d framework rows", n)
 	}
 }
 

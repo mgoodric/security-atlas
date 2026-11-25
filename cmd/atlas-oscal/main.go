@@ -98,8 +98,8 @@ Commands:
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared framework label (e.g. "NIST 800-53 rev5")
                     --scf-release  SCF release the control ids belong to (or an
-                                   "scf-release" metadata prop); without either
-                                   they match in the current release, with a warning
+                                   "scf-release" metadata prop); required: without
+                                   either the import is refused
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -127,8 +127,8 @@ Commands:
                     --source-label declared baseline label (e.g. "FedRAMP Moderate")
                     --scf-release  SCF release the resolved control ids belong to
                                    (or an "scf-release" prop on the entry profile's
-                                   metadata); without either they match in the
-                                   current release, with a warning
+                                   metadata); required: without either the import
+                                   is refused
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -147,8 +147,8 @@ Commands:
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared vendor / product label (e.g. "Acme Cloud")
                     --scf-release  SCF release the control ids belong to (or an
-                                   "scf-release" metadata prop); without either
-                                   they bind in the current release, with a warning
+                                   "scf-release" metadata prop); required: without
+                                   either the import is refused
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -204,7 +204,7 @@ func runImportCatalog(args []string) error {
 	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared framework label")
-	scfRelease := fs.String("scf-release", "", "SCF release the catalog's control ids belong to (or an \"scf-release\" prop on the catalog's metadata); without either they match in the current release, with a warning")
+	scfRelease := fs.String("scf-release", "", "SCF release the catalog's control ids belong to (or an \"scf-release\" prop on the catalog's metadata); required: without either the import is refused")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
@@ -336,7 +336,7 @@ func runImportProfile(args []string) error {
 	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared baseline label")
-	scfRelease := fs.String("scf-release", "", "SCF release the resolved control ids belong to (or an \"scf-release\" prop on the entry profile's metadata); without either they match in the current release, with a warning")
+	scfRelease := fs.String("scf-release", "", "SCF release the resolved control ids belong to (or an \"scf-release\" prop on the entry profile's metadata); required: without either the import is refused")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
@@ -480,7 +480,7 @@ func runImportComponentDefinition(args []string) error {
 	sourceLabel := fs.String("source-label", "", "declared vendor / product label")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
-	scfRelease := fs.String("scf-release", "", "SCF release the claims' control ids belong to (or an \"scf-release\" prop on the document's metadata); without either they bind in the current release, with a warning")
+	scfRelease := fs.String("scf-release", "", "SCF release the claims' control ids belong to (or an \"scf-release\" prop on the document's metadata); required: without either the import is refused")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
 
 	file, flagArgs, err := splitPositional(args)

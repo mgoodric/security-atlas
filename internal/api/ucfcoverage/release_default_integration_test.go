@@ -141,15 +141,16 @@ func TestRequirementCoverage_DefaultPinAcrossReleaseUpgrade(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		// reimportRelease is the scf_release the crosswalk is re-imported
-		// with after the upgrade: "" binds in the current release, as the
-		// bundled crosswalks do at boot; a release label keeps it pinned.
+		// with after the upgrade: the new current release (B), as a
+		// crosswalk re-pinned to the upgrade is (a release is required since
+		// #1774), or the legacy release (A), which keeps it where it was.
 		reimportRelease string
 		// wantCurrent is what the default read (and ?scf_release=B) links
 		// after the upgrade; wantUnpinned is what the pre-#2203 unpinned
 		// traversal links.
 		wantCurrent, wantUnpinned map[string]bool
 	}{
-		{"boot path", "", map[string]bool{"R-SAME": true}, map[string]bool{"R-SAME": true}},
+		{"crosswalk re-pinned to the new current release", scfreleasetest.ReleaseB, map[string]bool{"R-SAME": true}, map[string]bool{"R-SAME": true}},
 		{"crosswalk pinned to legacy release", scfreleasetest.ReleaseA, map[string]bool{}, map[string]bool{"R-RENAMED": true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -241,10 +242,10 @@ func TestRequirementCoverage_DefaultPinAcrossReleaseUpgrade(t *testing.T) {
 			if got := unpinned(); !maps.Equal(got, tc.wantUnpinned) {
 				t.Errorf("unpinned traversal: linked=%v; want %v", got, tc.wantUnpinned)
 			}
-			if tc.reimportRelease == "" && def["R-SAME"] != before["R-SAME"] {
-				t.Errorf("boot path: the re-bound control's coverage changed across the upgrade (before %v, after %v)", before, def)
+			if tc.reimportRelease == scfreleasetest.ReleaseB && def["R-SAME"] != before["R-SAME"] {
+				t.Errorf("re-pinned: the re-bound control's coverage changed across the upgrade (before %v, after %v)", before, def)
 			}
-			if tc.reimportRelease != "" {
+			if tc.reimportRelease == scfreleasetest.ReleaseA {
 				if legacy, _ := linked("?scf_release=" + tc.reimportRelease); !legacy["R-RENAMED"] {
 					t.Errorf("?scf_release=%s no longer reads the legacy-pinned crosswalk: %v", tc.reimportRelease, legacy)
 				}

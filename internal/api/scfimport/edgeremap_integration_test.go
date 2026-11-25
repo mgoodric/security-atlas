@@ -687,18 +687,12 @@ func TestEdgeRemapCoverage_SameBeforeAndAfterForAControlOnTheSameSuccessor(t *te
 		// the control store so its manifest re-anchors on approval.
 		tenant = uuid.MustParse(dbtest.SeedTenant(t, admin, "scf_remap_decisions", "controls"))
 		app := dbtest.NewAppPool(t)
-		b, err := control.FinalizeBundleForHTTP([]byte(`bundle_schema_version: "1"
+		seedUnpinned(t, admin, app, tenant.String(), `bundle_schema_version: "1"
 bundle_id: edge_1777_change
 title: "Change review"
 scf_anchor_id: TRM-02
 implementation_type: manual_attested
-`))
-		if err != nil {
-			t.Fatalf("bundle: %v", err)
-		}
-		if _, err := control.NewStore(app).Upload(withTenant(t, tenant.String()), b, "seed-1777"); err != nil {
-			t.Fatalf("upload: %v", err)
-		}
+`, "seed-1777")
 		srv = edgeServer(t, app)
 		liveroletest.Attach(t, srv, app)
 		// It reads coverage and approves the edge remap, a platform route.

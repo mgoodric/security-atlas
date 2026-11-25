@@ -66,9 +66,6 @@ func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 		// code" would also pick A; B shows the release decides.
 		{"declares A", "demo-it-1772-a", scfreleasetest.ReleaseA, true, false},
 		{"declares B", "demo-it-1772-b", scfreleasetest.ReleaseB, false, true},
-		// DemoSCFRelease is not loaded here: the spine adopts from the
-		// current release, B.
-		{"declares an unloaded release", "demo-it-1772-default", demoseed.DemoSCFRelease, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cleanupTenant(t, tc.slug)
@@ -93,28 +90,22 @@ func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 	}
 }
 
-// With no SCF release current, nothing is adopted: the spine synthesizes
-// its own tenant-scoped anchors, as it does on an install with no catalog.
-func TestApply_PostureSpineSynthesizesWithNoCurrentRelease(t *testing.T) {
+// #1774: when the declared release is not loaded, nothing is adopted, even
+// though B is current and carries the code: the spine synthesizes its own
+// tenant-scoped anchors, as it does on an install with no catalog.
+func TestApply_PostureSpineSynthesizesWhenTheDeclaredReleaseIsNotLoaded(t *testing.T) {
 	scfreleasetest.LoadAB(t, adminPool)
 	code := demoseed.FirstDemoSCFAnchorCode()
 	anchorA := addFixtureAnchor(t, scfreleasetest.ReleaseA, code)
 	anchorB := addFixtureAnchor(t, scfreleasetest.ReleaseB, code)
-	// LoadAB already demoted every other release; demoting B leaves none
-	// current. LoadAB's cleanup deletes B and restores the originals.
-	if _, err := adminPool.Exec(context.Background(),
-		`UPDATE framework_versions SET status = 'legacy' WHERE tenant_id IS NULL AND version = $1`,
-		scfreleasetest.ReleaseB); err != nil {
-		t.Fatalf("demote B: %v", err)
-	}
 
-	const slug = "demo-it-1772-none"
+	const slug = "demo-it-1774-unloaded"
 	cleanupTenant(t, slug)
 	seeder, err := demoseed.NewSeeder(adminPool, demoseed.DefaultScale)
 	if err != nil {
 		t.Fatalf("NewSeeder: %v", err)
 	}
-	res, err := seeder.Apply(context.Background(), demoseed.ApplyInput{Slug: slug})
+	res, err := seeder.WithSCFRelease("demo-it-1774-not-loaded").Apply(context.Background(), demoseed.ApplyInput{Slug: slug})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

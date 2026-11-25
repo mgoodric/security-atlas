@@ -42,8 +42,8 @@ func writeTemp(t *testing.T, name, content string) string {
 	return p
 }
 
-const overlayCSV = "framework,requirement_code,anchor_code,relationship_type,strength,rationale,source_ref\n" +
-	"soc2,CC1.1,HRS-07.1,equal,1,r,s\n"
+const overlayCSV = "framework,requirement_code,scf_release,anchor_code,relationship_type,strength,rationale,source_ref\n" +
+	"soc2,CC1.1,test-2026.3,HRS-07.1,equal,1,r,s\n"
 
 func TestMappingsOverlayImport_SendsFileAndPrintsResult(t *testing.T) {
 	api := &rawAPI{}

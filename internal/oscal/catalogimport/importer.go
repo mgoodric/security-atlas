@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -66,10 +67,11 @@ var (
 	ErrSCFReleaseConflict = scfbind.ErrConflict
 )
 
-// SCFReleaseDeprecationWarning is reported for an import that declares no
-// SCF release (#2264). Control ids match in the current SCF release, as
-// before; the declaration becomes required in a later release (#1774).
-const SCFReleaseDeprecationWarning = "no SCF release declared, so the catalog's control ids were matched in the current SCF release; pass --scf-release or add an \"scf-release\" prop to the catalog's metadata, which will become required"
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); the catalog's control ids are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("catalogimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the catalog's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import catalogs. admin is the
 // superset of grc_engineer in the canvas 5-role model.
@@ -116,8 +118,7 @@ type Request struct {
 	// (#2264), from atlas-oscal --scf-release. The catalog can declare it
 	// instead with an "scf-release" prop on its metadata; when both are
 	// given they must agree. A declared release that is not loaded fails
-	// the import. Neither matches in the current release, with
-	// SCFReleaseDeprecationWarning.
+	// the import. Neither is ErrSCFReleaseRequired (#1774).
 	SCFRelease string
 }
 
@@ -132,11 +133,9 @@ type Report struct {
 	// MappedCount is how many imported controls matched an SCF anchor
 	// deterministically (the rest are flagged NULL for operator mapping).
 	MappedCount int
-	// SCFRelease is the SCF release the control ids were matched in, or ""
-	// when no SCF release is loaded (every control is then unmapped).
+	// SCFRelease is the SCF release the control ids were matched in.
 	SCFRelease string
-	// Warnings are non-fatal notes for the operator, such as
-	// SCFReleaseDeprecationWarning.
+	// Warnings are non-fatal notes for the operator.
 	Warnings []string
 }
 
@@ -164,6 +163,11 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	release, err := scfbind.Declared("catalogimport", req.SCFRelease, req.OscalJSON, "catalog")
 	if err != nil {
 		return Report{}, err
+	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
 	}
 
 	// --- Bridge validate + normalize ---
@@ -223,12 +227,12 @@ func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha
 		return Report{}, fmt.Errorf("catalogimport: insert catalog: %w", err)
 	}
 
-	// Pre-load the scf_ids of the release the catalog declares (#2264), or
-	// the current release when it declares none, so the deterministic
+	// Pre-load the scf_ids of the release the catalog declares (#2264;
+	// required since #1774), so the deterministic
 	// requirement -> SCF-anchor mapping (D1) is a single query, not one per
 	// control. A control whose OSCAL control-id exactly matches a scf_id in
 	// that release maps TO that anchor; otherwise NULL.
-	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
 		return Report{}, fmt.Errorf("catalogimport: scf release: %w", err)
 	}

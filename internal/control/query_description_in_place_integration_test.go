@@ -25,7 +25,8 @@ func TestUpload_StockQueryDescriptionChangeUpdatesInPlace(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	seedSCFAnchor(t, admin, "AST-22", "AST")
+	seeded, _ := seedSCFAnchor(t, admin, "AST-22", "AST")
+	rel := releaseOfAnchor(t, admin, seeded)
 	tenant := dbtest.SeedTenant(t, admin,
 		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
 		"control_owner_assignments", "evidence_records", "controls",
@@ -38,14 +39,16 @@ func TestUpload_StockQueryDescriptionChangeUpdatesInPlace(t *testing.T) {
 
 	// testdata/cc6_5-2864 holds soc2_cc6_5_asset_disposal's control.yaml
 	// before and after #2864 (434c74b2), byte for byte. They differ only in
-	// the one query's description.
+	// the one query's description. Neither declares scf_release (both
+	// predate #1773), so the seeded anchor's release is added at upload,
+	// identically to both: they still differ only in the description.
 	upload := func(path string) control.UploadResult {
 		t.Helper()
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		b, err := control.FinalizeBundleForHTTP(raw)
+		b, err := control.FinalizeBundleForHTTP([]byte(withSCFRelease(string(raw), rel)))
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}

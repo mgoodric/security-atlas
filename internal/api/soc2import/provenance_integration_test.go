@@ -28,6 +28,7 @@ func provenanceCrosswalk(attribution, rationale string) *soc2import.Crosswalk {
 		FrameworkIssuer:   "security-atlas tests",
 		FrameworkVersion:  "1.0",
 		SourceAttribution: attribution,
+		SCFRelease:        sampleSCFRelease,
 		Requirements: []soc2import.Requirement{
 			{Code: "P-1", Title: "Governance", Body: "Fixture requirement."},
 		},

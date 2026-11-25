@@ -5,8 +5,10 @@
 // control, or the same control under a new title. A code on its own is
 // therefore ambiguous once more than one release is loaded, and every
 // caller that binds or reads an anchor by code goes through Resolve with
-// the release it means. An empty release means the current one, which is
-// what every caller did before releases could be named.
+// the release it means. An empty release means the current one; only read
+// paths may pass it (#1774). A write path that binds a code checks for a
+// declared release first and fails with ErrReleaseRequired, wrapped with
+// the one-line fix for its own input format.
 //
 // Resolve has two distinct, named failures: ErrUnknownRelease (no SCF
 // release carries that label) and ErrCodeNotInRelease (the release exists
@@ -34,6 +36,12 @@ var ErrUnknownRelease = errors.New("scf release: unknown SCF release")
 // anchor with the given code (or the given anchor uuid belongs to another
 // release).
 var ErrCodeNotInRelease = errors.New("scf release: SCF code not in release")
+
+// ErrReleaseRequired is returned by write paths that were handed an SCF
+// code with no SCF release to bind it in (#1774). Codes are reused between
+// releases, so binding one in "whatever is current" is never done on a
+// write. Callers wrap it with the fix for their input format.
+var ErrReleaseRequired = errors.New("scf release: an SCF release is required to bind an SCF code")
 
 // ErrNoCurrentRelease is returned when no release was named and no SCF
 // release is current (an empty catalog).

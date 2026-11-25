@@ -136,6 +136,7 @@ func TestOverlayImport_CleanYAMLCreatesEveryEdge(t *testing.T) {
   source_ref: FY25 report s4
 - framework: %[1]s
   requirement_code: C3
+  scf_release: %[3]s
   anchor_code: CRY-03
   relationship_type: subset_of
   strength: 0.5

@@ -13,9 +13,9 @@ package soc2import_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -104,8 +104,8 @@ func TestFreshBootstrap_StockContentBindsInTheSampleRelease(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Import %s: %v", f, err)
 		}
-		if slices.Contains(rep.Warnings, soc2import.SCFReleaseDeprecationWarning) {
-			t.Errorf("%s: import warned %q", f, soc2import.SCFReleaseDeprecationWarning)
+		if rep.SCFRelease != release {
+			t.Errorf("%s: bound in SCF release %q; want %s", f, rep.SCFRelease, release)
 		}
 		var total, outside int
 		if err := pool.QueryRow(ctx, `
@@ -142,11 +142,11 @@ func TestFreshBootstrap_StockContentBindsInTheSampleRelease(t *testing.T) {
 			t.Errorf("%s: upload: %v", dir, err)
 			continue
 		}
-		if slices.Contains(res.Warnings, control.SCFReleaseDeprecationWarning) {
-			t.Errorf("%s: upload warned %q", dir, control.SCFReleaseDeprecationWarning)
-		}
 		if b.Manifest.SCFAnchorID == "" {
 			continue
+		}
+		if res.SCFRelease != release {
+			t.Errorf("%s: bound in SCF release %q; want %s", dir, res.SCFRelease, release)
 		}
 		if res.SCFRelease != release {
 			t.Errorf("%s: bound in SCF release %q; want %q", dir, res.SCFRelease, release)
@@ -193,13 +193,27 @@ func TestUpgradeFromUnpinnedStock_UpdatesInPlace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: parse pre-#1773 manifest: %v", dir, err)
 		}
-		was, err := store.Upload(tenantCtx(t, tenant), prior, "oauth_client:bootstrap")
-		if err != nil {
-			t.Fatalf("%s: pre-#1773 upload: %v", dir, err)
-		}
 		next, err := control.FinalizeBundleForHTTP(shipped)
 		if err != nil {
 			t.Fatalf("%s: parse shipped manifest: %v", dir, err)
+		}
+		// The pre-#1773 bytes cannot be uploaded any more: they name a code
+		// with no scf_release (#1774). Store them as that install did: the
+		// control on the code's anchor in the sample, with the unpinned
+		// manifest and its hash.
+		if prior.Manifest.MissingSCFRelease() {
+			if _, err := store.Upload(tenantCtx(t, tenant), prior, "oauth_client:bootstrap"); !errors.Is(err, control.ErrSCFReleaseRequired) {
+				t.Fatalf("%s: pre-#1773 upload: err = %v; want ErrSCFReleaseRequired", dir, err)
+			}
+		}
+		was, err := store.Upload(tenantCtx(t, tenant), next, "oauth_client:bootstrap")
+		if err != nil {
+			t.Fatalf("%s: upload: %v", dir, err)
+		}
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE controls SET bundle_manifest_yaml = $2, bundle_manifest_hash = $3 WHERE id = $1`,
+			was.ControlID, string(before), prior.ManifestHashHex); err != nil {
+			t.Fatalf("%s: store the pre-#1773 manifest: %v", dir, err)
 		}
 		now, err := store.Upload(tenantCtx(t, tenant), next, "oauth_client:bootstrap")
 		if err != nil {

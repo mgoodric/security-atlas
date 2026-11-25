@@ -39,9 +39,9 @@ func approvedStockSurvivesBootSeed(t *testing.T, releaseB, wantClass, scfID stri
 	truncateCatalog(t, admin)
 	ctx := context.Background()
 
-	// The pre-#1773 shipped bytes: this test binds the stock control in
-	// synthetic release A, which the pinned bytes cannot.
-	stockYAML := stockManifestBeforePin(t, stockCC81Bundle)
+	// The shipped bytes, pinned to test-2026.3: the synthetic release A is
+	// imported under that label so they bind in it (#1774).
+	stockYAML := stockManifestShipped(t, stockCC81Bundle)
 	if !scfimport.IsStockManifest(stockCC81Bundle, string(stockYAML)) {
 		t.Fatalf("controls/soc2/%s/control.yaml is not in the stock manifest list", stockCC81Bundle)
 	}
@@ -65,7 +65,7 @@ func approvedStockSurvivesBootSeed(t *testing.T, releaseB, wantClass, scfID stri
 		return c
 	}
 
-	importRelease(t, admin, load("a"))
+	importAsShippedRelease(t, admin, load("a"))
 	tenant := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "controls")
 	legacy := bootSeed(tenant).ControlID
 	catB := load(releaseB)
