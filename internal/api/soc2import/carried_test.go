@@ -185,19 +185,22 @@ func TestDecideCarriedSync(t *testing.T) {
 		listed     bool
 		humanMoved bool
 		want       carriedSync
+		reason     HeldBackReason
 	}{
-		{"not listed", changed, false, false, carriedSyncNone},
-		{"same content", stored, true, false, carriedSyncNone},
-		{"changed content", changed, true, false, carriedSyncApply},
-		{"stronger attribution", stronger, true, false, carriedSyncApply},
-		{"weaker attribution", weaker, true, false, carriedSyncHeldBack},
-		{"moved by a person", changed, true, true, carriedSyncHeldBack},
-		{"moved by a person, same content", stored, true, true, carriedSyncNone},
+		{"not listed", changed, false, false, carriedSyncNone, ""},
+		{"same content", stored, true, false, carriedSyncNone, ""},
+		{"changed content", changed, true, false, carriedSyncApply, ""},
+		{"stronger attribution", stronger, true, false, carriedSyncApply, ""},
+		{"weaker attribution", weaker, true, false, carriedSyncHeldBack, HeldBackOutranked},
+		{"moved by a person", changed, true, true, carriedSyncHeldBack, HeldBackHumanReviewed},
+		{"moved by a person, weaker attribution", weaker, true, true, carriedSyncHeldBack, HeldBackHumanReviewed},
+		{"moved by a person, same content", stored, true, true, carriedSyncNone, ""},
 	}
 	for _, tc := range cases {
 		e := carriedEdge{content: stored, humanMoved: tc.humanMoved}
-		if got := decideCarriedSync(e, tc.row, tc.listed); got != tc.want {
-			t.Errorf("%s: decideCarriedSync = %v; want %v", tc.name, got, tc.want)
+		got, reason := decideCarriedSync(e, tc.row, tc.listed)
+		if got != tc.want || reason != tc.reason {
+			t.Errorf("%s: decideCarriedSync = %v %q; want %v %q", tc.name, got, reason, tc.want, tc.reason)
 		}
 	}
 }

@@ -68,7 +68,9 @@ type Report struct {
 	// EdgesUpgradedOntoRejected lists edges whose provenance this import
 	// raised while their mapping_tier is 'rejected'. A rejection is a human
 	// judgment the importer never overrides, so these stay hidden from
-	// coverage until a reviewer reopens them (rejected -> draft, #1849).
+	// coverage until a reviewer reopens them (rejected -> draft, #1849). A
+	// rejected carried edge whose content the sync rewrote is listed too
+	// (#3079).
 	EdgesUpgradedOntoRejected []UpgradedEdge
 
 	// EdgesTierReseeded lists edges whose content this import changed and
@@ -107,7 +109,8 @@ type Report struct {
 	// EdgesCarriedHeldBack lists the carried edges the sync above left alone:
 	// a person has moved them through the tier workflow, or they carry a
 	// higher-precedence source_attribution than the crosswalk's row (#3073).
-	EdgesCarriedHeldBack []CatalogEdge
+	// Reason says which (#3079).
+	EdgesCarriedHeldBack []HeldBackEdge
 
 	// EdgesUnlisted lists live edges the crosswalk does not list but did not
 	// retire, because another source wrote them (another crosswalk_source or

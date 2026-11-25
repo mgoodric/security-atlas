@@ -156,7 +156,156 @@ func TestCarriedEdges_HumanReviewedCopyKeepsItsContent(t *testing.T) {
 	if len(rep.EdgesCarriedSynced) != 0 {
 		t.Errorf("EdgesCarriedSynced = %v; want none", rep.EdgesCarriedSynced)
 	}
-	if got := carriedCodes(rep.EdgesCarriedHeldBack); !slices.Equal(got, []string{"GOV-04"}) {
-		t.Errorf("EdgesCarriedHeldBack = %v; want [GOV-04]", got)
+	if got := heldBack(rep); !slices.Equal(got, []string{"GOV-04:human_reviewed"}) {
+		t.Errorf("EdgesCarriedHeldBack = %v; want [GOV-04:human_reviewed]", got)
+	}
+}
+
+// heldBack returns "scf_id:reason" for each carried edge the sync held back.
+func heldBack(rep soc2import.Report) []string {
+	var out []string
+	for _, e := range rep.EdgesCarriedHeldBack {
+		out = append(out, e.SCFAnchor+":"+string(e.Reason))
+	}
+	return out
+}
+
+// setCopy sets columns on the carried copy directly, with no tier
+// transition, as a copy inherits them from its source when the remap is
+// approved (scf_edge_remap_decide copies source_attribution and
+// mapping_tier).
+func setCopy(t *testing.T, pool *pgxpool.Pool, id, set string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `UPDATE fw_to_scf_edges SET `+set+` WHERE id = $1`, id); err != nil {
+		t.Fatalf("set %s on the carried copy: %v", set, err)
+	}
+}
+
+// copyTierAndAttribution reads the carried copy's mapping_tier and
+// source_attribution.
+func copyTierAndAttribution(t *testing.T, pool *pgxpool.Pool, id string) (tier, attribution string) {
+	t.Helper()
+	if err := pool.QueryRow(context.Background(),
+		`SELECT mapping_tier::text, source_attribution::text FROM fw_to_scf_edges WHERE id = $1`, id).Scan(&tier, &attribution); err != nil {
+		t.Fatalf("read tier of %s: %v", id, err)
+	}
+	return tier, attribution
+}
+
+// officialMovedCrosswalk is movedCrosswalk with the row's provenance raised
+// to scf_official; the crosswalk default stays community_draft, so the
+// import still owns the GOV-02 root.
+func officialMovedCrosswalk(sample string) *soc2import.Crosswalk {
+	cw := movedCrosswalk(sample)
+	cw.Mappings[0].SourceAttribution = "scf_official"
+	return cw
+}
+
+// A copy whose stored attribution outranks the crosswalk row's keeps its
+// content, and is reported held back as outranked (#3079).
+func TestCarriedEdges_OutrankedCopyIsHeldBack(t *testing.T) {
+	pool, _, sample, copyID := syncFixture(t)
+	setCopy(t, pool, copyID, "source_attribution = 'scf_official'")
+
+	rep := importCarried(t, pool, movedCrosswalk(sample))
+	if rel, _, rationale, _, live := edgeContent(t, pool, copyID); !live || rel != "intersects_with" || rationale != "R-1->GOV-02" {
+		t.Errorf("outranked copy = live %v, %s %q; want it untouched", live, rel, rationale)
+	}
+	if _, attribution := copyTierAndAttribution(t, pool, copyID); attribution != "scf_official" {
+		t.Errorf("source_attribution = %s; want scf_official kept", attribution)
+	}
+	if len(rep.EdgesCarriedSynced) != 0 {
+		t.Errorf("EdgesCarriedSynced = %v; want none", rep.EdgesCarriedSynced)
+	}
+	if got := heldBack(rep); !slices.Equal(got, []string{"GOV-04:outranked"}) {
+		t.Errorf("EdgesCarriedHeldBack = %v; want [GOV-04:outranked]", got)
+	}
+}
+
+// A copy that inherited verified from its source restarts at draft when a
+// community_draft row rewrites its content (ADR 0018 "Tier follows
+// content"), and the sync transition records verified -> draft (#3079).
+func TestCarriedEdges_SyncReseedsAnInheritedVerifiedTierToDraft(t *testing.T) {
+	pool, _, sample, copyID := syncFixture(t)
+	setCopy(t, pool, copyID, "mapping_tier = 'verified'")
+
+	rep := importCarried(t, pool, movedCrosswalk(sample))
+	if tier, _ := copyTierAndAttribution(t, pool, copyID); tier != "draft" {
+		t.Errorf("mapping_tier = %s; want draft", tier)
+	}
+	if len(rep.EdgesCarriedSynced) != 1 || rep.EdgesCarriedSynced[0].Tier != "draft" {
+		t.Errorf("EdgesCarriedSynced = %+v; want GOV-04 at draft", rep.EdgesCarriedSynced)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM fw_to_scf_edge_tier_transitions
+		WHERE edge_id = $1 AND from_tier = 'verified' AND to_tier = 'draft'
+		  AND starts_with(note, 'carried-sync:')`, copyID); n != 1 {
+		t.Errorf("%d verified->draft carried-sync rows; want 1", n)
+	}
+}
+
+// A draft copy rewritten by an scf_official row seeds at verified, as a new
+// official edge does (ADR 0018 §2, #3079).
+func TestCarriedEdges_SyncSeedsVerifiedFromAnOfficialRow(t *testing.T) {
+	pool, _, sample, copyID := syncFixture(t)
+	if tier, _ := copyTierAndAttribution(t, pool, copyID); tier != "draft" {
+		t.Fatalf("carried copy starts at %s; want draft", tier)
+	}
+
+	rep := importCarried(t, pool, officialMovedCrosswalk(sample))
+	if tier, attribution := copyTierAndAttribution(t, pool, copyID); tier != "verified" || attribution != "scf_official" {
+		t.Errorf("carried copy = %s %s; want verified scf_official", tier, attribution)
+	}
+	if len(rep.EdgesCarriedSynced) != 1 || rep.EdgesCarriedSynced[0].Tier != "verified" || rep.EdgesCarriedSynced[0].Attribution != "scf_official" {
+		t.Errorf("EdgesCarriedSynced = %+v; want GOV-04 verified scf_official", rep.EdgesCarriedSynced)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM fw_to_scf_edge_tier_transitions
+		WHERE edge_id = $1 AND from_tier = 'draft' AND to_tier = 'verified'
+		  AND starts_with(note, 'carried-sync:')`, copyID); n != 1 {
+		t.Errorf("%d draft->verified carried-sync rows; want 1", n)
+	}
+}
+
+// A rejected copy whose content the sync rewrites with raised provenance
+// stays rejected and is reported, as an owned edge is (#3079).
+func TestCarriedEdges_RejectedCopyIsReportedUpgraded(t *testing.T) {
+	pool, _, sample, copyID := syncFixture(t)
+	setCopy(t, pool, copyID, "mapping_tier = 'rejected'")
+
+	rep := importCarried(t, pool, officialMovedCrosswalk(sample))
+	if rel, _, _, _, _ := edgeContent(t, pool, copyID); rel != "subset_of" {
+		t.Errorf("relationship = %s; want the crosswalk's subset_of", rel)
+	}
+	if tier, _ := copyTierAndAttribution(t, pool, copyID); tier != "rejected" {
+		t.Errorf("mapping_tier = %s; want rejected kept", tier)
+	}
+	var got []string
+	for _, up := range rep.EdgesUpgradedOntoRejected {
+		got = append(got, up.SCFAnchor+":"+up.PreviousAttribution+"->"+up.IncomingAttribution)
+	}
+	if !slices.Equal(got, []string{"GOV-04:community_draft->scf_official"}) {
+		t.Errorf("EdgesUpgradedOntoRejected = %v; want [GOV-04:community_draft->scf_official]", got)
+	}
+}
+
+// One import both restores a copy its retire pass retired and syncs the
+// restored copy's content (#3079).
+func TestCarriedEdges_RestoreThenSyncInOnePass(t *testing.T) {
+	pool, byo, sample, copyID := syncFixture(t)
+	rep := importCarried(t, pool, carriedCrosswalk(sample, "GOV-05"))
+	if got := carriedCodes(rep.EdgesCarriedRetired); !slices.Equal(got, []string{"GOV-04"}) {
+		t.Fatalf("EdgesCarriedRetired = %v; want [GOV-04]", got)
+	}
+
+	rep = importCarried(t, pool, movedCrosswalk(sample))
+	if got := carriedCodes(rep.EdgesCarriedRestored); !slices.Equal(got, []string{"GOV-04"}) {
+		t.Errorf("EdgesCarriedRestored = %v; want [GOV-04]", got)
+	}
+	if got := carriedCodes(rep.EdgesCarriedSynced); !slices.Equal(got, []string{"GOV-04"}) {
+		t.Errorf("EdgesCarriedSynced = %v; want [GOV-04]", got)
+	}
+	if rel, strength, rationale, _, live := edgeContent(t, pool, copyID); !live || rel != "subset_of" || strength != 0.9 || rationale != "R-1 is a subset of GOV-04" {
+		t.Errorf("carried copy on GOV-04@%s = live %v, %s %.2f %q; want live with the crosswalk's content", byo, live, rel, strength, rationale)
 	}
 }

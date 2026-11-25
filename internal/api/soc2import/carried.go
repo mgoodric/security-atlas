@@ -45,9 +45,9 @@ const remapSourcePrefix = "scf-remap:"
 
 // carriedEdgesSQL lists every edge under one framework version that an edge
 // remap carried from another edge, live or retired, row-locked, with that
-// source edge, and whether a person (any reviewer but SystemReviewerID)
-// has ever transitioned the edge. Only a source on the same requirement counts, which keeps the
-// pair inside the version. It runs after the retire pass, so a source the
+// source edge, and whether a person (any reviewer but $2, SystemReviewerID)
+// has ever transitioned the edge. Only a source on the same requirement
+// counts, which keeps the pair inside the version. It runs after the retire pass, so a source the
 // pass just retired reads as retired.
 const carriedEdgesSQL = `
 SELECT
@@ -56,7 +56,7 @@ SELECT
     e.retired_at IS NOT NULL,
     e.relationship_type, e.strength, e.rationale,
     EXISTS (SELECT 1 FROM fw_to_scf_edge_tier_transitions t
-            WHERE t.edge_id = e.id AND t.reviewer_id <> '00000000-0000-0000-0000-000000000000'),
+            WHERE t.edge_id = e.id AND t.reviewer_id <> $2),
     s.id, sa.scf_id, s.source_attribution::text, s.crosswalk_source,
     s.retired_at IS NOT NULL
 FROM fw_to_scf_edges e
@@ -157,19 +157,42 @@ const (
 	carriedSyncHeldBack
 )
 
+// HeldBackReason says why the content sync left a carried edge alone
+// (#3079). The values are stable: the CLI prints them as reason=<value>.
+type HeldBackReason string
+
+const (
+	// HeldBackHumanReviewed: a person has moved the edge through the tier
+	// workflow, so its content is theirs to change.
+	HeldBackHumanReviewed HeldBackReason = "human_reviewed"
+	// HeldBackOutranked: the edge's source_attribution outranks the
+	// crosswalk row's (attributionRank).
+	HeldBackOutranked HeldBackReason = "outranked"
+)
+
+// HeldBackEdge is a carried edge the content sync left alone, and why.
+type HeldBackEdge struct {
+	CatalogEdge
+	Reason HeldBackReason
+}
+
 // decideCarriedSync decides whether a live carried edge takes the crosswalk
 // row listed for its own code (#3073). It needs a row that differs from the
 // edge's content. A person's move holds it back, as does a stored
 // attribution that outranks the row's: the same precedence rule an owned
-// edge gets.
-func decideCarriedSync(e carriedEdge, row strmContent, rowListed bool) carriedSync {
+// edge gets. A held-back edge carries its reason; a person's move is
+// reported over a rank when both hold.
+func decideCarriedSync(e carriedEdge, row strmContent, rowListed bool) (carriedSync, HeldBackReason) {
 	if !rowListed || row == e.content {
-		return carriedSyncNone
+		return carriedSyncNone, ""
 	}
-	if e.humanMoved || attributionRank(row.attribution) < attributionRank(e.content.attribution) {
-		return carriedSyncHeldBack
+	if e.humanMoved {
+		return carriedSyncHeldBack, HeldBackHumanReviewed
 	}
-	return carriedSyncApply
+	if attributionRank(row.attribution) < attributionRank(e.content.attribution) {
+		return carriedSyncHeldBack, HeldBackOutranked
+	}
+	return carriedSyncApply, ""
 }
 
 // decideCarried decides each carried edge from the chain back to its root.
@@ -246,7 +269,7 @@ func carriedOwned(edges []carriedEdge, owns func(source *string, attribution str
 }
 
 func listCarriedEdges(ctx context.Context, tx pgx.Tx, versionID pgtype.UUID) ([]carriedEdge, error) {
-	rows, err := tx.Query(ctx, carriedEdgesSQL, versionID)
+	rows, err := tx.Query(ctx, carriedEdgesSQL, versionID, pgtype.UUID{Bytes: SystemReviewerID, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("crosswalk: list carried edges: %w", err)
 	}
@@ -334,19 +357,29 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 			continue
 		}
 		row, ok := content[requirementCode{e.requirementID, e.scfID}]
-		switch decideCarriedSync(e, row, ok) {
+		sync, reason := decideCarriedSync(e, row, ok)
+		switch sync {
 		case carriedSyncNone:
 		case carriedSyncHeldBack:
-			report.EdgesCarriedHeldBack = append(report.EdgesCarriedHeldBack, edge)
+			report.EdgesCarriedHeldBack = append(report.EdgesCarriedHeldBack, HeldBackEdge{CatalogEdge: edge, Reason: reason})
 		case carriedSyncApply:
-			if err := syncCarriedEdge(ctx, q, e, row, source); err != nil {
+			target, err := syncCarriedEdge(ctx, q, e, row, source)
+			if err != nil {
 				return nil, err
 			}
 			edge.Attribution = string(row.attribution)
-			if target, changed := reseedTier(tier, row.attribution); changed {
-				edge.Tier = string(target)
-			}
+			edge.Tier = string(target)
 			report.EdgesCarriedSynced = append(report.EdgesCarriedSynced, edge)
+			// A rejected copy keeps its tier (reseedTier), so a raised
+			// provenance is reported as it is for an owned edge (#3079).
+			if tier == dbx.CrosswalkMappingTierRejected && row.attribution != e.content.attribution {
+				report.EdgesUpgradedOntoRejected = append(report.EdgesUpgradedOntoRejected, UpgradedEdge{
+					RequirementCode:     e.requirementCode,
+					SCFAnchor:           e.scfID,
+					PreviousAttribution: string(e.content.attribution),
+					IncomingAttribution: string(row.attribution),
+				})
+			}
 		}
 	}
 	return retired, nil
@@ -356,8 +389,9 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 // edge keeps its crosswalk_source, so it stays linked to its remap and under
 // the carried retire pass. The tier re-seeds per ADR 0018 §2, as for an
 // owned edge whose content changed, and one system transition records the
-// sync with the content it replaced.
-func syncCarriedEdge(ctx context.Context, q *dbx.Queries, e carriedEdge, row strmContent, source string) error {
+// sync with the content it replaced. It returns the edge's tier after the
+// sync.
+func syncCarriedEdge(ctx context.Context, q *dbx.Queries, e carriedEdge, row strmContent, source string) (dbx.CrosswalkMappingTier, error) {
 	id := pgtype.UUID{Bytes: e.id, Valid: true}
 	if _, err := q.UpdateFwToScfEdge(ctx, dbx.UpdateFwToScfEdgeParams{
 		ID:                id,
@@ -367,19 +401,19 @@ func syncCarriedEdge(ctx context.Context, q *dbx.Queries, e carriedEdge, row str
 		Rationale:         row.rationale,
 		CrosswalkSource:   e.source,
 	}); err != nil {
-		return fmt.Errorf("crosswalk: sync carried edge %s->%s: %w", e.requirementCode, e.scfID, err)
+		return "", fmt.Errorf("crosswalk: sync carried edge %s->%s: %w", e.requirementCode, e.scfID, err)
 	}
 	from := dbx.CrosswalkMappingTier(e.tier)
 	to, changed := reseedTier(from, row.attribution)
 	if changed {
 		if err := q.SetFwToScfEdgeTier(ctx, dbx.SetFwToScfEdgeTierParams{ID: id, MappingTier: to}); err != nil {
-			return fmt.Errorf("crosswalk: reseed tier of carried %s->%s: %w", e.requirementCode, e.scfID, err)
+			return "", fmt.Errorf("crosswalk: reseed tier of carried %s->%s: %w", e.requirementCode, e.scfID, err)
 		}
 	}
 	if err := auditSystemTransition(ctx, q, id, from, to, carriedSyncNote(source, e.content)); err != nil {
-		return fmt.Errorf("crosswalk: audit sync carried %s->%s: %w", e.requirementCode, e.scfID, err)
+		return "", fmt.Errorf("crosswalk: audit sync carried %s->%s: %w", e.requirementCode, e.scfID, err)
 	}
-	return nil
+	return to, nil
 }
 
 // strmContent is the STRM content of one crosswalk row.
