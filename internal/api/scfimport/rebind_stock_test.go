@@ -92,6 +92,22 @@ func TestBundledSampleReleaseMatchesTheFixture(t *testing.T) {
 	}
 }
 
+// Every label the sample has shipped under stays recognised, so a re-pin
+// cannot reopen title-only moves off an older sample's anchors (#3068).
+func TestBundledSampleReleases_KeepsEveryLabel(t *testing.T) {
+	t.Parallel()
+	for _, label := range []string{"test-2026.3", BundledSampleRelease} {
+		if !IsBundledSampleRelease(label) {
+			t.Errorf("IsBundledSampleRelease(%q) = false; a sample label is never dropped", label)
+		}
+	}
+	for _, label := range []string{"2026.3", "2027.1", ""} {
+		if IsBundledSampleRelease(label) {
+			t.Errorf("IsBundledSampleRelease(%q) = true; it is not a sample label", label)
+		}
+	}
+}
+
 // #3061: a stock control whose title alone changed moves forward (#2321),
 // except off the bundled sample, whose titles are SCF 2026.3's: there only an
 // exact code and title match moves it.
