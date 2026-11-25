@@ -140,7 +140,9 @@ const BundledSampleRelease = "test-2026.3"
 // under, current one included (#3068). An install can still hold anchors
 // from an older sample after a re-pin, and moves off those need the same
 // exact match as moves off the current one. A re-pin appends here; it never
-// removes a label. TestBundledSampleReleases_KeepsEveryLabel holds that.
+// removes a label. scfseed's TestBundledSampleReleases_CoverEveryFixtureLabel
+// holds that against fixtureContentByRelease, the frozen record of every
+// label the sample has carried (#3076).
 var bundledSampleReleases = []string{"test-2026.3"}
 
 // IsBundledSampleRelease reports whether release is a label the bundled SCF
