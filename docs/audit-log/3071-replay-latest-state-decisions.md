@@ -14,7 +14,9 @@ Issue: mgoodric/security-atlas#3071 (D3 from #3056 / PR #3070).
 - **detection_tier_target:** integration
   (`TestReplay_OfAnEarlierInstantIsNotTheLatestState`,
   `TestFrameworkPosture_ReplayOfAnEarlierInstantIsNotTheLatestRun`,
-  `TestExport_ReplayRunsRankByTheirJudgedInstant`), plus a unit guard
+  `TestExport_ReplayRunsRankByTheirJudgedInstant`,
+  `TestReconcile_ReplayOfAnEarlierInstantDoesNotMoveThePlan`), each
+  observed failing against main's queries or function body, plus a unit guard
   (`TestQueries_ControlEvaluationReadsHandleReplayRows`) for the next query
   that forgets.
 
