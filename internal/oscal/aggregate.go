@@ -699,8 +699,9 @@ func annotationRef(annotations []byte) string {
 
 // poamInput converts the aggregate into the POA&M proto input. Per
 // decision D3, POA&M items derive from failing control evaluations:
-// owner = control owner_role, due date = last_observed_at (or evaluated_at)
-// + defaultRemediationWindow, milestone = a single default remediation
+// owner = control owner_role, due date = last_observed_at (or the judged
+// instant, COALESCE(evaluated_as_of, evaluated_at)) +
+// defaultRemediationWindow, milestone = a single default remediation
 // milestone.
 func (a *aggregate) poamInput() *oscalv1.PoamInput {
 	items := make([]*oscalv1.PoamItem, 0, len(a.failingEvals))
@@ -715,12 +716,21 @@ func (a *aggregate) poamInput() *oscalv1.PoamInput {
 			title = controlID.String()
 		}
 
-		// Due date: prefer last_observed_at, fall back to evaluated_at,
-		// then to now — always offset by the default remediation window.
+		// Due date: prefer last_observed_at, fall back to the instant the
+		// row judged (evaluated_as_of for a replay, #3087, else
+		// evaluated_at), then to now — always offset by the default
+		// remediation window.
 		base := time.Now().UTC()
-		if ev.LastObservedAt.Valid {
+		evaluatedAsOf := ""
+		if ev.EvaluatedAsOf.Valid {
+			evaluatedAsOf = ev.EvaluatedAsOf.Time.UTC().Format(time.RFC3339)
+		}
+		switch {
+		case ev.LastObservedAt.Valid:
 			base = ev.LastObservedAt.Time
-		} else if ev.EvaluatedAt.Valid {
+		case ev.EvaluatedAsOf.Valid:
+			base = ev.EvaluatedAsOf.Time
+		case ev.EvaluatedAt.Valid:
 			base = ev.EvaluatedAt.Time
 		}
 		due := base.Add(defaultRemediationWindow).UTC().Format(time.RFC3339)
@@ -743,10 +753,11 @@ func (a *aggregate) poamInput() *oscalv1.PoamInput {
 					"audit period horizon. Remediation required.",
 				title, ev.FreshnessStatus,
 			),
-			Severity:  severity,
-			Owner:     owner,
-			DueDate:   due,
-			Milestone: "Remediate the failing control and re-evaluate with fresh evidence.",
+			Severity:      severity,
+			Owner:         owner,
+			DueDate:       due,
+			Milestone:     "Remediate the failing control and re-evaluate with fresh evidence.",
+			EvaluatedAsOf: evaluatedAsOf,
 		})
 	}
 

@@ -526,6 +526,33 @@ def test_serialize_poam_emits_valid_oscal():
     assert valid, errors
 
 
+def test_serialize_poam_names_a_replay_items_judged_instant():
+    # #3087: a finding from a replay row carries evaluated-as-of; a live
+    # finding does not.
+    inp = oscal_pb2.PoamInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        items=[
+            oscal_pb2.PoamItem(
+                id="replay",
+                control_id="ctrl-1",
+                severity="high",
+                due_date="2026-07-30T00:00:00Z",
+                evaluated_as_of="2026-05-01T00:00:00Z",
+            ),
+            oscal_pb2.PoamItem(id="live", control_id="ctrl-2", severity="high"),
+        ],
+    )
+    data = serialize_poam(inp)
+    valid, errors = round_trip_validate("plan-of-action-and-milestones", data)
+    assert valid, errors
+    items = json.loads(data)["plan-of-action-and-milestones"]["poam-items"]
+    props = [{p["name"]: p["value"] for p in it["props"]} for it in items]
+    assert props[0]["evaluated-as-of"] == "2026-05-01T00:00:00Z"
+    assert "evaluated-as-of" not in props[1]
+
+
 def test_serialize_poam_handles_zero_findings():
     # An audit period with no open findings still produces a valid POA&M.
     inp = oscal_pb2.PoamInput(

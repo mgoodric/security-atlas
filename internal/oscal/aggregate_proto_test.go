@@ -788,6 +788,33 @@ func TestPOAMInput_FailingControlsBecomePOAMItems(t *testing.T) {
 	}
 }
 
+// TestPOAMInput_ReplayRowCountsFromJudgedInstant: a failing replay row
+// with no evidence carries evaluated_as_of, and its due date counts from
+// that instant, not from evaluated_at (#3087).
+func TestPOAMInput_ReplayRowCountsFromJudgedInstant(t *testing.T) {
+	judged := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	written := time.Date(2026, 4, 2, 10, 0, 0, 0, time.UTC)
+	failing := []dbx.ListFailingEvaluationsAsOfRow{{
+		ID:              pgUUID(uuid.New()),
+		ControlID:       pgUUID(uuid.New()),
+		Result:          "fail",
+		FreshnessStatus: "no_evidence",
+		EvaluatedAt:     pgtype.Timestamptz{Time: written, Valid: true},
+		EvaluatedAsOf:   pgtype.Timestamptz{Time: judged, Valid: true},
+	}}
+	out := makeAggregate(t, ExportInput{}, nil, nil, nil, nil, nil, nil, failing).poamInput()
+	if len(out.Items) != 1 {
+		t.Fatalf("Items len = %d, want 1", len(out.Items))
+	}
+	it := out.Items[0]
+	if want := judged.Format(time.RFC3339); it.EvaluatedAsOf != want {
+		t.Errorf("EvaluatedAsOf = %q, want %q", it.EvaluatedAsOf, want)
+	}
+	if want := judged.Add(defaultRemediationWindow).Format(time.RFC3339); it.DueDate != want {
+		t.Errorf("DueDate = %q, want %q (evaluated_as_of + 90d)", it.DueDate, want)
+	}
+}
+
 func TestPOAMInput_EmptyFailingEvalsProducesEmptyItems(t *testing.T) {
 	agg := makeAggregate(t, ExportInput{}, nil, nil, nil, nil, nil, nil, nil)
 	out := agg.poamInput()

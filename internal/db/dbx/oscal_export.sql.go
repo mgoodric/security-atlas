@@ -407,10 +407,11 @@ WITH control_latest_run AS (
     ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC,
              (evaluated_as_of IS NULL) DESC, evaluated_at DESC, created_at DESC
 )
-SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, evaluated_as_of, result, freshness_status, last_observed_at FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
         ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
-        ce.evaluated_at, ce.result, ce.freshness_status, ce.last_observed_at
+        ce.evaluated_at, ce.evaluated_as_of, ce.result, ce.freshness_status,
+        ce.last_observed_at
     FROM control_evaluations ce
     JOIN control_latest_run lr
       ON lr.control_id = ce.control_id
@@ -435,6 +436,7 @@ type ListFailingEvaluationsAsOfRow struct {
 	ScopeCellID     pgtype.UUID        `json:"scope_cell_id"`
 	EvalRunID       pgtype.UUID        `json:"eval_run_id"`
 	EvaluatedAt     pgtype.Timestamptz `json:"evaluated_at"`
+	EvaluatedAsOf   pgtype.Timestamptz `json:"evaluated_as_of"`
 	Result          EvidenceResult     `json:"result"`
 	FreshnessStatus string             `json:"freshness_status"`
 	LastObservedAt  pgtype.Timestamptz `json:"last_observed_at"`
@@ -452,6 +454,9 @@ type ListFailingEvaluationsAsOfRow struct {
 // control's applicability_expr resolves to at that moment, so a cell that
 // stopped applying has no row in it, and its older failing row is not a
 // finding.
+//
+// #3087: evaluated_as_of is the instant a replay row judged; the POA&M
+// item carries it, and its due date counts from it.
 //
 // A failing control evaluation IS a finding for v1 — there is no separate
 // findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
@@ -471,6 +476,7 @@ func (q *Queries) ListFailingEvaluationsAsOf(ctx context.Context, arg ListFailin
 			&i.ScopeCellID,
 			&i.EvalRunID,
 			&i.EvaluatedAt,
+			&i.EvaluatedAsOf,
 			&i.Result,
 			&i.FreshnessStatus,
 			&i.LastObservedAt,
