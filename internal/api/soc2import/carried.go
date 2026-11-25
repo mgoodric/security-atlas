@@ -370,8 +370,19 @@ func settleCarriedEdges(ctx context.Context, tx pgx.Tx, q *dbx.Queries, versionI
 			edge.Attribution = string(row.attribution)
 			edge.Tier = string(target)
 			report.EdgesCarriedSynced = append(report.EdgesCarriedSynced, edge)
-			// A rejected copy keeps its tier (reseedTier), so a raised
-			// provenance is reported as it is for an owned edge (#3079).
+			// A tier move is listed with the owned-edge re-seeds (ADR 0018,
+			// #3083). An edge step 5 rewrote already matches its row and
+			// never reaches here, so no move is listed twice.
+			if target != tier {
+				report.EdgesTierReseeded = append(report.EdgesTierReseeded, ReseededEdge{
+					RequirementCode: e.requirementCode,
+					SCFAnchor:       e.scfID,
+					PreviousTier:    e.tier,
+					NewTier:         string(target),
+				})
+			}
+			// A rejected copy keeps its tier (reseedTier), so a rewrite with
+			// raised provenance is reported as it is for an owned edge (#3079).
 			if tier == dbx.CrosswalkMappingTierRejected && row.attribution != e.content.attribution {
 				report.EdgesUpgradedOntoRejected = append(report.EdgesUpgradedOntoRejected, UpgradedEdge{
 					RequirementCode:     e.requirementCode,

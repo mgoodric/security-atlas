@@ -236,6 +236,9 @@ func TestCarriedEdges_SyncReseedsAnInheritedVerifiedTierToDraft(t *testing.T) {
 	if len(rep.EdgesCarriedSynced) != 1 || rep.EdgesCarriedSynced[0].Tier != "draft" {
 		t.Errorf("EdgesCarriedSynced = %+v; want GOV-04 at draft", rep.EdgesCarriedSynced)
 	}
+	if got := reseeded(rep); !slices.Equal(got, []string{"GOV-04:verified->draft"}) {
+		t.Errorf("EdgesTierReseeded = %v; want the carried move listed once (#3083)", got)
+	}
 	if n := countRows(t, pool, `
 		SELECT count(*) FROM fw_to_scf_edge_tier_transitions
 		WHERE edge_id = $1 AND from_tier = 'verified' AND to_tier = 'draft'
@@ -258,6 +261,9 @@ func TestCarriedEdges_SyncSeedsVerifiedFromAnOfficialRow(t *testing.T) {
 	}
 	if len(rep.EdgesCarriedSynced) != 1 || rep.EdgesCarriedSynced[0].Tier != "verified" || rep.EdgesCarriedSynced[0].Attribution != "scf_official" {
 		t.Errorf("EdgesCarriedSynced = %+v; want GOV-04 verified scf_official", rep.EdgesCarriedSynced)
+	}
+	if got := reseeded(rep); !slices.Equal(got, []string{"GOV-04:draft->verified"}) {
+		t.Errorf("EdgesTierReseeded = %v; want the carried move listed once (#3083)", got)
 	}
 	if n := countRows(t, pool, `
 		SELECT count(*) FROM fw_to_scf_edge_tier_transitions
@@ -287,6 +293,18 @@ func TestCarriedEdges_RejectedCopyIsReportedUpgraded(t *testing.T) {
 	if !slices.Equal(got, []string{"GOV-04:community_draft->scf_official"}) {
 		t.Errorf("EdgesUpgradedOntoRejected = %v; want [GOV-04:community_draft->scf_official]", got)
 	}
+	if got := reseeded(rep); len(got) != 0 {
+		t.Errorf("EdgesTierReseeded = %v; a rejected copy keeps its tier", got)
+	}
+}
+
+// reseeded lists rep's tier re-seeds as anchor:from->to.
+func reseeded(rep soc2import.Report) []string {
+	var got []string
+	for _, rs := range rep.EdgesTierReseeded {
+		got = append(got, rs.SCFAnchor+":"+rs.PreviousTier+"->"+rs.NewTier)
+	}
+	return got
 }
 
 // One import both restores a copy its retire pass retired and syncs the
