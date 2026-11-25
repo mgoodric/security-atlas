@@ -107,10 +107,7 @@ func TestEvaluateControl_AsOfReplayUsesTheAsOfInstant(t *testing.T) {
 		if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerReplay, asOf); err != nil {
 			t.Fatalf("%s: EvaluateControl as of %s: %v", tc.lang, asOf, err)
 		}
-		replayed, err := eng.ControlState(ctx, ctrlID, "", eval.FarFuture)
-		if err != nil {
-			t.Fatalf("%s: ControlState replay: %v", tc.lang, err)
-		}
+		replayed := runStates(t, admin, tenant, ctrlID, eval.TriggerReplay)
 		if len(replayed) != 1 || replayed[0].Result != eval.ResultPass {
 			t.Fatalf("%s: replay as of one hour after the record = %+v, want pass", tc.lang, replayed)
 		}

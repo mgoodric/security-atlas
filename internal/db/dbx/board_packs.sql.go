@@ -146,6 +146,8 @@ WITH control_latest_run AS (
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
+      -- #3071: a replay of an earlier instant is not the latest run.
+      AND evaluated_as_of IS NULL
     ORDER BY control_id, evaluated_at DESC, created_at DESC
 )
 SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (

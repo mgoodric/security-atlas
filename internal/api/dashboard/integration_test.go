@@ -580,6 +580,48 @@ func TestFrameworkPosture_ExceptedCellThatStopsApplyingDoesNotCount(t *testing.T
 	}
 }
 
+// #3071: a replay of an earlier instant, written after the live run, is not
+// the control's latest run. The dashboard keeps the live result.
+func TestFrameworkPosture_ReplayOfAnEarlierInstantIsNotTheLatestRun(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	fw, anchors := seedFramework(t, admin, "fwreplay3071", "2024", 1)
+	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	// Live: pass an hour ago. Replay, written now: excepted as of a day ago.
+	seedEvaluation(t, admin, tenant, ctrl, "pass", time.Now().UTC().Add(-time.Hour))
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO control_evaluations (
+			id, tenant_id, control_id, eval_run_id, evaluated_at, evaluated_as_of,
+			result, freshness_status, evidence_count_in_window, trigger
+		)
+		VALUES ($1, $2, $3, $4, now(), now() - interval '1 day', 'excepted', 'fresh', 1, 'replay')
+	`, uuid.New(), tenant, ctrl, uuid.New()); err != nil {
+		t.Fatalf("seed replay evaluation: %v", err)
+	}
+
+	_, body := get(t, env, "/v1/frameworks/posture")
+	rows, _ := body["frameworks"].([]any)
+	for _, r := range rows {
+		m := r.(map[string]any)
+		if m["framework_id"].(string) != fw.frameworkID.String() {
+			continue
+		}
+		if cov := m["coverage_pct"].(float64); cov != 100.0 {
+			t.Fatalf("coverage_pct = %v, want 100.0", cov)
+		}
+		if exc := m["covered_by_exception_pct"].(float64); exc != 0.0 {
+			t.Fatalf("covered_by_exception_pct = %v, want 0.0 (the live run passes; the replay is not latest)", exc)
+		}
+		return
+	}
+	t.Fatal("framework posture row missing")
+}
+
 // seedRunRow inserts one control_evaluations row for a scope cell under a
 // caller-chosen eval_run_id, so a test can lay down a whole run.
 func seedRunRow(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID, runID, cellID uuid.UUID, result string, evaluatedAt time.Time) {

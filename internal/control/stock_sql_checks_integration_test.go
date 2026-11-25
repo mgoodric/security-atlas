@@ -36,6 +36,38 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// evaluatedState is the state the evaluation just written computed. A live
+// run (asOf FarFuture) is the control's latest state, read through
+// ControlState. A run as of an earlier instant is not latest state (#3071),
+// so every row of its run is read directly, one per cell, as ControlState
+// would return them.
+func evaluatedState(ctx context.Context, engine *eval.Engine, admin *pgxpool.Pool, tenant string, ctrl uuid.UUID, asOf time.Time) ([]eval.State, error) {
+	if asOf.Equal(eval.FarFuture) {
+		return engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+	}
+	rows, err := admin.Query(ctx, `
+		SELECT result::text, freshness_status FROM control_evaluations
+		WHERE tenant_id = $1 AND control_id = $2
+		  AND eval_run_id = (
+		      SELECT eval_run_id FROM control_evaluations
+		      WHERE tenant_id = $1 AND control_id = $2 AND evaluated_as_of IS NOT NULL
+		      ORDER BY evaluated_at DESC, created_at DESC LIMIT 1)
+		ORDER BY scope_cell_id`, tenant, ctrl)
+	if err != nil {
+		return nil, fmt.Errorf("read as-of run: %w", err)
+	}
+	defer rows.Close()
+	var out []eval.State
+	for rows.Next() {
+		s := eval.State{ControlID: ctrl}
+		if err := rows.Scan(&s.Result, &s.FreshnessStatus); err != nil {
+			return nil, fmt.Errorf("scan as-of row: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 func TestStockSQLBundleTests_PassAgainstPostgres(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	soc2 := filepath.Join(repoRoot(t), "controls", "soc2")
@@ -413,7 +445,7 @@ func TestCC41_EngineEvaluatesHostCheckIn(t *testing.T) {
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
-			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			states, err := evaluatedState(ctx, engine, admin, tenant, ctrl, tc.asOf)
 			if err != nil {
 				t.Fatalf("ControlState: %v", err)
 			}
@@ -629,7 +661,7 @@ func TestWindowedStockChecks_EngineEvaluatesAgainstEvaluationInstant(t *testing.
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
-			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			states, err := evaluatedState(ctx, engine, admin, tenant, ctrl, tc.asOf)
 			if err != nil {
 				t.Fatalf("ControlState: %v", err)
 			}
@@ -927,7 +959,7 @@ func TestJiraTicketChecks_EngineEvaluatesTicketPayload(t *testing.T) {
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
-			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			states, err := evaluatedState(ctx, engine, admin, tenant, ctrl, tc.asOf)
 			if err != nil {
 				t.Fatalf("ControlState: %v", err)
 			}
@@ -1021,7 +1053,7 @@ func TestSASTChecks_EngineEvaluatesScanPayload(t *testing.T) {
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
-			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			states, err := evaluatedState(ctx, engine, admin, tenant, ctrl, tc.asOf)
 			if err != nil {
 				t.Fatalf("ControlState: %v", err)
 			}

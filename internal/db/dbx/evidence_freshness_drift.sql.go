@@ -307,6 +307,7 @@ WITH latest_per_cell AS (
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
+      AND evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
 )
 SELECT control_id

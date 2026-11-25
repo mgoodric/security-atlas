@@ -240,6 +240,12 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		// #2109: the plans linked to this control move completed <->
 		// verified on the evaluation just written, in this transaction.
 		// It locks only action_plans rows (in id order), never a risk.
+		// #3071: a replay of an earlier instant is not the control's state
+		// now, so it moves no plan. action_plan_linked_controls_pass also
+		// reads only live runs, as a second safeguard.
+		if instant.Before(evaluatedAt) {
+			return nil
+		}
 		if _, err := actionplan.ReconcileVerification(ctx, q, controlID); err != nil {
 			return err
 		}

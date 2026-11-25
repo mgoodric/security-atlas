@@ -652,6 +652,7 @@ JOIN LATERAL (
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
       AND ce.control_id = c.id
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.evaluated_at DESC, ce.id DESC
     LIMIT 1
 ) latest ON latest.result = 'pass'

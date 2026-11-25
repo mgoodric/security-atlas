@@ -157,6 +157,7 @@ control_passed_then AS (
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
       AND ce.evaluated_at <= $2
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.control_id, ce.evaluated_at DESC
 ),
 covered_then AS (
@@ -177,6 +178,7 @@ control_latest_run AS (
         ce.eval_run_id
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.control_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 control_excepted_now AS (
@@ -212,6 +214,7 @@ control_latest_run_then AS (
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
       AND ce.evaluated_at <= $2
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.control_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 control_excepted_then AS (
