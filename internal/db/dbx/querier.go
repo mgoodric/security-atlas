@@ -2711,6 +2711,9 @@ type Querier interface {
 	// stopped applying has no row in it, and its older failing row is not a
 	// finding.
 	//
+	// #3087: evaluated_as_of is the instant a replay row judged; the POA&M
+	// item carries it, and its due date counts from it.
+	//
 	// A failing control evaluation IS a finding for v1 — there is no separate
 	// findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
 	ListFailingEvaluationsAsOf(ctx context.Context, arg ListFailingEvaluationsAsOfParams) ([]ListFailingEvaluationsAsOfRow, error)

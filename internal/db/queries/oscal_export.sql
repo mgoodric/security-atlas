@@ -58,6 +58,9 @@ ORDER BY created_at ASC, id ASC;
 -- stopped applying has no row in it, and its older failing row is not a
 -- finding.
 --
+-- #3087: evaluated_as_of is the instant a replay row judged; the POA&M
+-- item carries it, and its due date counts from it.
+--
 -- A failing control evaluation IS a finding for v1 — there is no separate
 -- findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
 WITH control_latest_run AS (
@@ -76,7 +79,8 @@ WITH control_latest_run AS (
 SELECT * FROM (
     SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
         ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
-        ce.evaluated_at, ce.result, ce.freshness_status, ce.last_observed_at
+        ce.evaluated_at, ce.evaluated_as_of, ce.result, ce.freshness_status,
+        ce.last_observed_at
     FROM control_evaluations ce
     JOIN control_latest_run lr
       ON lr.control_id = ce.control_id

@@ -371,6 +371,10 @@ message PoamItem {
   // RFC-3339.
   string due_date = 7;
   string milestone = 8;
+  // RFC-3339 instant a replay judged the failing cell as of (#3087). Empty
+  // for a live evaluation and for an audit-note item. When set, the finding
+  // describes this earlier instant, and due_date counts from it.
+  string evaluated_as_of = 9;
 }
 
 message PoamInput {

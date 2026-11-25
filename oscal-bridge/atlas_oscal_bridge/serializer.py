@@ -711,6 +711,11 @@ def serialize_poam(pb_input) -> bytes:
             props.append(_prop("due-date", it.due_date))
         if it.milestone:
             props.append(_prop("milestone", it.milestone))
+        # #3087: a finding from a replay row judged an earlier instant than
+        # the one it was written at; the prop names it, and due-date counts
+        # from it.
+        if it.evaluated_as_of:
+            props.append(_prop("evaluated-as-of", it.evaluated_as_of))
         items.append(
             PoamItem(
                 uuid=str(uuid.uuid4()),
