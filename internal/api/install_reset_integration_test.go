@@ -7,10 +7,13 @@
 // AdminCredentialsService.ResetBootstrap, where API keys authenticate,
 // performs the reset against the real platform_status row.
 //
-// The single-tenant gate counts every row in `tenants`, so the test
-// truncates tenants (as internal/platform's TenantCount test does) and
-// seeds exactly one. Requires DATABASE_URL_APP (atlas_app, RLS) and
-// DATABASE_URL (BYPASSRLS).
+// The single-tenant gate counts every row in `tenants`, so the test needs
+// an install with exactly one tenant. It used to TRUNCATE tenants and users
+// CASCADE on the shared database; it now reads and writes empty copies of
+// the two tables through dbtest.NewShadowMigratePool (#3096), as
+// internal/platform's TenantCount test does. Every tenants read on this
+// path goes through the Status write pool, which is the shadow pool.
+// Requires DATABASE_URL_APP (atlas_app, RLS) and DATABASE_URL (BYPASSRLS).
 package api
 
 import (
@@ -35,18 +38,16 @@ import (
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
 const recoveryEnvToken = "FAKE_ATLAS_BOOTSTRAP_TOKEN_for_2121_not_a_secret"
 
-func resetInstallState(t *testing.T, admin *pgxpool.Pool) {
+func resetPlatformStatus(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := admin.Exec(ctx, `TRUNCATE TABLE tenants, users RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("truncate tenants: %v", err)
-	}
-	if _, err := admin.Exec(ctx, `UPDATE platform_status SET first_signin_at = NULL, bootstrap_token_consumed_at = NULL`); err != nil {
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE platform_status SET first_signin_at = NULL, bootstrap_token_consumed_at = NULL`); err != nil {
 		t.Fatalf("reset platform_status: %v", err)
 	}
 }
@@ -56,24 +57,12 @@ func adminCall(token string) context.Context {
 }
 
 func TestFirstLoginRecovery_SingleTenantEndToEnd(t *testing.T) {
-	appURL, adminURL := os.Getenv("DATABASE_URL_APP"), os.Getenv("DATABASE_URL")
-	if appURL == "" || adminURL == "" {
-		t.Skip("DATABASE_URL_APP and DATABASE_URL required")
-	}
 	ctx := context.Background()
-	app, err := pgxpool.New(ctx, appURL)
-	if err != nil {
-		t.Fatalf("app pool: %v", err)
-	}
-	t.Cleanup(app.Close)
-	admin, err := pgxpool.New(ctx, adminURL)
-	if err != nil {
-		t.Fatalf("admin pool: %v", err)
-	}
-	t.Cleanup(admin.Close)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
 
-	resetInstallState(t, admin)
-	t.Cleanup(func() { resetInstallState(t, admin) })
+	resetPlatformStatus(t, admin)
+	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 	tenant := uuid.New()
 	if _, err := admin.Exec(ctx,
 		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, 'Default Tenant', TRUE)`, tenant); err != nil {
