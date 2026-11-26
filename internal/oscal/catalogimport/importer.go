@@ -36,6 +36,8 @@ import (
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -59,7 +61,17 @@ var (
 	// ErrValidationFailed wraps the bridge's structured validation errors
 	// for a malformed / schema-invalid catalog (AC-10). Nothing is persisted.
 	ErrValidationFailed = errors.New("catalogimport: catalog failed OSCAL v1.1.x validation")
+	// ErrSCFReleaseConflict is returned when --scf-release and the
+	// document's "scf-release" prop name different SCF releases, or the
+	// document names two. Nothing is persisted.
+	ErrSCFReleaseConflict = scfbind.ErrConflict
 )
+
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); the catalog's control ids are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("catalogimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the catalog's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import catalogs. admin is the
 // superset of grc_engineer in the canvas 5-role model.
@@ -102,6 +114,12 @@ type Request struct {
 	ImportedBy string
 	// Role is the caller's role; must be a catalog-author role (AC-6).
 	Role authz.Role
+	// SCFRelease is the SCF release the control ids are matched in
+	// (#2264), from atlas-oscal --scf-release. The catalog can declare it
+	// instead with an "scf-release" prop on its metadata; when both are
+	// given they must agree. A declared release that is not loaded fails
+	// the import. Neither is ErrSCFReleaseRequired (#1774).
+	SCFRelease string
 }
 
 // Report summarizes a successful import.
@@ -115,6 +133,10 @@ type Report struct {
 	// MappedCount is how many imported controls matched an SCF anchor
 	// deterministically (the rest are flagged NULL for operator mapping).
 	MappedCount int
+	// SCFRelease is the SCF release the control ids were matched in.
+	SCFRelease string
+	// Warnings are non-fatal notes for the operator.
+	Warnings []string
 }
 
 // Import runs the full pipeline. On any validation or persistence failure
@@ -138,6 +160,16 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	sum := sha256.Sum256(req.OscalJSON)
 	sourceSha := hex.EncodeToString(sum[:])
 
+	release, err := scfbind.Declared("catalogimport", req.SCFRelease, req.OscalJSON, "catalog")
+	if err != nil {
+		return Report{}, err
+	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
+	}
+
 	// --- Bridge validate + normalize ---
 	resp, err := im.bridge.ImportCatalog(ctx, req.OscalJSON, req.SourceLabel)
 	if err != nil {
@@ -151,7 +183,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	}
 
 	// --- Transactional persistence (AC-5) ---
-	report, err := im.persist(ctx, req, sourceSha, resp)
+	report, err := im.persist(ctx, req, release, sourceSha, resp)
 	if err != nil {
 		// A persistence failure rolls the catalog back; record rejection.
 		_ = im.writeAuditRejected(ctx, req, sourceSha, []string{err.Error()})
@@ -164,7 +196,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // transaction under app.current_tenant. RLS scopes every write to the
 // caller's tenant (P0-492-5 / AC-11). The audit row is written in the SAME
 // transaction on success so the success record is atomic with the catalog.
-func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, resp *oscalv1.ImportCatalogResponse) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportCatalogResponse) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("catalogimport: begin tx: %w", err)
@@ -195,14 +227,16 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		return Report{}, fmt.Errorf("catalogimport: insert catalog: %w", err)
 	}
 
-	// Pre-load the set of SCF anchor scf_ids for the current SCF version so
-	// the deterministic requirement -> SCF-anchor mapping (D1) is a single
-	// query, not one per control. A control whose OSCAL control-id exactly
-	// matches a known SCF scf_id maps TO that anchor; otherwise NULL.
-	anchorIDs, err := loadSCFAnchorIDs(ctx, tx)
+	// Pre-load the scf_ids of the release the catalog declares (#2264;
+	// required since #1774), so the deterministic
+	// requirement -> SCF-anchor mapping (D1) is a single query, not one per
+	// control. A control whose OSCAL control-id exactly matches a scf_id in
+	// that release maps TO that anchor; otherwise NULL.
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
-		return Report{}, err
+		return Report{}, fmt.Errorf("catalogimport: scf release: %w", err)
 	}
+	anchorIDs := b.Anchors
 
 	mapped := 0
 	for _, c := range controls {
@@ -227,7 +261,7 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 	}
 
 	// Success audit row, atomic with the catalog (AC-7).
-	detail, _ := json.Marshal(map[string]any{"mapped": mapped, "unmapped": len(controls) - mapped})
+	detail, _ := json.Marshal(map[string]any{"mapped": mapped, "unmapped": len(controls) - mapped, "scf_release": b.Release.Version})
 	if _, err := q.InsertImportedCatalogAuditLog(ctx, dbx.InsertImportedCatalogAuditLogParams{
 		ID:           pgUUID(uuid.New()),
 		TenantID:     pgUUID(tenantID),
@@ -253,6 +287,8 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		SourceLabel:  req.SourceLabel,
 		ControlCount: len(controls),
 		MappedCount:  mapped,
+		SCFRelease:   b.Release.Version,
+		Warnings:     b.Warnings,
 	}, nil
 }
 
@@ -288,35 +324,6 @@ func (im *Importer) writeAuditRejected(ctx context.Context, req Request, sourceS
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-// loadSCFAnchorIDs returns the set of scf_id strings in the current SCF
-// framework version. The set is the deterministic crosswalk surface for
-// D1: an imported control whose OSCAL control-id matches a key maps TO that
-// SCF anchor. scf_anchors is the read-only bundled spine — never written.
-func loadSCFAnchorIDs(ctx context.Context, tx pgx.Tx) (map[string]struct{}, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT a.scf_id
-		FROM scf_anchors a
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'scf' AND fv.status = 'current'`)
-	if err != nil {
-		return nil, fmt.Errorf("catalogimport: load scf anchors: %w", err)
-	}
-	defer rows.Close()
-	out := make(map[string]struct{})
-	for rows.Next() {
-		var scfID string
-		if err := rows.Scan(&scfID); err != nil {
-			return nil, fmt.Errorf("catalogimport: scan scf anchor: %w", err)
-		}
-		out[scfID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("catalogimport: iterate scf anchors: %w", err)
-	}
-	return out, nil
 }
 
 func tenantUUID(ctx context.Context) (uuid.UUID, error) {

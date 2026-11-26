@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 
 from trestle.core.control_interface import ParameterRep
 from trestle.core.profile_resolver import ProfileResolver
@@ -31,12 +32,15 @@ from trestle.oscal.assessment_plan import AssessmentPlan
 from trestle.oscal.assessment_results import AssessmentResults, ImportAp, Result
 from trestle.oscal.catalog import Catalog
 from trestle.oscal.common import (
+    BackMatter,
     ControlSelection,
     ImportSsp,
+    Link,
     Metadata,
     Observation,
     Property,
     RelevantEvidence,
+    Resource,
     ReviewedControls,
     SystemComponent,
     SystemId,
@@ -62,13 +66,34 @@ from trestle.oscal.ssp import (
 
 from . import OSCAL_VERSION
 
-# trestle's pydantic enums are reachable via each field's own ``.type_``.
+# trestle's pydantic enums are reachable via each field's own
+# ``.annotation`` (trestle 5.x models are native pydantic v2).
 # Resolving them this way avoids guessing which of the near-identically
 # named ``Status`` / ``OperationalState`` enums a given field validates
 # against (there are several; see the slice-030 decisions log).
-_SC_STATUS_CLS = SystemCharacteristics.__fields__["status"].type_
-_SC_STATE_ENUM = _SC_STATUS_CLS.__fields__["state"].type_
-_COMP_STATE_ENUM = SystemComponent.__fields__["status"].type_.__fields__["state"].type_
+_SC_STATUS_CLS = SystemCharacteristics.model_fields["status"].annotation
+_SC_STATE_ENUM = _SC_STATUS_CLS.model_fields["state"].annotation
+_COMP_STATUS_CLS = SystemComponent.model_fields["status"].annotation
+_COMP_STATE_ENUM = _COMP_STATUS_CLS.model_fields["state"].annotation
+
+
+def _scalar_str(value) -> str:
+    """Read a scalar off a parsed trestle model as a plain ``str``.
+
+    trestle 5.x wraps some OSCAL scalars (``oscal-version``, a component's
+    ``type``) in pydantic ``RootModel`` datatypes, whose ``str()`` is the
+    model repr (``root='1.1.2'``), not the value. Unwrap ``.root`` first.
+    A field typed as a union with a plain ``Enum`` (``DefinedComponent.type``
+    is ``StringDatatype | DefinedComponentTypeValidValues``) parses to the
+    enum member, whose ``str()`` is ``Class.member``; unwrap ``.value`` too.
+    """
+    while True:
+        if hasattr(value, "root"):
+            value = value.root
+        elif isinstance(value, Enum):
+            value = value.value
+        else:
+            return str(value or "")
 
 
 class SerializeError(ValueError):
@@ -111,7 +136,7 @@ def _oscal_token(raw: str) -> str:
     """Coerce an arbitrary id into an OSCAL NCName-style token.
 
     OSCAL ``control-id`` / ``statement-id`` must start with a letter or
-    underscore and contain no whitespace. SCF codes ("IAC-06") already
+    underscore and contain no whitespace. SCF codes ("IAC-37") already
     qualify; raw control UUIDs may start with a digit. We lowercase,
     replace any disallowed run with a hyphen, and prefix ``ctrl-`` when
     the result would not start with a letter/underscore — so the mapping
@@ -120,6 +145,22 @@ def _oscal_token(raw: str) -> str:
     cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in raw.lower())
     if not cleaned or not (cleaned[0].isalpha() or cleaned[0] == "_"):
         cleaned = f"ctrl-{cleaned}"
+    return cleaned
+
+
+def _requirement_token(framework: str, code: str) -> str:
+    """Namespace a framework requirement code as an OSCAL control-id token.
+
+    The spec's ``iso27001-2022:A.8.25`` can't be used as written: an OSCAL
+    token admits no colon. The namespace and code are joined with ``_``
+    instead (``iso27001-2022_A.8.25``). Case is kept, since requirement codes
+    are case-significant identifiers, and any other character outside the
+    token alphabet becomes ``-``.
+    """
+    raw = f"{framework}_{code}"
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in raw)
+    if not (cleaned[0].isalpha() or cleaned[0] == "_"):
+        cleaned = f"fw-{cleaned}"
     return cleaned
 
 
@@ -240,11 +281,14 @@ def serialize_ssp(pb_input) -> bytes:
             props.append(_prop("scf-id", ci.scf_id))
         if ci.evaluated_at:
             props.append(_prop("evaluated-at", ci.evaluated_at))
+        if ci.demo:
+            # #2043: the in-place demo seed added this control; never real.
+            props.append(_prop("demo-seed", "true"))
         for pid in ci.linked_policy_ids:
             props.append(_prop("linked-policy-id", pid))
         # OSCAL control-id and statement-id are NCName-style tokens: they
         # must start with a letter/underscore and contain no spaces. SCF
-        # codes (e.g. "IAC-06") satisfy this; raw control UUIDs may start
+        # codes (e.g. "IAC-37") satisfy this; raw control UUIDs may start
         # with a digit, so we always prefix with "ctrl-" to guarantee a
         # valid token.
         control_token = _oscal_token(ci.scf_id or ci.control_id)
@@ -327,6 +371,29 @@ def serialize_ssp(pb_input) -> bytes:
                     _prop("claim-id", vai.claim_id),
                 ],
                 statements=[statement],
+            )
+        )
+
+    # #1792: requirements excluded in the framework-scope revision active at
+    # the freeze (the Statement of Applicability). One implemented-requirement
+    # each, with the OSCAL core `implementation-status: not-applicable` prop and
+    # the operator's justification as remarks. These are scope decisions, not
+    # control implementations, so they carry no evaluation-result and never
+    # merge into a per-control entry.
+    for er in getattr(pb_input, "excluded_requirements", None) or []:
+        props = [
+            Property(name="implementation-status", value="not-applicable"),
+            _prop("framework", er.framework),
+            _prop("requirement-code", er.requirement_code),
+        ]
+        if er.framework_scope_id:
+            props.append(_prop("framework-scope-id", er.framework_scope_id))
+        implemented.append(
+            ImplementedRequirement(
+                uuid=str(uuid.uuid4()),
+                control_id=_requirement_token(er.framework, er.requirement_code),
+                props=props,
+                remarks=er.justification,
             )
         )
 
@@ -433,6 +500,8 @@ def serialize_assessment(pb_input):
                 ],
             )
         )
+    excepted_obs, exception_resources = _excepted_observations(pb_input.excepted_cells)
+    observations.extend(excepted_obs)
 
     result = Result(
         uuid=str(uuid.uuid4()),
@@ -450,11 +519,99 @@ def serialize_assessment(pb_input):
         metadata=ar_meta,
         import_ap=ImportAp(href="#security-atlas-assessment-plan"),
         results=[result],
+        back_matter=BackMatter(resources=exception_resources) if exception_resources else None,
     )
 
     return (
         ap.oscal_serialize_json().encode("utf-8"),
         ar.oscal_serialize_json().encode("utf-8"),
+    )
+
+
+def _excepted_observations(cells):
+    """Map excepted cells to risk-accepted observations (#2269).
+
+    An excepted cell is a control waived by an approved exception in one
+    scope cell. It is never a finding: the observation is marked
+    ``risk-accepted`` and links to a back-matter resource per exception,
+    which carries the exception's id, expiry and approver. Each exception
+    appears once in back-matter however many cells it covers.
+
+    Returns ``(observations, resources)``.
+    """
+    observations = []
+    resources = {}
+    for cell in cells:
+        props = [
+            _prop("observation-source", "exception"),
+            _prop("risk-accepted", "true"),
+            _prop("control-id", cell.control_id),
+            _prop("evaluation-id", cell.evaluation_id),
+            _prop("evaluation-result", "excepted"),
+        ]
+        if cell.scope_cell_id:
+            props.append(_prop("scope-cell-id", cell.scope_cell_id))
+        # #3071: a replay row was written at evaluated_at (collected) but
+        # judged an earlier instant, and its exceptions are the ones in force
+        # then. The prop says which instant, so an exception revoked between
+        # the two does not read as a contradiction.
+        if cell.evaluated_as_of:
+            props.append(_prop("evaluated-as-of", cell.evaluated_as_of))
+        links = []
+        expiries = []
+        for exc in cell.exceptions:
+            props.append(_prop("exception-id", exc.id))
+            links.append(Link(href=f"#{exc.id}", rel="related", text="Accepting exception"))
+            if exc.expires_at:
+                expiries.append(datetime.fromisoformat(exc.expires_at))
+            if exc.id not in resources:
+                resources[exc.id] = _exception_resource(exc)
+        where = f"scope cell {cell.scope_cell_id}" if cell.scope_cell_id else "the whole tenant"
+        if cell.exceptions:
+            description = (
+                f"Control {cell.control_id} is excepted in {where}: an approved "
+                "exception accepts the risk, so the control's own result is not "
+                "assessed here. Not a finding."
+            )
+        else:
+            description = (
+                f"Control {cell.control_id} is excepted in {where}, but the "
+                "accepting exception can no longer be resolved. Not a finding."
+            )
+        observations.append(
+            Observation(
+                uuid=str(uuid.uuid4()),
+                title="Risk accepted by exception",
+                description=description,
+                methods=["EXAMINE"],
+                collected=_note_collected(cell.evaluated_at),
+                # The observation holds until the earliest exception expires.
+                expires=min(expiries) if expiries else None,
+                props=props,
+                links=links or None,
+            )
+        )
+    return observations, list(resources.values())
+
+
+def _exception_resource(exc) -> Resource:
+    props = [
+        _prop("exception-id", exc.id),
+        _prop("risk-accepted", "true"),
+    ]
+    if exc.expires_at:
+        props.append(_prop("expires-at", exc.expires_at))
+    if exc.approved_by:
+        props.append(_prop("approved-by", exc.approved_by))
+    if exc.approved_at:
+        props.append(_prop("approved-at", exc.approved_at))
+    if exc.status:
+        props.append(_prop("exception-status", exc.status))
+    return Resource(
+        uuid=exc.id,
+        title=f"Exception {exc.id}",
+        description=exc.justification or "Approved exception.",
+        props=props,
     )
 
 
@@ -522,8 +679,14 @@ def _population_props(populations):
         # Slice 494 (AC-1): the DRAWN sample evidence ids, one prop per id in
         # shuffle order. The ordinal-suffixed name preserves the deterministic
         # auditor's-sample order (AC-9) so an importer can re-key the draw.
+        demo_ids = set(pop.demo_evidence_ids)
         for ordinal, ev_id in enumerate(pop.sampled_evidence_ids):
             props.append(_prop(f"population-{pop.population_id}-sampled-{ordinal}", ev_id))
+            # #2043: the in-place demo seed added this record; never real.
+            if ev_id in demo_ids:
+                props.append(
+                    _prop(f"population-{pop.population_id}-sampled-{ordinal}-demo-seed", "true")
+                )
     return props or None
 
 
@@ -548,6 +711,11 @@ def serialize_poam(pb_input) -> bytes:
             props.append(_prop("due-date", it.due_date))
         if it.milestone:
             props.append(_prop("milestone", it.milestone))
+        # #3087: a finding from a replay row judged an earlier instant than
+        # the one it was written at; the prop names it, and due-date counts
+        # from it.
+        if it.evaluated_as_of:
+            props.append(_prop("evaluated-as-of", it.evaluated_as_of))
         items.append(
             PoamItem(
                 uuid=str(uuid.uuid4()),
@@ -765,9 +933,9 @@ def import_catalog(oscal_json: bytes, source_label: str = "") -> ImportResult:
         return ImportResult(False, ["catalog contains zero controls"], [], "", "")
 
     meta = catalog.metadata
-    oscal_version = getattr(meta, "oscal_version", "") or ""
-    catalog_title = getattr(meta, "title", "") or ""
-    return ImportResult(True, [], controls, str(oscal_version), str(catalog_title))
+    oscal_version = _scalar_str(getattr(meta, "oscal_version", ""))
+    catalog_title = _scalar_str(getattr(meta, "title", ""))
+    return ImportResult(True, [], controls, oscal_version, catalog_title)
 
 
 # --------------------------------------------------------------------------
@@ -1166,13 +1334,15 @@ def import_profile(
         if not controls:
             return _profile_reject(["resolved profile contains zero controls"])
 
-        rmeta = resolved.metadata
-        oscal_version = str(getattr(rmeta, "oscal_version", "") or "")
-        # The profile's OWN declared title is the provenance label, not the
-        # resolved catalog's (trestle stamps the resolved catalog with the
-        # profile's metadata, so this is the same value either way).
+        # Provenance comes from the profile's OWN declared metadata, not the
+        # resolved catalog's: trestle stamps the resolved catalog with its own
+        # OSCAL_VERSION (1.2.1 on 5.2.1), which is the resolver's version, not
+        # the one the imported document declared (issue #1875).
         pmeta = profile.get("metadata", {}) if isinstance(profile, dict) else {}
-        profile_title = str(pmeta.get("title", "")) if isinstance(pmeta, dict) else ""
+        if not isinstance(pmeta, dict):
+            pmeta = {}
+        oscal_version = str(pmeta.get("oscal-version", "") or "")
+        profile_title = str(pmeta.get("title", "") or "")
         return ProfileImportResult(True, [], controls, oscal_version, profile_title)
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -1339,7 +1509,7 @@ def import_component_definition(oscal_json: bytes, source_label: str = "") -> Co
         components.append(
             VendorComponent(
                 component_uuid=str(getattr(comp, "uuid", "") or ""),
-                component_type=str(getattr(comp, "type", "") or ""),
+                component_type=_scalar_str(getattr(comp, "type", "")),
                 title=str(getattr(comp, "title", "") or ""),
                 description=str(getattr(comp, "description", "") or ""),
                 claims=claims,
@@ -1354,6 +1524,6 @@ def import_component_definition(oscal_json: bytes, source_label: str = "") -> Co
         )
 
     meta = comp_def.metadata
-    oscal_version = str(getattr(meta, "oscal_version", "") or "")
+    oscal_version = _scalar_str(getattr(meta, "oscal_version", ""))
     title = str(getattr(meta, "title", "") or "")
     return ComponentImportResult(True, [], components, oscal_version, title)

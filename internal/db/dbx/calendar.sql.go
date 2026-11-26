@@ -41,14 +41,14 @@ FROM (
     WHERE ap.tenant_id = $1
       AND ap.period_end::timestamptz >= $2::timestamptz
       AND ap.period_end::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('audit' IN $4::text) > 0)
+      AND ($4::text = '' OR 'audit' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
     -- exception expirations: active waivers ordered by when they lapse.
     -- Slice 732: the title resolves the control UUID to its human SCF code
     -- + control name (controls.title) so the agenda / month-grid / ICS read
-    -- "Exception on AAA-01 — <name>" instead of the raw
+    -- "Exception on MON-04 — <name>" instead of the raw
     -- "Exception on control <uuid>". The SCF code is resolved two ways and
     -- COALESCEd: (1) controls.scf_id, the code stamped directly on the
     -- control row; (2) the global scf_anchors.scf_id reached through the
@@ -86,11 +86,17 @@ FROM (
       AND e.expires_at IS NOT NULL
       AND e.expires_at::timestamptz >= $2::timestamptz
       AND e.expires_at::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('exception' IN $4::text) > 0)
+      AND ($4::text = '' OR 'exception' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
-    -- policy review cycles: policies with next_review_at set.
+    -- policy review cycles: published policies with next_review_at set.
+    -- #1806: status is the review state. #2232: it is '' here and the store
+    -- fills it with duedate.Status and internal/policy ReviewDueSoonDays,
+    -- the rule internal/policy ReviewStatus applies to the policy list, so
+    -- the two cannot drift at the UTC day boundary. The policy lifecycle
+    -- state moves to summary. Only the published chain tip has a
+    -- review due; superseded rows keep their date as history.
     SELECT
         p.id::text                                                    AS event_id,
         'policy'::text                                                AS event_type,
@@ -100,57 +106,47 @@ FROM (
         p.id::text                                                    AS related_entity_id,
         'policy'::text                                                AS related_entity_kind,
         p.status                                                      AS summary,
-        p.status                                                      AS status,
+        ''::text                                                      AS status,
         NULL::text                                                    AS cadence
     FROM policies p
     WHERE p.tenant_id = $1
+      AND p.status = 'published'
       AND p.next_review_at IS NOT NULL
       AND p.next_review_at::timestamptz >= $2::timestamptz
       AND p.next_review_at::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('policy' IN $4::text) > 0)
+      AND ($4::text = '' OR 'policy' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
-    -- vendor reviews: last_review_date + cadence interval is the next-review
-    -- date. Mirrors the dashboard "Upcoming" rollup's vendor branch
-    -- (internal/db/queries/dashboard.sql ListUpcomingItems) so the two
-    -- surfaces source the SAME vendor-review events (slice 675 AC-1/AC-3).
-    -- Vendors with no last_review_date are excluded — there is no anchor to
-    -- project a next-review date from. The cadence -> interval mapping is the
-    -- vendor_review_cadence enum (monthly/quarterly/biannual/annual); the
-    -- ELSE-less CASE is total over the enum so next_due_at is never NULL.
+    -- vendor reviews: vendor_review_due_date is the review due date (#2232),
+    -- the one the vendor overdue list and burndown use: last_review_date +
+    -- cadence, or for a vendor never reviewed its first-review date
+    -- (created_at's UTC date + the tenant's initial-review window, #2061).
+    -- The date is placed at 00:00 UTC. status is filled by the store with
+    -- duedate.Status, so a vendor is overdue here exactly when it is in
+    -- ListOverdueVendors.
     SELECT
         v.id::text                                                    AS event_id,
         'vendor'::text                                                AS event_type,
         ('Vendor review: ' || v.name)::text                           AS title,
-        (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-         END)::timestamptz                                            AS starts_at,
+        (vd.due_date::timestamp AT TIME ZONE 'UTC')::timestamptz      AS starts_at,
         NULL::timestamptz                                             AS ends_at,
         v.id::text                                                    AS related_entity_id,
         'vendor'::text                                                AS related_entity_kind,
         v.criticality::text                                           AS summary,
-        v.review_cadence::text                                        AS status,
+        ''::text                                                      AS status,
         v.review_cadence::text                                        AS cadence
     FROM vendors v
+    CROSS JOIN LATERAL (
+        SELECT vendor_review_due_date(
+                   v.last_review_date, v.review_cadence, v.created_at,
+                   COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = v.tenant_id), 30)
+               )::date AS due_date
+    ) vd
     WHERE v.tenant_id = $1
-      AND v.last_review_date IS NOT NULL
-      AND (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-           END)::timestamptz >= $2::timestamptz
-      AND (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-           END)::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+      AND (vd.due_date::timestamp AT TIME ZONE 'UTC') >= $2::timestamptz
+      AND (vd.due_date::timestamp AT TIME ZONE 'UTC') <  $3::timestamptz
+      AND ($4::text = '' OR 'vendor' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -174,7 +170,7 @@ FROM (
       AND v.commercial_status <> 'churned'
       AND v.renewal_date::timestamptz >= $2::timestamptz
       AND v.renewal_date::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+      AND ($4::text = '' OR 'vendor' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -238,6 +234,8 @@ FROM (
         FROM control_evaluations ce
         WHERE ce.tenant_id = c.tenant_id
           AND ce.control_id = c.id
+          -- #3071: a replay does not count as the control's last review.
+          AND ce.evaluated_as_of IS NULL
     ) le ON TRUE
     WHERE c.tenant_id = $1
       AND c.superseded_by IS NULL
@@ -274,7 +272,120 @@ FROM (
                     END
             END
           ) <  $3::timestamptz
-      AND ($4::text = '' OR position('control' IN $4::text) > 0)
+      AND ($4::text = '' OR 'control' = ANY(string_to_array($4::text, ',')))
+
+    UNION ALL
+
+    -- risk reviews (#2130): every risk with a review_due_at, roll-ups
+    -- included. A roll-up's review date is its own (#2059 sets one on every
+    -- risk), and each risk is one row here, so a child listed under a
+    -- roll-up is not listed twice. status is '' in SQL: the store fills it
+    -- with duedate.Status (overdue after the UTC due day, due-soon within
+    -- 14 days), the one rule the policy list shares.
+    SELECT
+        r.id::text                                                    AS event_id,
+        'risk'::text                                                  AS event_type,
+        ('Risk review: ' || r.title)::text                            AS title,
+        r.review_due_at                                               AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        r.id::text                                                    AS related_entity_id,
+        'risk'::text                                                  AS related_entity_kind,
+        r.treatment::text                                             AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM risks r
+    WHERE r.tenant_id = $1
+      AND r.status = 'open'
+      AND r.review_due_at IS NOT NULL
+      AND r.review_due_at >= $2::timestamptz
+      AND r.review_due_at <  $3::timestamptz
+      AND ($4::text = '' OR 'risk' = ANY(string_to_array($4::text, ',')))
+
+    UNION ALL
+
+    -- action-plan due dates (#2130): open plans (not completed, verified or
+    -- tombstoned) with a due_date. due_date is a DATE, placed at 00:00 UTC
+    -- so the event's day does not move with the session time zone. status
+    -- is filled by the store, as for risk reviews.
+    SELECT
+        ap.id::text                                                   AS event_id,
+        'action_plan'::text                                           AS event_type,
+        ('Action plan due: ' || ap.title)::text                       AS title,
+        (ap.due_date::timestamp AT TIME ZONE 'UTC')                   AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        ap.id::text                                                   AS related_entity_id,
+        'action_plan'::text                                           AS related_entity_kind,
+        ap.status                                                     AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM action_plans ap
+    WHERE ap.tenant_id = $1
+      AND ap.tombstoned_at IS NULL
+      AND ap.status NOT IN ('completed', 'verified')
+      AND ap.due_date IS NOT NULL
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') >= $2::timestamptz
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') <  $3::timestamptz
+      AND ($4::text = '' OR 'action_plan' = ANY(string_to_array($4::text, ',')))
+
+    UNION ALL
+
+    -- policy acknowledgement expiries (#2130, #2234): the freshest ack per
+    -- (policy_version, user) plus 365 days, when that attestation lapses,
+    -- grouped into one event per policy and lapse day so a tenant-wide ack
+    -- campaign is one row, not one per user, under the 500-row cap and in
+    -- "Coming up". Only acks of a published policy version by an active
+    -- user count: a superseded version needs a fresh ack anyway (policies
+    -- have no other retired state), and a deactivated user's lapse is not
+    -- work anyone has to chase. The title names the policy and the count;
+    -- who acknowledged is not shown to calendar readers or ICS subscribers.
+    -- The related entity is the policy version. status is filled by the
+    -- store with duedate.Status, as for risk reviews.
+    SELECT
+        (acks.policy_version_id::text || ':' ||
+            to_char(acks.lapse_day, 'YYYY-MM-DD'))::text              AS event_id,
+        'policy_ack'::text                                            AS event_type,
+        (p.title || ': ' || acks.n::text ||
+            CASE WHEN acks.n = 1 THEN ' acknowledgement lapses on '
+                 ELSE ' acknowledgements lapse on ' END ||
+            to_char(acks.lapse_day, 'YYYY-MM-DD'))::text              AS title,
+        acks.first_lapse                                              AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        acks.policy_version_id::text                                  AS related_entity_id,
+        'policy'::text                                                AS related_entity_kind,
+        p.title::text                                                 AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM (
+        SELECT
+            latest_ack.policy_version_id,
+            (latest_ack.lapses_at AT TIME ZONE 'UTC')::date           AS lapse_day,
+            min(latest_ack.lapses_at)                                 AS first_lapse,
+            count(*)                                                  AS n
+        FROM (
+            SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
+                pa.policy_version_id,
+                (pa.acknowledged_at + INTERVAL '365 days')::timestamptz AS lapses_at
+            FROM policy_acknowledgments pa
+            JOIN policies pv
+              ON pv.tenant_id = pa.tenant_id
+             AND pv.id = pa.policy_version_id
+             AND pv.status = 'published'
+            JOIN users u
+              ON u.tenant_id = pa.tenant_id
+             AND u.id = pa.user_id
+             AND u.status = 'active'
+             AND u.active
+            WHERE pa.tenant_id = $1
+            ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
+        ) latest_ack
+        WHERE latest_ack.lapses_at >= $2::timestamptz
+          AND latest_ack.lapses_at <  $3::timestamptz
+        GROUP BY latest_ack.policy_version_id, (latest_ack.lapses_at AT TIME ZONE 'UTC')::date
+    ) acks
+    JOIN policies p
+      ON p.tenant_id = $1
+     AND p.id = acks.policy_version_id
+    WHERE ($4::text = '' OR 'policy_ack' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -300,7 +411,7 @@ FROM (
       AND psc.status = 'open'
       AND psc.due_at >= $2::timestamptz
       AND psc.due_at <  $3::timestamptz
-      AND ($4::text = '' OR position('offboarding' IN $4::text) > 0)
+      AND ($4::text = '' OR 'offboarding' = ANY(string_to_array($4::text, ',')))
 ) calendar_events
 ORDER BY starts_at ASC, event_id ASC
 LIMIT $6::int
@@ -335,9 +446,10 @@ type ListCalendarEventsRow struct {
 //  1. audit_periods           — period_end is the audit's "report due" date
 //  2. exceptions              — expires_at is the waiver-lapse date
 //  3. policies                — next_review_at is the next review date
-//  4. vendors                 — last_review_date + review_cadence interval is
-//     the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
-//     vendor branch so the two surfaces cannot drift (slice 675).
+//     (published only; overdue / due-soon, #1806)
+//  4. vendors                 — vendor_review_due_date() is the next
+//     vendor-review date, the one the vendor overdue list and burndown use
+//     (#2232), never-reviewed vendors' first review included.
 //     Also includes renewal_date as a separate vendor renewal event (OE-623).
 //  5. controls + control_evaluations — periodic-review controls whose
 //     cadence (derived from freshness_class) places their next review
@@ -345,6 +457,16 @@ type ListCalendarEventsRow struct {
 //     the append-only control_evaluations ledger.
 //  6. personnel_security_checklists — open offboarding due dates, so overdue
 //     leaver access-removal tasks surface on the compliance calendar.
+//  7. risks                   — review_due_at is the next risk review (#2130)
+//  8. action_plans            — due_date of an open plan (#2130)
+//  9. policy_acknowledgments  — the latest ack per (policy version, user)
+//     + 365 days, when the annual re-acknowledgement lapses (#2130; it
+//     moved here from the retired dashboard upcoming rollup), grouped per
+//     policy and lapse day (#2234)
+//
+// Past-due items: every branch filters on its own date against [from, to),
+// so a window that starts in the past returns the items that fell due in
+// it. The dashboard's "Coming up" asks for today + 14 days.
 //
 // All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 // explicit tenant_id predicates are the primary guarantee.
@@ -354,15 +476,20 @@ type ListCalendarEventsRow struct {
 // timestamptz bounds.
 //
 // Type filter (`type_filter`) is a CSV string. Empty string (”) means
-// "all five sources." A non-empty filter narrows to the subset by checking
-// membership on the per-branch literal type discriminator.
+// "every source." A non-empty filter narrows to the subset by exact
+// membership of the per-branch literal type in the CSV (#2130: it was a
+// substring match, which `policy_ack` would have tripped for `policy`).
+// The handler also narrows it by the caller's OPA access (risk,
+// action_plan) before it reaches this query.
 //
 // Cadence math for the controls branch:
 //   - The control's freshness_class is mapped to a max-acceptable-age
 //     interval. The mapping is the same one `internal/eval/state.go`
 //     `FreshnessMaxAge` exposes (realtime 24h, daily 7d, weekly 30d,
 //     monthly 90d, quarterly 120d, annual 400d). We replicate the mapping
-//     here as a CASE expression so the SQL is self-contained.
+//     here as a CASE expression so the SQL is self-contained. Every
+//     `CASE c.freshness_class` block below is pinned to the Go table by
+//     internal/eval/calendar_freshness_sync_test.go (#2868): change both.
 //   - next_due_at = last_evaluated_at + cadence, OR now() when the
 //     control has never been evaluated (LEFT JOIN -> NULL).
 //   - status: 'overdue' when next_due_at < now(); 'due-soon' when

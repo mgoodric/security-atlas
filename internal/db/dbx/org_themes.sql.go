@@ -84,6 +84,35 @@ func (q *Queries) GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme
 	return i, err
 }
 
+const getVisibleThemeByRef = `-- name: GetVisibleThemeByRef :one
+SELECT id, tenant_id, theme_name, description, created_at, updated_at
+FROM org_themes
+WHERE (tenant_id IS NULL OR tenant_id = $1)
+  AND (theme_name = $2::text OR id::text = $2::text)
+ORDER BY (tenant_id IS NULL) DESC
+LIMIT 1
+`
+
+type GetVisibleThemeByRefParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Ref      string      `json:"ref"`
+}
+
+// A theme the caller can see (built-in or its own), named by name or id.
+func (q *Queries) GetVisibleThemeByRef(ctx context.Context, arg GetVisibleThemeByRefParams) (OrgTheme, error) {
+	row := q.db.QueryRow(ctx, getVisibleThemeByRef, arg.TenantID, arg.Ref)
+	var i OrgTheme
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ThemeName,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listAllVisibleThemes = `-- name: ListAllVisibleThemes :many
 SELECT id, tenant_id, theme_name, description, created_at, updated_at
 FROM org_themes
@@ -191,4 +220,250 @@ func (q *Queries) ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const listVisibleThemesWithUsage = `-- name: ListVisibleThemesWithUsage :many
+SELECT
+    t.theme_name,
+    t.description,
+    t.tenant_id,
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = $1
+          AND r.themes @> ARRAY[t.theme_name])::bigint AS risk_count,
+    (SELECT count(*) FROM aggregation_rules ar
+        WHERE ar.tenant_id = $1
+          AND ar.target_theme = t.theme_name)::bigint AS rule_count
+FROM org_themes t
+WHERE t.tenant_id IS NULL OR t.tenant_id = $1
+ORDER BY (t.tenant_id IS NULL) DESC, t.theme_name
+`
+
+type ListVisibleThemesWithUsageRow struct {
+	ThemeName   string      `json:"theme_name"`
+	Description string      `json:"description"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	RiskCount   int64       `json:"risk_count"`
+	RuleCount   int64       `json:"rule_count"`
+}
+
+// The visible vocabulary (defaults + the tenant's own) with each theme's
+// usage (#1818): how many of the tenant's risks carry it, and how many of
+// its aggregation rules target it. Same counts as ThemeUsage.
+func (q *Queries) ListVisibleThemesWithUsage(ctx context.Context, tenantID pgtype.UUID) ([]ListVisibleThemesWithUsageRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleThemesWithUsage, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVisibleThemesWithUsageRow
+	for rows.Next() {
+		var i ListVisibleThemesWithUsageRow
+		if err := rows.Scan(
+			&i.ThemeName,
+			&i.Description,
+			&i.TenantID,
+			&i.RiskCount,
+			&i.RuleCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockTenantTheme = `-- name: LockTenantTheme :one
+SELECT id, tenant_id, theme_name, description, created_at, updated_at
+FROM org_themes
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockTenantThemeParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error) {
+	row := q.db.QueryRow(ctx, lockTenantTheme, arg.TenantID, arg.ID)
+	var i OrgTheme
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ThemeName,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockThemeVocabulary = `-- name: LockThemeVocabulary :exec
+
+SELECT pg_advisory_xact_lock(5, hashtext($1::uuid::text))
+`
+
+// ===== #1811: organisation theme management =====
+// #1811: serialize a theme rename or delete with every theme assignment in
+// one tenant. Rename and delete take it exclusively before anything else;
+// an assignment takes the shared form (LockThemeVocabularyShared) before it
+// validates, so it can never write a name a concurrent rename or delete has
+// just removed. Transaction-scoped. Namespace 5 is
+// advisorylock.ThemeVocabulary (#2273).
+func (q *Queries) LockThemeVocabulary(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockThemeVocabulary, tenantID)
+	return err
+}
+
+const lockThemeVocabularyShared = `-- name: LockThemeVocabularyShared :exec
+SELECT pg_advisory_xact_lock_shared(5, hashtext($1::uuid::text))
+`
+
+func (q *Queries) LockThemeVocabularyShared(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockThemeVocabularyShared, tenantID)
+	return err
+}
+
+const renameThemeOnRisks = `-- name: RenameThemeOnRisks :execrows
+UPDATE risks
+SET themes = ARRAY(
+        SELECT DISTINCT t
+        FROM unnest(array_replace(themes, $1::text, $2::text)) AS t
+        ORDER BY t
+    )
+WHERE tenant_id = $3
+  AND themes @> ARRAY[$1::text]
+`
+
+type RenameThemeOnRisksParams struct {
+	OldName  string      `json:"old_name"`
+	NewName  string      `json:"new_name"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+}
+
+// Replace a theme name in every one of the tenant's risk theme arrays,
+// keeping the array deduplicated and sorted as AssignThemes stores it.
+func (q *Queries) RenameThemeOnRisks(ctx context.Context, arg RenameThemeOnRisksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameThemeOnRisks, arg.OldName, arg.NewName, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renameThemeOnRules = `-- name: RenameThemeOnRules :execrows
+UPDATE aggregation_rules
+SET target_theme = $1::text,
+    rule_body = jsonb_set(rule_body, '{target_theme}', to_jsonb($1::text)),
+    updated_at = now()
+WHERE tenant_id = $2
+  AND target_theme = $3::text
+`
+
+type RenameThemeOnRulesParams struct {
+	NewName  string      `json:"new_name"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	OldName  string      `json:"old_name"`
+}
+
+// Retarget the tenant's aggregation rules. The engine reads target_theme
+// from rule_body, and the column is its queryable projection, so both move.
+func (q *Queries) RenameThemeOnRules(ctx context.Context, arg RenameThemeOnRulesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameThemeOnRules, arg.NewName, arg.TenantID, arg.OldName)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const themeNameTaken = `-- name: ThemeNameTaken :one
+SELECT EXISTS (
+    SELECT 1
+    FROM org_themes
+    WHERE (tenant_id IS NULL OR tenant_id = $1)
+      AND theme_name = $2::text
+      AND id <> $3
+) AS taken
+`
+
+type ThemeNameTakenParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ThemeName string      `json:"theme_name"`
+	ExceptID  pgtype.UUID `json:"except_id"`
+}
+
+// Names are unique across the built-ins and the tenant's own themes; the
+// two partial unique indexes only cover each namespace on its own.
+func (q *Queries) ThemeNameTaken(ctx context.Context, arg ThemeNameTakenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, themeNameTaken, arg.TenantID, arg.ThemeName, arg.ExceptID)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
+}
+
+const themeUsage = `-- name: ThemeUsage :one
+SELECT
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = $1
+          AND r.themes @> ARRAY[$2::text])::bigint AS risk_count,
+    (SELECT count(*) FROM aggregation_rules ar
+        WHERE ar.tenant_id = $1
+          AND ar.target_theme = $2::text)::bigint AS rule_count
+`
+
+type ThemeUsageParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ThemeName string      `json:"theme_name"`
+}
+
+type ThemeUsageRow struct {
+	RiskCount int64 `json:"risk_count"`
+	RuleCount int64 `json:"rule_count"`
+}
+
+// How many of the tenant's risks carry the theme, and how many of its
+// aggregation rules (any status) target it.
+func (q *Queries) ThemeUsage(ctx context.Context, arg ThemeUsageParams) (ThemeUsageRow, error) {
+	row := q.db.QueryRow(ctx, themeUsage, arg.TenantID, arg.ThemeName)
+	var i ThemeUsageRow
+	err := row.Scan(&i.RiskCount, &i.RuleCount)
+	return i, err
+}
+
+const updateTenantTheme = `-- name: UpdateTenantTheme :one
+UPDATE org_themes
+SET theme_name = $1,
+    description = $2,
+    updated_at = now()
+WHERE tenant_id = $3 AND id = $4
+RETURNING id, tenant_id, theme_name, description, created_at, updated_at
+`
+
+type UpdateTenantThemeParams struct {
+	ThemeName   string      `json:"theme_name"`
+	Description string      `json:"description"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateTenantTheme(ctx context.Context, arg UpdateTenantThemeParams) (OrgTheme, error) {
+	row := q.db.QueryRow(ctx, updateTenantTheme,
+		arg.ThemeName,
+		arg.Description,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i OrgTheme
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ThemeName,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

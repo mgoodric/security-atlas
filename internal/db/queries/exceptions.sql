@@ -32,6 +32,16 @@ FROM exceptions
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListRequestedExceptions :many
+-- #2457: the exceptions waiting for approval, for GET /v1/approvals and
+-- its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+-- (tenant_id, status) prefix.
+SELECT *
+FROM exceptions
+WHERE tenant_id = $1
+  AND status = 'requested'
+ORDER BY created_at DESC, id ASC;
+
 -- name: ListExceptionsByControl :many
 -- AC-4 read accessor: every active row for a given control. Downstream
 -- evaluation engine (slice 020/012) intersects scope_cell_predicate with
@@ -41,6 +51,22 @@ FROM exceptions
 WHERE tenant_id = $1
   AND control_id = $2
   AND status = 'active'
+ORDER BY expires_at ASC, id ASC;
+
+-- name: ListExceptionsByControlAsOf :many
+-- #3037: the control's exceptions as they stood at a past instant, for a
+-- replay of that instant. Activated by then and not revoked by then; the
+-- evaluator applies the [effective_from, expires_at) window itself, so an
+-- exception expired since is still in force at an instant before its
+-- expires_at. This reconstruction holds because effective_from and
+-- expires_at never change after activation (#2526); oscal/excepted.go's
+-- inForceAt applies the same rule.
+SELECT *
+FROM exceptions
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND activated_at <= sqlc.arg(as_of)::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > sqlc.arg(as_of)::timestamptz)
 ORDER BY expires_at ASC, id ASC;
 
 -- name: ListExpiringExceptions :many
@@ -56,8 +82,10 @@ ORDER BY expires_at ASC, id ASC;
 
 -- name: ApproveException :one
 -- AC-3 transition: requested -> approved. The application MUST verify the
--- caller has IsApprover before invoking this query AND that approved_by
--- differs from requested_by (segregation of duties). The WHERE
+-- caller has IsApprover before invoking this query AND apply the approval
+-- rule (internal/approval, #2101): approved_by differs from requested_by
+-- unless the organisation allows self-approval, in which case self_approved
+-- is true and exceptions_sod admits the same person. The WHERE
 -- status='requested' clause guards against double-approval / out-of-order
 -- transitions; zero rows returned indicates either a missing row or a wrong
 -- prior state -- the application probes after to disambiguate.
@@ -65,6 +93,7 @@ UPDATE exceptions
 SET status = 'approved',
     approved_by = $3,
     approved_at = now(),
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -98,6 +127,21 @@ SET status = 'active',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
+RETURNING *;
+
+-- name: RevokeException :one
+-- #2113: active -> revoked (terminal). An approver ends an active
+-- exception before its expires_at; the reason lives on the paired audit
+-- row. expires_at is left as granted, so the record shows both the
+-- window that was approved and the moment it was cut short.
+UPDATE exceptions
+SET status = 'revoked',
+    revoked_by = $3,
+    revoked_at = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 'active'
 RETURNING *;
 
 -- name: ExpireActiveExceptionsBefore :many
@@ -146,3 +190,34 @@ SELECT *
 FROM exception_audit_log
 WHERE tenant_id = $1 AND exception_id = $2
 ORDER BY occurred_at ASC, id ASC;
+
+-- name: LockExceptionIdempotencyKey :exec
+-- #2618: serialises two requests carrying the same Idempotency-Key, so the
+-- second waits for the first to commit and then replays it. Released at
+-- the end of the transaction. Namespace 12 is
+-- advisorylock.ExceptionIdempotencyKey.
+SELECT pg_advisory_xact_lock(
+    12,
+    hashtext(sqlc.arg(tenant_id)::text || '|' || sqlc.arg(requested_by)::text || '|' || sqlc.arg(idempotency_key)::text)
+);
+
+-- name: GetExceptionIdempotencyKey :one
+-- #2618: the exception a key created, while the key is inside its window.
+SELECT exception_id, request_hash
+FROM exception_idempotency_keys
+WHERE tenant_id = $1
+  AND requested_by = $2
+  AND idempotency_key = $3
+  AND created_at > sqlc.arg(not_before)::timestamptz;
+
+-- name: PutExceptionIdempotencyKey :exec
+-- #2618: records the key against the exception it created. A key past its
+-- window is overwritten.
+INSERT INTO exception_idempotency_keys (
+    tenant_id, requested_by, idempotency_key, request_hash, exception_id, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, requested_by, idempotency_key) DO UPDATE
+SET request_hash = EXCLUDED.request_hash,
+    exception_id = EXCLUDED.exception_id,
+    created_at   = EXCLUDED.created_at;

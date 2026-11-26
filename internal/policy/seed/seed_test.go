@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/policy/seed"
 )
 
@@ -58,6 +59,18 @@ func TestLoadFromFS_RealStockBundle(t *testing.T) {
 		}
 		if fm.SourceAttribution != "community_draft" {
 			t.Errorf("%s: expected community_draft attribution, got %q", p.SourcePath, fm.SourceAttribution)
+		}
+		// #1772: the codes are bound in the release they were written
+		// against, never whatever release is current at seed time. Which
+		// release, and that every code is in it, is internal/api/scfseed's
+		// TestStockPoliciesPinTheSampleRelease (#3033).
+		if fm.SCFRelease == "" {
+			t.Errorf("%s: declares no scf_release", p.SourcePath)
+		}
+		// #2588: every stock template is aimed at everyone; an admin narrows
+		// it afterwards. A team name ("engineer") matches no session.
+		if got := fm.AcknowledgmentRequiredRoles; len(got) != 1 || got[0] != policy.AudienceEveryone {
+			t.Errorf("%s: acknowledgment_required_roles = %v; want [%s]", p.SourcePath, got, policy.AudienceEveryone)
 		}
 	}
 }
@@ -135,8 +148,8 @@ func TestParseStockPolicy_NoFrontMatter(t *testing.T) {
 // controls table is populated.
 func TestNoopAnchorResolver_AllMissing(t *testing.T) {
 	resolver := seed.NoopAnchorResolver{}
-	codes := []string{"GOV-01", "IAC-07", "CHG-02"}
-	resolved, missing, err := resolver.Resolve(context.TODO(), codes)
+	codes := []string{"GOV-02", "IAC-04", "CHG-02"}
+	resolved, missing, _, err := resolver.Resolve(context.TODO(), "", codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -157,9 +170,9 @@ version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
 linked_control_ids:
-  - GOV-01
-  - GOV-04
-  - RSK-01
+  - GOV-02
+  - GOV-05
+  - RSK-02
 acknowledgment_required_roles:
   - employee
 source_attribution: community_draft

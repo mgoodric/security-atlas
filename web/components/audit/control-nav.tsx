@@ -46,12 +46,8 @@ export function ControlNav({
           data-testid="control-nav-empty"
           className="rounded-lg border border-dashed p-3 text-xs leading-relaxed text-muted-foreground"
         >
-          No controls loaded yet. The period-scoped control list (
-          <code className="rounded bg-muted px-1">
-            GET /v1/audit-periods/&#123;id&#125;/controls
-          </code>
-          ) is a pending backend slice. Until it lands, draw a population for a
-          control and it appears here.
+          No controls here yet. Draw a population for a control and it appears
+          in this list.
         </div>
       ) : (
         <ul className="flex flex-col gap-0.5">

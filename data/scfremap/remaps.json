@@ -1,0 +1,502 @@
+{
+  "$comment": "Concept remaps between releases of the bundled SCF sample (migrations/fixtures/scf-sample.json), from the D5 table in docs/audit-log/1717-scf-pin-ratchet-decisions.md. A control left on an anchor of from_release that the upgrade could not re-bind is reported as needing re-anchoring, with this note (#1971). basis: legacy = SCF lists the old code as the target's legacy ID; concept = the old code pointed at an unrelated control and the target was chosen by meaning. Each SCF family group (#1717) appends its rows.",
+  "remaps": [
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-06",
+      "to": "IAC-37",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-07",
+      "to": "IAC-04",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-10",
+      "to": "IAC-14",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-15",
+      "to": "IAC-12",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-21",
+      "to": "IAC-10",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-24",
+      "to": "IAC-11",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-25",
+      "to": "CFG-04.5",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AAA-01",
+      "to": "MON-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AAA-10",
+      "to": "MON-13",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AAA-12",
+      "to": "MON-05.1",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "MON-01",
+      "to": "MON-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "MON-08",
+      "to": "MON-16",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AST-03",
+      "to": "AST-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AST-09",
+      "to": "AST-22",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-02",
+      "to": "BCD-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-09",
+      "to": "BCD-24",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-11",
+      "to": "BCD-32",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CFG-02",
+      "to": "CFG-04",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CFG-04",
+      "to": "CHG-03",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CLD-01",
+      "to": "CLD-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CPL-01",
+      "to": "CPL-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CPL-03",
+      "to": "CPL-07.1",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-01",
+      "to": "TPM-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-04",
+      "to": "TPM-10",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-05",
+      "to": "TPM-14",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CLD-09",
+      "to": "TPM-10",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-01",
+      "to": "CRY-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-04",
+      "to": "CRY-07",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-08",
+      "to": "CRY-05",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-09",
+      "to": "CRY-10",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-11",
+      "to": "CRY-14",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-12",
+      "to": "CRY-06",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-01",
+      "to": "DCH-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-03",
+      "to": "DCH-27",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-05",
+      "to": "MON-27",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-07",
+      "to": "DCH-16",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "END-04",
+      "to": "END-03",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "END-07",
+      "to": "END-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-01",
+      "to": "NET-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-04",
+      "to": "NET-03",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-08",
+      "to": "NET-24",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PES-04",
+      "to": "PES-08",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "GOV-01",
+      "to": "GOV-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "GOV-02",
+      "to": "GOV-04",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "GOV-03",
+      "to": "GOV-04.1",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "GOV-04",
+      "to": "GOV-05",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "HRS-01",
+      "to": "HRS-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "HRS-04",
+      "to": "SAT-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "HRS-07",
+      "to": "HRS-10",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "HRS-09",
+      "to": "HRS-12",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "HRS-12",
+      "to": "HRS-06.1",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IRO-04",
+      "to": "IRO-08",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IRO-09",
+      "to": "IRO-16",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "MNT-02",
+      "to": "MNT-03",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "RSK-01",
+      "to": "RSK-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "RSK-04",
+      "to": "RSK-13",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PRI-01",
+      "to": "PRI-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PRI-04",
+      "to": "PRI-39",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "SEA-01",
+      "to": "SEA-05",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "SEA-05",
+      "to": "TDA-05",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TDA-01",
+      "to": "TDA-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "VPM-04",
+      "to": "VPM-06",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-01",
+      "to": "THR-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-02",
+      "to": "THR-11",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-03",
+      "to": "THR-04",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-04",
+      "to": "THR-13",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-05",
+      "to": "THR-15",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-06",
+      "to": "THR-16",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-07",
+      "to": "THR-12",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-09",
+      "to": "THR-06",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "THR-10",
+      "to": "THR-08",
+      "basis": "legacy"
+    }
+  ]
+}

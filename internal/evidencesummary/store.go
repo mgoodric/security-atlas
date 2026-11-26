@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -93,9 +94,11 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 		out.ControlTitle = ctrl.Title
 
 		total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
+			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: count evidence: %w", err)
@@ -103,11 +106,13 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			Limit:      MaxCitedExcerpts,
-			Offset:     0,
+			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			Limit:        MaxCitedExcerpts,
+			Offset:       0,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: list evidence: %w", err)

@@ -18,6 +18,7 @@
             "severity": 20
           },
           "link_weight": 0.75,
+          "methodology": "nist_800_30",
           "residual_score": {
             "impact": 4,
             "likelihood": 2,
@@ -29,6 +30,7 @@
         {
           "inherent_score": null,
           "link_weight": null,
+          "methodology": "fair",
           "residual_score": null,
           "risk_id": "44444444-4444-4444-8444-444444444444",
           "title": "Vendor SOC 2 report pending renewal"

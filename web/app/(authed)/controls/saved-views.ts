@@ -27,7 +27,10 @@
 // client store is the browser profile boundary; the spillover moves
 // isolation to RLS on (tenant, user).
 
+import { MAX_VIEW_NAME_LENGTH } from "@/lib/api/saved-views";
+
 import { ALL, DEFAULT_FILTERS, type ControlFilters } from "./filters";
+import { normalizeFilterValue } from "./server-query";
 
 // Pinned storage key. Changing it silently orphans every user's saved
 // views — the corresponding test fails on rename so the cost is visible
@@ -45,6 +48,10 @@ export const SAVED_VIEW_FILTER_KEYS: (keyof ControlFilters)[] = [
   "result",
   "freshness",
   "scope",
+  "anchor_fit",
+  // #2131 — the owner filter and the server sort.
+  "owner",
+  "sort",
 ];
 
 // Maximum number of saved views per user (v1 cap). A solo operator's
@@ -53,9 +60,9 @@ export const SAVED_VIEW_FILTER_KEYS: (keyof ControlFilters)[] = [
 // the cap is rejected by `addView` (the caller surfaces the message).
 export const MAX_SAVED_VIEWS = 20;
 
-// Maximum length of a user-supplied view name. Names are display-only
-// labels; the cap bounds the stored payload and the list rendering.
-export const MAX_VIEW_NAME_LENGTH = 60;
+// Maximum length of a user-supplied view name, shared with the saved-views
+// bar (#2550).
+export { MAX_VIEW_NAME_LENGTH };
 
 export type SavedView = {
   // Stable client-generated id (used as the React key + delete handle).
@@ -86,7 +93,12 @@ export function sanitizeFilters(raw: unknown): ControlFilters {
   const obj = raw as Record<string, unknown>;
   for (const key of SAVED_VIEW_FILTER_KEYS) {
     const v = obj[key];
-    out[key] = typeof v === "string" && v.length > 0 ? v : ALL;
+    // #2131: a value the platform would refuse (an old State option, a
+    // hand-edited id) reads as ALL rather than failing the list.
+    out[key] =
+      typeof v === "string" && v.length > 0
+        ? normalizeFilterValue(key, v)
+        : ALL;
   }
   return out;
 }

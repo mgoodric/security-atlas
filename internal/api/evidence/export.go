@@ -34,6 +34,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -95,6 +97,7 @@ type evidenceExportRow struct {
 	FreshnessClass  string
 	ValidUntil      string // empty when null; RFC3339 when set
 	CreatedAt       time.Time
+	Demo            bool // the in-place demo seed added this record (#2043)
 }
 
 // NewExportHandler constructs the slice 138 evidence export handler.
@@ -273,6 +276,8 @@ func parseEvidenceExportFormat(r *http.Request) (export.Format, error) {
 //	             through the RLS-protected /v1/artifacts/{id} surface
 //	             when authorized)
 //	lifecycle:   valid_until, created_at
+//	provenance:  demo — "true" for a record the in-place demo seed added
+//	             (#2043; appended so every earlier column keeps its position)
 func evidenceExportHeader() []string {
 	return []string{
 		"id",
@@ -287,6 +292,7 @@ func evidenceExportHeader() []string {
 		"payload_uri",
 		"valid_until",
 		"created_at",
+		"demo",
 	}
 }
 
@@ -306,6 +312,7 @@ func evidenceToRowIter(rows []evidenceExportRow) iter.Seq[[]string] {
 				r.PayloadURI,
 				r.ValidUntil,
 				r.CreatedAt.UTC().Format(time.RFC3339),
+				strconv.FormatBool(r.Demo),
 			}
 			if !yield(row) {
 				return
@@ -366,7 +373,13 @@ func (h *ExportHandler) listEvidenceDirect(ctx context.Context, limit int) ([]ev
 			hash,
 			payload_uri,
 			valid_until,
-			created_at
+			created_at,
+			EXISTS (
+				SELECT 1 FROM demo_seed_rows d
+				WHERE d.tenant_id = evidence_records.tenant_id
+				  AND d.table_name = 'evidence_records'
+				  AND d.row_key = jsonb_build_object('id', evidence_records.id)
+			) AS demo
 		FROM evidence_records
 		WHERE tenant_id = $1
 		ORDER BY observed_at DESC, id ASC
@@ -392,11 +405,12 @@ func (h *ExportHandler) listEvidenceDirect(ctx context.Context, limit int) ([]ev
 			payloadURI      pgtype.Text
 			validUntil      pgtype.Timestamptz
 			createdAt       time.Time
+			demo            bool
 		)
 		if err := rs.Scan(
 			&id, &controlID, &scopeID, &evidenceQueryID,
 			&observedAt, &ingestedAt, &result, &freshnessClass,
-			&contentHash, &payloadURI, &validUntil, &createdAt,
+			&contentHash, &payloadURI, &validUntil, &createdAt, &demo,
 		); err != nil {
 			return nil, false, fmt.Errorf("scan evidence row: %w", err)
 		}
@@ -409,6 +423,7 @@ func (h *ExportHandler) listEvidenceDirect(ctx context.Context, limit int) ([]ev
 			FreshnessClass: freshnessClass,
 			ContentHash:    contentHash,
 			CreatedAt:      createdAt,
+			Demo:           demo,
 		}
 		if scopeID.Valid {
 			row.ScopeID = uuid.UUID(scopeID.Bytes).String()
@@ -489,12 +504,14 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
-// evidenceHasProgramRead reports whether the credential grants
-// program-read access to the evidence ledger. Bare push credentials
-// (no flags) MUST NOT enumerate the ledger; that's a deliberate
-// separation from the push-side rate-limited POST surface.
+// evidenceHasProgramRead reports whether the credential may read the
+// evidence ledger export: a tenant approver by its live roles
+// (authz.IsTenantApprover), as OPA reads it for admin and grc_engineer only.
+// #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which
+// counted a session's role claim (#2381) and admitted roles OPA refuses
+// here.
 func evidenceHasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantApprover(c)
 }
 
 // ===== Counting writer / shared helpers =====

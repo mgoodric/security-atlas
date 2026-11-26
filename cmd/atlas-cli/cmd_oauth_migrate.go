@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
@@ -68,6 +69,11 @@ func runMigrateAPIKey(ctx context.Context, stdout, stderr io.Writer, apiKey stri
 	if err != nil {
 		return fmt.Errorf("look up source API key: %w", err)
 	}
+	// #2849: a policy-sync key may only sync policies; an OAuth client
+	// minted from it would act in its tenant without that limit.
+	if src.PolicySyncOnly() {
+		return fmt.Errorf("API key %s is a policy-sync key; it cannot be migrated to an OAuth client", src.ID)
+	}
 	_, _ = fmt.Fprintf(stdout, "source: id=%s tenant=%s admin=%t approver=%t roles=%v\n",
 		src.ID, src.TenantID, src.IsAdmin, src.IsApprover, src.OwnerRoles)
 
@@ -76,7 +82,13 @@ func runMigrateAPIKey(ctx context.Context, stdout, stderr io.Writer, apiKey stri
 	// were issued via migration vs direct `oauth issue-client`.
 	name := fmt.Sprintf("migrated-from-%s", src.ID)
 	clients := oauthclient.New(pool)
-	newClient, secret, err := clients.Issue(ctx, name)
+	// security-atlas#1739: the client acts in the legacy key's tenant, so
+	// its writes land where the key's did rather than in no tenant.
+	srcTenant, err := uuid.Parse(src.TenantID)
+	if err != nil || srcTenant == uuid.Nil {
+		return fmt.Errorf("source API key %s has no usable tenant (%q)", src.ID, src.TenantID)
+	}
+	newClient, secret, err := clients.IssueForTenant(ctx, name, srcTenant)
 	if err != nil {
 		if errors.Is(err, oauthclient.ErrDuplicateName) {
 			return fmt.Errorf("an OAuth client named %q already exists — has this key been migrated before?", name)

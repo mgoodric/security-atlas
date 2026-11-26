@@ -35,11 +35,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/protobuf/proto"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -56,16 +60,22 @@ import (
 // each gets every message.
 const ResidualConsumerDurable = "risk_residual_worker"
 
+// residualRecomputer is the slice of *ResidualDeriver the subscriber calls.
+// Declared as an interface so handle is unit-testable without Postgres.
+type residualRecomputer interface {
+	DeriveAndPersist(ctx context.Context, riskID uuid.UUID, recompute bool) (ResidualResult, error)
+}
+
 // deriverFactory builds a per-event ResidualDeriver. The subscriber runs as a
 // process-level service; each event's recompute runs through an app-role
 // Store + Engine so RLS is honored on the read and the residual write.
-type deriverFactory func() *ResidualDeriver
+type deriverFactory func() residualRecomputer
 
 // NewDeriverFactory returns a deriverFactory over an app-role pool. The same
 // pool backs the risk.Store, the eval.Store, and the scope.Store cell
 // resolver — every read and the residual write run RLS-honest.
 func NewDeriverFactory(appPool *pgxpool.Pool) deriverFactory {
-	return func() *ResidualDeriver {
+	return func() residualRecomputer {
 		engine := eval.NewEngine(eval.NewStore(appPool), scope.NewStore(appPool))
 		return NewResidualDeriver(NewStore(appPool), engine)
 	}
@@ -81,9 +91,10 @@ type ResidualSubscriber struct {
 	// listLinkedRisks resolves the risks linked to a control, scoped to the
 	// tenant on the message header. The subscriber runs it through an
 	// app-role pool so RLS makes cross-tenant links invisible.
-	appPool *pgxpool.Pool
-	logger  *slog.Logger
-	durable string
+	listLinkedRisks func(ctx context.Context, tenantID, controlID uuid.UUID) ([]uuid.UUID, error)
+	appPool         *pgxpool.Pool
+	logger          *slog.Logger
+	durable         string
 }
 
 // NewResidualSubscriber constructs a ResidualSubscriber over a slice-015
@@ -94,7 +105,7 @@ func NewResidualSubscriber(stream jetstream.Stream, subject string, appPool *pgx
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}
-	return &ResidualSubscriber{
+	s := &ResidualSubscriber{
 		stream:     stream,
 		subject:    subject,
 		newDeriver: NewDeriverFactory(appPool),
@@ -102,6 +113,8 @@ func NewResidualSubscriber(stream jetstream.Stream, subject string, appPool *pgx
 		logger:     logger,
 		durable:    ResidualConsumerDurable,
 	}
+	s.listLinkedRisks = s.linkedRisks
+	return s
 }
 
 // Start runs the subscriber until ctx is cancelled. It creates/updates its own
@@ -152,6 +165,12 @@ func (s *ResidualSubscriber) Start(ctx context.Context) error {
 // control_id is not a UUID or resolves to no linked risks (nothing to do);
 // Nak a transient DB error so the redelivery retries. DeriveAndPersist is
 // idempotent, so a redelivery just recomputes the same residual.
+//
+// Every linked risk is recomputed even when one fails (#2964), so one bad
+// risk never holds back the others on the same control. After the loop, any
+// transient error Naks the message (the redelivery recomputes all of them
+// again, harmlessly); otherwise an ErrUnderivable risk Terms it, since a
+// retry would fail identically and MaxDeliver is unlimited.
 func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	var rec evidencev1.EvidenceRecord
 	if err := proto.Unmarshal(msg.Data(), &rec); err != nil {
@@ -168,7 +187,7 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	controlID, err := uuid.Parse(rec.ControlId)
 	if err != nil {
 		// control_id is a free-form string in the SDK (may be an SCF anchor
-		// like "scf:VPM-04"). When it is not a UUID there is no control row
+		// like "scf:VPM-06"). When it is not a UUID there is no control row
 		// to resolve linked risks for. Ack and move on.
 		s.logger.Debug("residual subscriber: control_id not a uuid; skipping", "control_ref", rec.ControlId)
 		_ = msg.Ack()
@@ -181,10 +200,10 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	riskIDs, err := s.linkedRisks(tctx, tenantID, controlID)
+	riskIDs, err := s.listLinkedRisks(tctx, tenantID, controlID)
 	if err != nil {
 		s.logger.Warn("residual subscriber: list linked risks; will redeliver", "control", controlID, "err", err.Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if len(riskIDs) == 0 {
@@ -194,21 +213,36 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	deriver := s.newDeriver()
+	var transient, underivable []error
 	for _, riskID := range riskIDs {
 		// recompute=true: re-evaluate the control from the ledger before
 		// reading effectiveness, closing the race with slice 012's ingest
 		// subscriber (see file header).
-		if _, err := deriver.DeriveAndPersist(tctx, riskID, true); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				// The risk vanished between the link read and the recompute —
-				// not retryable for this risk; continue with the rest.
-				s.logger.Debug("residual subscriber: risk not found; skipping", "risk", riskID)
-				continue
-			}
-			s.logger.Warn("residual subscriber: recompute; will redeliver", "risk", riskID, "err", err.Error())
-			_ = msg.NakWithDelay(2 * time.Second)
-			return
+		_, err := deriver.DeriveAndPersist(tctx, riskID, true)
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrNotFound):
+			// The risk vanished between the link read and the recompute —
+			// not retryable for this risk; continue with the rest.
+			s.logger.Debug("residual subscriber: risk not found; skipping", "risk", riskID)
+		case errors.Is(err, ErrUnderivable):
+			countUnderivableResidual(tctx)
+			s.logger.Warn("residual subscriber: risk residual underivable; skipping",
+				"tenant", tenantID, "risk", riskID, "control", controlID, "err", err.Error())
+			underivable = append(underivable, err)
+		default:
+			transient = append(transient, fmt.Errorf("risk %s: %w", riskID, err))
 		}
+	}
+	if len(transient) > 0 {
+		s.logger.Warn("residual subscriber: recompute; will redeliver",
+			"control", controlID, "failed", len(transient), "err", errors.Join(transient...).Error())
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
+		return
+	}
+	if len(underivable) > 0 {
+		_ = msg.Term()
+		return
 	}
 	if err := msg.Ack(); err != nil {
 		s.logger.Warn("residual subscriber: ack failed", "err", err.Error())
@@ -243,6 +277,35 @@ func (s *ResidualSubscriber) linkedRisks(ctx context.Context, tenantID, controlI
 	}
 	return out, nil
 }
+
+// underivableResiduals counts risks the subscriber skipped because their
+// residual cannot be derived from the stored row (#2964). The OTel counter
+// is created on first use, after main has wired the MeterProvider; the
+// in-process count lets tests assert it without a collector.
+var underivableResiduals struct {
+	once    sync.Once
+	counter metric.Int64Counter
+	n       atomic.Uint64
+}
+
+func countUnderivableResidual(ctx context.Context) {
+	underivableResiduals.n.Add(1)
+	underivableResiduals.once.Do(func() {
+		c, err := otel.Meter("github.com/mgoodric/security-atlas/internal/risk").Int64Counter(
+			"atlas.risk.residual_underivable",
+			metric.WithDescription("Risks the residual subscriber skipped because their stored score cannot yield a residual"))
+		if err == nil {
+			underivableResiduals.counter = c
+		}
+	})
+	if c := underivableResiduals.counter; c != nil {
+		c.Add(ctx, 1)
+	}
+}
+
+// UnderivableResiduals returns how many risks the residual subscriber has
+// skipped as underivable since the process started.
+func UnderivableResiduals() uint64 { return underivableResiduals.n.Load() }
 
 // discardWriter is a no-op io.Writer for the default discard logger.
 type discardWriter struct{}

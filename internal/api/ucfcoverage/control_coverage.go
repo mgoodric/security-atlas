@@ -2,6 +2,7 @@ package ucfcoverage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 )
 
@@ -127,6 +129,8 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	var (
 		controlOK bool
 		ctrl      dbx.GetControlByIDRow
+		owner     pgtype.UUID
+		demo      demoprov.Set
 	)
 	if err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		got, err := q.GetControlByID(ctx, dbx.GetControlByIDParams{
@@ -141,7 +145,21 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 		ctrl = got
 		controlOK = true
-		return nil
+		// #2128: the person "assign owner" made this control's owner, if
+		// any. RLS keeps another tenant's assignment out of reach.
+		assigned, err := q.GetControlOwnerAssignment(ctx, dbx.GetControlOwnerAssignmentParams{
+			TenantID:  pgUUIDFromTenantCtx(ctx),
+			ControlID: pgtype.UUID{Bytes: cid, Valid: true},
+		})
+		switch {
+		case err == nil:
+			owner = assigned.OwnerUserID
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("lookup control owner: %w", err)
+		}
+		// #2043: badge a control the in-place demo seed added.
+		demo, err = demoprov.Lookup(ctx, q, demoprov.TableControls, []uuid.UUID{cid})
+		return err
 	}); err != nil {
 		return coverageView{}, false, fmt.Errorf("lookup control: %w", err)
 	}
@@ -149,7 +167,15 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		return coverageView{}, false, nil
 	}
 
-	view := coverageView{Control: controlWireFromControlRow(ctrl)}
+	cw, err := controlWireFromControlRow(ctrl)
+	if err != nil {
+		return coverageView{}, false, err
+	}
+	cw.Demo = demo.Has(cid)
+	if owner.Valid {
+		cw.OwnerUserID = uuidStr(owner)
+	}
+	view := coverageView{Control: cw}
 	if !ctrl.ScfAnchorID.Valid {
 		// Control exists but isn't anchored.
 		view.Requirements = []requirementForAnchorWire{}
@@ -171,23 +197,17 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 			view.Requirements = []requirementForAnchorWire{}
 			return view, true, nil
 		}
-		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
-			ScfAnchorID:        ctrl.ScfAnchorID,
-			FrameworkVersionID: fv.ID,
-		})
+		got, err := h.listRequirementsForAnchor(ctx, ctrl.ScfAnchorID, &fv.ID)
 		if err != nil {
 			return coverageView{}, false, fmt.Errorf("list requirements for control (pinned): %w", err)
 		}
-		reqs = mapPinnedRequirements(got)
+		reqs = got
 	} else {
-		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
-		// framework's CURRENT version — never bleed a legacy/superseded
-		// version's requirements into a control's coverage view (P0-484-5).
-		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, ctrl.ScfAnchorID)
+		got, err := h.listRequirementsForAnchor(ctx, ctrl.ScfAnchorID, nil)
 		if err != nil {
 			return coverageView{}, false, fmt.Errorf("list requirements for control (current): %w", err)
 		}
-		reqs = mapCurrentVersionRequirements(got)
+		reqs = got
 	}
 
 	// Slice 256 — per-row weighted Coverage column.
@@ -214,8 +234,55 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 	}
 
+	// #2140: mark each requirement the activated SoA excludes, so the
+	// control page's Coverage says which credit the scope removed.
+	if err := h.applyExclusions(ctx, reqs); err != nil {
+		return coverageView{}, false, fmt.Errorf("lookup requirement exclusions: %w", err)
+	}
+
 	view.Requirements = reqs
 	return view, true, nil
+}
+
+// applyExclusions sets `exclusion` on each requirement the caller
+// tenant's activated framework-scope revision excludes (#2140). One
+// lookup per distinct requirement, in one tenant transaction: an anchor
+// reaches tens of requirements, not thousands.
+func (h *Handler) applyExclusions(ctx context.Context, reqs []requirementForAnchorWire) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+	return h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		seen := map[string]*exclusionWire{}
+		for i := range reqs {
+			id := reqs[i].RequirementID
+			ex, done := seen[id]
+			if !done {
+				rid, err := uuid.Parse(id)
+				if err != nil {
+					return fmt.Errorf("requirement id %q: %w", id, err)
+				}
+				row, err := q.GetActivatedExclusionForRequirement(ctx, dbx.GetActivatedExclusionForRequirementParams{
+					TenantID:               pgUUIDFromTenantCtx(ctx),
+					FrameworkRequirementID: pgtype.UUID{Bytes: rid, Valid: true},
+				})
+				switch {
+				case err == nil:
+					ex = &exclusionWire{
+						FrameworkScopeID:  uuidStr(row.FrameworkScopeID),
+						Justification:     row.Justification,
+						ImplementationRef: row.ImplementationRef,
+						DecidedAt:         row.UpdatedAt.Time.UTC(),
+					}
+				case !errors.Is(err, pgx.ErrNoRows):
+					return err
+				}
+				seen[id] = ex
+			}
+			reqs[i].Exclusion = ex
+		}
+		return nil
+	})
 }
 
 // applyCoverage fills the `coverage` field on each requirement in `reqs`.
@@ -293,7 +360,7 @@ func (h *Handler) applyCoverage(ctx context.Context, controlID uuid.UUID, reqs [
 
 // controlWireFromControlRow maps a GetControlByIDRow to the controlWire
 // JSON shape (ControlCoverage's `control` field).
-func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
+func controlWireFromControlRow(c dbx.GetControlByIDRow) (controlWire, error) {
 	w := controlWire{
 		ID:                 uuidStr(c.ID),
 		BundleID:           c.BundleID,
@@ -304,6 +371,7 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
 		ImplementationType: string(c.ImplementationType),
 		OwnerRole:          c.OwnerRole,
 		LifecycleState:     string(c.LifecycleState),
+		AnchorFit:          c.AnchorFit,
 	}
 	if c.ScfID != nil {
 		w.SCFID = *c.ScfID
@@ -311,5 +379,13 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
 	if c.FreshnessClass != nil {
 		w.FreshnessClass = *c.FreshnessClass
 	}
-	return w
+	if c.AnchorFitNote != nil {
+		w.AnchorFitNote = *c.AnchorFitNote
+	}
+	if len(c.ExternalRefs) > 0 {
+		if err := json.Unmarshal(c.ExternalRefs, &w.ExternalRefs); err != nil {
+			return controlWire{}, fmt.Errorf("decode external_refs: %w", err)
+		}
+	}
+	return w, nil
 }

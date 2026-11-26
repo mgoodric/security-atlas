@@ -151,7 +151,7 @@ func TestCredential_IssueAuthenticateRevoke(t *testing.T) {
 	store.SetPrefix(bearer.PrefixTest)
 	ctx := tenantCtx(t, tenant)
 
-	cred, plain, err := store.Issue(ctx, tenant.String(), "Okta prod", nil)
+	cred, plain, err := store.Issue(ctx, tenant.String(), "Okta prod", scim.Actor{})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestCredential_IssueAuthenticateRevoke(t *testing.T) {
 	}
 
 	// Revoke, then re-authenticate must reject (AC-3).
-	if err := store.Revoke(ctx, tenant.String(), cred.ID); err != nil {
+	if err := store.Revoke(ctx, tenant.String(), cred.ID, scim.Actor{}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := store.Authenticate(context.Background(), plain); err != scim.ErrUnknownCredential {

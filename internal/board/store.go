@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -60,10 +61,14 @@ type frameworkRow struct {
 // methodology-dependent, so the extraction is Go-side, never a JSONB-path
 // SQL expression).
 type riskRow struct {
-	ID            uuid.UUID
-	Title         string
+	ID    uuid.UUID
+	Title string
+	// Category is the slug and CategoryName the display name of the
+	// tenant's category the risk references (#1814).
 	Category      string
+	CategoryName  string
 	Treatment     string
+	Methodology   dbx.RiskMethodology
 	ResidualScore []byte
 	InherentScore []byte
 	UpdatedAt     time.Time
@@ -104,25 +109,45 @@ func (s *Store) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRow, e
 		if err != nil {
 			return fmt.Errorf("list risks for board brief: %w", err)
 		}
-		out = make([]riskRow, 0, len(rows))
-		for _, r := range rows {
-			rr := riskRow{
-				ID:            uuid.UUID(r.ID.Bytes),
-				Title:         r.Title,
-				Category:      string(r.Category),
-				Treatment:     string(r.Treatment),
-				ResidualScore: r.ResidualScore,
-				InherentScore: r.InherentScore,
-			}
-			if r.UpdatedAt.Valid {
-				rr.UpdatedAt = r.UpdatedAt.Time
-			}
-			out = append(out, rr)
-		}
-		return nil
+		out, err = riskRowsFromDB(ctx, q, tenantID, rows)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// riskRowsFromDB projects board-query risks into riskRows, reading each
+// risk's category slug and name from the tenant's own category it
+// references (#1814). Shared by the brief
+// and pack stores.
+func riskRowsFromDB(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, rows []dbx.Risk) ([]riskRow, error) {
+	cats, err := q.ListRiskCategories(ctx, pgUUID(tenantID))
+	if err != nil {
+		return nil, fmt.Errorf("list risk categories: %w", err)
+	}
+	byID := make(map[uuid.UUID]dbx.OrgRiskCategory, len(cats))
+	for _, c := range cats {
+		byID[uuid.UUID(c.ID.Bytes)] = c
+	}
+	out := make([]riskRow, 0, len(rows))
+	for _, r := range rows {
+		rr := riskRow{
+			ID:            uuid.UUID(r.ID.Bytes),
+			Title:         r.Title,
+			Treatment:     treatmentLabel(r),
+			Methodology:   r.Methodology,
+			ResidualScore: r.ResidualScore,
+			InherentScore: r.InherentScore,
+		}
+		if c, ok := byID[uuid.UUID(r.CategoryID.Bytes)]; ok {
+			rr.Category, rr.CategoryName = c.Slug, c.Name
+		}
+		if r.UpdatedAt.Valid {
+			rr.UpdatedAt = r.UpdatedAt.Time
+		}
+		out = append(out, rr)
 	}
 	return out, nil
 }
@@ -335,4 +360,15 @@ func pgDate(t time.Time) pgtype.Date {
 		Time:  time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC),
 		Valid: true,
 	}
+}
+
+// treatmentLabel renders a risk row's treatment for the board surfaces, so
+// a pending acceptance reads "accept (proposed)" rather than passing for a
+// signed-off one (#1746).
+func treatmentLabel(r dbx.Risk) string {
+	var status dbx.RiskAcceptanceStatus
+	if r.AcceptanceStatus != nil {
+		status = *r.AcceptanceStatus
+	}
+	return risk.TreatmentLabel(r.Treatment, status)
 }

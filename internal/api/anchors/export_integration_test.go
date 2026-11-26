@@ -147,6 +147,19 @@ func ensureSCFAnchorsSeed(t *testing.T) (anchorID uuid.UUID, requirementID uuid.
 		`, soc2FwID); err != nil {
 			t.Fatalf("insert slice174-soc framework: %v", err)
 		}
+		// Delete the global slice174-soc framework this call inserted when
+		// the test ends (its version, requirement and edges cascade). Left
+		// behind, it shows up in every later package's framework listings
+		// on a shared database, as it did for internal/board (#2627). By
+		// id, and only when inserted here, so a row another test seeded is
+		// left to its owner (#2718). The admin pool's own close was
+		// registered first, so it runs after this.
+		t.Cleanup(func() {
+			if _, err := admin.Exec(context.Background(),
+				`DELETE FROM frameworks WHERE id = $1`, soc2FwID); err != nil {
+				t.Errorf("cleanup slice174-soc framework: %v", err)
+			}
+		})
 	}
 	var soc2VerID uuid.UUID
 	err = admin.QueryRow(ctx, `
@@ -191,9 +204,9 @@ func ensureSCFAnchorsSeed(t *testing.T) (anchorID uuid.UUID, requirementID uuid.
 }
 
 // freshAnchorsTenant creates a tenant uuid that auto-cleans its
-// me_audit_log rows on test exit. Catalog rows (anchors, edges,
-// frameworks) are NOT cleaned because they're global and shared
-// across tests.
+// me_audit_log rows on test exit. The SCF catalog rows (anchors) are NOT
+// cleaned because they're global and shared across tests;
+// ensureSCFAnchorsSeed deletes its own slice174-soc framework.
 //
 // Kept inline rather than delegated to dbtest.SeedTenant: this suite's
 // tenant is a uuid.UUID (consumed by newAnchorsExportRouter +

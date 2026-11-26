@@ -2,7 +2,10 @@
 // slice 130/154/162), extracted from the former `web/lib/api.ts`
 // god-file.
 
+import type { Theme } from "@/app/(authed)/settings/theme";
+
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ===== Slice 108 — /v1/me/* (profile + preferences + sessions) =====
 
@@ -14,7 +17,19 @@ export type MeProfile = {
   idp_subject: string;
   tenant_role: string;
   time_zone: string | null;
+  // #2142: the stored /settings theme. Null for a credential bearer with no
+  // users row (nowhere to store a choice); the browser cache rules there.
+  theme: Theme | null;
   is_admin: boolean;
+  // #2428: tenant admin, and may approve (admin or grc_engineer), by flag
+  // or live tenant role. Approve buttons show on whichever matches the role
+  // set the platform admits on that resource; is_admin is the super-admin
+  // bit that gates /admin.
+  is_tenant_admin: boolean;
+  is_approver: boolean;
+  // #2494: false for a signed-in user with no live role in this tenant who
+  // is not a super-admin. The (authed) layout shows the no-role page then.
+  has_tenant_role: boolean;
   owner_roles: string[];
   // Slice 130 (extended by slice 154): canonical `user_roles` list.
   // Always present on the wire — empty array, never omitted — so
@@ -29,6 +44,7 @@ export type MeProfile = {
 export type MePatchRequest = {
   display_name?: string;
   time_zone?: string;
+  theme?: Theme;
 };
 
 export type MePreferences = Record<string, Record<string, boolean>>;
@@ -74,13 +90,7 @@ export async function patchMe(body: MePatchRequest): Promise<MeProfile> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as MeProfile;
@@ -93,6 +103,46 @@ export async function getMyPreferences(): Promise<MePreferences> {
   }
   const body = (await res.json()) as { preferences: MePreferences };
   return body.preferences;
+}
+
+// ===== #2145 — first-visit onboarding hints, through /v1/me/preferences =====
+
+/** The help module ids whose "New to <module>?" hint the caller dismissed.
+ *  Throws on any non-2xx; a machine credential has no preferences (404). */
+export async function getMyDismissedHints(): Promise<string[]> {
+  const res = await fetch(`/api/me/preferences`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { dismissed_hints?: string[] };
+  return body.dismissed_hints ?? [];
+}
+
+/** Dismiss one module's hint for the caller, on every device. */
+export function dismissHint(module: string): Promise<string[]> {
+  return patchHints({ dismissed_hints: { [module]: true } });
+}
+
+/** "Show onboarding hints again": clear every dismissal. */
+export function resetOnboardingHints(): Promise<string[]> {
+  return patchHints({ reset_hints: true });
+}
+
+async function patchHints(body: {
+  dismissed_hints?: Record<string, boolean>;
+  reset_hints?: boolean;
+}): Promise<string[]> {
+  const res = await fetch(`/api/me/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const msg = await upstreamErrorMessage(res);
+    throw new APIError(res.status, msg);
+  }
+  const out = (await res.json()) as { dismissed_hints?: string[] };
+  return out.dismissed_hints ?? [];
 }
 
 // ===== Slice 445 — /v1/me/email-channel (master email opt-in) =====
@@ -124,13 +174,7 @@ export async function setEmailChannelOptIn(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as EmailChannelOptIn;
@@ -170,13 +214,7 @@ async function setChannelOptIn(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ChannelOptIn;
@@ -211,13 +249,7 @@ export async function patchMyPreferences(
     body: JSON.stringify(partial),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const body = (await res.json()) as { preferences: MePreferences };

@@ -34,6 +34,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
@@ -72,7 +74,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 }
 
 // seedSCFAnchor mirrors slice-011's helper. The schema registry needs
-// at least one SCF anchor to validate the GOV-04 default_scf_anchors on
+// at least one SCF anchor to validate the GOV-05 default_scf_anchors on
 // policy.acknowledgment.v1.
 func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) {
 	t.Helper()
@@ -130,9 +132,9 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 		t.Fatalf("acquire admin conn: %v", err)
 	}
 	defer conn.Release()
-	_, _ = conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781141)")
+	_ = advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAcks)
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781141)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAcks)
 	}()
 	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())
 	if err != nil {
@@ -248,7 +250,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 	id := s.postJSON(t, "/v1/policies", createBody, s.adminBear, http.StatusCreated)
 	// submit -> approve -> publish.
 	s.patchJSON(t, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	pubBody, _ := json.Marshal(map[string]any{"new_version": version})
 	publishedID := s.postJSON(t, "/v1/policies/"+id+"/publish", pubBody, s.adminBear, http.StatusCreated)
 	if publishedID == "" {
@@ -270,6 +272,7 @@ type setupResult struct {
 	tenant       string
 	controlID    uuid.UUID
 	adminBear    string
+	approverBear string // a second person; approves what the admin submits
 	adminUser    uuid.UUID
 	requiredRole string
 }
@@ -349,7 +352,7 @@ func setup(t *testing.T) setupResult {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "GOV-04", "GOV")
+	seedSCFAnchor(t, admin, "GOV-05", "GOV")
 	tenant := freshTenant(t, admin)
 	controlID := seedControl(t, admin, tenant)
 
@@ -360,6 +363,13 @@ func setup(t *testing.T) setupResult {
 		IngestService:  ingester,
 	})
 	apiServer.AttachDB(app)
+	// #2505: OPA and authzmw run as in production, so a session's roles
+	// are its user's live user_roles (cred.TenantRoles), not its claim.
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	apiServer.AttachAuthz(engine, authz.NewAuditWriter(app))
 
 	// Slice 197: JWT bearer via slice 190 path. Subject = the seeded
 	// users row id, matching the policy_acknowledgments FK target.
@@ -368,6 +378,7 @@ func setup(t *testing.T) setupResult {
 	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
 	adminClaims.Subject = adminUser.String()
 	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
+	approverBearer := issueSecondApprover(t, apiServer, tenant)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -385,9 +396,22 @@ func setup(t *testing.T) setupResult {
 		tenant:       tenant,
 		controlID:    controlID,
 		adminBear:    adminBearer,
+		approverBear: approverBearer,
 		adminUser:    adminUser,
-		requiredRole: "employee",
+		// A live tenant role, so a session can hold it (#2505). OPA admits
+		// grc_engineer to acknowledge (a policies write).
+		requiredRole: "grc_engineer",
 	}
+}
+
+// issueSecondApprover mints an approver bearer for a person other than the
+// admin, because the submitter cannot approve their own policy (#1807). It
+// seeds no users row, so acknowledgment-rate denominators are unchanged.
+func issueSecondApprover(t *testing.T, apiServer *api.Server, tenant string) string {
+	t.Helper()
+	claims := testjwt.AdminFor(uuid.MustParse(tenant))
+	claims.Subject = uuid.NewString()
+	return apiServer.IssueTestJWT(t, claims)
 }
 
 // makeUserAndBearer seeds a users row + an api_keys row, then mints a
@@ -402,6 +426,7 @@ func (s *setupResult) makeUserAndBearer(t *testing.T, email string, roles []stri
 	t.Helper()
 	user := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, user, isAdmin, false, roles)
+	seedLiveRoles(t, s.admin, s.tenant, user, roles)
 	tenantUUID := uuid.MustParse(s.tenant)
 	var claims = testjwt.OwnerFor(tenantUUID, roles)
 	if isAdmin {
@@ -409,6 +434,21 @@ func (s *setupResult) makeUserAndBearer(t *testing.T, email string, roles []stri
 	}
 	claims.Subject = user.String()
 	return user, s.apiServer.IssueTestJWT(t, claims)
+}
+
+// seedLiveRoles grants user the given roles in tenant as user_roles rows,
+// the live roles authzmw resolves for its session (#2505). A role already
+// granted is left as it is.
+func seedLiveRoles(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, roles []string) {
+	t.Helper()
+	for _, role := range roles {
+		if _, err := admin.Exec(context.Background(),
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2505')
+			 ON CONFLICT DO NOTHING`,
+			tenant, user.String(), role); err != nil {
+			t.Fatalf("seed user_roles %q: %v", role, err)
+		}
+	}
 }
 
 // ----- helpers for evidence verification (AC-2) -----
@@ -496,7 +536,7 @@ func TestPendingForUser_NoRoleMatch_AC3(t *testing.T) {
 	s := setup(t)
 	createAndPublishPolicy(t, s, "AC-3 Policy", "1", []string{s.requiredRole}, s.controlID)
 
-	_, bearer := s.makeUserAndBearer(t, "user3@test", []string{"some_other_role"}, false)
+	_, bearer := s.makeUserAndBearer(t, "user3@test", []string{"viewer"}, false)
 	raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
 	var resp struct {
 		Count int `json:"count"`
@@ -554,17 +594,13 @@ func TestPendingForUser_SupersededVersion_AC4(t *testing.T) {
 func (s *setupResult) forkAndPublishV2(t *testing.T, v1ID, newVersion string) string {
 	t.Helper()
 	// Test-only direct-DB shortcut: bypass slice 022's publish handler.
-	// Rationale: slice 022's subsequent-publish path (store.go line 354+)
-	// has a known architectural drift — it INSERTs a new row with
-	// predecessor_id = v1ID, but if the staging row also has
-	// predecessor_id = v1ID, the policies_predecessor_unique_when_set
-	// partial UNIQUE blocks the second insert. Fixing that handler is
-	// outside slice 023's scope. For slice 023's purposes we only need
-	// the schema state: v1 status = 'superseded', a new published v2
-	// row with predecessor_id = v1ID. The admin DB access produces
-	// that state directly. Slice 022's publish-handler drift is tracked
-	// as a follow-up (admincreds-like P0 — slice 022 publishing a
-	// version chain past v2 will hit the UNIQUE).
+	// Slice 023 only needs the schema state: v1 status = 'superseded', a
+	// new published v2 row with predecessor_id = v1ID. The admin DB
+	// access produces that state directly. (The store's
+	// subsequent-publish path used to hit the
+	// policies_predecessor_unique_when_set UNIQUE; #1747 fixed it to
+	// publish the successor draft in place. The shortcut stays because
+	// it keeps this test independent of the workflow.)
 	v2ID := uuid.New().String()
 	_, err := s.admin.Exec(context.Background(), `
 		WITH supersede AS (
@@ -657,6 +693,7 @@ func (s *setupResult) makeUserAndBearerWithUser(t *testing.T, email string, role
 	// an api_keys row for that user so the rate denominator query
 	// counts them.
 	seedAPIKeyForUser(t, s.admin, s.tenant, existingUser, isAdmin, false, roles)
+	seedLiveRoles(t, s.admin, s.tenant, existingUser, roles)
 	tenantUUID := uuid.MustParse(s.tenant)
 	var claims = testjwt.OwnerFor(tenantUUID, roles)
 	if isAdmin {
@@ -674,8 +711,9 @@ func TestAcknowledgmentRate_AC6(t *testing.T) {
 	s := setup(t)
 	policyID := createAndPublishPolicy(t, s, "AC-6 Policy", "1", []string{s.requiredRole}, s.controlID)
 
-	// Make 3 required-role users; admin user is also in denominator
-	// (is_admin=true wildcard counts).
+	// Make 3 required-role users. The admin's is_admin key does not put
+	// them on the roster: the roster is live user_roles (#2586), and the
+	// admin holds no grc_engineer row.
 	// 2 of 3 required-role users ack.
 	_, b1 := s.makeUserAndBearer(t, "u6a@test", []string{s.requiredRole}, false)
 	_, b2 := s.makeUserAndBearer(t, "u6b@test", []string{s.requiredRole}, false)
@@ -692,19 +730,19 @@ func TestAcknowledgmentRate_AC6(t *testing.T) {
 	if err := json.Unmarshal(raw, &rate); err != nil {
 		t.Fatalf("AC-6 unmarshal: %v body=%s", err, raw)
 	}
-	// Denominator: 3 required-role + 1 admin user = 4.
-	if rate.Denominator != 4 {
-		t.Fatalf("AC-6: want denominator 4 (3 role + 1 admin), got %d", rate.Denominator)
+	// Denominator: the 3 required-role users.
+	if rate.Denominator != 3 {
+		t.Fatalf("AC-6: want denominator 3 (the role holders), got %d", rate.Denominator)
 	}
 	// Numerator: 2 of the 3 role users ack; admin did NOT ack. So 2.
 	if rate.Numerator != 2 {
 		t.Fatalf("AC-6: want numerator 2, got %d (body=%s)", rate.Numerator, raw)
 	}
 	if rate.Percent == nil {
-		t.Fatalf("AC-6: percent is nil; want 50.0")
+		t.Fatalf("AC-6: percent is nil; want 66.67")
 	}
-	if *rate.Percent < 49.99 || *rate.Percent > 50.01 {
-		t.Fatalf("AC-6: want percent ~50, got %v", *rate.Percent)
+	if *rate.Percent < 66.66 || *rate.Percent > 66.67 {
+		t.Fatalf("AC-6: want percent ~66.67, got %v", *rate.Percent)
 	}
 }
 
@@ -804,5 +842,49 @@ func TestDeriveAckToken_DayBuckets(t *testing.T) {
 	}
 	if a == c {
 		t.Fatalf("cross-day tokens equal: %s == %s", a, c)
+	}
+}
+
+// #2183: a local-login / PKCE / device-grant JWT bridges Subject
+// "user:<uuid>" into cred.UserID. /v1/me/acknowledgments read that as a
+// non-user and returned an empty list, and acknowledge failed its raw parse.
+// Both now resolve the user through credstore.CallerUserID.
+func TestAcknowledge_UserPrefixedSubject(t *testing.T) {
+	s := setup(t)
+	policyID := createAndPublishPolicy(t, s, "2183 Policy", "1", []string{s.requiredRole}, s.controlID)
+	user := seedUser(t, s.admin, s.tenant, "user2183@test")
+	seedAPIKeyForUser(t, s.admin, s.tenant, user, false, false, []string{s.requiredRole})
+	seedLiveRoles(t, s.admin, s.tenant, user, []string{s.requiredRole})
+	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), []string{s.requiredRole})
+	claims.Subject = "user:" + user.String()
+	bearer := s.apiServer.IssueTestJWT(t, claims)
+
+	pendingCount := func() int {
+		raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
+		var resp struct {
+			Count int `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal pending: %v body=%s", err, raw)
+		}
+		return resp.Count
+	}
+	if got := pendingCount(); got != 1 {
+		t.Fatalf("pending before ack = %d; want 1", got)
+	}
+
+	_ = s.postJSON(t, "/v1/policies/"+policyID+"/acknowledge", []byte("{}"), bearer, http.StatusCreated)
+
+	var ackUser uuid.UUID
+	if err := s.admin.QueryRow(context.Background(),
+		`SELECT user_id FROM policy_acknowledgments WHERE tenant_id = $1`,
+		s.tenant).Scan(&ackUser); err != nil {
+		t.Fatalf("read ack row: %v", err)
+	}
+	if ackUser != user {
+		t.Errorf("ack user_id = %s; want the subject's user %s", ackUser, user)
+	}
+	if got := pendingCount(); got != 0 {
+		t.Errorf("pending after ack = %d; want 0", got)
 	}
 }

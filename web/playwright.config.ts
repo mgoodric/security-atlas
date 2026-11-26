@@ -52,6 +52,10 @@ export default defineConfig({
 
   use: {
     baseURL,
+    // #2084 — dates render in the viewer's locale and timezone; pin both
+    // so date assertions read the same on every runner.
+    locale: "en-US",
+    timezoneId: "UTC",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -61,6 +65,16 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /timezone-denver-.*\.spec\.ts/,
+    },
+    // #2365 — every other spec is pinned to UTC, where a calendar day
+    // formatted in local time reads the same as one formatted in UTC. This
+    // project runs the day-boundary spec west of UTC so that regression
+    // fails here.
+    {
+      name: "chromium-denver",
+      use: { ...devices["Desktop Chrome"], timezoneId: "America/Denver" },
+      testMatch: /timezone-denver-.*\.spec\.ts/,
     },
   ],
 

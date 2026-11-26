@@ -128,6 +128,10 @@ services:
   atlas-bootstrap:
     networks:
       - atlasnet
+    environment:
+      # security-atlas#1896: the printed opt-in crosswalk commands must name
+      # this overlay too, or they run against a stack without atlasnet.
+      ATLAS_COMPOSE_ARGS: -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.proxy.yml
 
   web:
     networks:

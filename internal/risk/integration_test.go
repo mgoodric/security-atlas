@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -74,8 +75,9 @@ func TestCreate_DefaultsMethodologyToNist80030(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Unauthorized PHI access",
-		Category:      dbx.RiskCategoryConfidentiality,
+		CategoryRef:   "confidentiality",
 		Methodology:   "", // omitted on purpose
 		InherentScore: []byte(`{"likelihood":3,"impact":4}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -98,8 +100,9 @@ func TestCreate_RejectsInvalidNistScore(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Bad score",
-		Category:      dbx.RiskCategoryIntegrity,
+		CategoryRef:   "integrity",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":9,"impact":2}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -117,8 +120,9 @@ func TestCreate_RejectsFairMissingLM(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR-style risk",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -136,8 +140,9 @@ func TestCreate_FairPersistsCanonicalDollarExposure(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR-style risk",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"loss_event_frequency":2,"loss_magnitude":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -169,8 +174,9 @@ func TestCreate_FairAcceptsLegacyAliasesAndNormalizes(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR aliases",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.5,"lm":40000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -208,8 +214,9 @@ func TestCreate_MitigateRequiresLinkedControl(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Needs mitigation",
-		Category:      dbx.RiskCategoryOperational,
+		CategoryRef:   "operational",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":4,"impact":3}`),
 		Treatment:     dbx.RiskTreatmentMitigate,
@@ -228,8 +235,9 @@ func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
 		Title:            "Mitigated",
-		Category:         dbx.RiskCategoryOperational,
+		CategoryRef:      "operational",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentMitigate,
@@ -251,58 +259,202 @@ func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
 	}
 }
 
-// ---- AC-4: treatment=accept requires accepted_until + accepter ----
+// ---- #2371: create cannot approve an acceptance ----
 
-func TestCreate_AcceptRequiresBothFields(t *testing.T) {
+// TestCreate_RefusesApprovedAcceptance: an acceptance is approved only
+// through propose then approve, so a create naming an approved status, an
+// accepter or an expiry is refused even with every field present.
+func TestCreate_RefusesApprovedAcceptance(t *testing.T) {
 	migrate := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	// Missing accepted_until.
-	_, err := store.Create(ctx, risk.CreateInput{
-		Title:         "Accepted",
-		Category:      dbx.RiskCategoryRegulatory,
-		Methodology:   dbx.RiskMethodologyNist80030,
-		InherentScore: []byte(`{"likelihood":1,"impact":2}`),
-		Treatment:     dbx.RiskTreatmentAccept,
-		Accepter:      "ciso@example.com",
-	})
-	if !risk.IsTreatmentValidation(err) {
-		t.Fatalf("want treatment validation (missing accepted_until); got %v", err)
-	}
-
-	// Missing accepter.
 	until := time.Now().AddDate(0, 6, 0)
-	_, err = store.Create(ctx, risk.CreateInput{
-		Title:         "Accepted",
-		Category:      dbx.RiskCategoryRegulatory,
-		Methodology:   dbx.RiskMethodologyNist80030,
-		InherentScore: []byte(`{"likelihood":1,"impact":2}`),
-		Treatment:     dbx.RiskTreatmentAccept,
-		AcceptedUntil: &until,
-	})
-	if !risk.IsTreatmentValidation(err) {
-		t.Fatalf("want treatment validation (missing accepter); got %v", err)
+	for name, in := range map[string]risk.CreateInput{
+		"approved with accepter and expiry": {
+			AcceptanceStatus: dbx.RiskAcceptanceStatusApproved,
+			AcceptedUntil:    &until,
+			Accepter:         "ciso@example.com",
+		},
+		"proposed with accepter": {
+			AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+			Accepter:         "ciso@example.com",
+		},
+		"proposed with expiry": {
+			AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+			AcceptedUntil:    &until,
+		},
+	} {
+		in.Title = "Accepted"
+		in.Actor = "test-actor"
+		in.CategoryRef = "regulatory"
+		in.Methodology = dbx.RiskMethodologyNist80030
+		in.InherentScore = []byte(`{"likelihood":1,"impact":2}`)
+		in.Treatment = dbx.RiskTreatmentAccept
+		if _, err := store.Create(ctx, in); !risk.IsTreatmentValidation(err) {
+			t.Errorf("%s: want treatment validation; got %v", name, err)
+		}
 	}
+}
 
-	// Both fields present succeeds.
+// ---- #1746: untreated default + acceptance status ----
+
+func TestCreate_OmittedTreatmentStoresUntreated(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	store := risk.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
 	created, err := store.Create(ctx, risk.CreateInput{
-		Title:         "Accepted",
-		Category:      dbx.RiskCategoryRegulatory,
-		Methodology:   dbx.RiskMethodologyNist80030,
-		InherentScore: []byte(`{"likelihood":1,"impact":2}`),
-		Treatment:     dbx.RiskTreatmentAccept,
-		AcceptedUntil: &until,
-		Accepter:      "ciso@example.com",
+		Actor:         "test-actor",
+		Title:         "Intake risk",
+		CategoryRef:   "operational",
+		InherentScore: []byte(`{"likelihood":2,"impact":2}`),
 	})
 	if err != nil {
-		t.Fatalf("Create with both accept fields: %v", err)
+		t.Fatalf("Create without treatment: %v", err)
 	}
-	if created.Accepter != "ciso@example.com" {
-		t.Fatalf("accepter not persisted: %q", created.Accepter)
+	if created.Treatment != dbx.RiskTreatmentUntreated {
+		t.Fatalf("treatment = %q; want untreated", created.Treatment)
 	}
+	if created.AcceptanceStatus != "" {
+		t.Fatalf("acceptance_status = %q; want empty", created.AcceptanceStatus)
+	}
+}
+
+func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	store := risk.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	until := time.Now().UTC().AddDate(0, 3, 0)
+	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
+		Title:            "Pending acceptance",
+		CategoryRef:      "operational",
+		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		Proposer:         "creator",
+		ProposerIsPerson: true,
+		Justification:    "Compensated by the edge filter.",
+		ProposedUntil:    until,
+	})
+	if err != nil {
+		t.Fatalf("Create proposed accept: %v", err)
+	}
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.AcceptanceStatus != dbx.RiskAcceptanceStatusProposed {
+		t.Fatalf("acceptance_status = %q; want proposed", got.AcceptanceStatus)
+	}
+	// #2371: the creator is the proposer the approval rule compares with.
+	if got.Acceptance.ProposedBy != "creator" || got.Acceptance.ProposedAt == nil {
+		t.Fatalf("acceptance = %+v; want proposed by the creator, with a time", got.Acceptance)
+	}
+	// #2391: the proposal's terms are recorded as the propose transition
+	// records them.
+	if got.Acceptance.Justification != "Compensated by the edge filter." ||
+		got.Acceptance.ProposedUntil == nil ||
+		got.Acceptance.ProposedUntil.Format(time.DateOnly) != until.Format(time.DateOnly) {
+		t.Fatalf("acceptance = %+v; want the justification and proposed expiry", got.Acceptance)
+	}
+
+	// A proposed acceptance with no proposer, justification or future
+	// proposed expiry is refused, as the propose transition refuses it
+	// (#2371, #2391).
+	for name, in := range map[string]risk.CreateInput{
+		"no proposer":      {ProposerIsPerson: true, Justification: "j", ProposedUntil: until},
+		"no justification": {Proposer: "creator", ProposerIsPerson: true, ProposedUntil: until},
+		"no expiry":        {Proposer: "creator", ProposerIsPerson: true, Justification: "j"},
+		"past expiry":      {Proposer: "creator", ProposerIsPerson: true, Justification: "j", ProposedUntil: time.Now().UTC().AddDate(0, 0, -1)},
+	} {
+		in.Title = "Pending, " + name
+		in.Actor = "test-actor"
+		in.CategoryRef = "operational"
+		in.InherentScore = []byte(`{"likelihood":2,"impact":2}`)
+		in.Treatment = dbx.RiskTreatmentAccept
+		in.AcceptanceStatus = dbx.RiskAcceptanceStatusProposed
+		if _, err := store.Create(ctx, in); !risk.IsTransitionInput(err) {
+			t.Errorf("%s: want transition input error; got %v", name, err)
+		}
+	}
+
+	// Approved without accepter / expiry: the domain layer rejects it.
+	_, err = store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
+		Title:            "Approved, unsigned",
+		CategoryRef:      "operational",
+		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusApproved,
+	})
+	if !risk.IsTreatmentValidation(err) {
+		t.Fatalf("want treatment validation for unsigned approved accept; got %v", err)
+	}
+}
+
+// TestDB_AcceptanceChecks pins the DB-side guards on the app role, bypassing
+// the domain layer: an approved acceptance needs accepter + accepted_until,
+// and acceptance_status is set exactly when treatment is accept.
+func TestDB_AcceptanceChecks(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	insert := func(treatment, status string) error {
+		conn, err := app.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		defer conn.Release()
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenant); err != nil {
+			t.Fatalf("set tenant: %v", err)
+		}
+		var st any
+		if status != "" {
+			st = status
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status)
+			VALUES ($1, $2, 'db check', risk_category_id($2, 'operational'), $3::risk_treatment, $4::risk_acceptance_status)
+		`, uuid.New(), tenant, treatment, st)
+		return err
+	}
+
+	if err := insert("accept", "proposed"); err != nil {
+		t.Fatalf("proposed accept without fields rejected: %v", err)
+	}
+	if err := insert("accept", "approved"); !isCheckViolation(err) {
+		t.Fatalf("approved accept without fields: want check violation, got %v", err)
+	}
+	if err := insert("accept", ""); !isCheckViolation(err) {
+		t.Fatalf("accept without status: want check violation, got %v", err)
+	}
+	if err := insert("untreated", "proposed"); !isCheckViolation(err) {
+		t.Fatalf("status on untreated: want check violation, got %v", err)
+	}
+	if err := insert("untreated", ""); err != nil {
+		t.Fatalf("untreated rejected: %v", err)
+	}
+}
+
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
 }
 
 // ---- AC-5: treatment=transfer requires instrument_reference ----
@@ -315,8 +467,9 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Insured",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":3,"impact":3}`),
 		Treatment:     dbx.RiskTreatmentTransfer,
@@ -326,8 +479,9 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 	}
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:               "test-actor",
 		Title:               "Insured",
-		Category:            dbx.RiskCategoryFinancial,
+		CategoryRef:         "financial",
 		Methodology:         dbx.RiskMethodologyNist80030,
 		InherentScore:       []byte(`{"likelihood":3,"impact":3}`),
 		Treatment:           dbx.RiskTreatmentTransfer,
@@ -350,20 +504,25 @@ func TestList_Filters(t *testing.T) {
 	store := risk.NewStore(app)
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	until := time.Now().AddDate(0, 6, 0)
 	// One nist_800_30 + accept
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "A", Category: dbx.RiskCategoryPrivacy,
-		Methodology:   dbx.RiskMethodologyNist80030,
-		InherentScore: []byte(`{"likelihood":2,"impact":2}`),
-		Treatment:     dbx.RiskTreatmentAccept,
-		AcceptedUntil: &until, Accepter: "u@example.com",
+		Actor: "test-actor",
+		Title: "A", CategoryRef: "privacy",
+		Methodology:      dbx.RiskMethodologyNist80030,
+		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		Proposer:         "creator",
+		ProposerIsPerson: true,
+		Justification:    "Low exposure.",
+		ProposedUntil:    time.Now().UTC().AddDate(0, 3, 0),
 	}); err != nil {
 		t.Fatalf("A: %v", err)
 	}
 	// One fair + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "B", Category: dbx.RiskCategoryFinancial,
+		Actor: "test-actor",
+		Title: "B", CategoryRef: "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0,"lm":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -372,7 +531,8 @@ func TestList_Filters(t *testing.T) {
 	}
 	// One qualitative_5x5 + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "C", Category: dbx.RiskCategoryAvailability,
+		Actor: "test-actor",
+		Title: "C", CategoryRef: "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
 		InherentScore: []byte(`{"likelihood":5,"impact":5}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -396,7 +556,7 @@ func TestList_Filters(t *testing.T) {
 		t.Fatalf("methodology filter expected [B], got %v", titles(got))
 	}
 
-	got, err = store.List(ctx, risk.ListFilter{Category: dbx.RiskCategoryAvailability})
+	got, err = store.List(ctx, risk.ListFilter{Categories: []string{"availability"}})
 	if err != nil {
 		t.Fatalf("List category=availability: %v", err)
 	}
@@ -417,8 +577,9 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	// Two nist_800_30 risks in the same bucket (3,4).
 	for i := 0; i < 2; i++ {
 		if _, err := store.Create(ctx, risk.CreateInput{
+			Actor:         "test-actor",
 			Title:         "n",
-			Category:      dbx.RiskCategoryConfidentiality,
+			CategoryRef:   "confidentiality",
 			Methodology:   dbx.RiskMethodologyNist80030,
 			InherentScore: []byte(`{"likelihood":3,"impact":4}`),
 			Treatment:     dbx.RiskTreatmentAvoid,
@@ -428,8 +589,9 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	}
 	// One qualitative_5x5 in bucket (5,5).
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "q",
-		Category:      dbx.RiskCategoryAvailability,
+		CategoryRef:   "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
 		InherentScore: []byte(`{"likelihood":5,"impact":5}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -438,8 +600,9 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	}
 	// One FAIR — must NOT appear in heatmap.
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "f",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0,"lm":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -480,8 +643,9 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	ctxB := dbtest.WithTenantCtx(t, tenantB)
 
 	created, err := store.Create(ctxA, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "A's risk",
-		Category:      dbx.RiskCategoryRegulatory,
+		CategoryRef:   "regulatory",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":1,"impact":1}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -507,7 +671,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	}
 
 	// Tenant B DELETE should also surface ErrNotFound (RLS hides the row).
-	if err := store.Delete(ctxB, created.ID); !errors.Is(err, risk.ErrNotFound) {
+	if err := store.Delete(ctxB, created.ID, "test-actor"); !errors.Is(err, risk.ErrNotFound) {
 		t.Fatalf("tenant B Delete expected ErrNotFound; got %v", err)
 	}
 
@@ -515,7 +679,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	if _, err := store.Get(ctxA, created.ID); err != nil {
 		t.Fatalf("tenant A Get own: %v", err)
 	}
-	if err := store.Delete(ctxA, created.ID); err != nil {
+	if err := store.Delete(ctxA, created.ID, "test-actor"); err != nil {
 		t.Fatalf("tenant A Delete own: %v", err)
 	}
 }

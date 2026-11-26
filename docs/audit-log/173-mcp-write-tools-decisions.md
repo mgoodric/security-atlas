@@ -99,6 +99,24 @@ check_violation. The CHECK is the backstop, not the primary validator.
 
 ### D4 — Applier transaction sharing
 
+> **Superseded for the evidence appliers by #1751.** `push_evidence` and
+> `update_control_state` no longer `INSERT INTO evidence_records` inside
+> the confirm transaction. Writing the ledger directly skipped the
+> `observed_at` skew check, schema validation, credential kind scope and
+> the `evidence_audit_log` row, so an approved proposal could backdate
+> evidence into a frozen audit period. Both appliers now hand the record
+> to `ingest.Service.Process` under the approving operator's credential.
+> Ingest commits in its own transaction, because the audit row for a
+> refusal has to survive the confirm rolling back. The proposal keeps
+> D4's guarantee by other means: the idempotency key is
+> `mcp-proposal:<proposal id>`, and a retried confirm returns the record
+> already ingested for that proposal. Refusals reach the operator as 4xx
+> with the REST push surface's codes (e.g. 400 `observed_at_skew`).
+> Approvers whose credential carries a `ScopePredicate` are refused with
+> 403 `scope_violation`, since the record's only scope dimension is the
+> server-set `mcp_tool`. The risk appliers are unchanged and still follow
+> D4 as written.
+
 **Chose: applier runs inside the confirm transaction.**
 
 When an operator invokes `confirm_write`:
@@ -185,7 +203,9 @@ into LLM context can drive a tool call with attacker-controlled
 1. The platform NEVER commits to the canonical table directly; the
    write tool only INSERTs to `mcp_write_proposals` with
    state=ai_proposed.
-2. The operator MUST explicitly confirm (server-side gate:
+2. A tenant admin MUST explicitly confirm (server-side gate:
+   `authz.IsTenantAdmin`, at both the engine and the handler; admin-only
+   since #2428, and this slice's original gate was
    `IsApprover || IsAdmin`).
 3. Even if the operator confirms blindly, the per-tool Applier
    re-validates the bounded input shape (e.g., `update_control_state`
@@ -223,9 +243,10 @@ Acceptable.
 
 1. Bearer token authenticates as the operator's credential — same as
    slice 172. No write tool runs without bearer.
-2. The confirm + reject HTTP routes gate on `IsApprover || IsAdmin`.
-   A bearer that authenticates as the operator but lacks the approver
-   role gets 403.
+2. Confirm and reject are admin-only: the engine admits only a tenant
+   admin, and the handlers gate on `authz.IsTenantAdmin` (since #2428;
+   this slice's original gate was `IsApprover || IsAdmin`). A bearer
+   that authenticates as the operator but is not a tenant admin gets 403.
 3. RLS gates the canonical write: even an Applier bug that builds
    the wrong SQL is bounded to the originating tenant.
 
@@ -239,8 +260,8 @@ all preliminary threats have explicit mitigations + tests.
 ## Anti-criteria honored
 
 - **P0-A1.** No audit-binding artifact ships without human approval —
-  enforced via Pattern A + the CHECK constraint + the IsApprover gate
-  on confirm.
+  enforced via Pattern A + the CHECK constraint + the admin-only
+  (`authz.IsTenantAdmin`) gate on confirm.
 - **P0-A2.** No admin-tier writes exposed — `AllowedTools` is a
   4-element set; the DB CHECK pins the same set; adding a fifth tool
   requires both a Go change and a migration.
@@ -262,17 +283,17 @@ all preliminary threats have explicit mitigations + tests.
 
 ## Acceptance criteria coverage
 
-| AC                                          | Verified by                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------ |
-| AC-1..AC-4 four write tools                 | `internal/mcp/tools/writes.go` + schema-stability snapshot               |
-| AC-5 meta-audit row on every write          | Every Create → mcp_write_proposals row with ai_model + actor + input     |
-| AC-6 HITL approval for audit-binding writes | `Store.Confirm` + `IsApprover` gate (`TestHTTP_ConfirmRequiresApprover`) |
-| AC-7 cross-tenant test                      | `TestList_CrossTenantIsolation`, `TestHTTP_CrossTenantIsolation`         |
-| AC-8 write-quota integration test           | `TestCreate_EnforcesPendingCap`                                          |
-| AC-9 schema-snapshot test                   | `TestSchemaStability` covers all 11 tools                                |
-| AC-10 stdio transport unchanged             | cmd/atlas-mcp/main.go single addition: `tools.AllWithWrites`             |
-| AC-11..AC-15 per-tool happy + sad paths     | tools_test.go + writeproposals tests                                     |
-| AC-16 decisions log                         | this file                                                                |
+| AC                                          | Verified by                                                                       |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| AC-1..AC-4 four write tools                 | `internal/mcp/tools/writes.go` + schema-stability snapshot                        |
+| AC-5 meta-audit row on every write          | Every Create → mcp_write_proposals row with ai_model + actor + input              |
+| AC-6 HITL approval for audit-binding writes | `Store.Confirm` + `authz.IsTenantAdmin` gate (`TestHTTP_ConfirmRequiresApprover`) |
+| AC-7 cross-tenant test                      | `TestList_CrossTenantIsolation`, `TestHTTP_CrossTenantIsolation`                  |
+| AC-8 write-quota integration test           | `TestCreate_EnforcesPendingCap`                                                   |
+| AC-9 schema-snapshot test                   | `TestSchemaStability` covers all 11 tools                                         |
+| AC-10 stdio transport unchanged             | cmd/atlas-mcp/main.go single addition: `tools.AllWithWrites`                      |
+| AC-11..AC-15 per-tool happy + sad paths     | tools_test.go + writeproposals tests                                              |
+| AC-16 decisions log                         | this file                                                                         |
 
 ## Schema-level enforcement summary
 

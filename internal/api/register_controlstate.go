@@ -36,6 +36,13 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	controlStateH := controlstateapi.New(controlStateEngine)
 	root.Get("/v1/controls/{id}/state", controlStateH.State)
 	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
+	// #2110: Evaluate now. Runs the same EvaluateControl the ingest
+	// subscriber and scheduler run (trigger=manual) and returns the new
+	// state. A tenant admin or the control's assigned owner only; OPA
+	// admits control_owner at this one path (control_owner.rego).
+	// #2479: per-principal limit, and the caller recorded as triggered_by.
+	evaluateH := controlstateapi.NewEvaluateHandler(controlStateEngine, s.dbPool, s.evaluateRatePerMin)
+	root.Post("/v1/controls/{id}/evaluate", evaluateH.Evaluate)
 	// Slice 064: control-detail backend read endpoints. Four pure reads that
 	// fill the four binding placeholders slice 041's control-detail view
 	// shipped (evidence stream, linked policies, linked risks, control
@@ -48,9 +55,20 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	// no migration and no write path (constitutional invariant #2).
 	controlDetailH := controldetailapi.New(controldetailapi.NewStore(s.dbPool))
 	root.Get("/v1/evidence", controlDetailH.Evidence)
+	// #2137: one evidence record with its payload. The schema registry,
+	// when DB-backed, supplies the kind's current redaction rules so they
+	// are re-applied on read. chi matches the literal /v1/evidence/freshness
+	// and /v1/evidence/receipts/... routes before this {id} pattern.
+	if lookup, ok := s.registry.(controldetailapi.RedactionLookup); ok {
+		controlDetailH.WithRedaction(lookup)
+	}
+	root.Get("/v1/evidence/{id}", controlDetailH.EvidenceDetail)
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// #2392: the control's SCF anchor history — every remap decision on
+	// any revision of its bundle.
+	root.Get("/v1/controls/{id}/anchor-history", controlDetailH.AnchorHistory)
 	// Slice 444: AI gap-explanation v0 — the first AI-assist surface, the
 	// lowest-risk one. GET /v1/controls/{id}/gap-explanation returns the
 	// DETERMINISTIC freshness/evidence rollup ALWAYS, plus a plain-language,

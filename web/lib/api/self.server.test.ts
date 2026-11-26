@@ -31,11 +31,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   emptyAdminMe,
   fetchAdminMe,
+  fetchTenantsSummary,
   fetchDemoSeedEnabled,
-  fetchEnabledModules,
+  fetchEffectiveModules,
   fetchSelfProfile,
   normalizeAdminMe,
-  normalizeEnabledModules,
+  normalizeEffectiveModules,
+  tenantRoleStateFrom,
+  tenantsSummaryFrom,
+  fetchTenantRoleState,
 } from "./self.server";
 
 // The internal service address the compose sets. Stable regardless of the
@@ -125,12 +129,18 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
   test("admin gate resolves is_admin=true with the web port remapped (3001 external / 3000 internal)", async () => {
     const { urls } = containerNetwork({
-      "/v1/me": { body: { is_admin: true, roles: ["admin"] } },
+      "/v1/me": {
+        body: { is_admin: true, is_tenant_admin: true, roles: ["admin"] },
+      },
     });
 
     const me = await fetchAdminMe("admin-bearer");
 
-    expect(me).toEqual({ is_admin: true, roles: ["admin"] });
+    expect(me).toEqual({
+      is_admin: true,
+      is_tenant_admin: true,
+      roles: ["admin"],
+    });
     expect(urls).toEqual([`${ATLAS_BASE}/v1/me`]);
     expectNoSelfFetch(urls);
   });
@@ -142,7 +152,11 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
     const me = await fetchAdminMe("viewer-bearer");
 
-    expect(me).toEqual({ is_admin: false, roles: ["control_owner"] });
+    expect(me).toEqual({
+      is_admin: false,
+      is_tenant_admin: false,
+      roles: ["control_owner"],
+    });
     expectNoSelfFetch(urls);
   });
 
@@ -168,17 +182,28 @@ describe("OE-549: server-side probes under a containerized topology", () => {
     expectNoSelfFetch(urls);
   });
 
-  test("enabled-modules probe resolves the real flags in-container (not the fail-closed empty map)", async () => {
-    const { urls } = containerNetwork({
-      "/v1/features/enabled": {
-        body: { modules: { "oscal.export": true, "board.reporting": false } },
+  test("effective-modules probe resolves the real modules in-container (not the unknown null)", async () => {
+    const modules = [
+      {
+        key: "questionnaires",
+        name: "Questionnaires",
+        state: "switched_off",
+        pages: ["/questionnaires"],
+        features: [],
       },
+      {
+        key: "board_reporting",
+        name: "Board reporting",
+        state: "on",
+        pages: ["/board-packs"],
+        features: [],
+      },
+    ];
+    const { urls } = containerNetwork({
+      "/v1/me/modules": { body: { modules } },
     });
 
-    await expect(fetchEnabledModules("any-bearer")).resolves.toEqual({
-      "oscal.export": true,
-      "board.reporting": false,
-    });
+    await expect(fetchEffectiveModules("any-bearer")).resolves.toEqual(modules);
     expectNoSelfFetch(urls);
   });
 
@@ -197,13 +222,13 @@ describe("OE-549: server-side probes under a containerized topology", () => {
     const { urls } = containerNetwork({
       "/v1/me": { body: { is_admin: true, roles: ["admin"] } },
       "/v1/admin/demo/status": { body: { enabled: false } },
-      "/v1/features/enabled": { body: { modules: {} } },
+      "/v1/me/modules": { body: { modules: [] } },
     });
 
     await Promise.all([
       fetchAdminMe("b"),
       fetchSelfProfile("b"),
-      fetchEnabledModules("b"),
+      fetchEffectiveModules("b"),
       fetchDemoSeedEnabled("b"),
     ]);
 
@@ -221,6 +246,7 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
     await expect(fetchAdminMe("b")).resolves.toEqual({
       is_admin: true,
+      is_tenant_admin: false,
       roles: [],
     });
     expect(urls).toEqual([`${ATLAS_BASE}/v1/me`]);
@@ -245,7 +271,7 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     // component, which is what rendered "This page couldn't load".
     await expect(fetchAdminMe("b")).resolves.toEqual(emptyAdminMe());
     await expect(fetchSelfProfile("b")).resolves.toBeNull();
-    await expect(fetchEnabledModules("b")).resolves.toEqual({});
+    await expect(fetchEffectiveModules("b")).resolves.toBeNull();
     await expect(fetchDemoSeedEnabled("b")).resolves.toBe(false);
   });
 
@@ -273,6 +299,20 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     await expect(fetchAdminMe("b")).resolves.toEqual(emptyAdminMe());
   });
 
+  test("#2503: normalizeAdminMe admits is_tenant_admin only on a literal true", () => {
+    expect(normalizeAdminMe({ is_tenant_admin: "true" }).is_tenant_admin).toBe(
+      false,
+    );
+    expect(normalizeAdminMe({ is_tenant_admin: 1 }).is_tenant_admin).toBe(
+      false,
+    );
+    expect(normalizeAdminMe({ is_tenant_admin: true }).is_tenant_admin).toBe(
+      true,
+    );
+    // A tenant admin is not a super-admin.
+    expect(normalizeAdminMe({ is_tenant_admin: true }).is_admin).toBe(false);
+  });
+
   test("normalizeAdminMe never admits on a soft-truthy is_admin", () => {
     // Slice 130 P0-A3 semantics, preserved verbatim by the extraction.
     expect(normalizeAdminMe({ is_admin: "true" }).is_admin).toBe(false);
@@ -295,14 +335,50 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     expect(normalizeAdminMe("nope")).toEqual(emptyAdminMe());
   });
 
-  test("normalizeEnabledModules collapses anything that is not a modules object", () => {
-    expect(normalizeEnabledModules(null)).toEqual({});
-    expect(normalizeEnabledModules({})).toEqual({});
-    expect(normalizeEnabledModules({ modules: null })).toEqual({});
-    expect(normalizeEnabledModules({ modules: "on" })).toEqual({});
-    expect(normalizeEnabledModules({ modules: { a: true } })).toEqual({
-      a: true,
-    });
+  test("normalizeEffectiveModules is null for anything that is not a modules list", () => {
+    expect(normalizeEffectiveModules(null)).toBeNull();
+    expect(normalizeEffectiveModules({})).toBeNull();
+    expect(normalizeEffectiveModules({ modules: null })).toBeNull();
+    expect(normalizeEffectiveModules({ modules: { a: true } })).toBeNull();
+  });
+
+  test("normalizeEffectiveModules drops malformed entries", () => {
+    const good = { key: "q", name: "Q", state: "on", pages: ["/q"] };
+    expect(
+      normalizeEffectiveModules({
+        modules: [
+          good,
+          { ...good, state: "maybe" },
+          { ...good, pages: [1] },
+          { key: "x" },
+          null,
+        ],
+      }),
+    ).toEqual([{ ...good, features: [] }]);
+  });
+
+  test("normalizeEffectiveModules keeps well-formed features and drops the rest (#2171)", () => {
+    const feature = {
+      key: "f",
+      name: "F",
+      state: "switched_off",
+      pages: ["/f"],
+    };
+    expect(
+      normalizeEffectiveModules({
+        modules: [
+          {
+            key: "m",
+            name: "M",
+            state: "on",
+            pages: ["/m"],
+            features: [feature, { key: "bad" }, null],
+          },
+        ],
+      }),
+    ).toEqual([
+      { key: "m", name: "M", state: "on", pages: ["/m"], features: [feature] },
+    ]);
   });
 
   test("demo-seed probe admits only on a literal enabled:true", async () => {
@@ -334,5 +410,76 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     // Invariant #6: the answer is bearer-dependent, so it must never
     // enter the Next.js data cache.
     expect(seen[0].cache).toBe("no-store");
+  });
+});
+
+describe("#2494: has_tenant_role and the current tenant name", () => {
+  beforeEach(() => {
+    process.env.ATLAS_HTTP_URL = ATLAS_BASE;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("tenantRoleStateFrom reads only a literal boolean", () => {
+    expect(tenantRoleStateFrom({ has_tenant_role: true })).toBe("has_role");
+    expect(tenantRoleStateFrom({ has_tenant_role: false })).toBe("no_role");
+    // A body without the field, or a malformed one, is neither.
+    expect(tenantRoleStateFrom({})).toBe("unknown");
+    expect(tenantRoleStateFrom({ has_tenant_role: "false" })).toBe("unknown");
+    expect(tenantRoleStateFrom(null)).toBe("unknown");
+    expect(tenantRoleStateFrom("x")).toBe("unknown");
+  });
+
+  test("a failed /v1/me read is unknown, never role-less", async () => {
+    containerNetwork({ "/v1/me": { status: 500, body: { error: "boom" } } });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+
+    vi.restoreAllMocks();
+    containerNetwork({
+      "/v1/me": { status: 403, body: { error: "forbidden" } },
+    });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+
+    vi.restoreAllMocks();
+    containerNetwork({ "/v1/me": { text: "<html>" } });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+  });
+
+  test("a role-less caller reads as no_role through the internal base", async () => {
+    const { urls } = containerNetwork({
+      "/v1/me": { body: { has_tenant_role: false, roles: [] } },
+    });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("no_role");
+    expectNoSelfFetch(urls);
+  });
+
+  test("tenantsSummaryFrom names the current tenant and counts them all", () => {
+    expect(
+      tenantsSummaryFrom({
+        tenants: [
+          { id: "a", name: "Acme", current: false },
+          { id: "b", name: "Beta", current: true },
+        ],
+      }),
+    ).toEqual({ currentName: "Beta", count: 2 });
+    expect(
+      tenantsSummaryFrom({ tenants: [{ id: "a", name: "", current: true }] }),
+    ).toEqual({ currentName: null, count: 1 });
+    expect(tenantsSummaryFrom({ tenants: "x" })).toEqual({
+      currentName: null,
+      count: 0,
+    });
+    expect(tenantsSummaryFrom(null)).toEqual({ currentName: null, count: 0 });
+  });
+
+  test("fetchTenantsSummary is empty on failure", async () => {
+    containerNetwork({ "/v1/me/tenants": { status: 500, body: {} } });
+    await expect(fetchTenantsSummary("b")).resolves.toEqual({
+      currentName: null,
+      count: 0,
+    });
   });
 });

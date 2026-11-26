@@ -104,7 +104,7 @@ function detailBody(answers: AnswerMap) {
         text: q.text,
         domain: q.code.slice(0, 3),
         answer_type: "yes_no",
-        scf_anchor_id: q.code === "HRS-01" ? null : "IAC-06",
+        scf_anchor_id: q.code === "HRS-01" ? null : "IAC-37",
         sort_order: i + 1,
         needs_mapping: q.code === "HRS-01",
         answer: a
@@ -490,6 +490,28 @@ test.describe("questionnaire batch review queue (slice 757)", () => {
       "audit logs retained",
     );
     await expect(page.getByTestId("review-cloud-banner")).toBeVisible();
+    // #2280: Reject asks first; Cancel sends nothing and keeps the draft.
+    let rejectPosts = 0;
+    page.on("request", (r) => {
+      if (r.url().includes("/ai-reject")) rejectPosts += 1;
+    });
+    await page.getByTestId("review-reject").click();
+    const rejectConfirm = page.getByTestId("review-reject-confirm");
+    await expect(rejectConfirm).toContainText("Reject the draft answer");
+    await expect(
+      page.getByTestId("review-reject-confirm-cancel"),
+    ).toBeFocused();
+    await page.getByTestId("review-reject-confirm-cancel").click();
+    await expect(rejectConfirm).toHaveCount(0);
+    await expect(page.getByTestId("review-question")).toContainText(
+      "audit logs retained",
+    );
+    expect(rejectPosts).toBe(0);
+    // Escape cancels too.
+    await page.getByTestId("review-reject").click();
+    await page.keyboard.press("Escape");
+    await expect(rejectConfirm).toHaveCount(0);
+    expect(rejectPosts).toBe(0);
     const reject3 = page.waitForResponse(
       (r) => r.url().includes("/ai-reject") && r.status() === 200,
       { timeout: 30_000 },
@@ -500,6 +522,7 @@ test.describe("questionnaire batch review queue (slice 757)", () => {
       { timeout: 30_000 },
     );
     await page.getByTestId("review-reject").click();
+    await page.getByTestId("review-reject-confirm-ok").click();
     await reject3;
     await refetch3;
     // Queue drained.

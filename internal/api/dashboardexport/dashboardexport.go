@@ -60,15 +60,17 @@
 //
 // # Role gate
 //
-// Slice 269 D3: narrow admit — admin OR approver only. The dashboard
-// EXPORT is the bulk-handoff variant of the dashboard READ, and bulk
-// handoff is a more sensitive surface than the in-app view. Mirrors
-// the slice 138 evidence-export pattern (`IsAdmin || IsApprover`)
-// rather than the slice 066 dashboard `requireProgramRead` pattern
-// (which also admits `control_owner`). The defense-in-depth gate is
-// the handler-level predicate `hasDashboardExportAccess`; the
-// production gate is the slice 035 OPA admit on `dashboard_export`
-// (added in the same slice).
+// #2350 (Matt, 2026-11-15): the export is gated by OPA, on read of
+// the `dashboard` resource, the decision the slice 035 middleware
+// makes for the route. admin.rego, grc_engineer.rego and auditor.rego
+// admit it; control_owner and viewer are refused. The handler asks
+// the engine itself (ExportDashboard, mayExport) so the gate holds
+// where the middleware is not mounted, and keeps the defense-in-depth
+// twin `hasDashboardExportAccess` over the same three roles. Slice 269
+// D3's admin-OR-approver gate refused an auditor, whom OPA admits,
+// and, before #2428, a tenant admin signed in by browser. Each
+// panel's content stays filtered per role: the upcoming panel by
+// calendar.ReadableTypes (#2342), hidden modules by moduleaccess.
 //
 // # Meta-audit
 //
@@ -107,10 +109,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -160,7 +165,52 @@ var validFormats = map[Format]bool{
 // type-safe at the boundary — the encoders work off a `Snapshot`
 // value, not a free-form map.
 type PanelSource interface {
-	Snapshot(ctx context.Context) (Snapshot, error)
+	Snapshot(ctx context.Context, upcoming UpcomingTypes) (Snapshot, error)
+}
+
+// UpcomingTypes is the calendar type filter the upcoming panel reads with:
+// the caller's readable event types from calendar.ReadableTypes, the same
+// OPA narrowing GET /v1/calendar applies (#2234). Filter is a normalized
+// CSV ("" is every type); None means the caller may read no type, so the
+// panel is empty.
+//
+// HideRisks leaves the risks panel empty: the caller may not see the Risk
+// module, because it is switched off or outside their module access
+// (#2173). It rides on the same value so the source keeps one seam.
+type UpcomingTypes struct {
+	Filter    string
+	None      bool
+	HideRisks bool
+}
+
+// risksRoute is a route of the module that owns the risks panel's rows.
+const risksRoute = "/v1/risks"
+
+// withModules narrows u to the modules the viewer may see (#2173): the
+// upcoming panel drops event types from hidden modules, as the calendar
+// does, and the risks panel is hidden with the Risk module.
+func withModules(u UpcomingTypes, v moduleaccess.Viewer) (UpcomingTypes, error) {
+	if !u.None {
+		filter, left, err := calendar.VisibleTypes(v, u.Filter)
+		if err != nil {
+			return u, err
+		}
+		u.Filter, u.None = filter, !left
+	}
+	seesRisks, err := v.Sees(risksRoute)
+	if err != nil {
+		return u, err
+	}
+	u.HideRisks = !seesRisks
+	return u, nil
+}
+
+// UpcomingTypesFor is the upcoming panel's type filter for the caller of
+// r: calendar.ReadableTypes over every type. With no engine every type
+// stays, as on the calendar.
+func UpcomingTypesFor(r *http.Request, engine *authz.Engine) UpcomingTypes {
+	filter, anyLeft := calendar.ReadableTypes(r, engine, "")
+	return UpcomingTypes{Filter: filter, None: !anyLeft}
 }
 
 // Handler owns the slice 269 dashboard export endpoint. The pool is
@@ -169,12 +219,29 @@ type PanelSource interface {
 type Handler struct {
 	source PanelSource
 	pool   *pgxpool.Pool
+	engine *authz.Engine
+	views  *moduleaccess.Views
+}
+
+// WithModules wires the module views (#2173) that leave a hidden module's
+// rows out of the export. With none every module is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
 }
 
 // NewHandler constructs a Handler. `source` MUST be non-nil for
 // production callers; pass a stub via `WithSource` for unit tests.
 func NewHandler(pool *pgxpool.Pool, source PanelSource) *Handler {
 	return &Handler{source: source, pool: pool}
+}
+
+// WithAuthz wires the OPA engine the upcoming panel's type filter asks, as
+// the calendar does (#2234). With no engine every type stays, as on the
+// calendar's unit-test servers.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // WithSource overrides the PanelSource — used by unit tests so the
@@ -194,7 +261,7 @@ func (h *Handler) WithSource(s PanelSource) *Handler {
 //	400 result=denied:bad_request   (unknown format)
 //	401 result=denied:unauthenticated   (no credential / bad tenant)
 //	403 result=denied:forbidden      (role lacks export admit)
-//	500 result=error:snapshot|encoder  (downstream / streaming err)
+//	500 result=error:authz|snapshot|encoder  (OPA / downstream / streaming err)
 func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -230,7 +297,17 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !hasDashboardExportAccess(cred) {
+	admitted, authzErr := h.mayExport(r, cred)
+	if authzErr != nil {
+		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
+			Format: string(format),
+			Result: "error:authz",
+			Reason: authzErr.Error(),
+		})
+		httperr.WriteInternal(w, r, "authorize dashboard export", authzErr)
+		return
+	}
+	if !admitted {
 		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format),
 			Result: "denied:forbidden",
@@ -244,14 +321,25 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	// Each panel's underlying call opens its own RLS-gated tx; cross-
 	// tenant isolation is a property of those stores, NOT of this
 	// handler.
-	snapshot, snapErr := h.source.Snapshot(ctx)
+	// #2234: the upcoming panel shows the event types the caller may read
+	// on the calendar, from the same function, not the flag gate above.
+	// #2173: and only the modules the caller may see.
+	viewer, snapErr := h.views.For(r)
+	var filter UpcomingTypes
+	if snapErr == nil {
+		filter, snapErr = withModules(UpcomingTypesFor(r, h.engine), viewer)
+	}
+	var snapshot Snapshot
+	if snapErr == nil {
+		snapshot, snapErr = h.source.Snapshot(ctx, filter)
+	}
 	if snapErr != nil {
 		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format),
 			Result: "error:snapshot",
 			Reason: snapErr.Error(),
 		})
-		httperr.WriteInternal(w, r, "compose dashboard snapshot", snapErr)
+		moduleaccess.WriteError(w, r, "compose dashboard snapshot", snapErr)
 		return
 	}
 
@@ -335,17 +423,42 @@ func buildFilename(entity, ext string) string {
 
 // ===== Role gate =====
 
-// hasDashboardExportAccess reports whether the credential grants
-// dashboard-export access. Slice 269 D3: narrower than the slice 066
-// dashboard-read admit (which also accepts `control_owner`) — the
-// export is a bulk-handoff surface, so we limit it to admin +
-// approver (auditor-level). Pins the AC-6 contract.
-//
-// `IsAdmin` is the wildcard signal; `IsApprover` represents the
-// auditor / sign-off role family. A bare push credential or a
-// control-owner credential lacks both and is denied.
+// dashboardResource is the OPA resource type the export is read under:
+// BuildInput derives it from the leading /v1/dashboard/ segment, and
+// auditor.rego admits it by that name.
+const dashboardResource = "dashboard"
+
+// mayExport reports whether the caller of r may export the dashboard
+// (#2350): the defense-in-depth twin admits it and, when an engine is
+// wired, OPA allows read of the dashboard resource. A Decide error is
+// returned for a 500, never read as an admit.
+func (h *Handler) mayExport(r *http.Request, cred credstore.Credential) (bool, error) {
+	if !hasDashboardExportAccess(cred) {
+		return false, nil
+	}
+	if h.engine == nil {
+		return true, nil
+	}
+	in := authz.BuildInput(r, nil)
+	in.Resource.Type = dashboardResource
+	in.Resource.ID = ""
+	in.Action = "read"
+	d, err := h.engine.Decide(r.Context(), in)
+	if err != nil {
+		return false, fmt.Errorf("decide dashboard export: %w", err)
+	}
+	return d.Allow, nil
+}
+
+// hasDashboardExportAccess is the handler-level twin of OPA's admit on
+// the dashboard resource (#2350), authz.IsTenantAuditReader: the admin
+// and approver flags, or the live admin, grc_engineer or auditor role.
+// control_owner, viewer, a bare push credential and a session's role
+// claim are refused. It matters where no engine is wired (unit and
+// integration test servers), and keeps out a bare push key, for which
+// OPA derives grc_engineer.
 func hasDashboardExportAccess(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover
+	return authz.IsTenantAuditReader(c)
 }
 
 // ===== Meta-audit =====

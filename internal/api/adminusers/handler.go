@@ -50,10 +50,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -76,6 +79,29 @@ const (
 type Handler struct {
 	pool     *pgxpool.Pool
 	authPool *pgxpool.Pool
+	creds    CredentialRevoker
+	// access is the member module access store (#2172). Nil leaves the
+	// module-access routes answering 503 and module_access null.
+	access *moduleaccess.Store
+
+	// beforeRevokeCommit, when set, runs in Revoke after the last-admin
+	// check passes and before the transaction commits. Nil in production;
+	// tests set it (export_test.go) to hold a revoke there (#2261).
+	beforeRevokeCommit func()
+}
+
+// CredentialRevoker drops a user's API keys from the in-memory credstore.
+// Revoke-membership revokes the keys durably in its transaction and calls
+// this after commit (#1915). *credstore.Store satisfies it.
+type CredentialRevoker interface {
+	RevokeUserInMemory(tenantID, userID string) int
+}
+
+// SetCredentialRevoker wires the after-commit in-memory key revocation.
+// Returns the handler so it composes with New(...).
+func (h *Handler) SetCredentialRevoker(c CredentialRevoker) *Handler {
+	h.creds = c
+	return h
 }
 
 // New constructs a Handler. Backward-compatible with the slice-062 callers;
@@ -97,6 +123,10 @@ type UserResponse struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	// ModuleAccess is the member's module access (#2172): null for all
+	// modules, else the optional-module keys they may work in. It does not
+	// apply to admins or auditors.
+	ModuleAccess []string `json:"module_access"`
 }
 
 // ListResponse is the GET /v1/admin/users shape.
@@ -176,6 +206,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, userResponseFromListRow(row))
 	}
+	if err := h.withModuleAccess(r.Context(), tenantID, items); err != nil {
+		httperr.WriteInternal(w, r, "list module access", err)
+		return
+	}
 
 	httpresp.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
 }
@@ -215,7 +249,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpresp.WriteJSON(w, http.StatusOK, userResponseFromGetRow(row))
+	out := []UserResponse{userResponseFromGetRow(row)}
+	if err := h.withModuleAccess(r.Context(), tenantID, out); err != nil {
+		httperr.WriteInternal(w, r, "get module access", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out[0])
 }
 
 // PatchRoles handles PATCH /v1/admin/users/{id}/roles.
@@ -263,10 +302,11 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Self-demotion guard. cred.UserID is the caller's identity (set by
-	// the auth layer). When the target equals the caller and admin is
-	// being dropped, require explicit confirmation.
-	if cred.UserID == targetID.String() && !hasAdmin && !req.ConfirmSelfDemotion {
+	// Self-demotion guard. When the target is the caller and admin is
+	// being dropped, require explicit confirmation. The caller resolves
+	// through credstore.CallerUserID: a local-login JWT carries
+	// "user:<uuid>", which never string-equals the bare target id (#2183).
+	if self, isUser := credstore.CallerUserID(cred); isUser && self == targetID && !hasAdmin && !req.ConfirmSelfDemotion {
 		httpresp.WriteError(w, http.StatusBadRequest, "self-demotion from admin requires confirm_self_demotion=true")
 		return
 	}
@@ -276,6 +316,24 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	// caller's tenant GUC; user_roles RLS policies fire on every
 	// statement).
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
+		// #2503: the target must be a member of the caller's tenant. An id
+		// from another tenant is a 404, and no orphan user_roles row is
+		// written for it.
+		if _, mErr := q.GetAdminUser(ctx, dbx.GetAdminUserParams{
+			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+			ID:       pgtype.UUID{Bytes: targetID, Valid: true},
+		}); mErr != nil {
+			if errors.Is(mErr, pgx.ErrNoRows) {
+				return errTargetNotMember
+			}
+			return fmt.Errorf("lookup target: %w", mErr)
+		}
+		// A replacement that drops admin can strand the tenant; lock the
+		// roster first and recount after (#2261).
+		guard, gErr := users.LockAdmins(ctx, q, tenantID)
+		if gErr != nil {
+			return gErr
+		}
 		if dErr := q.DeleteUserRoles(ctx, dbx.DeleteUserRolesParams{
 			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
 			UserID:   targetID.String(),
@@ -296,8 +354,16 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("insert role %s: %w", role, iErr)
 			}
 		}
-		return nil
+		return guard.Check(ctx, q)
 	})
+	if errors.Is(err, errTargetNotMember) {
+		httpresp.WriteError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if errors.Is(err, users.ErrLastAdmin) {
+		httpresp.WriteError(w, http.StatusConflict, lastAdminReason)
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "patch roles", err)
 		return
@@ -395,28 +461,12 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles manages its own tenant's
+	// users. Every query runs under the caller's tenant RLS, and the
+	// cross-tenant assign/revoke paths gate on super_admin before this.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
-}
-
-// credentialFromContext is the slice-478 thin re-export of
-// authctx.CredentialFromContext, used by the assign-path actor resolution
-// fallback for the within-tenant tenant-admin legacy-bearer case.
-func credentialFromContext(ctx context.Context) (cred credentialView, ok bool) {
-	c, present := authctx.CredentialFromContext(ctx)
-	if !present {
-		return credentialView{}, false
-	}
-	return credentialView{UserID: c.UserID, TenantID: c.TenantID, IsAdmin: c.IsAdmin}, true
-}
-
-// credentialView is the minimal slice of credstore.Credential the slice-478
-// assign path consumes — kept local so assign.go need not import credstore.
-type credentialView struct {
-	UserID   string
-	TenantID string
-	IsAdmin  bool
 }

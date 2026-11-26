@@ -1,16 +1,51 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_6_boundary_protection
-title: "Production endpoints have host-firewall enabled"
+title: "Endpoints reporting posture have the host firewall enabled"
 description: |
-  The entity implements logical access security measures to protect
-  against threats from sources outside its system boundaries (TSC CC6.6).
-  Network boundary protection covers many controls; the
-  auditor-most-tested manifestation at endpoint level is: every
-  production-developer endpoint has a host firewall enabled (pf on macOS,
-  ufw on Linux, Windows Defender Firewall on Windows). The osquery
-  query reads the firewall-state table and asserts coverage.
+  Systems are shielded from threats that originate outside the system
+  boundary (TSC CC6.6). The test is that every endpoint has a host
+  firewall enabled (pf / the application firewall on macOS, ufw on Linux,
+  Windows Defender Firewall on Windows).
 
-scf_anchor_id: NET-04
+  What runs today: a SQL query over the payloads of osquery's
+  `osquery.host_posture.v1` records, one per host per connector run. It
+  takes each host's latest in-window record, keyed by `host_uuid` and
+  ordered by the host's own `last_seen_at`, then by the record's
+  `observed_at`. A host whose latest record has `firewall_enabled` false
+  fails the control, whatever the other hosts report. Otherwise the
+  control passes only when every host's latest record has
+  `firewall_enabled` true, and is inconclusive when any host's latest
+  record has no `firewall_enabled`. No in-window record also leaves it
+  inconclusive. The connector's per-record verdict, which is disk
+  encryption plus screen lock, is not used.
+
+  Why a missing field is inconclusive and not a fail: the connector
+  writes `firewall_enabled` only when it read the firewall state, so an
+  absent key means "not read", not "off". Fleet's Get host API has no
+  firewall field. A Fleet-sourced record carries `firewall_enabled` only
+  when the operator names a firewall Fleet policy for the connector, and
+  `firewall_source` then names it (`fleet_policy:<name>`). A host the
+  policy does not target (a Linux host under a macOS-only policy, say),
+  or a host whose Fleet detail fetch failed, has no `firewall_enabled`.
+  With no firewall policy named, every Fleet host is unread and the
+  control stays inconclusive.
+
+  A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant (`evaluated_at`), ranks as a
+  missing one does: below every readable value. It never errors the
+  query, so the other hosts still decide.
+
+  Records without a `host_uuid` are left out. When a host's latest
+  records tie on both times, the host counts as on only if every tied
+  record says true, and any tied false fails it.
+
+  Not checked: which firewall is on, or its rules; that the host is a
+  production or managed endpoint (every reporting host counts). Only the
+  records the control receives are checked: a managed endpoint that never
+  reported is not seen, which waits on an endpoint inventory (#2834).
+
+scf_anchor_id: NET-03
+scf_release: test-2026.3
 control_family: NET
 implementation_type: automated
 owner_role: security-engineering
@@ -18,17 +53,39 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: host_firewall_enabled_on_managed_endpoints
-    language: rego
+  - id: every_reporting_host_firewall_enabled
+    language: sql
     evidence_kind: osquery.host_posture.v1
-    description: "Every managed endpoint reports host firewall = enabled"
+    description: "Every host's latest posture record reports the host firewall enabled"
     expression: |
-      package atlas.controls.soc2.cc6_6_fw
-
-      default allow := false
-
-      allow if {
-        every p in input.posture_records {
-          p.firewall_enabled == true
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_off) THEN 'fail'
+               WHEN bool_and(all_on) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT host,
+               bool_or(coalesce(fw IS NOT NULL AND fw <> 'true'::jsonb, false)) AS any_off,
+               bool_and(coalesce(fw = 'true'::jsonb, false)) AS all_on
+        FROM (
+          SELECT payload->>'host_uuid' AS host,
+                 payload->'firewall_enabled' AS fw,
+                 rank() OVER (
+                   PARTITION BY payload->>'host_uuid'
+                   ORDER BY CASE
+                              WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                                   AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                                THEN CASE
+                                       WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+                                         THEN (payload->>'last_seen_at')::timestamptz
+                                     END
+                            END DESC NULLS LAST,
+                            observed_at DESC
+                 ) AS recency
+          FROM evidence
+          WHERE coalesce(payload->>'host_uuid', '') <> ''
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY host
+      ) AS per_host

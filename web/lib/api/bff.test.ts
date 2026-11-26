@@ -31,7 +31,55 @@ vi.mock("next/headers", () => ({
 vi.mock("next/server", () => mockNextServer());
 
 import { ATLAS_JWT_COOKIE } from "../auth";
-import { forwardJSON, noStore } from "./bff";
+import {
+  forwardJSON,
+  forwardMultipart,
+  noStore,
+  rejectUnsafeSegment,
+  SEGMENT,
+  UPSTREAM_5XX_BODY,
+  upstreamBody,
+} from "./bff";
+
+describe("upstreamBody (#2704)", () => {
+  test.each([500, 502, 503, 599])("%i body is replaced", (status) => {
+    expect(upstreamBody(status, "panic: runtime error")).toBe(
+      UPSTREAM_5XX_BODY,
+    );
+  });
+  test.each([200, 201, 400, 404, 409, 429, 499])(
+    "%i body passes through",
+    (status) => {
+      expect(upstreamBody(status, '{"error":"x"}')).toBe('{"error":"x"}');
+    },
+  );
+});
+
+describe("forwardMultipart (#2704)", () => {
+  beforeEach(() => {
+    cookieStore.clear();
+    vi.restoreAllMocks();
+    process.env.ATLAS_HTTP_URL = "http://atlas:8080";
+  });
+
+  test("relays a 4xx body and replaces a 5xx body", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockResolvedValueOnce(
+      new Response('{"error":"bad sheet"}', { status: 400 }),
+    );
+    const bad = await forwardMultipart("/v1/imports", new FormData());
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "bad sheet" });
+
+    fetchSpy.mockResolvedValueOnce(
+      new Response("open /var/atlas/x: permission denied", { status: 500 }),
+    );
+    const broke = await forwardMultipart("/v1/imports", new FormData());
+    expect(broke.status).toBe(500);
+    expect(await broke.text()).toBe(UPSTREAM_5XX_BODY);
+  });
+});
 
 describe("forwardJSON", () => {
   beforeEach(() => {
@@ -81,6 +129,22 @@ describe("forwardJSON", () => {
     expect(body.ok).toBe(true);
   });
 
+  test("passes Retry-After through on a 429 (#2618)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"error":"too many evaluations; retry later"}', {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "9" },
+      }),
+    );
+
+    const res = await forwardJSON("/v1/controls/x/evaluate", {
+      method: "POST",
+    });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("9");
+  });
+
   test("passes upstream non-2xx status through verbatim", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -94,6 +158,25 @@ describe("forwardJSON", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("forbidden");
+  });
+
+  // #2704 — a 5xx body is the server's own failure; it never reaches the
+  // wire, whatever a handler wrote there. The status and Retry-After do.
+  test("replaces an upstream 5xx body with a generic one", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"error":"pq: relation \\"secret_table\\" missing"}', {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "5" },
+      }),
+    );
+
+    const res = await forwardJSON("/v1/audit/notes");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    const text = await res.text();
+    expect(text).toBe(UPSTREAM_5XX_BODY);
+    expect(text).not.toContain("secret_table");
   });
 
   test("sends POST with Content-Type and serialized body when jsonBody set", async () => {
@@ -180,5 +263,49 @@ describe("noStore (slice 746)", () => {
     expect(wrapped.status).toBe(204);
     expect(wrapped.headers.get("Cache-Control")).toBe("no-store");
     expect(wrapped.body).toBeNull();
+  });
+});
+
+describe("rejectUnsafeSegment (#2558)", () => {
+  const UUID = "00000000-0000-0000-0000-000000002558";
+
+  test.each([
+    ["slug", "risk.themes"],
+    ["slug", "evidence_freshness_pct"],
+    ["slugOrUUID", "third-party"],
+    ["slugOrUUID", UUID],
+    ["token", "aB3_-xYz"],
+    ["credentialID", `key_${UUID}`],
+    ["credentialID", UUID],
+    ["code", "IAC-06.1"],
+    ["code", "hipaa:2013:164.308(a)(1)(ii)(A)"],
+  ] as const)("SEGMENT.%s admits %s", (allow, v) => {
+    expect(rejectUnsafeSegment({ p: v }, SEGMENT[allow])).toBeNull();
+  });
+
+  const unsafe = ["", ".", "..", "a/b", "a\\b", "a%2Fb", "%2E%2E"];
+  for (const allow of Object.keys(SEGMENT) as (keyof typeof SEGMENT)[]) {
+    test.each(unsafe)(`SEGMENT.${allow} refuses %j`, async (v) => {
+      const res = rejectUnsafeSegment({ p: v }, SEGMENT[allow]);
+      expect(res?.status).toBe(400);
+      expect(await res?.json()).toEqual({
+        error: "p is not a valid path segment",
+      });
+    });
+  }
+
+  test("a closed set admits its members and names them on refusal", async () => {
+    const kinds: ReadonlySet<string> = new Set(["current", "target"]);
+    expect(rejectUnsafeSegment({ kind: "target" }, kinds)).toBeNull();
+    const res = rejectUnsafeSegment({ kind: ".." }, kinds);
+    expect(res?.status).toBe(400);
+    expect(await res?.json()).toEqual({
+      error: "kind must be one of current, target",
+    });
+  });
+
+  test("checks every param it is given", () => {
+    const res = rejectUnsafeSegment({ a: "ok", b: ".." }, SEGMENT.slug);
+    expect(res?.status).toBe(400);
   });
 });

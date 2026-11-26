@@ -1,0 +1,191 @@
+// #1748 — the attach picker's level rule. It mirrors the platform: a child
+// sits strictly below its parent (team < org < company). A risk with no
+// level (an older wire shape) is never offered.
+
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import {
+  canBeChildOf,
+  FETCH_ALL_RISKS_MAX_PAGES,
+  fetchHighSeverityRiskTotal,
+  fetchRiskRegisterTotal,
+  fetchRisksListWithRollUps,
+  listRisks,
+} from "./risks";
+
+// #2060 — roll-ups stay out of the register unless a caller asks for them.
+describe("risk list fetchers and roll-ups", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubFetch(body: unknown, status = 200) {
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(body), { status }));
+  }
+
+  test.each([
+    [{}, "/v1/risks"],
+    [{ include_rollups: "true" }, "/v1/risks?include_rollups=true"],
+    // #2132: filters, sort and page pass through in allow-list order.
+    [
+      { sort: "-title", owner: "none", status: "all", limit: "50" },
+      "/v1/risks?status=all&owner=none&sort=-title&limit=50",
+    ],
+    // #2482: a list repeats the key.
+    [
+      { category: ["ops", "vendor"], status: "all" },
+      "/v1/risks?status=all&category=ops&category=vendor",
+    ],
+  ])("listRisks(%o) asks upstream for %s", async (params, path) => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], count: 1, total: 7 });
+    const page = await listRisks("test-bearer-2060", params);
+    expect(page.risks).toEqual([{ id: "r1" }]);
+    expect(page.total).toBe(7);
+    expect(String(spy.mock.calls[0]?.[0]).endsWith(path)).toBe(true);
+  });
+
+  test("listRisks drops a parameter not on the allow-list", async () => {
+    const spy = stubFetch({ risks: [] });
+    await listRisks("test-bearer-2060", {
+      tenant_id: "x",
+    } as unknown as Record<string, string>);
+    expect(String(spy.mock.calls[0]?.[0]).endsWith("/v1/risks")).toBe(true);
+  });
+
+  test("fetchRisksListWithRollUps reads the BFF with roll-ups kept", async () => {
+    const spy = stubFetch({ risks: [] });
+    await expect(fetchRisksListWithRollUps()).resolves.toEqual({
+      risks: [],
+      count: 0,
+      total: 0,
+    });
+    expect(spy.mock.calls[0]?.[0]).toBe("/api/risks?include_rollups=true");
+  });
+
+  test("listRisks forwards severity_band (#2490)", async () => {
+    const spy = stubFetch({ risks: [], total: 2 });
+    await listRisks("test-bearer-2490", { severity_band: "high", limit: "1" });
+    expect(
+      String(spy.mock.calls[0]?.[0]).endsWith(
+        "/v1/risks?severity_band=high&limit=1",
+      ),
+    ).toBe(true);
+  });
+
+  // #2490: the badge and the register's "N of M" read the platform's total
+  // off a one-row page, not the whole register.
+  test("fetchHighSeverityRiskTotal reads total off one high-band row", async () => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], total: 7 });
+    await expect(fetchHighSeverityRiskTotal()).resolves.toBe(7);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      "/api/risks?severity_band=high&limit=1",
+    );
+  });
+
+  test("fetchHighSeverityRiskTotal refuses a response with no total", async () => {
+    stubFetch({ risks: [{ id: "r1" }] });
+    await expect(fetchHighSeverityRiskTotal()).rejects.toThrow("no total");
+  });
+
+  test("fetchRiskRegisterTotal reads total off one row", async () => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], total: 640 });
+    await expect(fetchRiskRegisterTotal()).resolves.toBe(640);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe("/api/risks?limit=1");
+  });
+
+  // #2490: an upstream whose pages never reach total stops at the cap and
+  // returns what it read, flagged partial, instead of looping or throwing.
+  test("fetchAllRisks stops at the page cap and flags partial", async () => {
+    let n = 0;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      return new Response(
+        JSON.stringify({ risks: [{ id: `r${n}` }], total: 1_000_000 }),
+      );
+    });
+    const all = await fetchRisksListWithRollUps();
+    expect(spy).toHaveBeenCalledTimes(FETCH_ALL_RISKS_MAX_PAGES);
+    expect(all.risks).toHaveLength(FETCH_ALL_RISKS_MAX_PAGES);
+    expect(all.partial).toBe(true);
+    expect(all.total).toBe(1_000_000);
+  });
+
+  // #2482: the platform returns at most 500 rows a call, so the whole-list
+  // fetchers walk every page until they hold the total.
+  test("fetchRisksListWithRollUps reads every page", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ risks: [{ id: "r1" }, { id: "r2" }], total: 3 }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [{ id: "r3" }], total: 3 })),
+      );
+    const all = await fetchRisksListWithRollUps();
+    expect(all.risks.map((r) => r.id)).toEqual(["r1", "r2", "r3"]);
+    expect(all.total).toBe(3);
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([
+      "/api/risks?include_rollups=true",
+      "/api/risks?include_rollups=true&offset=2",
+    ]);
+  });
+
+  test("an empty page ends the walk", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [{ id: "r1" }], total: 5 })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [], total: 5 })),
+      );
+    const all = await fetchRisksListWithRollUps();
+    expect(all.risks).toHaveLength(1);
+    expect(all.partial).toBeUndefined();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  test("a BFF 4xx surfaces its message", async () => {
+    stubFetch({ error: "limit out of range" }, 400);
+    await expect(fetchRisksListWithRollUps()).rejects.toThrow(
+      "limit out of range",
+    );
+  });
+
+  test("a BFF 5xx shows the status line, not its body (#2645)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "pq: relation risks does not exist" }),
+        { status: 502, statusText: "Bad Gateway" },
+      ),
+    );
+    const err = await fetchRisksListWithRollUps().catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("502 Bad Gateway");
+  });
+});
+
+describe("canBeChildOf", () => {
+  test("a lower level can be a child", () => {
+    expect(canBeChildOf({ level: "team" }, { level: "org" })).toBe(true);
+    expect(canBeChildOf({ level: "team" }, { level: "company" })).toBe(true);
+    expect(canBeChildOf({ level: "org" }, { level: "company" })).toBe(true);
+  });
+
+  test("the same or a higher level cannot", () => {
+    expect(canBeChildOf({ level: "org" }, { level: "org" })).toBe(false);
+    expect(canBeChildOf({ level: "company" }, { level: "org" })).toBe(false);
+    expect(canBeChildOf({ level: "org" }, { level: "team" })).toBe(false);
+  });
+
+  test("a missing level is never offered", () => {
+    expect(canBeChildOf({}, { level: "company" })).toBe(false);
+    expect(canBeChildOf({ level: "team" }, {})).toBe(false);
+  });
+});

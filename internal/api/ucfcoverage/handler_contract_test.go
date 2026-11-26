@@ -51,6 +51,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -99,7 +100,7 @@ func contractControlWire() controlWire {
 		ID:                 contractControlID,
 		BundleID:           "ctl.access-review",
 		Version:            3,
-		SCFID:              "IAC-06",
+		SCFID:              "IAC-37",
 		SCFAnchorID:        contractAnchorID,
 		Title:              "Periodic access review",
 		ControlFamily:      "IAC",
@@ -107,13 +108,15 @@ func contractControlWire() controlWire {
 		OwnerRole:          "grc_engineer",
 		LifecycleState:     "active",
 		FreshnessClass:     "30d",
+		AnchorFit:          "partial",
+		AnchorFitNote:      "IAC-37 covers the review cadence, not the reviewer's independence.",
 	}
 }
 
 func contractAnchorWire() anchorWire {
 	return anchorWire{
 		ID:          contractAnchorID,
-		SCFID:       "IAC-06",
+		SCFID:       "IAC-37",
 		Family:      "IAC",
 		Name:        "Identity & Access Management",
 		Description: "Govern logical access to systems and data.",
@@ -139,6 +142,7 @@ func contractRequirement(coverage *float64) requirementForAnchorWire {
 		Coverage:               coverage,
 		SourceAttribution:      "scf-strm",
 		MappingTier:            "verified",
+		Origin:                 "catalog",
 		Rationale:              "SCF anchor satisfies the SOC 2 logical-access requirement.",
 	}
 }
@@ -152,7 +156,15 @@ func TestContract_ControlCoverage(t *testing.T) {
 	// ?framework_version=): control + non-null anchor + a requirements list
 	// carrying BOTH the in-scope (coverage non-null) and out-of-scope
 	// (coverage null) row shapes, pinning the `number | null` coverage typing
-	// the consumer depends on (slice 256: null must NOT degrade to 0).
+	// the consumer depends on (slice 256: null must NOT degrade to 0). The
+	// out-of-scope row also carries the activated SoA's exclusion (#2140),
+	// pinning the object the control page's Coverage marks.
+	excluded := contractRequirement(nil)
+	excluded.Exclusion = &exclusionWire{
+		FrameworkScopeID: "66666666-6666-4666-8666-666666666666",
+		Justification:    "No in-house software development",
+		DecidedAt:        time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
 	anchoredUnpinned := stubCoverageAssembler{
 		found: true,
 		view: coverageView{
@@ -161,7 +173,7 @@ func TestContract_ControlCoverage(t *testing.T) {
 			Anchor:   contractAnchorWire(),
 			Requirements: []requirementForAnchorWire{
 				contractRequirement(&inScope),
-				contractRequirement(nil),
+				excluded,
 			},
 		},
 	}

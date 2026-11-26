@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,6 +55,10 @@ type runFlags struct {
 	skipMFAPolicy    bool
 	skipAppAssign    bool
 	skipUserLife     bool
+	// adminApps and infraApps are the Okta app ids the operator classifies
+	// admin and infrastructure (#2828); with both empty no app is classified.
+	adminApps []string
+	infraApps []string
 }
 
 func newRunCmd() *cobra.Command {
@@ -65,9 +70,14 @@ func newRunCmd() *cobra.Command {
 transform to evidence records, and push to the platform.
 
 Okta scopes required (least-privilege, Read-only Administrator):
-  - okta.policies.read  (gates okta.mfa_policy.v1)
+  - okta.policies.read  (gates okta.mfa_policy.v2, and the app sign-in
+                         and global session policies behind
+                         sign_on_mfa_required and session_mfa_required
+                         in okta.app_assignment.v1)
   - okta.apps.read      (gates okta.app_assignment.v1)
-  - okta.groups.read    (gates okta.app_assignment.v1)
+  - okta.groups.read    (gates okta.app_assignment.v1, and the Everyone
+                         group lookup for okta.mfa_policy.v2 and
+                         session_mfa_required)
   - okta.users.read     (gates okta.user_lifecycle.v1)
 
 Auth: set OKTA_API_TOKEN in the process environment. The --token flag
@@ -98,10 +108,12 @@ appears in shell history.`,
 	// documented preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")
 	_ = cmd.Flags().MarkHidden("token-env-only-do-not-pass-on-cli")
-	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "scf:IAC-06", "control_id to attach to okta.mfa_policy.v1 records")
-	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "scf:IAC-21", "control_id to attach to okta.app_assignment.v1 records")
-	cmd.Flags().StringVar(&f.userLifeControl, "user-lifecycle-control", "scf:IAC-22", "control_id to attach to okta.user_lifecycle.v1 records")
-	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v1 pull")
+	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "", "control_id to attach to okta.mfa_policy.v2 records; empty (the default) routes each record to every control that queries okta.mfa_policy.v2 (#2924)")
+	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "", "control_id to attach to okta.app_assignment.v1 records; empty (the default) routes each record to every control that queries okta.app_assignment.v1 (#2924)")
+	cmd.Flags().StringVar(&f.userLifeControl, "user-lifecycle-control", "", "control_id to attach to okta.user_lifecycle.v1 records; empty (the default) routes each record to every control that queries okta.user_lifecycle.v1 (#2924)")
+	cmd.Flags().StringSliceVar(&f.adminApps, "admin-apps", nil, "Okta app ids to classify admin in okta.app_assignment.v1 (comma-separated or repeated); with this and --infrastructure-apps both empty, no app is classified (#2828)")
+	cmd.Flags().StringSliceVar(&f.infraApps, "infrastructure-apps", nil, "Okta app ids to classify infrastructure in okta.app_assignment.v1; once either list is set, every other app is standard (#2828)")
+	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v2 pull")
 	cmd.Flags().BoolVar(&f.skipAppAssign, "skip-app-assignment", false, "skip okta.app_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipUserLife, "skip-user-lifecycle", false, "skip okta.user_lifecycle.v1 pull")
 	return cmd
@@ -149,6 +161,9 @@ func doRun(ctx context.Context, f runFlags) error {
 		if err != nil {
 			return fmt.Errorf("app assignment pull: %w", err)
 		}
+		for _, id := range oktaapps.Classify(assignments, f.adminApps, f.infraApps) {
+			fmt.Fprintf(os.Stderr, "warning: classified app %s is not among the Okta apps pulled\n", id)
+		}
 		for _, a := range assignments {
 			rec, err := buildAppAssignmentRecord(a, f.org, f.environment, f.appAssignControl)
 			if err != nil {
@@ -191,16 +206,18 @@ func doRun(ctx context.Context, f runFlags) error {
 
 func buildMFAPolicyRecord(s oktapolicy.PolicyState, org, env, controlID string) (*evidencev1.EvidenceRecord, error) {
 	now := s.ObservedAt.UTC().Truncate(time.Hour)
+	// v2 requires both lists; structpb turns an empty one into [].
 	pm := map[string]any{
-		"policy_id":    s.PolicyID,
-		"policy_name":  s.PolicyName,
-		"mfa_required": s.MFARequired,
+		"policy_id":           s.PolicyID,
+		"policy_name":         s.PolicyName,
+		"status":              s.Status,
+		"mfa_required":        s.MFARequired,
+		"factors_allowed":     asAny(s.FactorsAllowed),
+		"applies_to_groups":   asAny(s.AppliesToGroups),
+		"applies_to_everyone": s.AppliesToEveryone,
 	}
-	if len(s.FactorsAllowed) > 0 {
-		pm["factors_allowed"] = asAny(s.FactorsAllowed)
-	}
-	if len(s.AppliesToGroups) > 0 {
-		pm["applies_to_groups"] = asAny(s.AppliesToGroups)
+	if s.Priority > 0 {
+		pm["priority"] = float64(s.Priority)
 	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
@@ -208,8 +225,8 @@ func buildMFAPolicyRecord(s oktapolicy.PolicyState, org, env, controlID string) 
 	}
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.MFAPolicyKey(s.PolicyID, now),
-		EvidenceKind:   "okta.mfa_policy.v1",
-		SchemaVersion:  "1.0.0",
+		EvidenceKind:   "okta.mfa_policy.v2",
+		SchemaVersion:  "2.0.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},
@@ -237,6 +254,28 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	if a.SignOnMode != "" {
 		pm["sign_on_mode"] = a.SignOnMode
 	}
+	// #2828 (1.1.0): each field is omitted when the connector has no value
+	// for it, never sent as a default.
+	if a.Classification != "" {
+		pm["classification"] = a.Classification
+	}
+	if a.SignOnPolicyID != "" {
+		pm["sign_on_policy_id"] = a.SignOnPolicyID
+	}
+	if a.SignOnMFARequired != nil {
+		pm["sign_on_mfa_required"] = *a.SignOnMFARequired
+	}
+	if a.Reason != "" {
+		pm["reason"] = a.Reason
+	}
+	// #2951 (1.2.0): the org's global session policy verdict, the same
+	// rule of omission.
+	if a.SessionMFARequired != nil {
+		pm["session_mfa_required"] = *a.SessionMFARequired
+	}
+	if a.SessionReason != "" {
+		pm["session_reason"] = a.SessionReason
+	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
 		return nil, err
@@ -244,7 +283,7 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.AppAssignmentKey(a.AppID, now),
 		EvidenceKind:   "okta.app_assignment.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  "1.2.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},
@@ -314,6 +353,8 @@ func mapPolicyResult(r oktapolicy.Result) evidencev1.Result {
 		return evidencev1.Result_RESULT_FAIL
 	case oktapolicy.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
+	case oktapolicy.ResultNA:
+		return evidencev1.Result_RESULT_NA
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED
 	}

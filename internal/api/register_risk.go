@@ -8,10 +8,12 @@ import (
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
+	riskimportsapi "github.com/mgoodric/security-atlas/internal/api/risks/riskimports"
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -35,7 +37,7 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 		risksStore,
 		eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)),
 	)
-	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver)
+	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver).WithModules(s.moduleViews)
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
@@ -44,6 +46,21 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
 	// chi's declaration-order match keeps it ahead of the UUID-id route.
 	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
+	// #1809: the tenant's own risk categories (read-only expand step of
+	// #1745). Literal-segment route declared before the generic
+	// /v1/risks/{id}.
+	root.Get("/v1/risks/categories", risksH.ListCategories)
+	// #1810: category management. Literal segments, so chi matches them
+	// ahead of the generic /v1/risks/{id} routes.
+	root.Post("/v1/risks/categories", risksH.CreateCategory)
+	root.Patch("/v1/risks/categories/{ref}", risksH.RenameCategory)
+	root.Delete("/v1/risks/categories/{ref}", risksH.DeleteCategory)
+	root.Post("/v1/risks/categories/{ref}/archive", risksH.ArchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/unarchive", risksH.UnarchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/set-default", risksH.SetDefaultCategory)
+	// #2059: the organisation risk review cadence. Literal-segment route
+	// declared before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/review-cadence", risksH.GetReviewCadence)
 	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
 	// the slice 135 data-export library + slice 145 concurrency cap.
 	// Literal-segment route declared before the generic /v1/risks/{id}
@@ -54,17 +71,48 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
 	root.Post("/v1/risks/aggregate", risksH.Aggregate)
+	// #2839: risk register import — upload a CSV/XLSX register, get back a
+	// staged batch (every row staged or rejected with a reason), and a
+	// person with approver rights approves the pending rows into risks
+	// through risksStore. Literal /v1/risks/imports segments, declared
+	// before the generic /v1/risks/{id}.
+	riskimportsapi.New(riskimport.NewStore(s.dbPool, risksStore)).RegisterRoutes(root)
 	root.Get("/v1/risks/{id}/aggregation", risksH.LiveAggregation)
 	// Slice 020: POST /v1/risks/{id}/controls — link a control to a risk.
 	// Literal-suffix route declared before the generic /v1/risks/{id} so
 	// chi's declaration-order match keeps it ahead.
 	root.Post("/v1/risks/{id}/controls", risksH.LinkControl)
+	// #2106: unlink one control; refused for the last link of a mitigate
+	// risk with no live action plan.
+	root.Delete("/v1/risks/{id}/controls/{control_id}", risksH.UnlinkControl)
+	// #1748: hierarchy links into an existing risk. Literal-suffix routes
+	// declared before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/{id}/children", risksH.ListChildren)
+	root.Post("/v1/risks/{id}/children", risksH.LinkChildren)
+	root.Delete("/v1/risks/{id}/children/{child_id}", risksH.UnlinkChild)
+	root.Get("/v1/risks/{id}/parents", risksH.ListParents)
+	// #2104: the risk's change history. Literal-suffix route declared
+	// before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/{id}/audit-log", risksH.ListAuditLog)
+	// #2105: treatment and acceptance transitions. Literal-suffix routes,
+	// declared before the generic /v1/risks/{id}.
+	root.Patch("/v1/risks/{id}/treatment", risksH.ChangeTreatment)
+	root.Patch("/v1/risks/{id}/acceptance/propose", risksH.ProposeAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/approve", risksH.ApproveAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/reject", risksH.RejectAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/revoke", risksH.RevokeAcceptance)
+	// #2107: the open/closed lifecycle. Literal-suffix routes, declared
+	// before the generic /v1/risks/{id}.
+	root.Patch("/v1/risks/{id}/close", risksH.CloseRisk)
+	root.Patch("/v1/risks/{id}/reopen", risksH.ReopenRisk)
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
-	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool))
+	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool)).WithModules(s.moduleViews)
 	root.Get("/v1/risks/{id}/action-plans", actionPlansH.PlansForRisk)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
+	// #1749: move a risk between hierarchy levels and org units.
+	root.Patch("/v1/risks/{id}", risksH.PatchRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
 	// Slice 384: ActionPlan primitive — the fourth first-class risk-register
 	// primitive (canvas §6). Routes appended per the parallel-batch
@@ -78,6 +126,7 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Get("/v1/action-plans", actionPlansH.ListActionPlans)
 	root.Get("/v1/action-plans/{id}", actionPlansH.GetActionPlan)
 	root.Patch("/v1/action-plans/{id}", actionPlansH.UpdateActionPlan)
+	root.Post("/v1/action-plans/{id}/verify", actionPlansH.VerifyActionPlan)
 	root.Delete("/v1/action-plans/{id}", actionPlansH.DeleteActionPlan)
 	root.Post("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.LinkRisk)
 	root.Delete("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.UnlinkRisk)
@@ -87,6 +136,10 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Slice 053: theme catalog + per-risk theme tagging.
 	themesH := themesapi.New(risksStore)
 	root.Get("/v1/themes", themesH.ListVisible)
+	// #1811: organisation theme management (admin / grc_engineer).
+	root.Post("/v1/themes", risksH.CreateTheme)
+	root.Patch("/v1/themes/{ref}", risksH.RenameTheme)
+	root.Delete("/v1/themes/{ref}", risksH.DeleteTheme)
 	root.Post("/v1/risks/{id}/themes", themesH.AssignThemes)
 	root.Delete("/v1/risks/{id}/themes/{theme}", themesH.RemoveTheme)
 	// Slice 054: declarative aggregation rules engine. Routes appended per
@@ -99,6 +152,8 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// the HITL PATCH .../activate.
 	aggrulesH := aggregationrulesapi.New(aggrule.NewStore(s.dbPool))
 	root.Post("/v1/aggregation-rules", aggrulesH.Create)
+	// #1750: evaluate every active rule now, outside a risk write.
+	root.Post("/v1/aggregation-rules/evaluate", aggrulesH.EvaluateNow)
 	root.Get("/v1/aggregation-rules", aggrulesH.List)
 	root.Patch("/v1/aggregation-rules/{id}/activate", aggrulesH.Activate)
 	root.Patch("/v1/aggregation-rules/{id}/deactivate", aggrulesH.Deactivate)

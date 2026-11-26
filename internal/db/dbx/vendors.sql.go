@@ -51,26 +51,21 @@ SELECT
     criticality,
     COUNT(*)::bigint AS total_count,
     COUNT(*) FILTER (
-        WHERE last_review_date IS NULL
-           OR last_review_date + (
-                  CASE review_cadence
-                      WHEN 'monthly'   THEN INTERVAL '1 month'
-                      WHEN 'quarterly' THEN INTERVAL '3 months'
-                      WHEN 'biannual'  THEN INTERVAL '6 months'
-                      WHEN 'annual'    THEN INTERVAL '1 year'
-                  END
-              ) < $1::date
+        WHERE vendor_review_due_date(
+                  last_review_date, review_cadence, created_at,
+                  COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1), 30)
+              ) < $2::date
     )::bigint AS overdue_count
 FROM vendors
-WHERE tenant_id = $2
+WHERE tenant_id = $1
   AND ($3::vendor_criticality IS NULL
        OR criticality = $3)
 GROUP BY criticality
 `
 
 type CountVendorsForBurndownParams struct {
-	Cutoff      pgtype.Date        `json:"cutoff"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Cutoff      pgtype.Date        `json:"cutoff"`
 	Criticality *VendorCriticality `json:"criticality"`
 }
 
@@ -80,12 +75,14 @@ type CountVendorsForBurndownRow struct {
 	OverdueCount int64             `json:"overdue_count"`
 }
 
-// AC-3 burndown: returns total + overdue counts per criticality band. Used
+// AC-3 burndown: returns total + overdue counts per criticality band. The
+// overdue rule is ListOverdueVendors' (vendor_review_due_date before the
+// cutoff day, #2232), so the counts match the overdue list. Used
 // by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 // Returns one row per criticality present in the result set; empty bands are
 // not included (callers fill in zero where needed).
 func (q *Queries) CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error) {
-	rows, err := q.db.Query(ctx, countVendorsForBurndown, arg.Cutoff, arg.TenantID, arg.Criticality)
+	rows, err := q.db.Query(ctx, countVendorsForBurndown, arg.TenantID, arg.Cutoff, arg.Criticality)
 	if err != nil {
 		return nil, err
 	}
@@ -109,13 +106,14 @@ INSERT INTO vendors (
     id, tenant_id, name, domain, criticality, contract_start, contract_end,
     dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user,
     linked_sow_uri, notes, annual_cost, currency, renewal_date, auto_renew,
-    license_count, tool_category, cost_owner, commercial_status, billing_cadence
+    license_count, tool_category, cost_owner, commercial_status, billing_cadence,
+    owner_user_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23
+    $17, $18, $19, $20, $21, $22, $23, $24
 )
-RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence
+RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id
 `
 
 type CreateVendorParams struct {
@@ -142,6 +140,7 @@ type CreateVendorParams struct {
 	CostOwner        string                 `json:"cost_owner"`
 	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
 	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
+	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
 }
 
 // Insert a vendor. tenant_id is captured directly so RLS evaluates the
@@ -172,6 +171,7 @@ func (q *Queries) CreateVendor(ctx context.Context, arg CreateVendorParams) (Ven
 		arg.CostOwner,
 		arg.CommercialStatus,
 		arg.BillingCadence,
+		arg.OwnerUserID,
 	)
 	var i Vendor
 	err := row.Scan(
@@ -200,6 +200,7 @@ func (q *Queries) CreateVendor(ctx context.Context, arg CreateVendorParams) (Ven
 		&i.CostOwner,
 		&i.CommercialStatus,
 		&i.BillingCadence,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -219,7 +220,7 @@ func (q *Queries) DeleteVendor(ctx context.Context, arg DeleteVendorParams) erro
 }
 
 const getVendor = `-- name: GetVendor :one
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id FROM vendors
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -257,27 +258,50 @@ func (q *Queries) GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, e
 		&i.CostOwner,
 		&i.CommercialStatus,
 		&i.BillingCadence,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
+const insertVendorAuditLog = `-- name: InsertVendorAuditLog :exec
+INSERT INTO vendor_audit_log (
+    tenant_id, vendor_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertVendorAuditLogParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	VendorID    pgtype.UUID `json:"vendor_id"`
+	Actor       string      `json:"actor"`
+	ActionType  string      `json:"action_type"`
+	BeforeState []byte      `json:"before_state"`
+	AfterState  []byte      `json:"after_state"`
+}
+
+// #2450: one append-only row per vendor owner change, in the write's tx.
+func (q *Queries) InsertVendorAuditLog(ctx context.Context, arg InsertVendorAuditLogParams) error {
+	_, err := q.db.Exec(ctx, insertVendorAuditLog,
+		arg.TenantID,
+		arg.VendorID,
+		arg.Actor,
+		arg.ActionType,
+		arg.BeforeState,
+		arg.AfterState,
+	)
+	return err
+}
+
 const listOverdueVendors = `-- name: ListOverdueVendors :many
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id FROM vendors
 WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
-  AND (
-        last_review_date IS NULL
-     OR last_review_date + (
-            CASE review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '1 year'
-            END
-        ) < $3::date
-      )
-ORDER BY last_review_date ASC NULLS FIRST, name ASC
+  AND vendor_review_due_date(
+          last_review_date, review_cadence, created_at,
+          COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1), 30)
+      ) < $3::date
+ORDER BY last_review_date ASC NULLS FIRST, created_at ASC, name ASC
 `
 
 type ListOverdueVendorsParams struct {
@@ -286,13 +310,14 @@ type ListOverdueVendorsParams struct {
 	Cutoff      pgtype.Date        `json:"cutoff"`
 }
 
-// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-// the cutoff date. NULL last_review_date means "never reviewed" which always
-// counts as overdue (a vendor with no review on file is by definition past
-// due). Cadence -> interval mapping happens with a CASE in SQL so the query
-// plan is stable. Cutoff is passed as DATE so the caller controls "now"
-// (testability) and timezone semantics (vendor reviews are date-granular,
-// not timestamp-granular).
+// AC-4 overdue calc. A vendor is overdue once the UTC day its review is due
+// has ended: vendor_review_due_date(...) < cutoff (#2232, the
+// internal/duedate rule). The due date is last_review_date + cadence, or for
+// a vendor never reviewed the UTC date of created_at plus the tenant's
+// vendor_initial_review_days (default 30 when the tenant has no row, #2061).
+// CountVendorsForBurndown, the compliance calendar and vendor.IsOverdueAsOf
+// apply the same rule. Cutoff is passed as DATE so the caller controls "now"
+// (testability) and the day it falls on (vendor reviews are date-granular).
 func (q *Queries) ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error) {
 	rows, err := q.db.Query(ctx, listOverdueVendors, arg.TenantID, arg.Criticality, arg.Cutoff)
 	if err != nil {
@@ -328,6 +353,7 @@ func (q *Queries) ListOverdueVendors(ctx context.Context, arg ListOverdueVendors
 			&i.CostOwner,
 			&i.CommercialStatus,
 			&i.BillingCadence,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -438,7 +464,7 @@ func (q *Queries) ListVendorSpendRollup(ctx context.Context, tenantID pgtype.UUI
 }
 
 const listVendors = `-- name: ListVendors :many
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id FROM vendors
 WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
@@ -492,6 +518,7 @@ func (q *Queries) ListVendors(ctx context.Context, arg ListVendorsParams) ([]Ven
 			&i.CostOwner,
 			&i.CommercialStatus,
 			&i.BillingCadence,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -548,9 +575,10 @@ UPDATE vendors SET
     cost_owner       = $21,
     commercial_status = $22,
     billing_cadence  = $23,
+    owner_user_id    = $24,
     updated_at       = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence
+RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id
 `
 
 type UpdateVendorParams struct {
@@ -577,6 +605,7 @@ type UpdateVendorParams struct {
 	CostOwner        string                 `json:"cost_owner"`
 	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
 	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
+	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
 }
 
 // Full-row update. Caller is responsible for sending every field; partial
@@ -607,6 +636,7 @@ func (q *Queries) UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Ven
 		arg.CostOwner,
 		arg.CommercialStatus,
 		arg.BillingCadence,
+		arg.OwnerUserID,
 	)
 	var i Vendor
 	err := row.Scan(
@@ -635,6 +665,7 @@ func (q *Queries) UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Ven
 		&i.CostOwner,
 		&i.CommercialStatus,
 		&i.BillingCadence,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

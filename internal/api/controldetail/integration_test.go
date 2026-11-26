@@ -40,8 +40,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/controldetail"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -138,10 +138,10 @@ func seedRiskWithLink(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID u
 	riskID := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology,
+			id, tenant_id, title, category_id, methodology,
 			inherent_score, treatment, residual_score
 		)
-		VALUES ($1, $2, $3, 'confidentiality', 'qualitative_5x5',
+		VALUES ($1, $2, $3, risk_category_id($2, 'confidentiality'), 'qualitative_5x5',
 		        '{"likelihood":3,"impact":4}'::jsonb, 'mitigate',
 		        '{"likelihood":2,"impact":3}'::jsonb)
 	`, riskID, tenant, title); err != nil {
@@ -185,7 +185,8 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "control_owner")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")
@@ -240,6 +241,7 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 	r.Get("/v1/controls/{id}/policies", h.Policies)
 	r.Get("/v1/controls/{id}/risks", h.Risks)
 	r.Get("/v1/controls/{id}/history", h.History)
+	r.Get("/v1/controls/{id}/anchor-history", h.AnchorHistory)
 	return r
 }
 
@@ -810,12 +812,12 @@ func TestEvidence_TenantWideTotalIgnoresFilters(t *testing.T) {
 	}
 }
 
-// ISC-236-2: the per-control /v1/evidence?control_id=… path ALSO carries
-// `total`, equal to the tenant-wide ledger count — NOT the count for the
-// specific control. (Confusing the two is the bug class slice 236 closes;
-// the per-control wire shape is consistent with the tenant-wide wire
-// shape so the frontend can render a single meta-line formatter.)
-func TestEvidence_PerControlTotalIsTenantWide(t *testing.T) {
+// #2470 (reverses ISC-236-2): the per-control /v1/evidence?control_id=…
+// path's `total` is the count of that request's control and window, not the
+// tenant ledger. The tenant-wide count told a period-scoped auditor how much
+// evidence the whole tenant holds. Control A has two in-window rows and one
+// outside the window; control B has one.
+func TestEvidence_PerControlTotalIsFilteredCount(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
@@ -823,23 +825,23 @@ func TestEvidence_PerControlTotalIsTenantWide(t *testing.T) {
 
 	a := seedControl(t, admin, tenant)
 	b := seedControl(t, admin, tenant)
-	// Two rows for control A, one row for control B — tenant total = 3.
 	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "pass", time.Now().UTC().Add(-1*24*time.Hour))
 	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "fail", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidenceWithResult(t, admin, tenant, a, "k.v1", "pass", time.Now().UTC().Add(-90*24*time.Hour))
 	seedEvidenceWithResult(t, admin, tenant, b, "k.v1", "pass", time.Now().UTC().Add(-3*24*time.Hour))
 
-	resp, body := get(t, env, "/v1/evidence?control_id="+a.String())
+	// limit=1 so total is not just the page length.
+	resp, body := get(t, env, "/v1/evidence?control_id="+a.String()+"&limit=1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200; body %v", resp.StatusCode, body)
 	}
-	// `evidence` is per-control A — two rows.
 	rows, _ := body["evidence"].([]any)
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 per-control rows, got %d", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row on the page, got %d", len(rows))
 	}
-	// `total` is tenant-wide — three rows.
-	if got := totalFromBody(body); got != 3 {
-		t.Fatalf("total = %d, want 3 (per-control wire shape must surface tenant-wide total)", got)
+	// Two rows for control A inside the default 30-day window.
+	if got := totalFromBody(body); got != 2 {
+		t.Fatalf("total = %d, want 2 (control A inside the window, not the tenant ledger of 4)", got)
 	}
 }
 

@@ -406,7 +406,7 @@ func TestNewScopesCmd_RendersTable(t *testing.T) {
 	}
 	// At least one documented scope name (from githubauth.DocumentedScopes)
 	// must render. "Repository: Administration" gates the
-	// github.repo_protection.v1 evidence kind.
+	// github.repo_protection.v2 evidence kind.
 	if !strings.Contains(out, "Repository: Administration") {
 		t.Errorf("scopes output missing Repository: Administration entry: %q", out)
 	}
@@ -554,20 +554,21 @@ func TestBuildRepoProtectionRecord_AllResults(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			state := githubrepo.ProtectionState{
+				RepoID:        7,
 				RepoFullName:  "example/repo",
 				DefaultBranch: "main",
 				Result:        tc.in,
 				ObservedAt:    time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 			}
-			rec, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+			rec, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 			if err != nil {
 				t.Fatalf("buildRepoProtectionRecord: %v", err)
 			}
 			if rec.GetResult() != tc.want {
 				t.Errorf("result = %v; want %v", rec.GetResult(), tc.want)
 			}
-			if rec.GetEvidenceKind() != "github.repo_protection.v1" {
-				t.Errorf("kind = %q; want github.repo_protection.v1", rec.GetEvidenceKind())
+			if rec.GetEvidenceKind() != "github.repo_protection.v2" {
+				t.Errorf("kind = %q; want github.repo_protection.v2", rec.GetEvidenceKind())
 			}
 		})
 	}
@@ -660,7 +661,7 @@ func TestBuildAuditEventRecord_OptionalRepo(t *testing.T) {
 		CreatedAt:      time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 		// Repo intentionally empty (org-level event)
 	}
-	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditEventRecord: %v", err)
 	}
@@ -690,7 +691,7 @@ func TestBuildAuditEventRecord_WithRepo(t *testing.T) {
 		DeliveryID:     "test-delivery-2",
 		CreatedAt:      time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditEventRecord: %v", err)
 	}

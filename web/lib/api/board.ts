@@ -3,6 +3,7 @@
 // export-URL helpers and the approver-role probe (`getSessionMe`).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 032: quarterly board pack -----
 //
@@ -14,11 +15,19 @@ import { APIError } from "./base";
 
 export type BoardPackSectionData = {
   // posture
+  // posture (#2056): one row per framework version, the dashboard's own
+  // per-framework posture; scope_not_set rows carry no percentage.
   frameworks?: {
+    framework_id?: string;
+    framework_version_id?: string;
     slug: string;
     name: string;
+    version?: string;
+    scope_not_set?: boolean;
     coverage_pct: number;
     freshness_pct: number;
+    baseline_pct?: number;
+    no_trend_history?: boolean;
     trend_arrow: string;
     delta: number;
     state: string;
@@ -28,14 +37,20 @@ export type BoardPackSectionData = {
     id: string;
     title: string;
     category: string;
+    category_name?: string;
     treatment: string;
+    methodology?: string;
     residual_severity: number;
+    // #2511: no score yet; ranked last.
+    unscored?: boolean;
     age_days: number;
   }[];
   // coverage_trend
   coverage_pct?: number;
   baseline_coverage_pct?: number;
   coverage_delta?: number;
+  scoped_framework_count?: number;
+  no_baseline?: boolean;
   // open_findings
   findings?: {
     evaluation_id: string;
@@ -77,6 +92,9 @@ export type BoardPackContent = {
   generated_at: string;
   status: string;
   sections: Record<string, BoardPackSection>;
+  // Sections left out at generation because the module that owns them was
+  // switched off (#2175). Mirrors internal/board/pack.go Pack.Omitted.
+  omitted_sections?: string[];
 };
 
 export type BoardPack = {
@@ -113,6 +131,16 @@ export const BOARD_PACK_SECTION_KEYS: string[] = [
   "investment",
   "asks",
 ];
+
+// packSectionKeys returns the section keys a pack carries, in canonical
+// order: the fixed keys without those left out at generation because their
+// module was switched off (#2175). A pack generated before then keeps every
+// section it has, and a missing section that was not omitted still renders
+// as "not generated".
+export function packSectionKeys(content: BoardPackContent): string[] {
+  const omitted = new Set(content.omitted_sections ?? []);
+  return BOARD_PACK_SECTION_KEYS.filter((key) => !omitted.has(key));
+}
 
 // SECTION_TITLES maps each fixed section key to its board-facing human
 // label. Mirrors internal/board/pack.go `sectionTitles` (all eight keys).
@@ -155,13 +183,7 @@ export type BoardPackSectionInputs = {
 async function boardPackJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) msg = body.error;
-    } catch {
-      // keep the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;

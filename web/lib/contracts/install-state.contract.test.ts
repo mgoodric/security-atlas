@@ -75,6 +75,7 @@ describe("contract: GET /api/install-state <-> atlas GET /v1/install-state", () 
     fresh_install_with_tenant: 1,
     fresh_install_without_tenant: 1,
     post_first_install: 1,
+    post_first_install_single_tenant: 1,
   })) {
     test(`BFF passes provider variant "${variantName}" through verbatim`, async () => {
       const providerBody = golden.variants[variantName];

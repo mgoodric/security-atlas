@@ -13,7 +13,9 @@
 //	                     (aggregated by class — the panel's bucket=class
 //	                     wire shape)
 //	drift              — slice 016 drift.Store.Report (since=7d default)
-//	upcoming           — slice 066 dashboard.Store.UpcomingItems
+//	upcoming           — calendar.Store.ListEvents over the next
+//	                     14 days, the dashboard's "Coming up" window
+//	                     (#2130 retired the upcoming rollup)
 //	activity           — slice 066 dashboard.Store.ActivityFeed
 //
 // Each call delegates to the upstream store, which opens its own
@@ -31,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/drift"
@@ -69,12 +72,22 @@ type Panels struct {
 
 // FrameworkPosturePanelRow mirrors the wire shape of
 // `/v1/frameworks/posture`'s rows.
+//
+// ScopeSet (#2114) is false when the tenant has no activated framework
+// scope for the version; the percentages are then nil (JSON null, an empty
+// CSV/XLSX cell). The percentages are pointers so a snapshot written before
+// #2114, with plain numbers and no scope_set key, still decodes.
 type FrameworkPosturePanelRow struct {
-	FrameworkID        string  `json:"framework_id"`
-	FrameworkVersion   string  `json:"framework_version"`
-	CoveragePct        float64 `json:"coverage_pct"`
-	FreshnessComposite float64 `json:"freshness_composite"`
-	TrendDelta90d      float64 `json:"trend_delta_90d"`
+	FrameworkID        string   `json:"framework_id"`
+	FrameworkVersion   string   `json:"framework_version"`
+	FrameworkVersionID string   `json:"framework_version_id"`
+	ScopeSet           bool     `json:"scope_set"`
+	CoveragePct        *float64 `json:"coverage_pct"`
+	// CoveredByExceptionPct is the part of CoveragePct that rests only on
+	// active exceptions (#2112).
+	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    *float64 `json:"freshness_composite"`
+	TrendDelta90d         *float64 `json:"trend_delta_90d"`
 }
 
 // RiskPanelRow mirrors the relevant subset of `/v1/risks`'s rows
@@ -96,6 +109,9 @@ type RiskPanelRow struct {
 	Methodology   string `json:"methodology"`
 	ResidualScore string `json:"residual_score,omitempty"`
 	CreatedAt     string `json:"created_at"`
+	// CategoryName is the organisation's name for the category whose slug
+	// is Category (#1814).
+	CategoryName string `json:"category_name"`
 }
 
 // FreshnessPanel mirrors `/v1/evidence/freshness?bucket=class`'s
@@ -116,12 +132,18 @@ type FreshnessClassBucket struct {
 }
 
 // DriftPanel mirrors `/v1/controls/drift?since=7d`'s payload.
+//
+// Delta is the net change in passing controls (latest snapshot minus
+// earliest), not started-passing minus flipped-out: a control can fail and
+// recover inside the window. Read it beside both lists.
 type DriftPanel struct {
-	Since           string     `json:"since"`
-	Through         string     `json:"through"`
-	Delta           int        `json:"delta"`
-	FlippedOutCount int        `json:"flipped_out_count"`
-	FlippedOut      []DriftRow `json:"flipped_out"`
+	Since               string         `json:"since"`
+	Through             string         `json:"through"`
+	Delta               int            `json:"delta"`
+	FlippedOutCount     int            `json:"flipped_out_count"`
+	FlippedOut          []DriftRow     `json:"flipped_out"`
+	StartedPassingCount int            `json:"started_passing_count"`
+	StartedPassing      []DriftGainRow `json:"started_passing"`
 }
 
 // DriftRow is one flipped-out-of-passing control.
@@ -131,7 +153,16 @@ type DriftRow struct {
 	CurrentResult string `json:"current_result"`
 }
 
-// UpcomingPanelRow mirrors `/v1/upcoming`'s rows.
+// DriftGainRow is one control that started passing in the window (#2195).
+type DriftGainRow struct {
+	ControlID string `json:"control_id"`
+}
+
+// UpcomingPanelRow is one compliance-calendar event in the export's
+// "Coming up" window. The column names predate #2130 (they were
+// the upcoming rollup's); they are kept so existing export consumers keep
+// parsing: due_date is the event's starts_at, category its type,
+// resource_type / resource_id its related entity.
 type UpcomingPanelRow struct {
 	DueDate      string `json:"due_date"`
 	Category     string `json:"category"`
@@ -167,9 +198,14 @@ const defaultDriftWindow = 7 * 24 * time.Hour
 // first page and the export mirrors what an operator sees.
 const defaultActivityPageSize = 50
 
-// defaultUpcomingPageSize matches the default page size for the
-// upcoming rollup. Same "first page only" posture as activity.
-const defaultUpcomingPageSize = 50
+// UpcomingWindow is the dashboard's "Coming up" window (#2130): the
+// calendar from the start of today (UTC) for this long. The web panel
+// asks the calendar for the same 14 days.
+const UpcomingWindow = 14 * 24 * time.Hour
+
+// upcomingRowLimit bounds the export's calendar read. 14 days of
+// events stays well under it at v1 volumes; it guards the pool.
+const upcomingRowLimit = 500
 
 // defaultPostureTrendWindow is the slice 066 dashboard's trend window
 // (90 days; see internal/api/dashboard/handler.go `trendWindow`).
@@ -184,21 +220,24 @@ type LivePanelSource struct {
 	riskStore      *risk.Store
 	freshnessStore *freshness.Store
 	driftStore     *drift.Store
+	calendarStore  *calendar.Store
 }
 
-// NewLivePanelSource constructs a LivePanelSource. All four stores
+// NewLivePanelSource constructs a LivePanelSource. All five stores
 // MUST be non-nil for the production code path.
 func NewLivePanelSource(
 	dashboardStore *dashboard.Store,
 	riskStore *risk.Store,
 	freshnessStore *freshness.Store,
 	driftStore *drift.Store,
+	calendarStore *calendar.Store,
 ) *LivePanelSource {
 	return &LivePanelSource{
 		dashboardStore: dashboardStore,
 		riskStore:      riskStore,
 		freshnessStore: freshnessStore,
 		driftStore:     driftStore,
+		calendarStore:  calendarStore,
 	}
 }
 
@@ -209,7 +248,7 @@ func NewLivePanelSource(
 // parallelising would saturate the pool under a burst of export
 // requests without a meaningful latency benefit at v1 dashboard
 // volumes.
-func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
+func (s *LivePanelSource) Snapshot(ctx context.Context, upcoming UpcomingTypes) (Snapshot, error) {
 	out := Snapshot{
 		SnapshotAt: time.Now().UTC(),
 	}
@@ -221,23 +260,33 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	out.Panels.FrameworkPosture = make([]FrameworkPosturePanelRow, len(postureRows))
 	for i, p := range postureRows {
-		out.Panels.FrameworkPosture[i] = FrameworkPosturePanelRow{
+		row := FrameworkPosturePanelRow{
 			FrameworkID:        uuidStringFromPgtype(p.FrameworkID),
 			FrameworkVersion:   p.FrameworkVersion,
-			CoveragePct:        p.CoveragePct,
-			FreshnessComposite: p.FreshnessComposite,
-			TrendDelta90d:      p.TrendDelta90d,
+			FrameworkVersionID: uuidStringFromPgtype(p.FrameworkVersionID),
+			ScopeSet:           p.ScopeActivated,
 		}
+		if p.ScopeActivated {
+			row.CoveragePct = &p.CoveragePct
+			row.CoveredByExceptionPct = &p.CoveredByExceptionPct
+			row.FreshnessComposite = &p.FreshnessComposite
+			row.TrendDelta90d = &p.TrendDelta90d
+		}
+		out.Panels.FrameworkPosture[i] = row
 	}
 
 	// 2. Risks — same filter the dashboard's risks panel uses
 	//    (treatment=mitigate, sort=residual,age).
-	risks, err := s.riskStore.List(ctx, risk.ListFilter{
-		Treatment: dbx.RiskTreatmentMitigate,
-		Sort:      risk.SortResidualAge,
-	})
-	if err != nil {
-		return out, fmt.Errorf("risks panel: %w", err)
+	//    Empty when the caller may not see the Risk module (#2173).
+	var risks []risk.Risk
+	if !upcoming.HideRisks {
+		risks, err = s.riskStore.List(ctx, risk.ListFilter{
+			Treatment: dbx.RiskTreatmentMitigate,
+			Sort:      risk.SortResidualAge,
+		})
+		if err != nil {
+			return out, fmt.Errorf("risks panel: %w", err)
+		}
 	}
 	out.Panels.Risks = make([]RiskPanelRow, len(risks))
 	for i, rk := range risks {
@@ -249,10 +298,11 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 			ID:            rk.ID.String(),
 			Title:         rk.Title,
 			Treatment:     string(rk.Treatment),
-			Category:      string(rk.Category),
+			Category:      rk.CategorySlug,
 			Methodology:   string(rk.Methodology),
 			ResidualScore: residual,
 			CreatedAt:     rk.CreatedAt.UTC().Format(time.RFC3339),
+			CategoryName:  rk.CategoryName,
 		}
 	}
 
@@ -277,28 +327,40 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 			CurrentResult: fr.CurrentResult,
 		}
 	}
+	gains := make([]DriftGainRow, len(driftReport.StartedPassing))
+	for i, g := range driftReport.StartedPassing {
+		gains[i] = DriftGainRow{ControlID: g.ControlID.String()}
+	}
 	out.Panels.Drift = DriftPanel{
-		Since:           driftReport.SinceDate.UTC().Format("2006-01-02"),
-		Through:         driftReport.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           driftReport.Delta,
-		FlippedOutCount: len(flips),
-		FlippedOut:      flips,
+		Since:               driftReport.SinceDate.UTC().Format("2006-01-02"),
+		Through:             driftReport.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               driftReport.Delta,
+		FlippedOutCount:     len(flips),
+		FlippedOut:          flips,
+		StartedPassingCount: len(gains),
+		StartedPassing:      gains,
 	}
 
-	// 5. Upcoming — first page only; category filter empty (all
-	//    categories merged).
-	upcomingRows, err := s.dashboardStore.UpcomingItemsFirstPage(ctx, "", int32(defaultUpcomingPageSize))
-	if err != nil {
-		return out, fmt.Errorf("upcoming panel: %w", err)
+	// 5. Upcoming — the calendar's next 14 days, the window the
+	//    dashboard's "Coming up" panel shows (#2130), narrowed to the
+	//    event types the caller may read on the calendar (#2234).
+	now := time.Now().UTC()
+	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var events []dbx.ListCalendarEventsRow
+	if !upcoming.None {
+		events, err = s.calendarStore.ListEvents(ctx, from, from.Add(UpcomingWindow), now, upcoming.Filter, upcomingRowLimit)
+		if err != nil {
+			return out, fmt.Errorf("upcoming panel: %w", err)
+		}
 	}
-	out.Panels.Upcoming = make([]UpcomingPanelRow, 0, len(upcomingRows))
-	for _, u := range upcomingRows {
+	out.Panels.Upcoming = make([]UpcomingPanelRow, 0, len(events))
+	for _, e := range events {
 		out.Panels.Upcoming = append(out.Panels.Upcoming, UpcomingPanelRow{
-			DueDate:      tsStringFromPgtype(u.DueDate),
-			Category:     u.Category,
-			Title:        anyToString(u.Title),
-			ResourceType: u.ResourceType,
-			ResourceID:   u.ResourceID,
+			DueDate:      tsStringFromPgtype(e.StartsAt),
+			Category:     e.EventType,
+			Title:        e.Title,
+			ResourceType: e.RelatedEntityKind,
+			ResourceID:   e.RelatedEntityID,
 		})
 	}
 
@@ -395,17 +457,4 @@ func tsStringFromPgtype(t pgtype.Timestamptz) string {
 		return ""
 	}
 	return t.Time.UTC().Format(time.RFC3339Nano)
-}
-
-func anyToString(v any) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	case []byte:
-		return string(s)
-	case nil:
-		return ""
-	default:
-		return fmt.Sprintf("%v", v)
-	}
 }

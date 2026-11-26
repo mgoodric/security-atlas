@@ -1,0 +1,481 @@
+# #2503 — tenant-scoped /v1/admin pages for organisation admins — decisions log
+
+**Ticket:** https://github.com/mgoodric/security-atlas/issues/2503
+**Date:** 2026-11-17
+
+Matt's decision (2026-11-17): organisation admins manage their own
+organisation's admin pages. Until now every `/v1/admin/*` route and `/v1/me`
+`is_admin` were super-admin only (#2216 D2, #2428 D4), held by the handlers'
+`cred.IsAdmin` gates. OPA's `admin.rego` admitted any `admin` role on every
+`/v1/admin/*` segment except `crosswalk-edge-remap-proposals`, so the handlers
+were the only thing keeping a tenant admin out.
+
+This is the first of the PRs the ticket splits into: the inventory, the
+mechanism, and the users routes. The other tenant-scoped routes follow in
+later PRs (D6).
+
+**Detection-tier classification (slice 353 / Q-13):**
+
+- `detection_tier_actual`: none (a product decision, not a bug found during
+  the work).
+- `detection_tier_target`: integration.
+  `TestTenantAdmin2503_*` (real ES256 JWTs through jwtmw, tenancymw, authzmw
+  and the real adminusers handlers on Postgres) fails on the old rego and
+  handler gate and passes on the new ones.
+
+## Words used here
+
+- **Admin credential**: `cred.IsAdmin`. jwtmw sets it from the verified
+  `atlas:super_admin` claim; an admin-flagged API key also carries it.
+- **Tenant admin by role**: a caller whose live `user_roles` in its current
+  tenant include `admin`, with no admin credential. `authz.IsTenantAdmin`
+  admits both.
+
+## D1 — the inventory
+
+Every `/v1/admin/*` route and method. "OPA before" and "OPA after" are the
+decision for a tenant admin by role. A super-admin and an admin-flagged key
+keep exactly what they had.
+
+| Route                                                                                                              | Class                                           | Reason                                                                                                              | Handler gate before                                              | Handler gate after                             | OPA before | OPA after                                       |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- | ---------- | ----------------------------------------------- |
+| `GET /v1/admin/users`                                                                                              | tenant                                          | own tenant's members, under RLS; super-admins get the cross-tenant list                                             | `cred.IsAdmin`                                                   | `IsTenantAdmin`                                | allow      | allow                                           |
+| `GET /v1/admin/users/{id}`                                                                                         | tenant                                          | own member, under RLS (foreign id 404)                                                                              | `cred.IsAdmin`                                                   | `IsTenantAdmin`                                | allow      | allow                                           |
+| `PATCH /v1/admin/users/{id}/roles`                                                                                 | tenant                                          | own member's roles; canonical roles only, last-admin guard                                                          | `cred.IsAdmin`                                                   | `IsTenantAdmin`, foreign id 404                | allow      | allow                                           |
+| `PUT /v1/admin/users/{id}/module-access`                                                                           | tenant                                          | own member's module access (#2172)                                                                                  | `IsTenantAdmin`                                                  | unchanged                                      | allow      | allow                                           |
+| `POST /v1/admin/users/assign`                                                                                      | tenant within own tenant; platform cross-tenant | cross-tenant needs super_admin in the handler                                                                       | super_admin or `cred.IsAdmin`                                    | super_admin or `IsTenantAdmin`                 | allow      | allow                                           |
+| `POST /v1/admin/users/revoke`                                                                                      | tenant within own tenant; platform cross-tenant | as assign                                                                                                           | super_admin or `cred.IsAdmin`                                    | super_admin or `IsTenantAdmin`, foreign id 404 | allow      | allow                                           |
+| `GET /v1/admin/controls/held-back`                                                                                 | tenant                                          | own tenant's held-back controls (#2358)                                                                             | `IsTenantAdmin`                                                  | unchanged                                      | allow      | allow                                           |
+| `GET/PUT/DELETE /v1/admin/llm-routing`                                                                             | tenant                                          | own tenant's LLM routing (#2428)                                                                                    | `IsTenantAdmin`                                                  | unchanged                                      | allow      | allow                                           |
+| `GET /v1/admin/evidence/export`                                                                                    | tenant                                          | own tenant's ledger export (#2507)                                                                                  | `IsTenantApprover`                                               | unchanged                                      | allow      | allow                                           |
+| `GET /v1/admin/policies/export`                                                                                    | tenant                                          | as above                                                                                                            | `IsTenantApprover`                                               | unchanged                                      | allow      | allow                                           |
+| `GET /v1/admin/exceptions/export`                                                                                  | tenant                                          | as above                                                                                                            | `IsTenantApprover`                                               | unchanged                                      | allow      | allow                                           |
+| `GET /v1/admin/samples/export`                                                                                     | tenant                                          | as above                                                                                                            | `IsTenantApprover`                                               | unchanged                                      | allow      | allow                                           |
+| `POST /v1/admin/policies/import`                                                                                   | tenant, later PR                                | bulk-writes published policies with history; opening it is a separate call                                          | `cred.IsAdmin`                                                   | unchanged                                      | allow      | allow (segment `policies`; the handler refuses) |
+| `GET/PATCH /v1/admin/sso`, `POST /v1/admin/sso/preflight`                                                          | tenant, later PR                                | own tenant's OIDC config                                                                                            | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/scim-credentials`, `DELETE …/{id}`                                                             | tenant, later PR                                | own tenant's SCIM bearer                                                                                            | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/credentials`, `POST …/{id}/rotate`, `POST …/{id}/revoke`                                       | tenant, later PR                                | own tenant's API keys; mint carries an `is_admin` flag that must be refused, and roles must not exceed the minter's | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/group-role-mappings`, `DELETE …/{id}`                                                          | tenant, later PR                                | own tenant's IdP group-to-role map                                                                                  | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/features`, `PATCH …/{key}`                                                                          | tenant, later PR                                | own tenant's module switches                                                                                        | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/audit-log`                                                                                          | unsure, platform for now                        | feature-flag flip log; see D5                                                                                       | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/audit-log/unified`, `…/export`                                                                      | unsure, platform for now                        | see D5                                                                                                              | `cred.IsAdmin` or auditor/grc_engineer row                       | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/audit-periods/export`                                                                               | unsure, platform for now                        | handler admits auditor/grc_engineer, not a tenant admin                                                             | `cred.IsAdmin` or auditor/grc_engineer                           | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/vendors/export`                                                                                     | unsure, platform for now                        | as above                                                                                                            | `cred.IsAdmin` or auditor/grc_engineer                           | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/demo/status`, `POST …/seed`, `POST …/teardown`                                                      | platform                                        | seed and teardown create and delete a whole tenant (#1851)                                                          | status: `cred.IsAdmin` or live admin; seed/teardown: super_admin | unchanged                                      | allow      | deny (D4)                                       |
+| `POST /v1/admin/install/reset-bootstrap`                                                                           | platform                                        | install-wide bootstrap token                                                                                        | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/tenants`                                                                                       | platform                                        | lists and creates tenants                                                                                           | super_admin                                                      | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/super-admins`, `DELETE …/{user_id}`                                                            | platform                                        | super-admin management                                                                                              | super_admin                                                      | unchanged                                      | allow      | deny                                            |
+| `POST /v1/admin/authz-bundle/reload`                                                                               | platform                                        | swaps the install's policy bundle                                                                                   | super_admin                                                      | unchanged                                      | allow      | deny                                            |
+| `POST /v1/admin/crosswalk-edges/{id}/tier`                                                                         | platform                                        | global catalog rows (#1757)                                                                                         | super_admin                                                      | unchanged                                      | allow      | deny                                            |
+| `GET/POST /v1/admin/crosswalk-edge-remap-proposals…`                                                               | platform                                        | global catalog rows (#1777)                                                                                         | super_admin                                                      | unchanged                                      | deny       | deny                                            |
+| `POST /v1/admin/framework-versions/{id}/promote`, `…/revert`, `…/migrations:suggest`, `…/migrations/{id}/decision` | platform                                        | global catalog rows (#1757)                                                                                         | super_admin                                                      | unchanged                                      | allow      | deny                                            |
+| `GET /v1/admin/framework-versions/migrations`                                                                      | platform                                        | global catalog queue                                                                                                | `cred.IsAdmin`                                                   | unchanged                                      | allow      | deny                                            |
+
+grc_engineer, auditor, control_owner and viewer get the same OPA answer on
+every row as before: their rules are separate from `admin.rego`, which is the
+only file this changes.
+
+## D2 — the OPA mechanism: a named segment set, no wildcard
+
+`admin.rego`'s single `has_role("admin")` rule is split into three:
+
+1. `admin` role on any resource that is not `admin` (unchanged).
+2. `admin` role on `admin/<segment>` only for `tenant_admin_segments`:
+   `users`, `controls`, `llm-routing`, `evidence`, `policies`, `exceptions`,
+   `samples`.
+3. `admin` role plus an admin credential on any other `admin/<segment>`,
+   except the `super_admin_only_segments` (unchanged).
+
+BuildInput adds `input.user.attrs.is_admin_credential` (`cred.IsAdmin`) so
+rule 3 can tell the two callers apart; an admin credential derives the
+`admin` role in `derivedRolesFor` as before. The rego is in
+`internal/authz/rego_bundle/admin.rego`, mirrored byte for byte in
+`policies/authz/admin.rego` (#2410).
+
+The segment set starts with exactly the segments a tenant admin by role
+already reached through a handler (D1 rows marked unchanged and allow), plus
+`users`. Nothing a tenant admin could do before is refused now, except
+`demo/status` (D4). Each later PR adds its segment to the set with its
+handler change.
+
+`adminauditlog`'s payload gate asked OPA `write` on `admin` with an empty id
+to mean "is an admin". It now asks on `admin/users`, which the module-access
+rows it gates live under, so its answer is unchanged.
+
+## D3 — the users routes and their guards
+
+- `requireAdmin` in `adminusers` is `authz.IsTenantAdmin`. Every query runs
+  under the caller's tenant RLS; the tenant comes from the credential, never
+  from a path or body value. Cross-tenant assign and revoke keep their
+  super_admin check before this one.
+- `PATCH …/{id}/roles` checks the target is a member of the caller's tenant
+  before writing. Before, a foreign id deleted nothing, inserted an orphan
+  `user_roles` row in the caller's tenant, and answered 404 only on the
+  refetch. It is now a 404 with nothing written.
+- `POST …/revoke` within the caller's tenant checks the same and answers 404
+  for a foreign id, where it answered 204 having changed nothing.
+- `super_admin` is not a role: `PATCH …/roles` and `assign` accept only the
+  five canonical roles, so a tenant admin cannot grant it. Granting the
+  `admin` role to a member of its own tenant is allowed, as for any admin.
+- The last-admin guards (#2261/#2263/#2273) are unchanged and run for a tenant
+  admin as for anyone; the integration test checks self-demotion and revoke of
+  the only admin are 409.
+
+## D4 — demo status is platform
+
+A tenant admin by role could read `GET /v1/admin/demo/status` (whether the
+demo seed is switched on). The demo page seeds and tears down whole tenants,
+so the segment is platform and OPA now refuses the status read too. The web
+probes it only for a super-admin. The answer is an env-var flag, so nothing a
+tenant admin needs is lost.
+
+## D5 — audit-log stays where it is (for Matt; resolved in D9)
+
+grc_engineer's and auditor's reads of `/v1/admin/audit-log/unified` and its
+export are their own rules (slice 124 D5) and are unchanged. Whether a tenant
+admin by role should read the unified log, and whether `audit-log` should
+become tenant-admin-only (`tenant_admin_only_segments`) instead of staying
+readable by grc_engineer and auditor, is not settled by "users, roles, module
+access, settings, keys, SCIM/OIDC". It stays platform for a tenant admin and
+unchanged for the others until Matt decides. The same goes for the
+audit-periods and vendors exports.
+
+## D5a — grc_engineer still reads `admin/users` in OPA (for Matt; resolved in D10)
+
+`grc_engineer.rego`'s blanket read admits `GET /v1/admin/users` and
+`GET /v1/admin/users/{id}`. The handler refused grc_engineer there before
+(`cred.IsAdmin`) and still does (`IsTenantAdmin`), so access is unchanged.
+It is pinned in `handlerNarrower2428`. Adding `users` to
+`tenant_admin_only_segments` would make the layers agree, but it changes a
+grc_engineer OPA answer, which this ticket leaves alone.
+
+## D6 — what the later PRs carry
+
+Each adds its segment to `tenant_admin_segments` and switches its handler to
+`IsTenantAdmin`, with an integration test:
+
+- `sso` (incl. preflight), `scim-credentials`, `group-role-mappings`,
+  `features`.
+- `credentials`: a tenant admin's mint must refuse `is_admin: true` and
+  `is_approver`, and `owner_roles` no wider than the minter's own live roles;
+  the current handler takes `is_admin` from the request body.
+- `policies/import`, if Matt wants it opened.
+
+## D7 — web
+
+- `/v1/me` already carried `is_tenant_admin` (#2428 D4); `is_admin` keeps
+  meaning super-admin.
+- `AdminMe` (`lib/api/self.server.ts`) carries `is_tenant_admin`, true only on
+  a literal `true`.
+- The sidebar Admin entry (`shouldShowAdminEntry`) shows on `is_admin` or
+  `is_tenant_admin`. The role-string list stays `super_admin` only: a role
+  string is the session's claim, not a live grant.
+- `/admin` admits both. A tenant admin's section nav lists Admin and Users.
+  The overview shows the Users tile only, and does not fetch the API key or
+  feature counts.
+- The platform pages (SSO, API keys, Features, Audit, Super admins, Tenants,
+  Demo) wrap their children in `PlatformAdminGate`, which renders a "this page
+  is for platform super-admins" panel unless `is_admin`. The handlers and OPA
+  refuse those routes anyway; the gate keeps the page from rendering a screen
+  of 403s.
+- Other `is_admin` reads in the web were left alone: `/audit-log` and
+  `/activity` (`canReachAuditLog`) follow the backend's audit-log gate (D5),
+  `FeatureGate` uses it for module visibility, not the admin section, and
+  the Settings page's API tokens card follows `/v1/admin/credentials`, which
+  moves with the credentials PR (D6).
+
+## Part 2 — SSO, and Matt's calls on D4, D5, D5a and D6
+
+The second PR of the split. Matt decided the four open items on
+2026-11-18: D5 and D5a as below, D4 as built (demo status stays platform),
+and D6 as written (the credentials mint guard lands in the credentials PR,
+before `credentials` joins the segments).
+
+### D8 — SSO is tenant-scoped
+
+`GET/PATCH /v1/admin/sso` and `POST /v1/admin/sso/preflight` admit
+`authz.IsTenantAdmin`, and `sso` joins `tenant_admin_segments`. The handler
+keys every read and write on the credential's tenant under RLS (one
+`oidc_idp_configs` row per tenant), and the sign-in resolver reads the same
+row (#2602), so a tenant admin's change affects only its own sign-in. The
+issuer validation and SSRF guard are unchanged and apply to a tenant admin
+as to anyone. The `trust_unverified_email_for_link` switch (#1944) is in the
+same config: a tenant admin can turn it on for its own tenant. It links an
+IdP identity to an existing member of that tenant by email, the same
+authority the admin already has through Users.
+
+grc_engineer's blanket read still admits `GET /v1/admin/sso` in OPA; the
+handler refuses it, as before. It is pinned in `handlerNarrower2428`.
+
+### D9 — org admins read and export their own audit log (Matt, 2026-11-18)
+
+`audit-log` joins `tenant_admin_segments`. The handler gates move from
+`cred.IsAdmin` to `authz.IsTenantAdmin`:
+
+- `GET /v1/admin/audit-log` (the feature-flag flip log): `requireAdmin`.
+- `GET /v1/admin/audit-log/unified` and `…/export`: `callerAllowedUnified`
+  takes `IsTenantAdmin` in place of the flag; the live auditor/grc_engineer
+  `user_roles` lookup is unchanged, so grc_engineer keeps its read.
+- `GET /v1/activity/unified` passes the same value as its privileged view,
+  so an org admin sees the rows a privileged caller sees there (feature-flag
+  rows and other members' own-settings rows), as a super-admin does.
+
+All four run under the credential's tenant RLS. On the web, the export bar
+on Activity (`canReachAuditLog`) admits `is_tenant_admin`.
+
+### D10 — Users is org-admin only (Matt, 2026-11-18)
+
+`users` joins `tenant_admin_only_segments`, so grc_engineer's blanket read no
+longer admits `GET /v1/admin/users` in OPA; the handler and OPA now agree,
+and the `handlerNarrower2428` pin for it is gone. One consequence: the
+unified log's module-access rows (#2172) take their payload visibility from
+`admin/users`, so a grc_engineer now sees those rows without their payload.
+The payload-gate test pins that.
+
+The payload gate used to cache one OPA answer for every kind whose source
+is `admin`, and part 1 asked it on `admin/users`. Once `users` became
+tenant-admin only, that answer also hid the decision-log and feature-flag
+payloads from grc*engineer, which `TestPayloadGate*\*` caught. The gate now
+asks per segment (`kindSourceAdminSegment`): decision rows on `audit-log`,
+feature-flag rows on `features`, module-access rows on `users`. So
+grc_engineer keeps the first two and loses only the third.
+
+### D11 — inventory rows after part 2
+
+| Route                                         | Class                     | Handler gate                                 | OPA, tenant admin by role | OPA, grc_engineer                        |
+| --------------------------------------------- | ------------------------- | -------------------------------------------- | ------------------------- | ---------------------------------------- |
+| `GET/PATCH /v1/admin/sso`, `POST …/preflight` | tenant                    | `IsTenantAdmin`                              | allow                     | read allow (handler refuses); write deny |
+| `GET /v1/admin/audit-log`                     | tenant                    | `IsTenantAdmin`                              | allow                     | allow (handler refuses)                  |
+| `GET /v1/admin/audit-log/unified`, `…/export` | tenant                    | `IsTenantAdmin` or live auditor/grc_engineer | allow                     | allow                                    |
+| `GET /v1/admin/users…`                        | tenant, tenant-admin only | `IsTenantAdmin`                              | allow                     | deny (was allow)                         |
+
+The other D1 rows are unchanged.
+
+### D12 — tests
+
+- `TestTenantAdmin2503_SSOAndAuditLog`: a tenant admin by role saves and
+  reads its SSO config, another tenant's admin sees none of it, and the
+  feature-flag log, unified read and export all answer 200.
+- `TestTenantAdmin2503_OtherRolesRefused`: grc_engineer's `GET
+/v1/admin/users` is refused by OPA before the handler runs.
+- Both fail on main's code (the SSO read is a 403, the grc_engineer read
+  reaches the handler) and pass on this PR's.
+- `slice124` / `slice135`: a tenant admin by role is now admitted to the
+  unified log and its export.
+- `gate_sites_2447` / `routes2428`: the SSO and feature-flag-log gates are
+  rows. The unified read, export and activity gates are listed with no route
+  row: the unified pair adds a live DB role lookup a cred-only row cannot
+  express, and the activity call only picks the view.
+
+## Part 3 — SCIM credentials
+
+Matt (2026-11-18): org admins keep `trust_unverified_email_for_link` in the
+SSO config (D8 stands), and #2609 (auditing SSO changes) lands before the
+last PR of this split, the one that closes #2503.
+
+### D13 — SCIM credentials are tenant-scoped
+
+`POST/GET /v1/admin/scim-credentials` and `DELETE …/{id}` admit
+`authz.IsTenantAdmin`, and `scim-credentials` joins `tenant_admin_segments`.
+
+- The handler takes the tenant from the credential and accepts no
+  `tenant_id`. The store runs list and revoke under that tenant's RLS, so
+  another tenant's credential id is a 404.
+- The token it mints drives only `/scim/v2` for that tenant. It provisions
+  members and their group-derived roles there. That is the same authority
+  the admin already has through Users. Which group maps to which role is
+  set at `/v1/admin/group-role-mappings`, which stays platform until its
+  own PR.
+- There is no SCIM page in the web app, so nothing changes there.
+
+grc_engineer's blanket read still admits `GET /v1/admin/scim-credentials`
+(ids and descriptions, never a token) in OPA. The handler refuses it, as
+before, and it is pinned in `handlerNarrower2428`.
+
+### D14 — tests
+
+`TestTenantAdmin2503_SCIMCredentials`:
+
+- A tenant admin by role issues a credential for its own tenant, lists it
+  and revokes it.
+- Another tenant's admin does not see it in its list, and its revoke is
+  a 404.
+
+It fails on part 2's code: the issue is a 403.
+
+## Part 4 — IdP group-to-role mappings
+
+### D15 — group-role mappings are tenant-scoped
+
+`POST/GET /v1/admin/group-role-mappings` and `DELETE …/{id}` now admit
+`authz.IsTenantAdmin`, and `group-role-mappings` joins
+`tenant_admin_segments`.
+
+- A mapping can only target one of the five canonical roles. That is
+  `grouprole.ValidateMappingRole`, plus the table's role CHECK. So a tenant
+  admin cannot map a group to `super_admin`; that request is a 400. Mapping
+  a group to `admin` is allowed. It grants what the admin can already grant
+  through Users.
+- The store runs every operation under the caller's tenant RLS. Another
+  tenant's mapping id is a 404.
+- `idp_config_id` is optional and has no foreign key. A tenant admin could
+  type another tenant's config id into its own mapping. The resolver reads
+  mappings for the signing-in tenant only, under that tenant's RLS, so such
+  a row can never apply to the other tenant's sign-ins. It is inert, not a
+  cross-tenant write.
+- No web page manages mappings, so nothing changes in the web app.
+
+grc_engineer's blanket read still admits `GET /v1/admin/group-role-mappings`
+in OPA. The handler refuses it, as before, and it is pinned in
+`handlerNarrower2428`.
+
+### D16 — tests
+
+`TestTenantAdmin2503_GroupRoleMappings` checks four things:
+
+- A tenant admin by role creates a mapping, lists it and deletes it.
+- Mapping a group to `super_admin` is a 400.
+- Another tenant's admin doesn't see the mapping in its list.
+- Another tenant's admin gets a 404 when it tries to delete the mapping.
+
+On part 3's code the test fails, because both creates are refused with 403.
+
+## Part 5 — module and feature switches
+
+### D17 — features are tenant-scoped
+
+`GET /v1/admin/features` and `PATCH /v1/admin/features/{key}` admit
+`authz.IsTenantAdmin`, and `features` joins `tenant_admin_segments`.
+
+- Every flag row is keyed on the caller's tenant under RLS. A switch
+  changes only that tenant's modules.
+- The spine flags (`rls`, `tenancy`, `auth`, `schema.registry`, the scope,
+  evidence, framework and control-core keys) are refused in
+  `featureflag.Store.Set` for every caller, so a tenant admin cannot switch
+  off a platform invariant.
+- Every switch already writes `feature_flag_audit_log`, and since part 2 an
+  org admin reads that log.
+
+On the web:
+
+- `/admin/features` is no longer behind `PlatformAdminGate`.
+- A tenant admin's section nav and overview list Features, and the
+  overview shows its count for every admin.
+
+grc_engineer's blanket read still admits `GET /v1/admin/features` in OPA.
+The handler refuses it, as before, and `handlerNarrower2428` pins that.
+
+### D18 — tests
+
+`TestTenantAdmin2503_Features` checks that a tenant admin by role:
+
+- lists its flags;
+- switches its own `vendor.enabled` off, and another tenant's stays on;
+- is refused on `rls.policies`.
+
+On part 4's code the test fails: the list is a 403. The Playwright spec now
+expects Features among a tenant admin's pages.
+
+## Part 6 — API keys, with the mint guard (D6)
+
+### D19 — credentials are tenant-scoped, within the minter's authority
+
+The credentials routes now admit `authz.IsTenantAdmin`, and `credentials`
+joins `tenant_admin_segments`:
+
+- `POST/GET /v1/admin/credentials`
+- `POST …/{id}/rotate`
+- `POST …/{id}/revoke`
+
+As D6 required, a tenant admin by role (no admin credential) works only
+with keys it could hold itself. `admincreds.mintWithinCaller` enforces this:
+
+- **No `is_admin` key.** Such a key is an admin credential
+  (`cred.IsAdmin`). It would reach every platform `/v1/admin` segment, and
+  pass the handlers that still gate on the flag. Issue answers 403.
+- **No `is_approver` key.** Issue answers 403, as Matt confirmed in D6.
+- **Canonical `owner_roles` labels.** Each canonical label must be a role
+  the caller holds live. A live admin holds every tenant role, so for a
+  tenant admin this admits any canonical label; it is not a wider grant
+  than the admin already has. A free-text label grants nothing (#2595)
+  and passes.
+- **Rotate and revoke of a key it could not have minted are 403.** A
+  rotate returns a new plaintext with the same flags. Without this check, a
+  tenant admin who rotated a super-admin's `is_admin` key would receive an
+  admin credential. The falsifier showed exactly that: with the guard
+  disabled, the rotate answered 200 with a bearer.
+- **No change for an admin credential.** A super-admin, or an
+  admin-flagged key, keeps every behaviour it had before.
+
+The tenant comes from the credential (`tenant_id` is refused, slice 051),
+and the store runs under its RLS, so another tenant's key id is a 404.
+
+grc_engineer's blanket read still admits `GET /v1/admin/credentials` (the
+list carries no plaintext) in OPA. The handler refuses it, as before, and
+it is pinned in `handlerNarrower2428`.
+
+### D19a — personal keys: no rotate by another user, and rotate keeps the owner
+
+The #2655 review found a gap in D19's guard. The list shows user-bound keys
+(a user's personal token, `issued_by` set). Before this fix:
+
+- A tenant admin could rotate another user's personal token.
+- `Store.Rotate` dropped `issued_by`, so the successor came back unbound.
+- An unbound key's copied `owner_roles` label counts as its own grant
+  (`ownerLabelIsGrant`).
+
+So the admin received a bearer acting with the user's labels, and the
+user's own token retired.
+
+Two fixes:
+
+- `callerMayHandle` refuses a tenant admin (no admin credential) rotating
+  a user-bound key it does not own. It may still revoke one.
+- `Store.Rotate` now carries `issued_by` to the successor for every
+  caller, so a rotated personal token stays bound to its owner.
+
+`TestTenantAdmin2503_CredentialsMintGuard` covers both. A tenant admin
+rotating a member's bound key gets 403, and revoking it is a 204. Rotating
+its own bound key is a 200, and the successor's `issued_by` is the owner.
+
+On the previous head the test fails: the rotate is a 200 with the member's
+bearer, and the successor's `issued_by` is null.
+
+### D20 — web
+
+- `/admin/api-keys` is no longer behind `PlatformAdminGate`.
+- For a caller without `is_admin`, the issue form hides the "Admin
+  credential" checkbox, and Rotate and Revoke are disabled with a reason
+  on an `is_admin` or `is_approver` key. The platform refuses both anyway.
+- A tenant admin's section nav and overview list API keys with their
+  count.
+- Settings (`/settings`): the `/admin` cross-link and the API tokens card
+  admit `is_tenant_admin`. This is the `is_admin` gate D7 said would move
+  with this PR. The card's own issue form already sends
+  `is_admin: false`. The profile's admin badge and the tenant rename stay
+  on `is_admin` (super-admin), as before.
+
+### D21 — tests
+
+`TestTenantAdmin2503_CredentialsMintGuard` covers a tenant admin by role:
+
+- Issuing an `is_admin` or `is_approver` key is a 403.
+- Issuing a `viewer` key is a 201.
+- Rotate and revoke of a super-admin-minted `is_admin` key are 403.
+- Another tenant's admin revoking its key gets a 404.
+- It rotates and revokes its own key.
+
+The test fails two ways:
+
+- On part 5's code: the plain issue is a 403.
+- With the gate opened but `mintWithinCaller` disabled: the `is_admin`
+  and `is_approver` issues are 201, and the rotate of the `is_admin` key
+  is a 200 with a bearer.
+
+The Playwright spec now expects API keys among a tenant admin's pages, and
+checks the platform panel on `/admin/tenants`.
+
+With this part the inventory's tenant-scoped rows are all open. What stays
+platform: `policies/import` (not opened; no decision asked for it), the
+audit-periods and vendors exports, demo, install reset, tenants,
+super-admins, the authz-bundle reload, and the global catalog routes.

@@ -208,7 +208,7 @@ func TestRLS_CompositeFK_PreventsCrossTenantReference(t *testing.T) {
 
 	// Seed: tenant A owns controlA; tenant B owns controlB.
 	withTenantTx(t, tenantA, true, func(ctx context.Context, tx pgx.Tx) {
-		mustInsertControl(ctx, t, tx, tenantA, controlA, "IAC-10")
+		mustInsertControl(ctx, t, tx, tenantA, controlA, "IAC-14")
 	})
 	withTenantTx(t, tenantB, true, func(ctx context.Context, tx pgx.Tx) {
 		mustInsertControl(ctx, t, tx, tenantB, controlB, "IAC-11")
@@ -287,7 +287,7 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 
 	withTenantTx(t, tenant, true, func(ctx context.Context, tx pgx.Tx) {
 		// Parent rows first (FK dependencies).
-		mustInsertControl(ctx, t, tx, tenant, controlID, "AAA-01")
+		mustInsertControl(ctx, t, tx, tenant, controlID, "MON-04")
 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
@@ -307,8 +307,8 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 		// default treatment='accept' requires accepted_until + accepter; the
 		// simplest survivor is treatment='avoid', which has no extra fields.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category, treatment)
-			VALUES ($1, $2, 'Unauthorized access to PHI', 'confidentiality', 'avoid')
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+			VALUES ($1, $2, 'Unauthorized access to PHI', risk_category_id($2, 'confidentiality'), 'avoid')
 		`, uuid.NewString(), tenant); err != nil {
 			t.Fatalf("INSERT risks: %v", err)
 		}
@@ -328,7 +328,7 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 				(id, tenant_id, control_id, control_ref, scope_id, observed_at, provenance, result, hash)
 			VALUES
 				($1, $2, $3, $4, $5, now(), '{"connector_id":"aws"}'::jsonb, 'pass', 'sha-abc')
-		`, uuid.NewString(), tenant, controlID, "scf:AAA-01", scopeID); err != nil {
+		`, uuid.NewString(), tenant, controlID, "scf:MON-04", scopeID); err != nil {
 			t.Fatalf("INSERT evidence_records: %v", err)
 		}
 

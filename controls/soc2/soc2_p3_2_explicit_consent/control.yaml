@@ -1,0 +1,33 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p3_2_explicit_consent
+title: "Express opt-in consent is obtained before collection where required"
+description: |
+  Where law or a customer commitment requires a person's express
+  agreement before their information is gathered, the service asks for an
+  affirmative opt-in first (TSC P3.2). The owner attests annually which
+  collection points require opt-in, and that each one blocks collection
+  until the opt-in is recorded.
+
+scf_anchor_id: PRI-27
+scf_release: test-2026.3
+control_family: PRI
+implementation_type: manual_attested
+owner_role: product-engineering
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, opt_in_points]
+  properties:
+    attested_at: { type: string, format: date-time }
+    attestor: { type: string, minLength: 1 }
+    opt_in_points:
+      type: array
+      items:
+        type: object
+        required: [collection_point, requirement_source, blocks_until_opt_in]
+        properties:
+          collection_point: { type: string }
+          requirement_source: { type: string }
+          blocks_until_opt_in: { type: boolean }

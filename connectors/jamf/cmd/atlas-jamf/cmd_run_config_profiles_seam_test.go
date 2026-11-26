@@ -42,7 +42,7 @@ func twoDevicesConfigProfiles() []cfgprofile.RawDeviceProfiles {
 }
 
 func okConfigProfileFlags() runConfigProfilesFlags {
-	return runConfigProfilesFlags{environment: "prod", configControl: "scf:CFG-02"}
+	return runConfigProfilesFlags{environment: "prod", configControl: "scf:CFG-04"}
 }
 
 func TestDoRunConfigProfiles_PushSuccess(t *testing.T) {

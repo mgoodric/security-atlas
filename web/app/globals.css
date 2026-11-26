@@ -2,12 +2,15 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* `.paper` (#2057) opts a subtree out of dark mode: the board-pack sheet is a
+   printable document and always renders light, so `dark:` utilities must not
+   fire inside it even when <html> carries `.dark`. */
+@custom-variant dark (&:is(.dark *):not(:where(.paper, .paper *)));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -56,7 +59,10 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
+/* `.paper` re-declares the light token set on its own element, so a board-pack
+   sheet reads as paper in any app theme while still using only theme tokens. */
+:root,
+.paper {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -76,20 +82,28 @@
   --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  /* #2097: was L 0.577 — 4.76:1 on white but 4.0:1 as badge text on its
+     own /10 tint (axe color-contrast). Now 5.96:1 on white, 4.95:1 on /10. */
+  --destructive: oklch(0.5 0.245 27.325);
 
   /* Muted-pastel accent layer (claude.ai/design pull-back, 2026-06) — deep
      same-hue tones; surfaces stay neutral and --primary stays near-black.
-     Each pairs with a soft tint via color-mix in the consuming component.
-     As text on their own tint, measured on white: pass 4.73 · info 4.72 ·
-     warning 4.71 · critical 4.77 · progress 4.73 · brand 4.72 (:1) — clears
-     the WCAG AA 4.5:1 floor the slice-360 --muted-foreground decision set. */
-  --pass: oklch(0.545 0.1 155);
-  --info: oklch(0.555 0.1 245);
-  --warning: oklch(0.56 0.095 75);
-  --critical: oklch(0.57 0.14 28);
-  --progress: oklch(0.565 0.1 292);
-  --brand: oklch(0.56 0.13 265);
+     Each pairs with a soft tint (`bg-<hue>/10` or `/15`) in the consuming
+     component. #2097 darkened them from L 0.545-0.57 to 0.49: the old values
+     were ~4.7:1 on plain white but ~3.9:1 as text on their own /15 tint,
+     which is how every status badge renders (axe color-contrast). As text
+     on their own /15 tint over white, now: pass 4.82 · info 5.00 ·
+     warning 5.12 · critical 5.31 · progress 5.23 · brand 5.14 (:1); on
+     white 5.96-6.72 — clears the WCAG AA 4.5:1 floor the slice-360
+     --muted-foreground decision set. Heavier tints eat the margin: same-hue
+     text at L 0.49 is about 4.6:1 on a /20 tint and about 4.3:1 on /25
+     (below AA), so same-hue text needs a tint of /15 or lighter (#2397). */
+  --pass: oklch(0.49 0.1 155);
+  --info: oklch(0.49 0.1 245);
+  --warning: oklch(0.49 0.095 75);
+  --critical: oklch(0.49 0.14 28);
+  --progress: oklch(0.49 0.1 292);
+  --brand: oklch(0.49 0.13 265);
   --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
   --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
 
@@ -131,13 +145,16 @@
   --destructive: oklch(0.704 0.191 22.216);
 
   /* Muted-pastel accent layer — dark-tuned (lighter tones on dark surfaces).
-     As text on their tint over the dark card, measured: pass 7.06 · info 6.76 ·
-     warning 6.61 · critical 6.40 · progress 6.48 (:1). */
-  --pass: oklch(0.7 0.11 155);
-  --info: oklch(0.7 0.11 245);
-  --warning: oklch(0.7 0.1 75);
-  --critical: oklch(0.7 0.11 28);
-  --progress: oklch(0.7 0.11 292);
+     #2199 lifted them from L 0.7 to 0.75: as badge text on their own /24
+     tint over --card they were 4.32-4.48:1 (all but pass), under the WCAG AA
+     4.5:1 floor. Now, on the tint over --card: pass 5.20 · info 5.08 ·
+     warning 4.99 · critical 4.91 · progress 4.93 (:1); over --background
+     5.67-6.03. Guarded by lib/a11y-badge-variant-contrast.test.ts. */
+  --pass: oklch(0.75 0.11 155);
+  --info: oklch(0.75 0.11 245);
+  --warning: oklch(0.75 0.1 75);
+  --critical: oklch(0.75 0.11 28);
+  --progress: oklch(0.75 0.11 292);
   --brand: oklch(0.72 0.11 265);
   --surface-1: color-mix(in oklab, var(--brand) 8%, var(--card));
   --surface-2: color-mix(in oklab, var(--info) 7%, var(--card));
@@ -164,10 +181,41 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* #2080 — every interactive control shows a focus ring drawn from the
+     `--ring` token when it has keyboard focus. Components with their own
+     ring (`focus-visible:ring-*` + `outline-none`) override this from the
+     utilities layer; everything else (native selects, bare links,
+     summary toggles) gets this one instead of the browser's default. */
+  :where(a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   body {
     @apply bg-background text-foreground;
   }
   html {
     @apply font-sans;
   }
+  .paper {
+    color-scheme: light;
+    @apply bg-background text-foreground;
+  }
+}
+
+/* #2365 — <Timestamp>'s exact UTC value for assistive tech. The `title`
+   tooltip shows only on mouse hover, so the exact value is also carried as
+   generated content: screen readers read it after the visible text, it is
+   visually hidden, and it is not part of the element's textContent (so the
+   visible text stays the only text tests and copy-paste see). */
+.timestamp-exact::after {
+  content: " (" attr(data-exact) ")";
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

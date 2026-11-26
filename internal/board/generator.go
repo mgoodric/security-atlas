@@ -7,24 +7,22 @@
 // the structured Brief, renders the templated narrative (NO LLM — narrative.go),
 // and writes both into one append-only row.
 //
-// Posture-attribution scope (decisions log D3): true per-framework control
-// attribution needs the SCF anchor graph + framework-scope intersection,
-// which is heavyweight. v1 reports the program's tenant-wide posture numbers
-// (coverage / freshness / drift) listed against each registered framework.
-// The brief is honest about this — it states the program posture and names
-// every framework the program runs against. A future slice does true
-// per-framework attribution.
+// Posture (#2210): each framework's posture and the program coverage figure
+// come from the dashboard's per-framework posture query, read and reduced the
+// way the board pack reads them (pack_posture.go), so a board member reading
+// both sees one coverage number. The slice-031 tenant-wide figure survives
+// only as the evidence freshness rate.
 package board
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // freshnessLister is the narrow view of *freshness.Store the Generator needs.
@@ -122,40 +120,30 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 	if err != nil {
 		return Brief{}, fmt.Errorf("board: drift report: %w", err)
 	}
+	startedPassing := len(report.StartedPassing)
 	driftSummary := DriftSummary{
-		WindowDays:      int(DriftWindow.Hours() / 24),
-		Since:           report.SinceDate.UTC().Format("2006-01-02"),
-		Through:         report.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           report.Delta,
-		FlippedOutCount: len(report.FlippedToOut),
+		WindowDays:          int(DriftWindow.Hours() / 24),
+		Since:               report.SinceDate.UTC().Format("2006-01-02"),
+		Through:             report.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               report.Delta,
+		FlippedOutCount:     len(report.FlippedToOut),
+		StartedPassingCount: &startedPassing,
 	}
 
-	// --- freshness: program coverage + freshness percentages ---
+	// --- freshness: the tenant-wide evidence freshness rate ---
 	freshnessRows, err := g.freshness.List(ctx)
 	if err != nil {
 		return Brief{}, fmt.Errorf("board: freshness list: %w", err)
 	}
-	coveragePct, freshnessPct := programPosture(freshnessRows)
 
-	// --- frameworks: one posture row per registered framework ---
-	frameworks, err := g.store.ListFrameworks(ctx)
+	// --- posture: the board pack's per-framework posture and its coverage
+	//     figure, from the same query and the same 90-day trend (#2210) ---
+	postureRows, err := g.store.FrameworkPosture(ctx, generatedAt.Add(-PostureTrendWindow))
 	if err != nil {
 		return Brief{}, err
 	}
-	trendArrow := trendFromDelta(driftSummary.Delta)
-	postureState := stateFromCoverage(coveragePct)
-	postures := make([]FrameworkPosture, 0, len(frameworks))
-	for _, fw := range frameworks {
-		postures = append(postures, FrameworkPosture{
-			Slug:         fw.Slug,
-			Name:         fw.Name,
-			CoveragePct:  coveragePct,
-			FreshnessPct: freshnessPct,
-			TrendArrow:   trendArrow,
-			Delta:        driftSummary.Delta,
-			State:        postureState,
-		})
-	}
+	postures := packPostures(postureRows)
+	coveragePct, _, scopedCount, _ := coverageTrend(postures)
 
 	// --- risks: top-N aging, ranked by residual severity then age ---
 	riskRows, err := g.store.ListRisksAsOf(ctx, generatedAt)
@@ -177,9 +165,14 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 		PeriodEnd:   periodEnd.Format("2006-01-02"),
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Frameworks:  postures,
-		Drift:       driftSummary,
-		TopRisks:    topRisks,
-		Exceptions:  exceptionSummary(excAgg, generatedAt),
+		Coverage: &CoverageSummary{
+			CoveragePct:              coveragePct,
+			ScopedFrameworkCount:     scopedCount,
+			EvidenceFreshnessRatePct: evidenceFreshnessRate(freshnessRows),
+		},
+		Drift:      driftSummary,
+		TopRisks:   topRisks,
+		Exceptions: exceptionSummary(excAgg, generatedAt),
 	}, nil
 }
 
@@ -207,46 +200,21 @@ func exceptionSummary(agg exceptionAggRow, now time.Time) ExceptionSummary {
 	return out
 }
 
-// programPosture derives the program-wide coverage and freshness percentages
-// from the slice-016 freshness read model.
+// evidenceFreshnessRate is the tenant-wide evidence freshness rate: fresh
+// controls / total controls in the slice-016 freshness read model, rounded to
+// the nearest integer. Zero controls -> 0%.
 //
-//   - freshnessPct = fresh controls / total controls in the read model.
-//   - coveragePct  = controls with at least one evidence record that are NOT
-//     stale / controls with at least one evidence record. This is the
-//     canvas §7.1 control-coverage shape ("active controls with at least one
-//     passing evidence record in the freshness window" / "active controls
-//     with applicability") approximated over the freshness read model: a
-//     fresh control with evidence is "covered". A control with no evidence
-//     is neither fresh nor covered.
-//
-// Both round to the nearest integer. Zero controls -> 0% for both (a program
-// with no controls has nothing covered and nothing fresh — the honest read).
-func programPosture(rows []freshness.ControlFreshness) (coveragePct, freshnessPct int) {
-	if len(rows) == 0 {
-		return 0, 0
-	}
-	total := len(rows)
+// Until #2210 the brief also derived a "coverage" from this read model
+// (fresh controls / controls with evidence). That figure is gone: coverage is
+// the posture query's, and this rate is only ever labelled a freshness rate.
+func evidenceFreshnessRate(rows []freshness.ControlFreshness) int {
 	fresh := 0
-	withEvidence := 0
-	coveredWithEvidence := 0
 	for _, cf := range rows {
 		if !cf.IsStale {
 			fresh++
 		}
-		if cf.EvidenceCount > 0 {
-			withEvidence++
-			if !cf.IsStale {
-				coveredWithEvidence++
-			}
-		}
 	}
-	freshnessPct = roundPct(fresh, total)
-	if withEvidence == 0 {
-		coveragePct = 0
-	} else {
-		coveragePct = roundPct(coveredWithEvidence, withEvidence)
-	}
-	return coveragePct, freshnessPct
+	return roundPct(fresh, len(rows))
 }
 
 // roundPct computes round(100 * num / den) with den > 0. den == 0 -> 0.
@@ -255,20 +223,6 @@ func roundPct(num, den int) int {
 		return 0
 	}
 	return int((float64(num)*100.0)/float64(den) + 0.5)
-}
-
-// trendFromDelta maps the signed 30-day drift delta to a trend-arrow token.
-// A positive delta (more controls passing) is an up trend; negative is down;
-// zero is flat.
-func trendFromDelta(delta int) string {
-	switch {
-	case delta > 0:
-		return TrendUp
-	case delta < 0:
-		return TrendDown
-	default:
-		return TrendFlat
-	}
 }
 
 // stateFromCoverage maps a coverage percentage to the posture label the
@@ -290,15 +244,21 @@ func stateFromCoverage(coveragePct int) string {
 //
 // "Age" is the age-since-treatment proxy: now - updated_at (decisions log
 // D4 — the risks table has no treatment-applied timestamp). Residual
-// severity is extracted from the residual_score JSONB, falling back to
-// inherent_score when residual has not been derived yet (a risk with no
-// linked controls — slice 020 AC-7 — has residual == inherent anyway).
+// severity is read from the residual_score JSONB by risk.ScoreValue, falling
+// back to inherent_score when residual has not been derived yet (a risk with
+// no linked controls — slice 020 AC-7 — has residual == inherent anyway).
+// FAIR risks carry a dollar residual, so risk.RanksAbove ranks them after
+// every 5x5 risk rather than comparing dollars with severities (#2185).
+// A risk with neither score readable is Unscored, and risk.RanksAbove ranks
+// it after every scored risk, FAIR included (#2511, #2516).
 func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 	aging := make([]RiskAging, 0, len(rows))
 	for _, r := range rows {
-		severity := extractSeverity(r.ResidualScore)
+		severity, scored := risk.ScoreValue(r.ResidualScore)
 		if severity == 0 {
-			severity = extractSeverity(r.InherentScore)
+			var inherentScored bool
+			severity, inherentScored = risk.ScoreValue(r.InherentScore)
+			scored = scored || inherentScored
 		}
 		ageDays := 0
 		if !r.UpdatedAt.IsZero() {
@@ -311,14 +271,23 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 			ID:               r.ID.String(),
 			Title:            r.Title,
 			Category:         r.Category,
+			CategoryName:     r.CategoryName,
 			Treatment:        r.Treatment,
+			Methodology:      string(r.Methodology),
 			ResidualSeverity: severity,
+			Unscored:         !scored,
 			AgeDays:          ageDays,
 		})
 	}
 	sort.SliceStable(aging, func(i, j int) bool {
-		if aging[i].ResidualSeverity != aging[j].ResidualSeverity {
-			return aging[i].ResidualSeverity > aging[j].ResidualSeverity
+		a, b := aging[i], aging[j]
+		ar := risk.Rank{Unscored: a.Unscored, Monetary: a.Monetary(), Value: a.ResidualSeverity}
+		br := risk.Rank{Unscored: b.Unscored, Monetary: b.Monetary(), Value: b.ResidualSeverity}
+		if risk.RanksAbove(ar, br) {
+			return true
+		}
+		if risk.RanksAbove(br, ar) {
+			return false
 		}
 		if aging[i].AgeDays != aging[j].AgeDays {
 			return aging[i].AgeDays > aging[j].AgeDays
@@ -329,52 +298,4 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 		aging = aging[:n]
 	}
 	return aging
-}
-
-// extractSeverity pulls a ranking-comparable severity scalar out of a
-// score JSONB blob. The JSONB shape is methodology-dependent (slice 019 /
-// 020 / 053):
-//
-//   - slice 020 residual_score: { "score": <float>, ... }
-//   - slice 053 aggregated parents: { "severity": <float>, ... }
-//   - slice 019 nist_800_30 / qualitative_5x5 inherent_score:
-//     { "likelihood": L, "impact": I } -> severity := L * I
-//
-// The extraction tries each in turn and returns 0 when none resolves (the
-// caller then falls back to the other blob, and ultimately to 0 — a risk
-// with no derivable severity ranks last, which is the honest behavior).
-func extractSeverity(blob []byte) float64 {
-	if len(blob) == 0 {
-		return 0
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(blob, &m); err != nil {
-		return 0
-	}
-	if v, ok := numField(m, "score"); ok {
-		return v
-	}
-	if v, ok := numField(m, "severity"); ok {
-		return v
-	}
-	l, lok := numField(m, "likelihood")
-	i, iok := numField(m, "impact")
-	if lok && iok {
-		return l * i
-	}
-	return 0
-}
-
-// numField extracts a numeric value from a raw JSON object field. Returns
-// (0, false) when the field is absent or not a number.
-func numField(m map[string]json.RawMessage, key string) (float64, bool) {
-	raw, ok := m[key]
-	if !ok {
-		return 0, false
-	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return 0, false
-	}
-	return f, true
 }

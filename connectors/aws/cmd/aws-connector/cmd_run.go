@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -17,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/aws/internal/awsauth"
 	"github.com/mgoodric/security-atlas/connectors/aws/internal/awss3"
 	"github.com/mgoodric/security-atlas/connectors/aws/internal/idem"
+	"github.com/mgoodric/security-atlas/connectors/aws/internal/s3tls"
 )
 
 // Package-level seams (slice 305): doRun reaches through these function
@@ -27,6 +29,7 @@ var (
 	awsauthAssume    = awsauth.Assume
 	awsauthResolveID = awsauth.ResolveIdentity
 	awss3Inspect     = awss3.Inspect
+	s3tlsInspect     = s3tls.Inspect
 	newSDKClient     = func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error) {
 		return sdk.NewClient(endpoint, bearer, opts...)
 	}
@@ -56,8 +59,8 @@ func newRunCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(_ *cobra.Command, _ []string) error {
-			if f.kind != SupportedKind {
-				return fmt.Errorf("--kind must be %q (slice 004 supports one kind)", SupportedKind)
+			if !slices.Contains(SupportedKinds, f.kind) {
+				return fmt.Errorf("--kind must be one of %q", SupportedKinds)
 			}
 			if f.roleARN == "" {
 				return fmt.Errorf("--role-arn is required (no static access keys supported)")
@@ -71,11 +74,11 @@ func newRunCmd() *cobra.Command {
 			return doRun(context.Background(), f)
 		},
 	}
-	cmd.Flags().StringVar(&f.kind, "kind", SupportedKind, "evidence kind to pull")
+	cmd.Flags().StringVar(&f.kind, "kind", SupportedKind, "evidence kind to pull: "+SupportedKind+" or "+TLSKind)
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "IAM role ARN to assume [required]")
 	cmd.Flags().StringVar(&f.region, "region", "", "primary AWS region [required]")
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag; fallback when Organizations:DescribeAccount is not available")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:CRY-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "", "control_id to attach to each record as provenance; empty (the default) routes each record to every control that queries its kind (#2924)")
 	return cmd
 }
 
@@ -96,9 +99,34 @@ func doRun(ctx context.Context, f runFlags) error {
 	clientFor := func(region string) awss3.API {
 		return s3.NewFromConfig(cfg, func(o *s3.Options) { o.Region = region })
 	}
-	states, err := awss3Inspect(ctx, s3Client, resolver, clientFor)
-	if err != nil {
-		return fmt.Errorf("inspect: %w", err)
+	var records []bucketRecord
+	if f.kind == TLSKind {
+		tlsClientFor := func(region string) s3tls.API {
+			return s3.NewFromConfig(cfg, func(o *s3.Options) { o.Region = region })
+		}
+		states, err := s3tlsInspect(ctx, s3Client, s3tls.RegionResolver(resolver), tlsClientFor)
+		if err != nil {
+			return fmt.Errorf("inspect: %w", err)
+		}
+		for _, state := range states {
+			record, buildErr := buildTLSRecord(state, identity, f.controlID)
+			if buildErr != nil {
+				return fmt.Errorf("build record for %s: %w", state.BucketName, buildErr)
+			}
+			records = append(records, bucketRecord{state.BucketName, record})
+		}
+	} else {
+		states, err := awss3Inspect(ctx, s3Client, resolver, clientFor)
+		if err != nil {
+			return fmt.Errorf("inspect: %w", err)
+		}
+		for _, state := range states {
+			record, buildErr := buildRecord(state, identity, f.controlID)
+			if buildErr != nil {
+				return fmt.Errorf("build record for %s: %w", state.BucketName, buildErr)
+			}
+			records = append(records, bucketRecord{state.BucketName, record})
+		}
 	}
 
 	client, err := newSDKClient(common.endpoint, common.token, sdkOpts()...)
@@ -108,22 +136,24 @@ func doRun(ctx context.Context, f runFlags) error {
 	defer func() { _ = client.Close() }()
 
 	pushed := 0
-	for _, state := range states {
-		record, buildErr := buildRecord(state, identity, f.controlID)
-		if buildErr != nil {
-			return fmt.Errorf("build record for %s: %w", state.BucketName, buildErr)
-		}
+	for _, r := range records {
 		ctxPush, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err := client.Push(ctxPush, record)
+		_, err := client.Push(ctxPush, r.record)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("push %s: %w", state.BucketName, err)
+			return fmt.Errorf("push %s: %w", r.bucket, err)
 		}
 		pushed++
 	}
 	fmt.Printf("pushed %d records (account=%s environment=%s source=%s)\n",
 		pushed, identity.AccountID, identity.Environment, identity.Source)
 	return nil
+}
+
+// bucketRecord is one record ready to push, with the bucket it describes.
+type bucketRecord struct {
+	bucket string
+	record *evidencev1.EvidenceRecord
 }
 
 func sdkOpts() []sdk.Option {
@@ -139,22 +169,32 @@ func buildRecord(state awss3.BucketState, identity awsauth.Identity, controlID s
 	// hour (see idem.Key); without this truncation, ObservedAt drift in
 	// sub-second precision would force hash mismatch on dedup.
 	now := time.Now().UTC().Truncate(time.Hour)
-	payload, err := structpb.NewStruct(map[string]any{
-		"bucket_arn":         state.BucketARN,
+	// Keys follow the registered schema (#2815); ingest rejects any other
+	// key. Empty strings are omitted rather than sent as "".
+	fields := map[string]any{
 		"bucket_name":        state.BucketName,
-		"bucket_region":      state.BucketRegion,
-		"algorithm":          state.Algorithm,
-		"kms_key_id":         state.KMSKeyID,
+		"encryption_enabled": state.Result == awss3.ResultPass,
 		"bucket_key_enabled": state.BucketKeyEnabled,
-		"reason":             state.Reason,
-	})
+		"account_id":         identity.AccountID,
+	}
+	for key, value := range map[string]string{
+		"region":        state.BucketRegion,
+		"sse_algorithm": state.Algorithm,
+		"kms_key_id":    state.KMSKeyID,
+		"reason":        state.Reason,
+	} {
+		if value != "" {
+			fields[key] = value
+		}
+	}
+	payload, err := structpb.NewStruct(fields)
 	if err != nil {
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.Key(state.BucketARN, now),
 		EvidenceKind:   SupportedKind,
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  SchemaVersion,
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "cloud_account", Values: []string{"aws:" + identity.AccountID}},
@@ -171,6 +211,67 @@ func buildRecord(state awss3.BucketState, identity awsauth.Identity, controlID s
 			// turning AC-6 idempotency into AlreadyExists errors.
 		},
 	}, nil
+}
+
+// buildTLSRecord builds one TLSKind record. policy_present and
+// denies_insecure_transport are set only when the connector read the
+// policy or found it absent; an unread bucket omits both, so a missing
+// value means "not observed", never false.
+func buildTLSRecord(state s3tls.BucketState, identity awsauth.Identity, controlID string) (*evidencev1.EvidenceRecord, error) {
+	now := time.Now().UTC().Truncate(time.Hour)
+	fields := map[string]any{
+		"bucket_name": state.BucketName,
+		"account_id":  identity.AccountID,
+	}
+	if state.PolicyRead {
+		fields["policy_present"] = state.PolicyPresent
+		fields["denies_insecure_transport"] = state.DeniesInsecureTransport
+	}
+	for key, value := range map[string]string{
+		"region": state.BucketRegion,
+		"reason": state.Reason,
+	} {
+		if value != "" {
+			fields[key] = value
+		}
+	}
+	payload, err := structpb.NewStruct(fields)
+	if err != nil {
+		return nil, err
+	}
+	return &evidencev1.EvidenceRecord{
+		// The kind is part of the key: idempotency keys are unique per
+		// tenant across kinds, so the bucket ARN alone would collide with
+		// the same hour's encryption record and be deduplicated into it.
+		IdempotencyKey: idem.Key(TLSKind+"|"+state.BucketARN, now),
+		EvidenceKind:   TLSKind,
+		SchemaVersion:  TLSSchemaVersion,
+		ControlId:      controlID,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "cloud_account", Values: []string{"aws:" + identity.AccountID}},
+			{Key: "environment", Values: []string{identity.Environment}},
+		},
+		ObservedAt: timestamppb.New(now),
+		Result:     mapTLSResult(state.Result),
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "connector",
+			ActorId:   actorID(),
+		},
+	}, nil
+}
+
+func mapTLSResult(r s3tls.Result) evidencev1.Result {
+	switch r {
+	case s3tls.ResultPass:
+		return evidencev1.Result_RESULT_PASS
+	case s3tls.ResultFail:
+		return evidencev1.Result_RESULT_FAIL
+	case s3tls.ResultInconclusive:
+		return evidencev1.Result_RESULT_INCONCLUSIVE
+	default:
+		return evidencev1.Result_RESULT_UNSPECIFIED
+	}
 }
 
 func mapResult(r awss3.EncryptionResult) evidencev1.Result {

@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	board "github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -89,6 +90,8 @@ type packGenerateRequest struct {
 //   - 201 the stored draft pack
 //   - 400 when period_end is missing or not a YYYY-MM-DD date
 //   - 401 when the tenant context is missing
+//   - 503 module_state_unavailable when a section's module switch cannot
+//     be read (#2702)
 //   - 500 on an unexpected generation failure
 func (h *PackHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -116,7 +119,7 @@ func (h *PackHandler) Generate(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusBadRequest, "period_end must be a YYYY-MM-DD date")
 			return
 		}
-		httperr.WriteInternal(w, r, "board", err)
+		moduleaccess.WriteError(w, r, "board", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, packWireFromStored(stored))
@@ -357,9 +360,7 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 	// (slice 475); board.RenderPackPDF routes through it.
 	pdfBytes, err := board.RenderPackPDF(ctx, stored)
 	if err != nil {
-		if status, msg, ok := pdfDegradation(err); ok {
-			logPDFDegradation(r, "board-pack", err)
-			httpresp.WriteError(w, status, msg)
+		if writePDFDegradation(w, r, "board-pack", err) {
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)

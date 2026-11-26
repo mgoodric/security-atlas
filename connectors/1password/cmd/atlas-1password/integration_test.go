@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -101,42 +99,29 @@ func TestRegister_ListsConnector(t *testing.T) {
 	}
 }
 
-// TestRun_PushesOrgPolicy verifies AC-2/AC-3/AC-4: the run path pulls
-// from a fake 1Password API, builds a canonical record, and pushes it
-// through the platform's Push RPC.
+// TestRun_PushesOrgPolicy verifies AC-2/AC-3/AC-4: the run path reads the
+// documented 1Password responses, builds a canonical v2 record, and pushes
+// it through the platform's Push RPC.
 func TestRun_PushesOrgPolicy(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
+	setOPEnv(t)
+	opSrv := fake1Password(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/account", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{
-			"id": "acme-corp",
-			"name": "Acme Corp",
-			"two_factor_required": true,
-			"minimum_password_length": 14,
-			"domain_restrictions_enabled": true,
-			"active_member_count": 47
-		}`))
-	})
-	opSrv := httptest.NewServer(mux)
-	t.Cleanup(opSrv.Close)
-
-	creds, err := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
+	creds, err := opauth.Resolve()
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-
-	api := opaccount.NewClient(opSrv.Client(), opSrv.URL, creds)
+	api := opaccount.NewClient(opSrv.Client(), opSrv.URL, opSrv.URL, creds)
 	state, err := opaccount.Inspect(context.Background(), api, nil)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Result != opaccount.ResultPass {
+	if state.Result != opaccount.ResultInconclusive {
 		t.Fatalf("unexpected inspect result: %+v", state)
 	}
 
-	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("buildOrgPolicyRecord: %v", err)
 	}
@@ -149,8 +134,8 @@ func TestRun_PushesOrgPolicy(t *testing.T) {
 	}
 
 	// AC-4: provenance + scope tags.
-	if got := scopeValue(rec.GetScope(), "org"); got != "acme-corp" {
-		t.Errorf("scope.org = %q; want acme-corp", got)
+	if got := scopeValue(rec.GetScope(), "org"); got != "M4E2SWNZAZFTRGQGDNS2E5A4MU" {
+		t.Errorf("scope.org = %q; want the introspect account_uuid", got)
 	}
 	if got := scopeValue(rec.GetScope(), "environment"); got != "prod" {
 		t.Errorf("scope.environment = %q; want prod", got)
@@ -170,19 +155,18 @@ func TestRun_OrgPolicyDedupes(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 	state := &opaccount.PolicyState{
-		OrgID:                     "acme-corp",
-		TwoFactorRequired:         true,
-		MinimumPasswordLength:     14,
-		DomainRestrictionsEnabled: true,
-		ActiveMembers:             47,
-		Result:                    opaccount.ResultPass,
-		ObservedAt:                time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		OrgID:              "acme-corp",
+		AuditEventsEnabled: true,
+		ActiveMembers:      47,
+		SuspendedMembers:   2,
+		Result:             opaccount.ResultInconclusive,
+		ObservedAt:         time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	r1, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	r1, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("build r1: %v", err)
 	}
-	r2, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	r2, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("build r2: %v", err)
 	}
@@ -210,10 +194,10 @@ func TestRun_OrgPolicyDedupes(t *testing.T) {
 func TestRun_OrgPolicyRotatesAcrossHour(t *testing.T) {
 	hourA := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
 	hourB := time.Date(2026, 5, 11, 13, 0, 0, 0, time.UTC)
-	stateA := &opaccount.PolicyState{OrgID: "acme-corp", TwoFactorRequired: true, MinimumPasswordLength: 14, Result: opaccount.ResultPass, ObservedAt: hourA}
-	stateB := &opaccount.PolicyState{OrgID: "acme-corp", TwoFactorRequired: true, MinimumPasswordLength: 14, Result: opaccount.ResultPass, ObservedAt: hourB}
-	rA, _ := buildOrgPolicyRecord(stateA, "prod", "scf:IAC-10")
-	rB, _ := buildOrgPolicyRecord(stateB, "prod", "scf:IAC-10")
+	stateA := &opaccount.PolicyState{OrgID: "acme-corp", AuditEventsEnabled: true, Result: opaccount.ResultInconclusive, ObservedAt: hourA}
+	stateB := &opaccount.PolicyState{OrgID: "acme-corp", AuditEventsEnabled: true, Result: opaccount.ResultInconclusive, ObservedAt: hourB}
+	rA, _ := buildOrgPolicyRecord(stateA, "prod", "scf:IAC-14")
+	rB, _ := buildOrgPolicyRecord(stateB, "prod", "scf:IAC-14")
 	if rA.GetIdempotencyKey() == rB.GetIdempotencyKey() {
 		t.Fatal("idempotency_key identical across hour boundary; freshness lost")
 	}

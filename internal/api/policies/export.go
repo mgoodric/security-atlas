@@ -21,6 +21,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,8 +31,10 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -55,7 +58,7 @@ type policiesExportSource interface {
 type policyExportRow struct {
 	ID                          uuid.UUID
 	Title                       string
-	Version                     int32
+	Version                     string
 	EffectiveDate               string // empty when null; YYYY-MM-DD when set
 	Owner                       string
 	Approver                    string
@@ -63,8 +66,18 @@ type policyExportRow struct {
 	BodyMD                      string
 	AcknowledgmentRequiredRoles string // joined "," — null-safe
 	NextReviewAt                string // RFC3339 when set; empty when null
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	// Import fields (#1747). Empty on policies that were not imported.
+	SourceAttribution      string
+	HistoricalApproverName string
+	HistoricalApprovedAt   string // YYYY-MM-DD when set
+	SourceURL              string
+	ImportedBy             string
+	ImportedAt             string // RFC3339 when set
+	// SelfApproved marks a policy its submitter approved under Allow
+	// self-approval (#2101).
+	SelfApproved bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // NewExportHandler constructs the slice 138 policies export handler.
@@ -240,6 +253,14 @@ func policiesExportHeader() []string {
 		"body_md",
 		"created_at",
 		"updated_at",
+		"source_attribution",
+		"imported",
+		"historical_approver_name",
+		"historical_approved_at",
+		"source_url",
+		"imported_by",
+		"imported_at",
+		"self_approved",
 	}
 }
 
@@ -249,7 +270,7 @@ func policiesToRowIter(rows []policyExportRow) iter.Seq[[]string] {
 			row := []string{
 				r.ID.String(),
 				r.Title,
-				fmt.Sprintf("%d", r.Version),
+				r.Version,
 				r.Status,
 				r.EffectiveDate,
 				r.Owner,
@@ -259,6 +280,14 @@ func policiesToRowIter(rows []policyExportRow) iter.Seq[[]string] {
 				r.BodyMD,
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
+				r.SourceAttribution,
+				strconv.FormatBool(r.SourceAttribution == policy.SourceImported),
+				r.HistoricalApproverName,
+				r.HistoricalApprovedAt,
+				r.SourceURL,
+				r.ImportedBy,
+				r.ImportedAt,
+				strconv.FormatBool(r.SelfApproved),
 			}
 			if !yield(row) {
 				return
@@ -299,15 +328,22 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			id,
 			title,
 			version,
-			status::text,
+			status,
 			effective_date,
-			owner,
-			approver,
-			acknowledgment_required_role,
+			owner_role,
+			approver_role,
+			acknowledgment_required_roles,
 			next_review_at,
 			body_md,
 			created_at,
-			updated_at
+			updated_at,
+			source_attribution,
+			historical_approver_name,
+			historical_approved_at,
+			source_url,
+			imported_by,
+			imported_at,
+			self_approved
 		FROM policies
 		WHERE tenant_id = $1
 		ORDER BY title ASC, version DESC
@@ -323,7 +359,7 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 		var (
 			id           uuid.UUID
 			title        string
-			version      int32
+			version      string
 			status       string
 			effective    pgtype.Date
 			owner        string
@@ -333,11 +369,20 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			bodyMD       string
 			createdAt    time.Time
 			updatedAt    time.Time
+			source       string
+			histApprover *string
+			histApproved pgtype.Date
+			sourceURL    *string
+			importedBy   *string
+			importedAt   pgtype.Timestamptz
+			selfApproved bool
 		)
 		if err := rs.Scan(
 			&id, &title, &version, &status, &effective,
 			&owner, &approver, &roles, &nextReviewAt,
 			&bodyMD, &createdAt, &updatedAt,
+			&source, &histApprover, &histApproved, &sourceURL,
+			&importedBy, &importedAt, &selfApproved,
 		); err != nil {
 			return nil, false, fmt.Errorf("scan policy row: %w", err)
 		}
@@ -350,8 +395,19 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			Approver:                    approver,
 			BodyMD:                      bodyMD,
 			AcknowledgmentRequiredRoles: strings.Join(roles, ","),
+			SourceAttribution:           source,
+			HistoricalApproverName:      derefString(histApprover),
+			SourceURL:                   derefString(sourceURL),
+			ImportedBy:                  derefString(importedBy),
+			SelfApproved:                selfApproved,
 			CreatedAt:                   createdAt,
 			UpdatedAt:                   updatedAt,
+		}
+		if histApproved.Valid {
+			row.HistoricalApprovedAt = histApproved.Time.UTC().Format("2006-01-02")
+		}
+		if importedAt.Valid {
+			row.ImportedAt = importedAt.Time.UTC().Format(time.RFC3339)
 		}
 		if effective.Valid {
 			row.EffectiveDate = effective.Time.UTC().Format("2006-01-02")
@@ -373,6 +429,13 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 		out = out[:limit]
 	}
 	return out, exceeded, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // ===== Meta-audit =====
@@ -426,8 +489,14 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
+// policiesHasProgramRead reports whether the credential may read the
+// policies export: a tenant approver by its live roles
+// (authz.IsTenantApprover), as OPA reads it for admin and grc_engineer only.
+// #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which
+// counted a session's role claim (#2381) and admitted roles OPA refuses
+// here.
 func policiesHasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantApprover(c)
 }
 
 // ===== Counting writer =====

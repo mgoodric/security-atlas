@@ -75,10 +75,12 @@ test.describe("control-detail header chrome (slice 257)", () => {
     // 213 spec pins on /audits and slice 235 spec pins on /evidence.
     // Asserting on `/controls/{id}` proves the shared-chrome wiring
     // is intact for the detail route.
-    await expect(pill).toContainText("SOC 2 Type II · Q2 2026 in progress");
+    // #2135: the pill is the audit banner, counting down to the
+    // period's end; the period name stays in its accessible label.
+    await expect(pill).toContainText(/Audit (ends|ended)/);
     await expect(pill).toHaveAttribute(
       "aria-label",
-      "SOC 2 Type II · Q2 2026 in progress",
+      /^SOC 2 Type II · Q2 2026: audit (ends|ended)/,
     );
   });
 
@@ -117,6 +119,11 @@ test.describe("control-detail header chrome (slice 257)", () => {
     await page.goto(`/controls/${seeded.controlId}`);
     const input = page.getByTestId("global-search-input");
     await expect(input).not.toBeFocused();
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
   });

@@ -44,8 +44,8 @@ endpoint.config_profile.v1 records, and push to the platform.
 
 This reports WHICH configuration / compliance profiles are deployed to a managed
 computer and what compliance-relevant settings they enforce — evidence for
-configuration-management controls (SCF CFG-02 Secure Baseline Configurations /
-CFG-04 Configuration Change Control) at a finer grain than the posture verdict.
+configuration-management controls (SCF CFG-04 Secure Baseline Configurations /
+CHG-03 Configuration Change Control) at a finer grain than the posture verdict.
 
 Per-setting enrichment (slice 595): each device carries a synthetic "Enforced
 Configuration Summary" profile whose settings are the effective enforced
@@ -83,7 +83,7 @@ summaries.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.configControl, "config-control", "scf:CFG-02", "control_id to attach to endpoint.config_profile.v1 records")
+	cmd.Flags().StringVar(&f.configControl, "config-control", "scf:CFG-04", "control_id to attach to endpoint.config_profile.v1 records")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "Jamf Pro instance URL override (env: JAMF_BASE_URL)")
 	return cmd
 }

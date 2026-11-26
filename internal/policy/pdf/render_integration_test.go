@@ -30,7 +30,8 @@ func TestRender_ProducesRealPDF(t *testing.T) {
 	// stretched by Harden-Runner audit-mode egress instrumentation
 	// (slice 117). Fix landed in render.go: WSURLReadTimeout(60s) +
 	// DefaultTimeout 30s→90s. Full diagnosis at
-	// docs/audit-log/340-chromedp-flake-decisions.md.
+	// docs/audit-log/340-chromedp-flake-decisions.md. chromedp v0.23's
+	// exec allocator uses a pipe, which retired the websocket watchdog.
 	doc := policypdf.Doc{
 		Title:         "Test Policy",
 		Version:       "1.0.0",

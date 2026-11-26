@@ -2,7 +2,9 @@
 
 // Slice 094 — event-type filter sidebar.
 //
-// Five checkboxes — audit / exception / policy / vendor / control. State
+// Checkboxes — audit / exception / policy / vendor / control / risk /
+// action_plan / policy_ack (the last three added by #2130) / offboarding
+// (#2215). State
 // lives in the parent (URL query string). Clicking a checkbox toggles its
 // type in the selection.
 //
@@ -33,6 +35,22 @@ const TYPE_LABELS: Record<CalendarEventType, { label: string; color: string }> =
     control: {
       label: "Control reviews",
       color: "bg-emerald-500",
+    },
+    risk: {
+      label: "Risk reviews",
+      color: "bg-orange-500",
+    },
+    action_plan: {
+      label: "Action plans due",
+      color: "bg-cyan-500",
+    },
+    policy_ack: {
+      label: "Policy acknowledgements",
+      color: "bg-violet-500",
+    },
+    offboarding: {
+      label: "Offboarding due",
+      color: "bg-slate-500",
     },
   };
 

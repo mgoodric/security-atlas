@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -140,7 +141,11 @@ func resetSuperAdmins(t *testing.T) {
 // `atlas:super_admin=true`.
 func newRouter(t *testing.T, tenantID uuid.UUID, userID uuid.UUID, superAdmin bool) http.Handler {
 	t.Helper()
-	h := adminsuperadmins.New(appPool)
+	return newRouterWith(t, adminsuperadmins.New(appPool), tenantID, userID, superAdmin)
+}
+
+func newRouterWith(t *testing.T, h *adminsuperadmins.Handler, tenantID uuid.UUID, userID uuid.UUID, superAdmin bool) http.Handler {
+	t.Helper()
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -498,5 +503,82 @@ func TestList_NonSuperAdminBlocked(t *testing.T) {
 	res2, body2 := doRequest(t, h2, http.MethodGet, "/v1/admin/super-admins", nil)
 	if res2.StatusCode != http.StatusOK {
 		t.Fatalf("super_admin list expected 200, got %d body=%v", res2.StatusCode, body2)
+	}
+}
+
+// #2385: a super admin whose users row is in another tenant is named
+// from that tenant when the BYPASSRLS pool is wired, and stays unnamed
+// without it (the session tenant's RLS hides the row).
+func TestList_NamesSuperAdminFromAnotherTenant(t *testing.T) {
+	resetSuperAdmins(t)
+	sessionTenant := seedTenant(t, "Session tenant 2385")
+	homeTenant := seedTenant(t, "Home tenant 2385")
+	callerID := uuid.New()
+	otherID := uuid.New()
+	seedSuperAdmin(t, callerID, "bootstrap_first_install")
+	seedSuperAdmin(t, otherID, "manual_grant")
+	if _, err := adminPool.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status)
+		 VALUES ($1, $2, 'other-2385@example.invalid', 'Other Tenant Admin', 'active')`,
+		otherID, homeTenant); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, otherID)
+	})
+
+	nameOf := func(body map[string]any) any {
+		items, _ := body["items"].([]any)
+		for _, it := range items {
+			row, _ := it.(map[string]any)
+			if row["user_id"] == otherID.String() {
+				return row["display_name"]
+			}
+		}
+		t.Fatalf("super admin %s not listed: %v", otherID, body)
+		return nil
+	}
+
+	// Session tenant only: the row is unnamed.
+	res, body := doRequest(t, newRouter(t, sessionTenant, callerID, true),
+		http.MethodGet, "/v1/admin/super-admins", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	if got := nameOf(body); got != nil {
+		t.Fatalf("without authPool display_name = %v, want absent", got)
+	}
+
+	// With the BYPASSRLS pool: named from the home tenant.
+	h := adminsuperadmins.New(appPool).SetAuthPool(adminPool)
+	res, body = doRequest(t, newRouterWith(t, h, sessionTenant, callerID, true),
+		http.MethodGet, "/v1/admin/super-admins", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	if got := nameOf(body); got != "Other Tenant Admin" {
+		t.Fatalf("with authPool display_name = %v, want Other Tenant Admin", got)
+	}
+	// #2684: the other tenant's email never reaches the wire.
+	if raw, _ := json.Marshal(body); strings.Contains(string(raw), "other-2385@example.invalid") {
+		t.Fatalf("cross-tenant email on the wire: %s", raw)
+	}
+
+	// #2684: a blank display name falls back to the local part, on the
+	// server.
+	if _, err := adminPool.Exec(context.Background(),
+		`UPDATE users SET display_name = '' WHERE id = $1`, otherID); err != nil {
+		t.Fatalf("blank display_name: %v", err)
+	}
+	res, body = doRequest(t, newRouterWith(t, h, sessionTenant, callerID, true),
+		http.MethodGet, "/v1/admin/super-admins", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	if got := nameOf(body); got != "other-2385" {
+		t.Fatalf("blank display_name: display_name = %v, want other-2385", got)
+	}
+	if raw, _ := json.Marshal(body); strings.Contains(string(raw), "@example.invalid") {
+		t.Fatalf("cross-tenant email on the wire: %s", raw)
 	}
 }

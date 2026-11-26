@@ -234,17 +234,13 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
-	seedFramework(t, admin, tenant, "soc2", "SOC 2")
-	ctrl := seedControl(t, admin, tenant, "monthly")
-	seedEvidence(t, admin, tenant, ctrl, time.Now().UTC().AddDate(0, 0, -5))
-	if _, err := env.freshness.Refresh(ctxFor(t, tenant)); err != nil {
-		t.Fatalf("freshness refresh: %v", err)
-	}
 	packID := generateDraftPack(t, env, "2026-03-31")
 
-	// Set the coverage baseline to 40 so the delta is meaningful, then enter
-	// $30000 spend. With one fresh control with evidence, coverage is 100%;
-	// delta = 100 - 40 = 60; cost-per-point = 30000/60 = 500.
+	// Coverage is the dashboard's per-framework posture (#2056); this tenant
+	// has no activated framework scope, so the generated coverage is 0. Set
+	// the baseline to 40, then enter $30000 spend: delta = 0 - 40 = -40 on
+	// both sections. With no scoped framework there is no coverage to buy,
+	// so the cost per coverage point is n/a (absent, no_baseline set).
 	resp, _ := doJSON(t, env, http.MethodPut,
 		"/v1/board-packs/"+packID+"/sections/coverage_trend",
 		map[string]any{"inputs": map[string]any{"baseline_coverage_pct": 40}})
@@ -264,11 +260,14 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	if spend, _ := data["spend_usd"].(float64); spend != 30000 {
 		t.Errorf("investment spend_usd = %v, want 30000", data["spend_usd"])
 	}
-	if delta, _ := data["coverage_delta"].(float64); delta != 60 {
-		t.Errorf("investment coverage_delta = %v, want 60", data["coverage_delta"])
+	if delta, _ := data["coverage_delta"].(float64); delta != -40 {
+		t.Errorf("investment coverage_delta = %v, want -40 (0 - 40)", data["coverage_delta"])
 	}
-	if cpp, _ := data["cost_per_coverage_point"].(float64); cpp != 500 {
-		t.Errorf("cost_per_coverage_point = %v, want 500", data["cost_per_coverage_point"])
+	if _, ok := data["cost_per_coverage_point"]; ok {
+		t.Errorf("cost_per_coverage_point = %v, want absent (n/a with no scoped framework)", data["cost_per_coverage_point"])
+	}
+	if na, _ := data["no_baseline"].(bool); !na {
+		t.Errorf("investment no_baseline = %v, want true", data["no_baseline"])
 	}
 }
 
@@ -383,7 +382,7 @@ func TestPackOutputs_MarkdownAndPDF(t *testing.T) {
 	// PDF — exactly 200 (%PDF- magic) or 503 graceful degradation, never a
 	// 500 / hang (slice 475 AC-1). Shared assertion with the brief PDF test.
 	resp, raw = doRaw(t, env, "/v1/board-packs/"+packID+"/pdf")
-	assertPDFOrServiceUnavailable(t, resp, raw)
+	assertRealPDF(t, resp, raw)
 }
 
 // ===== AC-7: a published pack is immutable =====
@@ -624,7 +623,8 @@ func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
 		tenant := freshPackVendorTenant(t, admin)
 		env := testServer(t, app, tenant)
 		// Mix: 2 on-time (recent annual), 2 past-due (reviewed >400 days ago
-		// against annual cadence, OR never reviewed).
+		// against annual cadence, OR never reviewed and created long enough
+		// before period end that its first review was due — #2061).
 		periodEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
 		recent := periodEnd.AddDate(0, 0, -10)
 		ancient := periodEnd.AddDate(-2, 0, 0) // ~730 days ago
@@ -632,6 +632,11 @@ func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
 		seedHighCritVendor(t, admin, tenant, "Globex", &recent, "annual")
 		seedHighCritVendor(t, admin, tenant, "OldVendor", &ancient, "annual")
 		seedHighCritVendor(t, admin, tenant, "NeverReviewed", nil, "annual")
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE vendors SET created_at = $3 WHERE tenant_id = $1 AND name = $2`,
+			tenant, "NeverReviewed", periodEnd.AddDate(0, -3, 0)); err != nil {
+			t.Fatalf("backdate NeverReviewed: %v", err)
+		}
 
 		packID := generateDraftPack(t, env, "2026-03-31")
 		resp, body := doJSON(t, env, http.MethodGet, "/v1/board-packs/"+packID, nil)

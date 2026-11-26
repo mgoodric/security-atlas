@@ -30,6 +30,10 @@
 //     table itself is append-only with supersession markers
 //     (`superseded_by`); the history export surfaces that ledger shape
 //     directly. No row is ever deleted from the underlying table.
+//     One exception to "every change is a version" (issue #1908): a
+//     re-upload that changes only `description` updates the active row
+//     in place, so this export shows only the latest prose. The prose
+//     it replaced lives append-only in `control_manifest_revisions`.
 //
 //   - Slice 145 concurrency cap inherited from slice 137. Refusal
 //     returns 429 with `Retry-After: 30`. The release fn is sync.Once-
@@ -409,7 +413,7 @@ func controlsHistoryToRowIter(rows []controlHistoryExportRow) iter.Seq[[]string]
 				r.Title,
 				r.ControlFamily,
 				r.SCFID,
-				r.SCFAnchorID.String(),
+				anchorIDCell(r.SCFAnchorID),
 				r.ImplementationType,
 				r.OwnerRole,
 				r.LifecycleState,

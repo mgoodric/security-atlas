@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRiskActionPlanLinks = `-- name: CountRiskActionPlanLinks :one
+SELECT COUNT(*)::bigint
+FROM action_plan_risks apr
+JOIN action_plans ap
+  ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
+WHERE apr.tenant_id = $1 AND apr.risk_id = $2
+  AND ap.tombstoned_at IS NULL
+`
+
+type CountRiskActionPlanLinksParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	RiskID   pgtype.UUID `json:"risk_id"`
+}
+
+// #2105: live (not tombstoned) action plans linked to a risk, for the
+// mitigate rule (a linked control or a linked action plan).
+func (q *Queries) CountRiskActionPlanLinks(ctx context.Context, arg CountRiskActionPlanLinksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRiskActionPlanLinks, arg.TenantID, arg.RiskID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countRiskControlLinks = `-- name: CountRiskControlLinks :one
 SELECT COUNT(*)::bigint
 FROM risk_control_links
@@ -29,9 +52,96 @@ func (q *Queries) CountRiskControlLinks(ctx context.Context, arg CountRiskContro
 	return column_1, err
 }
 
+const countRisksPage = `-- name: CountRisksPage :one
+SELECT count(*)::bigint AS total
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+LEFT JOIN LATERAL (
+    -- The same expression as ListRisksPage's sev lateral; keep them equal.
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
+WHERE r.tenant_id = $1
+  AND ($2::text IS NULL OR r.status::text = $2::text)
+  AND ($3::bool OR kids.child_count = 0)
+  AND ($4::text IS NULL OR r.treatment::text = $4::text)
+  AND ($5::text IS NULL OR r.methodology::text = $5::text)
+  AND ($6::text IS NULL OR r.level::text = $6::text)
+  AND ($7::text IS NULL OR $7::text = ANY(r.themes))
+  AND ($8::uuid IS NULL OR r.org_unit_id = $8::uuid)
+  AND ($9::uuid[] IS NULL OR r.category_id = ANY($9::uuid[]))
+  AND ($10::uuid IS NULL OR r.owner_user_id = $10::uuid)
+  AND (NOT $11::bool OR r.owner_user_id IS NULL)
+  AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+  AND ($14::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= $14::int))
+  AND ($15::int IS NULL OR sev.assessed <= $15::int)
+`
+
+type CountRisksPageParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Status         *string            `json:"status"`
+	IncludeRollups bool               `json:"include_rollups"`
+	Treatment      *string            `json:"treatment"`
+	Methodology    *string            `json:"methodology"`
+	Level          *string            `json:"level"`
+	Theme          *string            `json:"theme"`
+	OrgUnitID      pgtype.UUID        `json:"org_unit_id"`
+	CategoryIds    []pgtype.UUID      `json:"category_ids"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
+	Unowned        bool               `json:"unowned"`
+	DueFrom        pgtype.Timestamptz `json:"due_from"`
+	DueBefore      pgtype.Timestamptz `json:"due_before"`
+	SeverityMin    *int32             `json:"severity_min"`
+	SeverityMax    *int32             `json:"severity_max"`
+}
+
+// #2132: the total for ListRisksPage. It takes every filter the list does,
+// so the total counts exactly the set the register pages over.
+func (q *Queries) CountRisksPage(ctx context.Context, arg CountRisksPageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRisksPage,
+		arg.TenantID,
+		arg.Status,
+		arg.IncludeRollups,
+		arg.Treatment,
+		arg.Methodology,
+		arg.Level,
+		arg.Theme,
+		arg.OrgUnitID,
+		arg.CategoryIds,
+		arg.OwnerUserID,
+		arg.Unowned,
+		arg.DueFrom,
+		arg.DueBefore,
+		arg.SeverityMin,
+		arg.SeverityMax,
+	)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const createAggregateRisk = `-- name: CreateAggregateRisk :one
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     accepter, instrument_reference, level, org_unit_id, themes
 )
@@ -40,7 +150,7 @@ VALUES (
     $7, $8, $9, $10,
     $11, $12, $13, $14, $15::text[]
 )
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type CreateAggregateRiskParams struct {
@@ -48,7 +158,7 @@ type CreateAggregateRiskParams struct {
 	TenantID            pgtype.UUID     `json:"tenant_id"`
 	Title               string          `json:"title"`
 	Description         string          `json:"description"`
-	Category            RiskCategory    `json:"category"`
+	CategoryID          pgtype.UUID     `json:"category_id"`
 	Methodology         RiskMethodology `json:"methodology"`
 	InherentScore       []byte          `json:"inherent_score"`
 	Treatment           RiskTreatment   `json:"treatment"`
@@ -72,7 +182,7 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		arg.TenantID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
+		arg.CategoryID,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -90,7 +200,6 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -105,39 +214,69 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
 
 const createRisk = `-- name: CreateRisk :one
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
-    review_due_at, accepted_until, accepter, instrument_reference
+    review_due_at, accepted_until, accepter, instrument_reference,
+    acceptance_status, level, org_unit_id,
+    acceptance_proposed_by, acceptance_proposed_at, owner_user_id,
+    acceptance_justification, acceptance_proposed_until, external_ref
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
-    $11, $12, $13, $14
+    $11, $12, $13, $14,
+    $15, $16, $17,
+    $18, $19, $20,
+    $21, $22, $23
 )
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type CreateRiskParams struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Title               string             `json:"title"`
-	Description         string             `json:"description"`
-	Category            RiskCategory       `json:"category"`
-	Methodology         RiskMethodology    `json:"methodology"`
-	InherentScore       []byte             `json:"inherent_score"`
-	Treatment           RiskTreatment      `json:"treatment"`
-	TreatmentOwner      string             `json:"treatment_owner"`
-	ResidualScore       []byte             `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz `json:"review_due_at"`
-	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
-	Accepter            string             `json:"accepter"`
-	InstrumentReference string             `json:"instrument_reference"`
+	ID                      pgtype.UUID           `json:"id"`
+	TenantID                pgtype.UUID           `json:"tenant_id"`
+	Title                   string                `json:"title"`
+	Description             string                `json:"description"`
+	CategoryID              pgtype.UUID           `json:"category_id"`
+	Methodology             RiskMethodology       `json:"methodology"`
+	InherentScore           []byte                `json:"inherent_score"`
+	Treatment               RiskTreatment         `json:"treatment"`
+	TreatmentOwner          string                `json:"treatment_owner"`
+	ResidualScore           []byte                `json:"residual_score"`
+	ReviewDueAt             pgtype.Timestamptz    `json:"review_due_at"`
+	AcceptedUntil           pgtype.Date           `json:"accepted_until"`
+	Accepter                string                `json:"accepter"`
+	InstrumentReference     string                `json:"instrument_reference"`
+	AcceptanceStatus        *RiskAcceptanceStatus `json:"acceptance_status"`
+	Level                   RiskLevel             `json:"level"`
+	OrgUnitID               pgtype.UUID           `json:"org_unit_id"`
+	AcceptanceProposedBy    string                `json:"acceptance_proposed_by"`
+	AcceptanceProposedAt    pgtype.Timestamptz    `json:"acceptance_proposed_at"`
+	OwnerUserID             pgtype.UUID           `json:"owner_user_id"`
+	AcceptanceJustification string                `json:"acceptance_justification"`
+	AcceptanceProposedUntil pgtype.Date           `json:"acceptance_proposed_until"`
+	ExternalRef             *string               `json:"external_ref"`
 }
 
 // Insert a new risk. The application validates methodology-specific
@@ -150,7 +289,7 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.TenantID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
+		arg.CategoryID,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -160,6 +299,15 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.AcceptedUntil,
 		arg.Accepter,
 		arg.InstrumentReference,
+		arg.AcceptanceStatus,
+		arg.Level,
+		arg.OrgUnitID,
+		arg.AcceptanceProposedBy,
+		arg.AcceptanceProposedAt,
+		arg.OwnerUserID,
+		arg.AcceptanceJustification,
+		arg.AcceptanceProposedUntil,
+		arg.ExternalRef,
 	)
 	var i Risk
 	err := row.Scan(
@@ -167,7 +315,6 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -182,6 +329,21 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -202,7 +364,7 @@ func (q *Queries) DeleteRisk(ctx context.Context, arg DeleteRiskParams) error {
 }
 
 const getRiskByAggregationKey = `-- name: GetRiskByAggregationKey :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
@@ -230,7 +392,6 @@ func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggr
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -245,12 +406,27 @@ func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggr
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
 
 const getRiskByID = `-- name: GetRiskByID :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1 AND id = $2
 `
@@ -268,7 +444,6 @@ func (q *Queries) GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk,
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -283,6 +458,21 @@ func (q *Queries) GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk,
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -325,6 +515,24 @@ func (q *Queries) GetRiskControlLink(ctx context.Context, arg GetRiskControlLink
 	return i, err
 }
 
+const getRiskReviewCadenceDays = `-- name: GetRiskReviewCadenceDays :one
+SELECT COALESCE(
+    (SELECT t.risk_review_cadence_days FROM tenants t WHERE t.id = $1),
+    365
+)::int AS cadence_days
+`
+
+// #2059: the tenant's risk review cadence in days, as the
+// risks_review_due_default trigger reads it: the tenants row's
+// risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+// tenant predating slice 144). RLS scopes tenants to the caller's own row.
+func (q *Queries) GetRiskReviewCadenceDays(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, getRiskReviewCadenceDays, id)
+	var cadence_days int32
+	err := row.Scan(&cadence_days)
+	return cadence_days, err
+}
+
 const heatmapBuckets = `-- name: HeatmapBuckets :many
 SELECT
     (inherent_score->>'likelihood')::int  AS likelihood,
@@ -332,6 +540,7 @@ SELECT
     COUNT(*)::int                         AS count
 FROM risks
 WHERE tenant_id = $1
+  AND status = 'open'
   AND methodology IN ('nist_800_30', 'qualitative_5x5')
   AND jsonb_typeof(inherent_score->'likelihood') = 'number'
   AND jsonb_typeof(inherent_score->'impact')     = 'number'
@@ -351,7 +560,8 @@ type HeatmapBucketsRow struct {
 // methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
 // and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
 // methodologies (FAIR has LEF/LM) are intentionally excluded so the
-// heatmap stays a single coherent visualization.
+// heatmap stays a single coherent visualization. Closed risks are left
+// out (#2107): the heatmap counts live exposure.
 //
 // The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 // read jsonb-number values directly as int4 without an explicit cast.
@@ -373,6 +583,35 @@ func (q *Queries) HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]H
 		return nil, err
 	}
 	return items, nil
+}
+
+const insertRiskAuditLog = `-- name: InsertRiskAuditLog :exec
+INSERT INTO risk_audit_log (
+    tenant_id, risk_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertRiskAuditLogParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	RiskID      pgtype.UUID `json:"risk_id"`
+	Actor       string      `json:"actor"`
+	ActionType  string      `json:"action_type"`
+	BeforeState []byte      `json:"before_state"`
+	AfterState  []byte      `json:"after_state"`
+}
+
+// #1749: one append-only row per placement change, in the write's tx.
+func (q *Queries) InsertRiskAuditLog(ctx context.Context, arg InsertRiskAuditLogParams) error {
+	_, err := q.db.Exec(ctx, insertRiskAuditLog,
+		arg.TenantID,
+		arg.RiskID,
+		arg.Actor,
+		arg.ActionType,
+		arg.BeforeState,
+		arg.AfterState,
+	)
+	return err
 }
 
 const linkRiskControl = `-- name: LinkRiskControl :exec
@@ -432,6 +671,62 @@ func (q *Queries) LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskCo
 		arg.WeightCoverage,
 	)
 	return err
+}
+
+const listRiskAuditLog = `-- name: ListRiskAuditLog :many
+SELECT id, tenant_id, risk_id, actor, action_type, before_state, after_state, created_at, subject_module
+FROM risk_audit_log
+WHERE tenant_id = $1
+  AND (risk_id = $2::uuid
+       OR (action_type IN ('child_linked', 'child_unlinked')
+           AND COALESCE(after_state->>'child_risk_id', before_state->>'child_risk_id')
+               = ($2::uuid)::text))
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type ListRiskAuditLogParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	RiskID   pgtype.UUID `json:"risk_id"`
+	RowLimit int32       `json:"row_limit"`
+}
+
+// #2311: capped at row_limit; the caller asks for one more than it shows
+// to learn whether older rows exist.
+//
+// #2961: also the child_linked / child_unlinked rows on a parent's trail
+// that name this risk as the child, so a child's History shows being
+// linked under or unlinked from a parent without a second row. Their
+// risk_id is the parent's. The COALESCE matches the partial index
+// risk_audit_log_child_link (migration 20261300000000).
+func (q *Queries) ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error) {
+	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RiskAuditLog
+	for rows.Next() {
+		var i RiskAuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RiskID,
+			&i.Actor,
+			&i.ActionType,
+			&i.BeforeState,
+			&i.AfterState,
+			&i.CreatedAt,
+			&i.SubjectModule,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRiskControlLinkWeights = `-- name: ListRiskControlLinkWeights :many
@@ -563,7 +858,7 @@ func (q *Queries) ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskID
 }
 
 const listRisks = `-- name: ListRisks :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -586,7 +881,6 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -601,6 +895,21 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+			&i.ExternalRef,
 		); err != nil {
 			return nil, err
 		}
@@ -613,7 +922,7 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 }
 
 const listRisksByIDs = `-- name: ListRisksByIDs :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1 AND id = ANY($2::uuid[])
 ORDER BY id ASC
@@ -641,7 +950,6 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -656,6 +964,21 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+			&i.ExternalRef,
 		); err != nil {
 			return nil, err
 		}
@@ -665,6 +988,535 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const listRisksPage = `-- name: ListRisksPage :many
+SELECT
+    r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id, r.acceptance_justification, r.acceptance_proposed_until, r.acceptance_proposed_by, r.acceptance_proposed_at, r.acceptance_approved_at, r.self_approved, r.status, r.closure_reason, r.closure_note, r.closed_at, r.closed_by, r.owner_user_id, r.external_ref,
+    kids.child_count::int AS child_count
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+LEFT JOIN org_risk_categories cat
+       ON cat.tenant_id = r.tenant_id AND cat.id = r.category_id
+LEFT JOIN users ou
+       ON ou.tenant_id = r.tenant_id AND ou.id = r.owner_user_id
+LEFT JOIN org_units unit
+       ON unit.tenant_id = r.tenant_id AND unit.id = r.org_unit_id
+LEFT JOIN LATERAL (
+    SELECT CASE WHEN r.methodology = 'fair' THEN 1 ELSE 0 END AS fair_group,
+           CASE
+               WHEN jsonb_typeof(r.residual_score -> 'score') = 'number'
+                   THEN (r.residual_score ->> 'score')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'severity') = 'number'
+                   THEN (r.residual_score ->> 'severity')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.residual_score -> 'impact') = 'number'
+                   THEN (r.residual_score ->> 'likelihood')::float8 * (r.residual_score ->> 'impact')::float8
+           END AS residual,
+           lower(COALESCE(NULLIF(ou.display_name, ''), NULLIF(ou.email, ''), NULLIF(btrim(r.treatment_owner), ''))) AS owner_name
+) k ON true
+LEFT JOIN LATERAL (
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
+WHERE r.tenant_id = $1
+  AND ($2::text IS NULL OR r.status::text = $2::text)
+  AND ($3::bool OR kids.child_count = 0)
+  AND ($4::text IS NULL OR r.treatment::text = $4::text)
+  AND ($5::text IS NULL OR r.methodology::text = $5::text)
+  AND ($6::text IS NULL OR r.level::text = $6::text)
+  AND ($7::text IS NULL OR $7::text = ANY(r.themes))
+  AND ($8::uuid IS NULL OR r.org_unit_id = $8::uuid)
+  AND ($9::uuid[] IS NULL OR r.category_id = ANY($9::uuid[]))
+  AND ($10::uuid IS NULL OR r.owner_user_id = $10::uuid)
+  AND (NOT $11::bool OR r.owner_user_id IS NULL)
+  AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+  AND ($14::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= $14::int))
+  AND ($15::int IS NULL OR sev.assessed <= $15::int)
+ORDER BY
+    -- residual (the default, descending): 5x5, then FAIR, then unscored,
+    -- in both directions (risk.Rank.Tier).
+    CASE WHEN $16::text IN ('residual', 'residual_age') THEN
+        CASE WHEN k.residual IS NULL THEN 2 ELSE k.fair_group END
+    END ASC,
+    CASE WHEN $16::text = 'residual' AND NOT $17::bool THEN k.residual END ASC NULLS LAST,
+    CASE WHEN ($16::text = 'residual' AND $17::bool) OR $16::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
+    -- residual_age (the dashboard's residual,age): oldest first on a tie.
+    CASE WHEN $16::text = 'residual_age' THEN r.created_at END ASC,
+    CASE WHEN $16::text = 'title' AND NOT $17::bool THEN lower(r.title) COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'title' AND $17::bool THEN lower(r.title) COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'category' AND NOT $17::bool THEN lower(cat.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'category' AND $17::bool THEN lower(cat.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'owner' AND NOT $17::bool THEN k.owner_name COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'owner' AND $17::bool THEN k.owner_name COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'treatment' AND NOT $17::bool THEN r.treatment::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'treatment' AND $17::bool THEN r.treatment::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'review_due' AND NOT $17::bool THEN r.review_due_at END ASC NULLS LAST,
+    CASE WHEN $16::text = 'review_due' AND $17::bool THEN r.review_due_at END DESC NULLS LAST,
+    CASE WHEN $16::text = 'status' AND NOT $17::bool THEN r.status::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'status' AND $17::bool THEN r.status::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'methodology' AND NOT $17::bool THEN r.methodology::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'methodology' AND $17::bool THEN r.methodology::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'level' AND NOT $17::bool THEN r.level END ASC,
+    CASE WHEN $16::text = 'level' AND $17::bool THEN r.level END DESC,
+    CASE WHEN $16::text = 'org_unit' AND NOT $17::bool THEN lower(unit.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'org_unit' AND $17::bool THEN lower(unit.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'themes' AND NOT $17::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'themes' AND $17::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'created_at' AND NOT $17::bool THEN r.created_at END ASC,
+    CASE WHEN $16::text = 'created_at' AND $17::bool THEN r.created_at END DESC,
+    CASE WHEN $16::text = 'id' AND $17::bool THEN r.id END DESC,
+    r.id
+LIMIT $19 OFFSET $18
+`
+
+type ListRisksPageParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Status         *string            `json:"status"`
+	IncludeRollups bool               `json:"include_rollups"`
+	Treatment      *string            `json:"treatment"`
+	Methodology    *string            `json:"methodology"`
+	Level          *string            `json:"level"`
+	Theme          *string            `json:"theme"`
+	OrgUnitID      pgtype.UUID        `json:"org_unit_id"`
+	CategoryIds    []pgtype.UUID      `json:"category_ids"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
+	Unowned        bool               `json:"unowned"`
+	DueFrom        pgtype.Timestamptz `json:"due_from"`
+	DueBefore      pgtype.Timestamptz `json:"due_before"`
+	SeverityMin    *int32             `json:"severity_min"`
+	SeverityMax    *int32             `json:"severity_max"`
+	SortKey        string             `json:"sort_key"`
+	SortDesc       bool               `json:"sort_desc"`
+	RowOffset      int32              `json:"row_offset"`
+	RowLimit       int32              `json:"row_limit"`
+}
+
+type ListRisksPageRow struct {
+	Risk       Risk  `json:"risk"`
+	ChildCount int32 `json:"child_count"`
+}
+
+// #2132: the risk register, filtered, sorted and paged on the server.
+//
+// Filters (each optional; NULL / false leaves it off):
+//
+//	status            open | closed. NULL keeps both.
+//	include_rollups   false leaves out a roll-up: a risk with at least one
+//	                  open child (#2060, the #2107 open-children rule).
+//	treatment, methodology, level, theme, org_unit_id: exact match.
+//	category_ids      any of these organisation categories (#1745); the
+//	                  store resolves slugs to ids first.
+//	severity_min, severity_max  the assessed severity in that inclusive
+//	                  range (#2490), FAIR left out. The value is
+//	                  risk.AssessedSeverity's, the wire `severity`: the
+//	                  inherent score's `severity`, else likelihood x
+//	                  impact, each truncated to a whole number, and 0 when
+//	                  the score is not an object or any of the three keys
+//	                  is not a number (Go's json.Unmarshal into *float64
+//	                  fails on the whole object then). The store sets the
+//	                  bounds from risk.SeverityBandRange.
+//	owner_user_id     that person's risks (#2129); unowned keeps the risks
+//	                  with no owner user.
+//	due_from, due_before  review_due_at in [due_from, due_before). The
+//	                  store turns overdue, due-soon and a date range into
+//	                  these two UTC-day bounds (the duedate rule).
+//
+// sort_key is one of the fixed keys in the ORDER BY; the handler refuses
+// any other value before it gets here. Residual follows #2185's
+// risk.RanksAbove and risk.Rank.Tier: scored 5x5 risks, then scored FAIR
+// risks, then unscored risks of any methodology (#2516), in either
+// direction, so a dollar figure never ranks against a 1..25 score. The
+// value is risk.ScoreValue's: score, then severity, then likelihood x
+// impact; a risk with no such value is unscored. Every order ends on r.id,
+// so offset paging has no duplicates or gaps. Text keys sort lower-cased
+// under COLLATE "C", so the order is the same on every deployment.
+//
+// RLS posture: the explicit tenant_id predicates sit alongside the
+// GUC-driven RLS on every table read here.
+func (q *Queries) ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([]ListRisksPageRow, error) {
+	rows, err := q.db.Query(ctx, listRisksPage,
+		arg.TenantID,
+		arg.Status,
+		arg.IncludeRollups,
+		arg.Treatment,
+		arg.Methodology,
+		arg.Level,
+		arg.Theme,
+		arg.OrgUnitID,
+		arg.CategoryIds,
+		arg.OwnerUserID,
+		arg.Unowned,
+		arg.DueFrom,
+		arg.DueBefore,
+		arg.SeverityMin,
+		arg.SeverityMax,
+		arg.SortKey,
+		arg.SortDesc,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRisksPageRow
+	for rows.Next() {
+		var i ListRisksPageRow
+		if err := rows.Scan(
+			&i.Risk.ID,
+			&i.Risk.TenantID,
+			&i.Risk.Title,
+			&i.Risk.Description,
+			&i.Risk.Methodology,
+			&i.Risk.InherentScore,
+			&i.Risk.Treatment,
+			&i.Risk.TreatmentOwner,
+			&i.Risk.ResidualScore,
+			&i.Risk.ReviewDueAt,
+			&i.Risk.CreatedAt,
+			&i.Risk.UpdatedAt,
+			&i.Risk.AcceptedUntil,
+			&i.Risk.Accepter,
+			&i.Risk.InstrumentReference,
+			&i.Risk.Level,
+			&i.Risk.OrgUnitID,
+			&i.Risk.Themes,
+			&i.Risk.AcceptanceStatus,
+			&i.Risk.CategoryID,
+			&i.Risk.AcceptanceJustification,
+			&i.Risk.AcceptanceProposedUntil,
+			&i.Risk.AcceptanceProposedBy,
+			&i.Risk.AcceptanceProposedAt,
+			&i.Risk.AcceptanceApprovedAt,
+			&i.Risk.SelfApproved,
+			&i.Risk.Status,
+			&i.Risk.ClosureReason,
+			&i.Risk.ClosureNote,
+			&i.Risk.ClosedAt,
+			&i.Risk.ClosedBy,
+			&i.Risk.OwnerUserID,
+			&i.Risk.ExternalRef,
+			&i.ChildCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRisksWithProposedAcceptance = `-- name: ListRisksWithProposedAcceptance :many
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+FROM risks
+WHERE tenant_id = $1
+  AND status = 'open'
+  AND acceptance_status = 'proposed'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the open risks whose acceptance waits for approval, for GET
+// /v1/approvals and its sidebar badge. A closed risk's acceptance cannot
+// be approved until it is reopened, so it is not read.
+func (q *Queries) ListRisksWithProposedAcceptance(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error) {
+	rows, err := q.db.Query(ctx, listRisksWithProposedAcceptance, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Risk
+	for rows.Next() {
+		var i Risk
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Description,
+			&i.Methodology,
+			&i.InherentScore,
+			&i.Treatment,
+			&i.TreatmentOwner,
+			&i.ResidualScore,
+			&i.ReviewDueAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AcceptedUntil,
+			&i.Accepter,
+			&i.InstrumentReference,
+			&i.Level,
+			&i.OrgUnitID,
+			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+			&i.ExternalRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRiskByID = `-- name: LockRiskByID :one
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+FROM risks
+WHERE tenant_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockRiskByIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1867: read a risk and hold its row against concurrent theme writes and
+// deletes until the transaction ends, so a theme write or delete sees the
+// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
+// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
+// it links this risk as a child, so an evaluation is never blocked by it.
+func (q *Queries) LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, lockRiskByID, arg.TenantID, arg.ID)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
+	)
+	return i, err
+}
+
+const setRiskStatus = `-- name: SetRiskStatus :one
+UPDATE risks
+SET status = $1,
+    closure_reason = $2,
+    closure_note = $3,
+    closed_at = $4,
+    closed_by = $5,
+    updated_at = now()
+WHERE tenant_id = $6 AND id = $7
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+`
+
+type SetRiskStatusParams struct {
+	Status        RiskStatus         `json:"status"`
+	ClosureReason *RiskClosureReason `json:"closure_reason"`
+	ClosureNote   string             `json:"closure_note"`
+	ClosedAt      pgtype.Timestamptz `json:"closed_at"`
+	ClosedBy      string             `json:"closed_by"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ID            pgtype.UUID        `json:"id"`
+}
+
+// #2107: the lifecycle columns, written only by the close and reopen
+// transitions (internal/risk/lifecycle.go), which check the current state
+// and audit-log the change in the same transaction.
+func (q *Queries) SetRiskStatus(ctx context.Context, arg SetRiskStatusParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, setRiskStatus,
+		arg.Status,
+		arg.ClosureReason,
+		arg.ClosureNote,
+		arg.ClosedAt,
+		arg.ClosedBy,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
+	)
+	return i, err
+}
+
+const setRiskTreatment = `-- name: SetRiskTreatment :one
+UPDATE risks
+SET treatment = $3,
+    acceptance_status = $4,
+    instrument_reference = $5,
+    accepted_until = $6,
+    accepter = $7,
+    acceptance_justification = $8,
+    acceptance_proposed_until = $9,
+    acceptance_proposed_by = $10,
+    acceptance_proposed_at = $11,
+    acceptance_approved_at = $12,
+    self_approved = $13,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+`
+
+type SetRiskTreatmentParams struct {
+	TenantID                pgtype.UUID           `json:"tenant_id"`
+	ID                      pgtype.UUID           `json:"id"`
+	Treatment               RiskTreatment         `json:"treatment"`
+	AcceptanceStatus        *RiskAcceptanceStatus `json:"acceptance_status"`
+	InstrumentReference     string                `json:"instrument_reference"`
+	AcceptedUntil           pgtype.Date           `json:"accepted_until"`
+	Accepter                string                `json:"accepter"`
+	AcceptanceJustification string                `json:"acceptance_justification"`
+	AcceptanceProposedUntil pgtype.Date           `json:"acceptance_proposed_until"`
+	AcceptanceProposedBy    string                `json:"acceptance_proposed_by"`
+	AcceptanceProposedAt    pgtype.Timestamptz    `json:"acceptance_proposed_at"`
+	AcceptanceApprovedAt    pgtype.Timestamptz    `json:"acceptance_approved_at"`
+	SelfApproved            bool                  `json:"self_approved"`
+}
+
+// #2105: the treatment and acceptance columns, written only by the risk
+// treatment and acceptance transitions (internal/risk/transitions.go),
+// which validate the state machine and audit-log the change in the same
+// transaction. Record fields are untouched.
+func (q *Queries) SetRiskTreatment(ctx context.Context, arg SetRiskTreatmentParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, setRiskTreatment,
+		arg.TenantID,
+		arg.ID,
+		arg.Treatment,
+		arg.AcceptanceStatus,
+		arg.InstrumentReference,
+		arg.AcceptedUntil,
+		arg.Accepter,
+		arg.AcceptanceJustification,
+		arg.AcceptanceProposedUntil,
+		arg.AcceptanceProposedBy,
+		arg.AcceptanceProposedAt,
+		arg.AcceptanceApprovedAt,
+		arg.SelfApproved,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
+	)
+	return i, err
 }
 
 const unlinkRiskControl = `-- name: UnlinkRiskControl :exec
@@ -687,48 +1539,52 @@ const updateRisk = `-- name: UpdateRisk :one
 UPDATE risks
 SET title = $3,
     description = $4,
-    category = $5,
-    methodology = $6,
-    inherent_score = $7,
-    treatment = $8,
-    treatment_owner = $9,
-    residual_score = $10,
-    review_due_at = $11,
-    accepted_until = $12,
-    accepter = $13,
-    instrument_reference = $14,
+    methodology = $5,
+    inherent_score = $6,
+    treatment = $7,
+    treatment_owner = $8,
+    residual_score = $9,
+    review_due_at = $10,
+    accepted_until = $11,
+    accepter = $12,
+    instrument_reference = $13,
+    acceptance_status = $14,
+    owner_user_id = $15,
+    external_ref = $16,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type UpdateRiskParams struct {
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	ID                  pgtype.UUID        `json:"id"`
-	Title               string             `json:"title"`
-	Description         string             `json:"description"`
-	Category            RiskCategory       `json:"category"`
-	Methodology         RiskMethodology    `json:"methodology"`
-	InherentScore       []byte             `json:"inherent_score"`
-	Treatment           RiskTreatment      `json:"treatment"`
-	TreatmentOwner      string             `json:"treatment_owner"`
-	ResidualScore       []byte             `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz `json:"review_due_at"`
-	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
-	Accepter            string             `json:"accepter"`
-	InstrumentReference string             `json:"instrument_reference"`
+	TenantID            pgtype.UUID           `json:"tenant_id"`
+	ID                  pgtype.UUID           `json:"id"`
+	Title               string                `json:"title"`
+	Description         string                `json:"description"`
+	Methodology         RiskMethodology       `json:"methodology"`
+	InherentScore       []byte                `json:"inherent_score"`
+	Treatment           RiskTreatment         `json:"treatment"`
+	TreatmentOwner      string                `json:"treatment_owner"`
+	ResidualScore       []byte                `json:"residual_score"`
+	ReviewDueAt         pgtype.Timestamptz    `json:"review_due_at"`
+	AcceptedUntil       pgtype.Date           `json:"accepted_until"`
+	Accepter            string                `json:"accepter"`
+	InstrumentReference string                `json:"instrument_reference"`
+	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
+	OwnerUserID         pgtype.UUID           `json:"owner_user_id"`
+	ExternalRef         *string               `json:"external_ref"`
 }
 
 // Full-update path (PATCH handler reads existing, mutates fields, writes).
 // updated_at is set explicitly so the schema's per-row default doesn't
-// silently keep stale values.
+// silently keep stale values. The category moves only through
+// UpdateRiskCategory, which the caller audit-logs (#1812).
 func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error) {
 	row := q.db.QueryRow(ctx, updateRisk,
 		arg.TenantID,
 		arg.ID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -738,6 +1594,9 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		arg.AcceptedUntil,
 		arg.Accepter,
 		arg.InstrumentReference,
+		arg.AcceptanceStatus,
+		arg.OwnerUserID,
+		arg.ExternalRef,
 	)
 	var i Risk
 	err := row.Scan(
@@ -745,7 +1604,6 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -760,6 +1618,144 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
+	)
+	return i, err
+}
+
+const updateRiskCategory = `-- name: UpdateRiskCategory :one
+UPDATE risks
+SET category_id = $1,
+    updated_at = now()
+WHERE tenant_id = $2 AND id = $3
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+`
+
+type UpdateRiskCategoryParams struct {
+	CategoryID pgtype.UUID `json:"category_id"`
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+// #1812: move a risk onto another of the tenant's categories. The caller
+// holds the row via LockRiskByID and has resolved the category as
+// assignable.
+func (q *Queries) UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskCategory, arg.CategoryID, arg.TenantID, arg.ID)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
+	)
+	return i, err
+}
+
+const updateRiskPlacement = `-- name: UpdateRiskPlacement :one
+UPDATE risks
+SET level = $3,
+    org_unit_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
+`
+
+type UpdateRiskPlacementParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ID        pgtype.UUID `json:"id"`
+	Level     RiskLevel   `json:"level"`
+	OrgUnitID pgtype.UUID `json:"org_unit_id"`
+}
+
+// #1749: move a risk between hierarchy levels and org units. The caller
+// holds the row via LockRiskByID and has checked that level matches the
+// org unit's level.
+func (q *Queries) UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlacementParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskPlacement,
+		arg.TenantID,
+		arg.ID,
+		arg.Level,
+		arg.OrgUnitID,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -769,7 +1765,7 @@ UPDATE risks
 SET residual_score = $3::jsonb,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type UpdateRiskResidualParams struct {
@@ -791,7 +1787,6 @@ func (q *Queries) UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidual
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -806,6 +1801,21 @@ func (q *Queries) UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidual
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -815,7 +1825,7 @@ UPDATE risks
 SET themes = $3::text[],
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type UpdateRiskThemesParams struct {
@@ -836,7 +1846,6 @@ func (q *Queries) UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesPara
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -851,6 +1860,21 @@ func (q *Queries) UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesPara
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }

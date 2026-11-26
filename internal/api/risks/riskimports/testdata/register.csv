@@ -1,0 +1,11 @@
+Risk Register FY27,,,,,,
+Risk ID,Risk Title,Description,Category,Next Review,Risk Owner,Target Date
+R-001,Vendor outage,The primary payments vendor is unavailable for a business day.,Operational,2027-01-15,alice@corp.test,2027-03-01
+R-002,Credential phishing,Staff credentials are phished.,privacy,,bob@corp.test,
+R-003,,This row has no title.,operational,,,
+r-001,Repeated ID,The ID repeats row 3 in another case.,operational,,,
+R-004,Unknown category,No category has this name.,nonsense,,,
+R-005,Bad review date,The review date is not a date.,operational,next week,,
+,Risk without an ID,The register gives this risk no ID.,financial,,,
+R-EXIST,Already in the register,The tenant already has a risk with this ID.,operational,,,
+R-OTHER,Another tenant's ID,Only another tenant has a risk with this ID.,regulatory,,,

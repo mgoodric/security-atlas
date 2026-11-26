@@ -58,6 +58,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +69,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -143,6 +146,10 @@ type controlExportRow struct {
 	BundleManifestHash string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	AnchorFit          string
+	AnchorFitNote      string
+	// Demo is true for a control the in-place demo seed added (#2043).
+	Demo bool
 }
 
 // NewExportHandler constructs the slice 137 export handler. The pool
@@ -391,6 +398,10 @@ func parseControlsExportFormat(r *http.Request) (export.Format, error) {
 //	tenant data: applicability_expr     (slice 017 DSL; RLS guards)
 //	integrity:   freshness_class, bundle_manifest_hash
 //	audit:       created_at, updated_at
+//	anchor fit:  anchor_fit, anchor_fit_note (issue #1736; appended so
+//	             every earlier column keeps its position)
+//	provenance:  demo — "true" for a control the in-place demo seed added
+//	             (#2043; appended for the same reason)
 func controlsExportHeader() []string {
 	return []string{
 		"id",
@@ -408,7 +419,21 @@ func controlsExportHeader() []string {
 		"bundle_manifest_hash",
 		"created_at",
 		"updated_at",
+		"anchor_fit",
+		"anchor_fit_note",
+		"demo",
 	}
+}
+
+// anchorIDCell renders the scf_anchor_id export cell. An unanchored
+// control (anchor_fit: none, issue #1736) has a NULL anchor, which the
+// row mapping reads as uuid.Nil; it exports as an empty cell, not the
+// all-zero UUID, which no anchor has.
+func anchorIDCell(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
 }
 
 // controlsToRowIter projects a slice of controlExportRow into an
@@ -418,7 +443,7 @@ func controlsExportHeader() []string {
 // Date fields render as RFC3339 (timestamps). The UUID columns render
 // as canonical 8-4-4-4-12 hex (UUID.String()). The nullable string
 // columns (`scf_id`, `freshness_class`) render as the empty string
-// when absent.
+// when absent, and so does `scf_anchor_id` (see anchorIDCell).
 func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, r := range rows {
@@ -429,7 +454,7 @@ func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 				r.Title,
 				r.ControlFamily,
 				r.SCFID,
-				r.SCFAnchorID.String(),
+				anchorIDCell(r.SCFAnchorID),
 				r.ImplementationType,
 				r.OwnerRole,
 				r.LifecycleState,
@@ -438,6 +463,9 @@ func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 				r.BundleManifestHash,
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
+				r.AnchorFit,
+				r.AnchorFitNote,
+				strconv.FormatBool(r.Demo),
 			}
 			if !yield(row) {
 				return
@@ -493,6 +521,14 @@ func (h *ExportHandler) listControlsDirect(ctx context.Context, limit int) ([]co
 	if err != nil {
 		return nil, false, fmt.Errorf("list active controls for export: %w", err)
 	}
+	ids := make([]uuid.UUID, len(dbRows))
+	for i, r := range dbRows {
+		ids[i] = uuid.UUID(r.ID.Bytes)
+	}
+	demo, err := demoprov.Lookup(ctx, q, demoprov.TableControls, ids)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit: %w", err)
 	}
@@ -530,6 +566,11 @@ func (h *ExportHandler) listControlsDirect(ctx context.Context, limit int) ([]co
 			ApplicabilityExpr:  r.ApplicabilityExpr,
 			FreshnessClass:     freshness,
 			BundleManifestHash: r.BundleManifestHash,
+			AnchorFit:          r.AnchorFit,
+			Demo:               demo.Has(uuid.UUID(r.ID.Bytes)),
+		}
+		if r.AnchorFitNote != nil {
+			out[i].AnchorFitNote = *r.AnchorFitNote
 		}
 		if r.CreatedAt.Valid {
 			out[i].CreatedAt = r.CreatedAt.Time
@@ -612,16 +653,14 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
-// controlsHasProgramRead reports whether the credential carries an
-// explicit program-read role signal. Mirrors `hasProgramRead` from
-// `internal/api/risks/authz.go`; the controls catalog includes the
-// same class of tenant-private data (applicability_expr) and demands
-// the same gate.
-//
-// Deliberately stricter than authz.derivedRolesFor — a bare push
-// credential (no flags) has no business reading the control catalog.
+// controlsHasProgramRead reports whether the credential holds a tenant role:
+// any of the five, by its live user_roles (authz.HasAnyTenantRole). OPA
+// reads the controls exports for every role, so the defense-in-depth gate
+// admits the same set. A bare push credential, or a session whose role claim
+// names a role it no longer holds (#2381), is refused. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted that claim.
 func controlsHasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // ===== Counting writer =====

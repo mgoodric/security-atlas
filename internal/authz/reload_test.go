@@ -49,12 +49,10 @@ func freshEmbeddedModules(t *testing.T) (map[string]*ast.Module, map[string][]by
 	return modules, sources
 }
 
-// parseTestBundle parses the same policies/authz/*.rego sources that
+// parseTestBundle parses the same internal/authz/rego_bundle/*.rego sources that
 // NewEngine loads, but without going through the package's
 // (intentionally) unexported `embeddedPoliciesWithSources` function.
-// The bundle is small enough to enumerate by filename + we keep the
-// list in lockstep with internal/authz/rego_bundle/ via the
-// `just authz-sync` step.
+// The bundle is small enough to enumerate by filename.
 //
 // The bundle contents are intentionally NOT enumerated by string
 // literal here — that would create a second source-of-truth that

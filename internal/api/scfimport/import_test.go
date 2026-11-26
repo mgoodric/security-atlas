@@ -4,7 +4,9 @@ package scfimport_test
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -156,26 +158,142 @@ func TestImport_NewReleaseCreatesNewFrameworkVersion(t *testing.T) {
 	}
 }
 
-func TestImport_DetectsContentUpdates(t *testing.T) {
+// anchorSnapshot captures every scf_anchors row (content + xmin) and
+// the SCF framework_versions rows, so a test can assert a re-import wrote
+// nothing.
+func anchorSnapshot(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	var snap string
+	err := pool.QueryRow(context.Background(), `
+		SELECT coalesce((SELECT string_agg(concat_ws('|', a.id, a.scf_id, a.family, a.title,
+		                    a.description, a.subtopics::text, a.xmin::text), E'\n' ORDER BY a.id)
+		                 FROM scf_anchors a), '')
+		    || E'\n--\n' ||
+		    coalesce((SELECT string_agg(concat_ws('|', fv.id, fv.version, fv.status::text,
+		                    fv.xmin::text), E'\n' ORDER BY fv.id)
+		                 FROM framework_versions fv WHERE fv.tenant_id IS NULL), '')
+		    || E'\n--\n' ||
+		    coalesce((SELECT string_agg(concat_ws('|', f.id, f.latest_version_id, f.xmin::text), E'\n' ORDER BY f.id)
+		                 FROM frameworks f WHERE f.slug = 'scf'), '')`).Scan(&snap)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return snap
+}
+
+func TestImport_SameReleaseIdenticalContentChangesNothing(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	truncateCatalog(t, pool)
+	cat := loadFixture(t)
+	if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
+		t.Fatalf("first Import: %v", err)
+	}
+	before := anchorSnapshot(t, pool)
 
+	report, err := scfimport.Import(context.Background(), pool, loadFixture(t))
+	if err != nil {
+		t.Fatalf("identical re-import: %v", err)
+	}
+	if report.Created != 0 || report.Updated != 0 || report.Unchanged != len(cat.Controls) {
+		t.Fatalf("report = %+v; want all %d unchanged", report, len(cat.Controls))
+	}
+	if after := anchorSnapshot(t, pool); after != before {
+		t.Fatalf("identical re-import changed the database:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestImport_SameReleaseChangedTitleIsRefused(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	truncateCatalog(t, pool)
+	cat := loadFixture(t)
+	if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
+		t.Fatalf("first Import: %v", err)
+	}
+	before := anchorSnapshot(t, pool)
+
+	changed := loadFixture(t)
+	changed.Controls[0].Title = "MUTATED: title rewritten for the test"
+	target := changed.Controls[0].SCFID
+	_, err := scfimport.Import(context.Background(), pool, changed)
+	if err == nil {
+		t.Fatal("re-import with a changed title succeeded; want refusal")
+	}
+	var conflict *scfimport.ReleaseConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %v (%T); want *scfimport.ReleaseConflictError", err, err)
+	}
+	if len(conflict.Changed) != 1 || conflict.Changed[0] != target ||
+		len(conflict.Added) != 0 || len(conflict.Missing) != 0 {
+		t.Fatalf("conflict = %+v; want only %s changed", conflict, target)
+	}
+	if !strings.Contains(err.Error(), target) {
+		t.Fatalf("error %q does not name anchor %s", err, target)
+	}
+	if after := anchorSnapshot(t, pool); after != before {
+		t.Fatalf("refused re-import wrote to the database:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestImport_SameReleaseAddedOrMissingAnchorIsRefused(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	truncateCatalog(t, pool)
 	cat := loadFixture(t)
 	if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
 		t.Fatalf("first Import: %v", err)
 	}
 
-	// Mutate one anchor's description and re-import the same release.
-	cat.Controls[0].Description = "MUTATED: description rewritten for the test"
-	report, err := scfimport.Import(context.Background(), pool, cat)
-	if err != nil {
-		t.Fatalf("second Import: %v", err)
+	shorter := loadFixture(t)
+	dropped := shorter.Controls[len(shorter.Controls)-1].SCFID
+	shorter.Controls = shorter.Controls[:len(shorter.Controls)-1]
+	shorter.Controls = append(shorter.Controls, scfimport.Control{SCFID: "ZZZ-99", Family: "ZZZ", Title: "Added"})
+	_, err := scfimport.Import(context.Background(), pool, shorter)
+	var conflict *scfimport.ReleaseConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %v; want *scfimport.ReleaseConflictError", err)
 	}
-	if report.Updated != 1 {
-		t.Fatalf("updated = %d; want 1", report.Updated)
+	if len(conflict.Added) != 1 || conflict.Added[0] != "ZZZ-99" ||
+		len(conflict.Missing) != 1 || conflict.Missing[0] != dropped {
+		t.Fatalf("conflict = %+v; want added ZZZ-99, missing %s", conflict, dropped)
 	}
-	if report.Unchanged != len(cat.Controls)-1 {
-		t.Fatalf("unchanged = %d; want %d", report.Unchanged, len(cat.Controls)-1)
+}
+
+// TestSCFAnchor_DirectUpdateRejected proves the trigger: an UPDATE of an
+// imported anchor's title is refused for the migrate role (the trigger) and
+// for the app role (which holds only SELECT, so the GRANT refuses it before
+// the trigger runs). A no-content UPDATE still passes for the migrate role.
+func TestSCFAnchor_DirectUpdateRejected(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	truncateCatalog(t, migrate)
+	cat := loadFixture(t)
+	if _, err := scfimport.Import(context.Background(), migrate, cat); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	scfID := cat.Controls[0].SCFID
+	const update = `UPDATE scf_anchors SET title = 'rewritten' WHERE scf_id = $1`
+
+	_, err := migrate.Exec(context.Background(), update, scfID)
+	if err == nil || !strings.Contains(err.Error(), "imported anchors are frozen") {
+		t.Fatalf("migrate-role UPDATE: err = %v; want the immutability trigger's rejection", err)
+	}
+
+	_, err = app.Exec(context.Background(), update, scfID)
+	if err == nil {
+		t.Fatal("app-role UPDATE of an anchor title succeeded; want rejection")
+	}
+
+	if _, err := migrate.Exec(context.Background(),
+		`UPDATE scf_anchors SET updated_at = now() WHERE scf_id = $1`, scfID); err != nil {
+		t.Fatalf("non-content UPDATE rejected: %v", err)
+	}
+
+	var title string
+	if err := migrate.QueryRow(context.Background(),
+		`SELECT title FROM scf_anchors WHERE scf_id = $1`, scfID).Scan(&title); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if title != cat.Controls[0].Title {
+		t.Fatalf("title = %q; want unchanged %q", title, cat.Controls[0].Title)
 	}
 }
 

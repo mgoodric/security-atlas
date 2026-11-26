@@ -1,8 +1,8 @@
 // Slice 681 / ATLAS-039 + ATLAS-036 — Playwright E2E pinning the three
 // risk-surface UX fixes:
 //
-//   AC-1 — clicking the INHERENT SEVERITY / RESIDUAL / REVIEW-DUE headers
-//          re-orders the rows (sortable columns).
+//   AC-1 — clicking the RESIDUAL / REVIEW-DUE headers re-orders the rows
+//          (sortable columns; on the server since #2132).
 //   AC-2 — a risk TITLE links to the read-only `/risks/{id}` detail.
 //   AC-3 — the sidebar Risks badge reads as HIGH-SEVERITY (not a total).
 //
@@ -28,7 +28,7 @@ function mockRisks() {
       inherent_score: { likelihood: 3, impact: 4 },
       treatment: "mitigate",
       treatment_owner: "owner-b",
-      residual_score: { likelihood: 3, impact: 3 }, // 9/25 = 0.36
+      residual_score: { likelihood: 3, impact: 3 }, // 9
       review_due_at: "2026-09-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -48,7 +48,7 @@ function mockRisks() {
       inherent_score: { likelihood: 5, impact: 5 },
       treatment: "mitigate",
       treatment_owner: "owner-a",
-      residual_score: { likelihood: 5, impact: 5 }, // 25/25 = 1.00
+      residual_score: { likelihood: 5, impact: 5 }, // 25
       review_due_at: "2026-12-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -68,7 +68,7 @@ function mockRisks() {
       inherent_score: { likelihood: 1, impact: 2 },
       treatment: "mitigate",
       treatment_owner: "owner-c",
-      residual_score: { likelihood: 1, impact: 1 }, // 1/25 = 0.04
+      residual_score: { likelihood: 1, impact: 1 }, // 1
       review_due_at: "2026-06-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -95,6 +95,18 @@ async function mockListRoutes(page: import("@playwright/test").Page) {
   // anchor this pattern to the list shape (`/api/risks` optionally with a
   // query string, but NOT a trailing `/id`).
   await page.route(/\/api\/risks(\?.*)?$/, async (route) => {
+    // #2490: the sidebar badge asks the platform for the high band's
+    // total; the mock answers as the platform would.
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("severity_band") === "high") {
+      const high = mockRisks().filter((r) => r.severity >= 15);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risks: high.slice(0, 1), total: high.length }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -111,67 +123,57 @@ async function titleOrder(
   return desktop.getByTestId("risks-row-title").allInnerTexts();
 }
 
-test.describe("/risks sortable columns (slice 681 AC-1)", () => {
-  test("default order is inherent-severity descending (worst first)", async ({
+// #2132: sorting moved to the server. The register renders rows in the
+// order the API returns them and sends each header click as `?sort=`;
+// e2e/risks-server-list-2132.spec.ts covers the request side in full.
+test.describe("/risks sortable columns (slice 681 AC-1, server-side since #2132)", () => {
+  test("rows render in the order the API returned them", async ({
     authedPage,
   }) => {
     await mockListRoutes(authedPage);
     await authedPage.goto("/risks");
-    // Default sort = severity desc: Alpha (25), Bravo (12), Charlie (4).
+    // mockRisks() order: Bravo, Alpha, Charlie. The browser no longer
+    // re-sorts, so the table keeps it.
     await expect
       .poll(() => titleOrder(authedPage))
-      .toEqual(["Risk Alpha", "Risk Bravo", "Risk Charlie"]);
+      .toEqual(["Risk Bravo", "Risk Alpha", "Risk Charlie"]);
   });
 
-  test("clicking the inherent-severity header toggles to ascending order", async ({
+  test("the residual and review-due headers send their sort to the API", async ({
     authedPage,
   }) => {
+    const sorts: (string | null)[] = [];
+    authedPage.on("request", (req) => {
+      const url = new URL(req.url());
+      // Only the register page sends offset; the sidebar badge and the
+      // "N of M" size send limit=1 without it (#2490).
+      if (url.pathname === "/api/risks" && url.searchParams.has("offset")) {
+        sorts.push(url.searchParams.get("sort"));
+      }
+    });
     await mockListRoutes(authedPage);
     await authedPage.goto("/risks");
 
     const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
-    // The active default column is severity; one click flips desc -> asc.
-    await desktop.getByTestId("risks-sort-severity").click();
+    // Residual, highest first, is the default: active, and not sent.
+    const residual = desktop.getByTestId("risks-sort-residual");
+    await expect(residual).toHaveAttribute("data-dir", "desc");
+    await expect.poll(() => sorts[0]).toBeNull();
 
-    await expect
-      .poll(() => titleOrder(authedPage))
-      .toEqual(["Risk Charlie", "Risk Bravo", "Risk Alpha"]);
-    // The URL carries the non-default sort so it is bookmarkable.
-    await expect(authedPage).toHaveURL(/sort=severity%3Aasc/);
-  });
+    // The active column flips to ascending.
+    await residual.click();
+    await expect(residual).toHaveAttribute("data-dir", "asc");
+    await expect.poll(() => sorts.at(-1)).toBe("residual");
+    await expect(authedPage).toHaveURL(/sort=residual/);
 
-  test("clicking the review-due header orders by date ascending (soonest first)", async ({
-    authedPage,
-  }) => {
-    await mockListRoutes(authedPage);
-    await authedPage.goto("/risks");
-
-    const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
-    // A new column click sorts descending first (latest first).
-    await desktop.getByTestId("risks-sort-review_due").click();
-    await expect
-      .poll(() => titleOrder(authedPage))
-      .toEqual(["Risk Alpha", "Risk Bravo", "Risk Charlie"]); // Dec, Sep, Jun
-
-    // Second click flips to ascending (soonest first).
-    await desktop.getByTestId("risks-sort-review_due").click();
-    await expect
-      .poll(() => titleOrder(authedPage))
-      .toEqual(["Risk Charlie", "Risk Bravo", "Risk Alpha"]); // Jun, Sep, Dec
-  });
-
-  test("clicking the residual header orders by magnitude descending", async ({
-    authedPage,
-  }) => {
-    await mockListRoutes(authedPage);
-    await authedPage.goto("/risks");
-
-    const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
-    await desktop.getByTestId("risks-sort-residual").click();
-    // Residual desc: Alpha (1.00), Bravo (0.36), Charlie (0.04).
-    await expect
-      .poll(() => titleOrder(authedPage))
-      .toEqual(["Risk Alpha", "Risk Bravo", "Risk Charlie"]);
+    // A new column sorts descending first, then flips.
+    const reviewDue = desktop.getByTestId("risks-sort-review_due");
+    await reviewDue.click();
+    await expect(reviewDue).toHaveAttribute("data-dir", "desc");
+    await expect.poll(() => sorts.at(-1)).toBe("-review_due");
+    await reviewDue.click();
+    await expect(reviewDue).toHaveAttribute("data-dir", "asc");
+    await expect.poll(() => sorts.at(-1)).toBe("review_due");
   });
 });
 

@@ -76,7 +76,8 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 
 // seedEvidence inserts n evidence_records rows with observed_at evenly
 // spaced inside [windowStart, windowEnd]. ids are server-generated UUIDs,
-// returned for the test's reference.
+// returned for the test's reference. Each row is ingested when it was
+// observed, so a freeze at a past instant finds it in the ledger (#1699).
 func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, n int, windowStart time.Time) []uuid.UUID {
 	t.Helper()
 	out := make([]uuid.UUID, n)
@@ -89,7 +90,7 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 				id, tenant_id, control_id, observed_at, ingested_at,
 				provenance, result, payload, hash, control_ref
 			)
-			VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
+			VALUES ($1, $2, $3, $4, $4, '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
 		`, id, tenant, ctrlID, observed, fmt.Sprintf("hash-%03d", i)); err != nil {
 			t.Fatalf("seed evidence %d: %v", i, err)
 		}
@@ -312,6 +313,117 @@ func TestAnnotateSample_RecordsResultPerRecord(t *testing.T) {
 	})
 	if !errors.Is(err, audit.ErrInvalidAnnotation) {
 		t.Fatalf("AC-4 validation: expected ErrInvalidAnnotation, got %v", err)
+	}
+}
+
+// An annotation may only name a record the sampler drew into the sample
+// (security-atlas#2425). A record elsewhere in the tenant is refused and
+// writes nothing.
+func TestAnnotateSample_RejectsRecordNotInSample(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrlID := seedControl(t, admin, tenant)
+	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	all := seedEvidence(t, admin, tenant, ctrlID, 10, windowStart)
+
+	store := audit.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
+		ControlID:       ctrlID,
+		TimeWindowStart: windowStart,
+		TimeWindowEnd:   windowStart.Add(24 * time.Hour),
+		CreatedBy:       "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("CreatePopulation: %v", err)
+	}
+	s, err := store.DrawSample(ctx, audit.DrawSampleInput{
+		PopulationID: pop.ID,
+		N:            3,
+		Seed:         "seed-2425",
+		CreatedBy:    "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("DrawSample: %v", err)
+	}
+
+	drawn := make(map[uuid.UUID]bool, len(s.EvidenceRecordIDs))
+	for _, id := range s.EvidenceRecordIDs {
+		drawn[id] = true
+	}
+	var outside uuid.UUID
+	for _, id := range all {
+		if !drawn[id] {
+			outside = id
+			break
+		}
+	}
+	if outside == uuid.Nil {
+		t.Fatal("every seeded record was drawn; need one outside the sample")
+	}
+
+	// Another sample's record: a second sample drawn in full from the same
+	// population holds records the first sample did not draw.
+	s2, err := store.DrawSample(ctx, audit.DrawSampleInput{
+		PopulationID: pop.ID,
+		N:            len(all),
+		Seed:         "seed-2425-b",
+		CreatedBy:    "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("DrawSample 2: %v", err)
+	}
+	var otherSampleRec uuid.UUID
+	for _, id := range s2.EvidenceRecordIDs {
+		if !drawn[id] {
+			otherSampleRec = id
+			break
+		}
+	}
+	if otherSampleRec == uuid.Nil {
+		t.Fatal("second sample has no record outside the first")
+	}
+
+	// Another tenant's record.
+	tenantB := freshTenant(t, admin)
+	foreign := seedEvidence(t, admin, tenantB, seedControl(t, admin, tenantB), 1, windowStart)
+
+	for _, tc := range []struct {
+		name string
+		rec  uuid.UUID
+	}{
+		{"tenant record not drawn", outside},
+		{"another sample's record", otherSampleRec},
+		{"another tenant's record", foreign[0]},
+	} {
+		_, err = store.AnnotateSample(ctx, audit.AnnotateSampleInput{
+			SampleID:         s.ID,
+			EvidenceRecordID: tc.rec,
+			Result:           "passed",
+			AnnotatedBy:      "key_auditor",
+		})
+		if !errors.Is(err, audit.ErrRecordNotInSample) {
+			t.Fatalf("%s: got %v; want ErrRecordNotInSample", tc.name, err)
+		}
+	}
+	anns, err := store.ListAnnotations(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("ListAnnotations: %v", err)
+	}
+	if len(anns) != 0 {
+		t.Fatalf("refused annotation wrote %d rows; want 0", len(anns))
+	}
+
+	// A drawn record still annotates.
+	if _, err := store.AnnotateSample(ctx, audit.AnnotateSampleInput{
+		SampleID:         s.ID,
+		EvidenceRecordID: s.EvidenceRecordIDs[0],
+		Result:           "passed",
+		AnnotatedBy:      "key_auditor",
+	}); err != nil {
+		t.Fatalf("annotate a drawn record: %v", err)
 	}
 }
 

@@ -28,6 +28,7 @@ import type { SortDir, SortKey, SortState } from "./sort";
 export function SortableHeader({
   sortKey,
   label,
+  term,
   title,
   state,
   onSort,
@@ -36,6 +37,10 @@ export function SortableHeader({
   sortKey: SortKey;
   /** Visible header label (may include the slice-680 axis-name copy). */
   label: ReactNode;
+  /** #2144: a leading `<Term>` (its own button, so it sits beside the sort
+   *  button rather than inside it) and its text, which prefixes the sort
+   *  button's aria-label. */
+  term?: { node: ReactNode; text: string };
   /** Native tooltip text (the slice-680 axis-disambiguation copy). */
   title?: string;
   /** The register's current sort. */
@@ -50,13 +55,18 @@ export function SortableHeader({
   // active column). Plain glyphs so no icon dependency is added.
   const caret = dir === "asc" ? "▲" : dir === "desc" ? "▼" : "↕";
 
+  // #2132: a term with an empty label (the Residual column) reads as the
+  // term alone, with no stray space.
+  const name = term
+    ? [term.text, ariaText(label)].filter(Boolean).join(" ")
+    : ariaText(label);
   const ariaLabel = isActive
-    ? `${ariaText(label)}, sorted ${
+    ? `${name}, sorted ${
         dir === "asc" ? "ascending" : "descending"
       }. Activate to sort ${dir === "asc" ? "descending" : "ascending"}.`
-    : `${ariaText(label)}, not sorted. Activate to sort descending.`;
+    : `${name}, not sorted. Activate to sort descending.`;
 
-  return (
+  const button = (
     <button
       type="button"
       onClick={() => onSort(sortKey)}
@@ -75,6 +85,13 @@ export function SortableHeader({
         {caret}
       </span>
     </button>
+  );
+  if (!term) return button;
+  return (
+    <span className="inline-flex items-center gap-1">
+      {term.node}
+      {button}
+    </span>
   );
 }
 

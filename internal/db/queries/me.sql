@@ -36,9 +36,36 @@ DO UPDATE SET
 --
 -- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 -- the DB layer; explicit-is-clearer per AC-5).
+--
+-- #2329: actor_principal is the acting credential's principal
+-- (credstore.PrincipalOf), so a change made with a key that is not a user's
+-- still names its credential. NULL for a writer with no caller.
 INSERT INTO me_audit_log (
-    tenant_id, user_id, action, before, after, subject_module
+    tenant_id, user_id, action, before, after, subject_module, actor_principal
 )
 VALUES (
-    $1, $2, $3, $4, $5, 'core'
+    $1, $2, $3, $4, $5, 'core', sqlc.narg(actor_principal)
 );
+
+-- name: ListOnboardingHintDismissals :many
+-- #2145: the modules whose first-visit hint the caller has dismissed.
+SELECT module
+FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2
+ORDER BY module ASC;
+
+-- name: InsertOnboardingHintDismissal :exec
+-- #2145: dismissing twice is a no-op.
+INSERT INTO user_onboarding_hint_dismissals (tenant_id, user_id, module)
+VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, user_id, module) DO NOTHING;
+
+-- name: DeleteOnboardingHintDismissal :exec
+-- #2145: show one module's hint again.
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2 AND module = $3;
+
+-- name: DeleteOnboardingHintDismissals :exec
+-- #2145: "Show onboarding hints again" clears every dismissal for the caller.
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2;

@@ -4,11 +4,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
+	"github.com/mgoodric/security-atlas/internal/api/mappingoverlays"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	"github.com/mgoodric/security-atlas/internal/api/ucfcoverage"
 	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/evidence/historicalimport"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -60,6 +63,21 @@ func (s *Server) registerGraph(root *chi.Mux) {
 	root.Get("/v1/scopes/cells", scopesH.ListCells)
 	root.Get("/v1/scopes/dimensions", scopesH.ListDimensions)
 	root.Get("/v1/controls/{id}/applicability", scopesH.ControlApplicability)
+	// #1797: tenant overlay edges, an organisation's own requirement -> SCF
+	// anchor edges (#1735). Tenant-scoped under RLS; the catalog edges
+	// stay read-only.
+	overlaysH := mappingoverlays.New(mappingoverlay.NewStore(s.dbPool)).WithPeople(s.dbPool)
+	root.Post("/v1/mapping-overlays", overlaysH.Create)
+	root.Get("/v1/mapping-overlays", overlaysH.List)
+	root.Post("/v1/mapping-overlays/{id}/retire", overlaysH.Retire)
+	root.Post("/v1/mapping-overlays/import", overlaysH.Import)
+	root.Get("/v1/mapping-overlays/export", overlaysH.Export)
+	// #1801: the "audited under" report.
+	root.Get("/v1/mapping-overlays/audited-under", overlaysH.AuditedUnder)
+	root.Get("/v1/mapping-overlays/audited-under/export", overlaysH.AuditedUnderExport)
+	// #1804: overlay edges left on an older SCF release's anchor, queued by
+	// the SCF import, decided by the tenant's own writers.
+	overlaysH.RegisterRemapRoutes(root)
 	// Slice 013: evidence ledger write API. Only mounted when an ingest
 	// service has been wired in (DB-backed). Unit-only servers leave it
 	// nil and exclusively use the slice-003 gRPC fallback path.
@@ -76,5 +94,12 @@ func (s *Server) registerGraph(root *chi.Mux) {
 		}
 		root.Post("/v1/evidence:push", evidenceH.PushHTTP)
 		root.Get("/v1/evidence/receipts/{record_id}", evidenceH.ReceiptStatusHTTP)
+		// #1742: admin-only historical import. Straight through ingest in
+		// one transaction (never the push stream), so a batch commits or
+		// rolls back whole.
+		if s.dbPool != nil {
+			importH := apievidence.NewImportHandler(historicalimport.New(s.dbPool, s.ingestService))
+			root.Post("/v1/evidence:import", importH.ImportHTTP)
+		}
 	}
 }

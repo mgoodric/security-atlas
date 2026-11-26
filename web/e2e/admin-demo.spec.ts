@@ -207,7 +207,9 @@ test.describe("admin demo-seed page", () => {
     await expect(success).toHaveAttribute("aria-live", "polite");
   });
 
-  test("AC-3: failure Alert surfaces error message via the BFF body", async ({
+  // #2730: the env gate refuses with a 409 `feature_not_enabled`, a 4xx, so
+  // its wording reaches the Alert. It was a 503, whose body #2645 hid.
+  test("AC-3: a feature_not_enabled 409 failure Alert shows its message (#2730)", async ({
     authedPage,
   }) => {
     await authedPage.route("**/api/admin/demo/status", async (route) => {
@@ -219,10 +221,11 @@ test.describe("admin demo-seed page", () => {
     });
     await authedPage.route("**/api/admin/demo/seed", async (route) => {
       await route.fulfill({
-        status: 503,
+        status: 409,
         contentType: "application/json",
         body: JSON.stringify({
           error: "demo seed not enabled on this deployment",
+          code: "feature_not_enabled",
         }),
       });
     });
@@ -236,6 +239,35 @@ test.describe("admin demo-seed page", () => {
     await expect(errorAlert).toContainText(
       "demo seed not enabled on this deployment",
     );
+    await expect(errorAlert).toHaveAttribute("aria-live", "polite");
+  });
+
+  test("AC-3: a 5xx failure Alert shows the status line, not the body (#2645)", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/admin/demo/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ enabled: true }),
+      });
+    });
+    await authedPage.route("**/api/admin/demo/seed", async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "pq: relation tenants does not exist" }),
+      });
+    });
+
+    await authedPage.goto("/admin/demo");
+    await authedPage.getByTestId("demo-seed-button").click();
+    await authedPage.getByTestId("demo-seed-confirm").click();
+
+    const errorAlert = authedPage.getByTestId("demo-error");
+    await expect(errorAlert).toBeVisible();
+    await expect(errorAlert).toContainText("500 Internal Server Error");
+    await expect(errorAlert).not.toContainText("pq: relation");
     await expect(errorAlert).toHaveAttribute("aria-live", "polite");
   });
 });

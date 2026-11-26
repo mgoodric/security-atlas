@@ -21,9 +21,10 @@
 //   - DoS guard: real User-Agent strings stay under a few hundred bytes;
 //     truncation at the session-store layer (MaxUserAgentBytes) caps the
 //     persisted value at 512 bytes. The helper here is the read-side.
-//     The XFF walk caps the number of parsed hops (maxForwardedHops) so a
-//     pathological multi-kilobyte header cannot turn the per-request walk
-//     into a CPU sink (threat-model D).
+//     The XFF walk stops at the first untrusted hop and caps the trusted
+//     hops it steps over (maxForwardedHops), so a pathological
+//     multi-kilobyte header cannot turn the per-request walk into a CPU
+//     sink (threat-model D).
 //
 // Operator note: in a v1 single-VM docker-compose deployment, the platform
 // process binds directly to the public TLS port and TRUSTED_PROXY_CIDRS
@@ -56,10 +57,13 @@ const (
 	// always takes precedence when set.
 	trustForwardedHeadersEnv = "TRUST_FORWARDED_HEADERS"
 
-	// maxForwardedHops caps how many X-Forwarded-For entries the walk will
-	// parse (threat-model D — DoS via a pathological header). A request
-	// legitimately passes through a handful of proxies; 50 is far beyond
-	// any real topology while bounding the per-request CPU cost.
+	// maxForwardedHops caps how many trusted-proxy hops (the socket peer
+	// included) the X-Forwarded-For walk steps over (threat-model D — DoS
+	// via a pathological header). Untrusted entries never count: the walk
+	// stops at the first one. A request legitimately passes through a
+	// handful of proxies; 50 is far beyond any real topology while bounding
+	// the per-request CPU cost. Matches MAX_FORWARDED_HOPS in
+	// web/peer-chain.cjs.
 	maxForwardedHops = 50
 )
 
@@ -215,16 +219,29 @@ func clientIP(r *http.Request) string {
 		return peer.String()
 	}
 
-	hops := forwardedHops(r.Header.Get("X-Forwarded-For"))
-	// Walk right-to-left. `connecting` is the address that delivered the
-	// request to the current frame; it starts as the peer (already known
-	// trusted). For each hop from the right, the hop's value is the address
-	// that connected to `connecting`. We accept the hop's stated client and
-	// keep walking left only while that stated client is itself a trusted
-	// proxy.
+	// Every X-Forwarded-For line, in order: a proxy that adds its own line
+	// instead of appending to the client's leaves the real client on the
+	// last line, which Header.Get never reads (#2272).
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	// Walk right-to-left. `candidate` starts as the peer (already known
+	// trusted). Each hop from the right is the address that connected to
+	// the current candidate; we keep walking left only while that address
+	// is itself a trusted proxy. Only trusted steps count toward
+	// maxForwardedHops, the peer being the first, as in the web preload
+	// (web/peer-chain.cjs, #2077). An untrusted hop ends the walk at once,
+	// so however many entries a client forges in front of a trusted proxy,
+	// the right-most untrusted one (the real client) is returned.
 	candidate := peer
-	for i := len(hops) - 1; i >= 0; i-- {
-		ip := net.ParseIP(hops[i])
+	trustedSteps := 1
+	for {
+		hop, rest, ok := lastForwardedHop(xff)
+		if !ok {
+			// Every hop was a trusted proxy (or the header was empty).
+			// Return the left-most candidate we walked to (or the peer).
+			return candidate.String()
+		}
+		xff = rest
+		ip := net.ParseIP(hop)
 		if ip == nil {
 			// Malformed entry — stop; return the last good (trusted-side)
 			// candidate, which is the closest address we can attribute.
@@ -235,10 +252,13 @@ func clientIP(r *http.Request) string {
 			// First untrusted hop — this is the real client.
 			return candidate.String()
 		}
+		trustedSteps++
+		if trustedSteps > maxForwardedHops {
+			// Cap reached. Everything to the right was written by trusted
+			// proxies, so this trusted address is still attributable.
+			return candidate.String()
+		}
 	}
-	// Every hop was a trusted proxy (or the header was empty). Return the
-	// left-most candidate we walked to (or the peer if no hops).
-	return candidate.String()
 }
 
 // ClientIP is the exported entrypoint for other packages (e.g.
@@ -274,26 +294,24 @@ func peerIP(remoteAddr string) net.IP {
 	return net.ParseIP(host)
 }
 
-// forwardedHops splits an X-Forwarded-For value into trimmed, non-empty
-// entries, left-to-right (client-most first per RFC 7239). It caps the
-// number of returned entries at maxForwardedHops (threat-model D). Empty
-// and whitespace-only entries are dropped so a stray comma does not abort
-// the walk early.
-func forwardedHops(xff string) []string {
-	if xff == "" {
-		return nil
-	}
-	raw := strings.Split(xff, ",")
-	out := make([]string, 0, len(raw))
-	for _, p := range raw {
-		tok := strings.TrimSpace(p)
-		if tok == "" {
-			continue
+// lastForwardedHop pops the right-most trimmed, non-empty entry off an
+// X-Forwarded-For value and returns it with the remainder to its left;
+// ok is false when no entry remains. Empty and whitespace-only entries
+// are skipped so a stray comma does not abort the walk early. Popping
+// from the right means the walk never splits the client-written part of
+// the header it does not reach (threat-model D).
+func lastForwardedHop(xff string) (hop, rest string, ok bool) {
+	for xff != "" {
+		i := strings.LastIndexByte(xff, ',')
+		tok := strings.TrimSpace(xff[i+1:])
+		if i < 0 {
+			xff = ""
+		} else {
+			xff = xff[:i]
 		}
-		out = append(out, tok)
-		if len(out) >= maxForwardedHops {
-			break
+		if tok != "" {
+			return tok, xff, true
 		}
 	}
-	return out
+	return "", "", false
 }

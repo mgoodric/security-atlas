@@ -13,7 +13,7 @@
 //
 // Coverage maps to slice 278 acceptance criteria + ISC criteria:
 //
-//	AC-4  / ISC-3    env-var unset -> 503 + no seed + no audit row
+//	AC-4  / ISC-3    env-var unset -> 409 + no seed + no audit row
 //	AC-5  / ISC-4    non-admin     -> 403 + no seed + no audit row
 //	AC-6  / ISC-7    admin + env   -> 200 + seed runs + audit row written
 //	AC-8  / ISC-5    rate limit    -> second call within 60s -> 429
@@ -43,6 +43,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 )
 
@@ -191,10 +193,20 @@ func cleanupDemoTenant(t *testing.T, slug string) {
 
 // newRouter wires the handler under chi with the standard auth + tenancy
 // middleware. `admin` controls whether the credential carries the admin
-// role; `enabled` controls the env-var gate.
+// role; `enabled` controls the env-var gate. The shared integration
+// database always holds other tenants, so the multi-tenant opt-in is on;
+// newRouterMultiTenant sets it explicitly.
 func newRouter(t *testing.T, tenantID, userID uuid.UUID, isAdmin, enabled bool) http.Handler {
 	t.Helper()
-	h := admindemo.New(adminPool, func() bool { return enabled })
+	return newRouterMultiTenant(t, tenantID, userID, isAdmin, enabled, true)
+}
+
+// newRouterMultiTenant is newRouter with the ATLAS_ALLOW_MULTI_TENANT
+// opt-in set to allowMultiTenant (#2043).
+func newRouterMultiTenant(t *testing.T, tenantID, userID uuid.UUID, isAdmin, enabled, allowMultiTenant bool) http.Handler {
+	t.Helper()
+	h := admindemo.New(adminPool, func() bool { return enabled }).
+		WithAllowMultiTenant(func() bool { return allowMultiTenant })
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -205,6 +217,13 @@ func newRouter(t *testing.T, tenantID, userID uuid.UUID, isAdmin, enabled bool) 
 				IsAdmin:  isAdmin,
 			}
 			ctx := authctx.WithCredential(req.Context(), cred)
+			if isAdmin {
+				// Seed/Teardown require the super_admin claim (#1851).
+				ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID.String()},
+					SuperAdmin:       true,
+				})
+			}
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	})
@@ -290,8 +309,8 @@ func TestStatus_EnabledFalse(t *testing.T) {
 	}
 }
 
-// AC-4 / ISC-3: env-var unset -> 503 + no seed + no audit row.
-func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
+// AC-4 / ISC-3: env-var unset -> 409 + no seed + no audit row.
+func TestSeed_EnvUnsetGets409AndDoesNotSeed(t *testing.T) {
 	resetDemoAuditRows(t)
 	sessionTenant := seedTenant(t, "slice278 env-unset")
 	actor := uuid.New()
@@ -300,8 +319,8 @@ func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
 
 	h := newRouter(t, sessionTenant, actor, true, false)
 	res, body := doRequest(t, h, http.MethodPost, "/v1/admin/demo/seed")
-	if res.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d; want 503; body=%v", res.StatusCode, body)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status code = %d; want 409; body=%v", res.StatusCode, body)
 	}
 
 	// No me_audit_log row should exist for the actor's tenant.
@@ -310,7 +329,7 @@ func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
 	}
 	// No demo tenant should exist.
 	if demoTenantExists(t, "demo") {
-		t.Fatalf("demo tenant exists after 503; should not have been created")
+		t.Fatalf("demo tenant exists after 409; should not have been created")
 	}
 }
 
@@ -394,6 +413,10 @@ func TestSeed_RateLimited(t *testing.T) {
 				IsAdmin:  true,
 			}
 			ctx := authctx.WithCredential(req.Context(), cred)
+			ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+				RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + actor.String()},
+				SuperAdmin:       true,
+			})
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	})
@@ -419,5 +442,57 @@ func TestSeed_RateLimited(t *testing.T) {
 	}
 	if rr2.Header().Get("Retry-After") != "60" {
 		t.Fatalf("Retry-After = %q; want 60", rr2.Header().Get("Retry-After"))
+	}
+}
+
+// #2043: without ATLAS_ALLOW_MULTI_TENANT the button never creates the demo
+// tenant beside an existing one. The click is audited, then refused with 403.
+func TestSeed_WithoutMultiTenantOptIn_Gets403AndCreatesNoTenant(t *testing.T) {
+	resetDemoAuditRows(t)
+	sessionTenant := seedTenant(t, "2043 multi-tenant refused")
+	actor := uuid.New()
+	seedActorUser(t, sessionTenant, actor)
+	cleanupDemoTenant(t, "demo")
+
+	h := newRouterMultiTenant(t, sessionTenant, actor, true, true, false)
+	res, body := doRequest(t, h, http.MethodPost, "/v1/admin/demo/seed")
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("status code = %d; want 403; body=%v", res.StatusCode, body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "ATLAS_ALLOW_MULTI_TENANT=true") {
+		t.Errorf("error = %q; want it to name ATLAS_ALLOW_MULTI_TENANT=true", msg)
+	}
+	if demoTenantExists(t, "demo") {
+		t.Fatalf("demo tenant exists after a refused seed")
+	}
+	if n := countMeAuditRows(t, sessionTenant, "demo_seed"); n != 1 {
+		t.Errorf("me_audit_log demo_seed count = %d; want 1 (the click is audited)", n)
+	}
+}
+
+// #2043: the seeder's demo_seed_apply mark lands in the demo tenant, never in
+// the clicking admin's organisation, so that organisation can never be torn
+// down as a demo tenant.
+func TestSeed_MarkAnchorsToDemoTenantNotActorTenant(t *testing.T) {
+	resetDemoAuditRows(t)
+	sessionTenant := seedTenant(t, "2043 mark anchor")
+	actor := uuid.New()
+	seedActorUser(t, sessionTenant, actor)
+	cleanupDemoTenant(t, "demo")
+
+	h := newRouter(t, sessionTenant, actor, true, true)
+	res, body := doRequest(t, h, http.MethodPost, "/v1/admin/demo/seed")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status code = %d; want 200; body=%v", res.StatusCode, body)
+	}
+	if n := countMeAuditRows(t, sessionTenant, "demo_seed_apply"); n != 0 {
+		t.Errorf("actor tenant holds %d demo_seed_apply marks; want 0", n)
+	}
+	demoID, err := uuid.Parse(fmt.Sprint(body["tenant_id"]))
+	if err != nil {
+		t.Fatalf("tenant_id = %v: %v", body["tenant_id"], err)
+	}
+	if n := countMeAuditRows(t, demoID, "demo_seed_apply"); n != 1 {
+		t.Errorf("demo tenant holds %d demo_seed_apply marks; want 1", n)
 	}
 }

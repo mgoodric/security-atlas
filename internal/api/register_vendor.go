@@ -24,11 +24,13 @@ func (s *Server) registerVendor(root *chi.Mux, vendorStore *vendor.Store) {
 	// Slice 273: the same vendor.Store also backs the board-pack
 	// vendor_burndown section adapter wired below. Single store = single
 	// resource; the adapter reuses vendor.Store.Burndown.
-	vendorsH := vendors.New(vendorStore)
+	vendorsH := vendors.New(vendorStore).WithModules(s.moduleViews)
 	root.Post("/v1/vendors", vendorsH.CreateVendor)
 	root.Get("/v1/vendors", vendorsH.ListVendors)
 	root.Get("/v1/vendors/burndown", vendorsH.Burndown)
 	root.Get("/v1/vendors/spend", vendorsH.SpendRollup)
+	// #2201: the organisation vendor initial-review window, read by Settings.
+	root.Get("/v1/vendors/initial-review-window", vendorsH.GetInitialReviewWindow)
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)

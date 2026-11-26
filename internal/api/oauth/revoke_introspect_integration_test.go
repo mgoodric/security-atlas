@@ -348,6 +348,34 @@ func TestIntegrationRevoke_HappyPath(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevoke_PaddedToken_Revokes: a valid token sent with
+// surrounding whitespace is trimmed and revoked. Without the trim it
+// fails to parse, and RFC 7009 §2.2's silent 200 would hide that the
+// token is still live.
+func TestIntegrationRevoke_PaddedToken_Revokes(t *testing.T) {
+	srv, signer, revoked, clients, _ := newRevokeIntrospectServer(t)
+	clientID, clientSecret := issueClientForTest(t, clients)
+
+	tok, claims := mintJWTForTest(t, signer, "user:alice-revoke-padded")
+
+	form := url.Values{}
+	form.Set("token", "  "+tok+"\n")
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+
+	resp, body := postFormAt(t, srv.URL+oauth.PathRevoke, form, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke status = %d body = %s", resp.StatusCode, body)
+	}
+	isRevoked, err := revoked.IsRevoked(context.Background(), claims.ID)
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if !isRevoked {
+		t.Fatal("padded token answered 200 but was not revoked")
+	}
+}
+
 // TestIntegrationRevoke_UnknownToken_Returns200: AC-17 / P0-190-4 —
 // RFC 7009 §2.2 silent 200 for unknown tokens.
 func TestIntegrationRevoke_UnknownToken_Returns200(t *testing.T) {
@@ -454,6 +482,57 @@ func TestIntegrationRevoke_SelfRevocation_RejectOtherUser(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (cross-user revoke rejected)", resp.StatusCode)
+	}
+}
+
+// TestIntegrationRevoke_SelfRevocationLastsUntilExp (#2714): sign-out
+// self-revokes the session JWT, and the jti stays on the denylist until
+// the token's own exp. The row records exactly that exp, a sweep before
+// it leaves the row in place, and a second revocation cannot move it.
+func TestIntegrationRevoke_SelfRevocationLastsUntilExp(t *testing.T) {
+	srv, signer, revoked, _, _ := newRevokeIntrospectServer(t)
+	pool := openTokenIntegrationPool(t)
+	ctx := context.Background()
+
+	tok, claims := mintJWTForTest(t, signer, "user:alice-revoke-ttl")
+	selfRevoke := func() {
+		t.Helper()
+		form := url.Values{}
+		form.Set("token", tok)
+		resp, _ := postFormAt(t, srv.URL+oauth.PathRevoke, form, map[string]string{"Authorization": "Bearer " + tok})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("self-revoke status = %d, want 200", resp.StatusCode)
+		}
+	}
+	storedExp := func() time.Time {
+		t.Helper()
+		var exp time.Time
+		if err := pool.QueryRow(ctx,
+			`SELECT expires_at FROM oauth_revoked_tokens WHERE jti = $1`, claims.ID).Scan(&exp); err != nil {
+			t.Fatalf("read revoked row: %v", err)
+		}
+		return exp
+	}
+
+	selfRevoke()
+	if got, want := storedExp().Unix(), claims.ExpiresAt; got != want {
+		t.Fatalf("expires_at = %d, want the token's exp %d", got, want)
+	}
+
+	if _, err := revoked.Sweep(ctx); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	isRevoked, err := revoked.IsRevoked(ctx, claims.ID)
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if !isRevoked {
+		t.Fatal("a sweep before exp dropped the revoked jti")
+	}
+
+	selfRevoke()
+	if got, want := storedExp().Unix(), claims.ExpiresAt; got != want {
+		t.Fatalf("expires_at after a second revoke = %d, want %d", got, want)
 	}
 }
 

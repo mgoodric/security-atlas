@@ -45,6 +45,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -94,11 +95,11 @@ func boot(t *testing.T) *fixture {
 		t.Fatalf("acquire: %v", err)
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191782015)"); err != nil {
+	if err := advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceStreambuf); err != nil {
 		t.Fatalf("advisory lock: %v", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191782015)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceStreambuf)
 	}()
 	// CASCADE so downstream FK references (slice 026's
 	// sample_evidence.evidence_record_id) don't block the truncate.
@@ -219,7 +220,7 @@ func recordFor(t *testing.T, kind string, idem string, payload map[string]any) *
 		IdempotencyKey: idem,
 		EvidenceKind:   kind,
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "environment", Values: []string{"prod"}},
 		},
@@ -516,7 +517,7 @@ func TestReceiptStatusHTTP_ReportsTerminalConsumerRejection(t *testing.T) {
 		"idempotency_key": idem,
 		"evidence_kind":   "does.not.exist.v1",
 		"schema_version":  "1.0.0",
-		"control_id":      "scf:VPM-04",
+		"control_id":      "scf:VPM-06",
 		"scope": []map[string]any{
 			{"key": "environment", "values": []string{"prod"}},
 		},

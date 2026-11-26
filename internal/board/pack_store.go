@@ -82,22 +82,8 @@ func (s *PackStore) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRo
 		if err != nil {
 			return fmt.Errorf("list risks for board pack: %w", err)
 		}
-		out = make([]riskRow, 0, len(rows))
-		for _, r := range rows {
-			rr := riskRow{
-				ID:            uuid.UUID(r.ID.Bytes),
-				Title:         r.Title,
-				Category:      string(r.Category),
-				Treatment:     string(r.Treatment),
-				ResidualScore: r.ResidualScore,
-				InherentScore: r.InherentScore,
-			}
-			if r.UpdatedAt.Valid {
-				rr.UpdatedAt = r.UpdatedAt.Time
-			}
-			out = append(out, rr)
-		}
-		return nil
+		out, err = riskRowsFromDB(ctx, q, tenantID, rows)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -107,8 +93,10 @@ func (s *PackStore) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRo
 
 // ListFailingEvaluations returns the open findings for the pack — the latest
 // failing control evaluation per (control, scope_cell) as of `periodEnd`
-// (decision D4). Board-pack-owned read; same data semantics as slice 030's
-// AuditPeriod-bound aggregator but pinned to the calendar-quarter horizon.
+// (decision D4), counting only cells in each control's latest evaluation run
+// as of that horizon (#2688). Board-pack-owned read; same data semantics as
+// slice 030's AuditPeriod-bound aggregator but pinned to the calendar-quarter
+// horizon.
 func (s *PackStore) ListFailingEvaluations(ctx context.Context, periodEnd time.Time) ([]Finding, error) {
 	// The pack's period_end is a DATE; the control_evaluations horizon is a
 	// TIMESTAMPTZ. Treat the horizon as the END of the period_end day
@@ -271,6 +259,10 @@ func (s *PackStore) UpdateSection(ctx context.Context, id uuid.UUID, edit Sectio
 		current, err := storedPackFromRow(row)
 		if err != nil {
 			return err
+		}
+		// A section left out at generation (#2175) is not part of the pack.
+		if current.Content.isOmitted(edit.SectionKey) {
+			return fmt.Errorf("%w: %q", ErrUnknownSection, edit.SectionKey)
 		}
 		mutated := applySectionEdit(current.Content, edit)
 
@@ -475,7 +467,11 @@ func applyInputs(sec *Section, in *SectionInputs) {
 		d.SpendUSD = *in.SpendUSD
 	}
 	if in.BaselineCoveragePct != nil {
-		d.BaselineCoveragePct = *in.BaselineCoveragePct
+		d.BaselineCoveragePct = float64(*in.BaselineCoveragePct)
+		d.NoBaseline = false
+		// #2269: an operator's baseline carries no exception share.
+		d.BaselineExceptionKnown = false
+		d.BaselineCoveredByExceptionPct = 0
 	}
 	sec.Data = d
 }
@@ -485,17 +481,28 @@ func applyInputs(sec *Section, in *SectionInputs) {
 //
 //   - coverage_trend.coverage_delta = coverage_pct - baseline_coverage_pct
 //   - investment.coverage_delta mirrors coverage_trend's delta
-//   - investment.cost_per_coverage_point = spend / max(delta, 1)
+//   - investment.cost_per_coverage_point = spend / max(delta, 1), or n/a
+//     (0, no_baseline) when there is no baseline or no scoped framework
 func recomputeDerived(sections map[string]Section) {
 	trend, hasTrend := sections[SectionCoverageTrend]
 	inv, hasInv := sections[SectionInvestment]
 	if !hasTrend || !hasInv {
 		return
 	}
-	delta := trend.Data.CoveragePct - trend.Data.BaselineCoveragePct
+	delta := 0.0
+	if !trend.Data.NoBaseline {
+		delta = round2(trend.Data.CoveragePct - trend.Data.BaselineCoveragePct)
+	}
 	trend.Data.CoverageDelta = delta
 	inv.Data.CoverageDelta = delta
-	inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)
+	inv.Data.ScopedFrameworkCount = trend.Data.ScopedFrameworkCount
+	// No baseline, or nothing scoped to measure coverage against: the cost
+	// per coverage point is n/a, not spend divided by a made-up delta.
+	inv.Data.NoBaseline = trend.Data.NoBaseline || trend.Data.NoScopedFrameworks()
+	inv.Data.CostPerCoveragePoint = 0
+	if !inv.Data.NoBaseline {
+		inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)
+	}
 	sections[SectionCoverageTrend] = trend
 	sections[SectionInvestment] = inv
 }

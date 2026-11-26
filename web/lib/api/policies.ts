@@ -2,7 +2,12 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
-import { apiFetch } from "./_shared";
+import {
+  apiFetch,
+  bffControlFetch,
+  bffPostJSON,
+  upstreamErrorMessage,
+} from "./_shared";
 
 // ----- Slice 101: /policies list view -----
 //
@@ -47,9 +52,61 @@ export type Policy = {
   submitted_by?: string | null;
   approved_at?: string | null;
   approved_by?: string | null;
+  /**
+   * #2101 — true when the submitter approved the policy under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   published_at?: string | null;
   published_by?: string | null;
   superseded_at?: string | null;
+  next_review_at?: string | null;
+  /**
+   * #1806 — where a published policy stands against `next_review_at`,
+   * computed by the API at response time: `overdue` once the due day (the
+   * UTC date of `next_review_at`) has ended, `due-soon` within 30 days of
+   * it, else `upcoming`. Absent when the policy has no review date or is
+   * not published; a superseded version keeps the date it was due (#2009).
+   */
+  review_status?: "overdue" | "due-soon" | "upcoming" | null;
+  /**
+   * #1747 — true when the policy was brought in by the policy library
+   * import with its historical lifecycle. The historical approver is a
+   * free-text name (not a credential); `source_url` is an absolute
+   * http(s) URL validated on import.
+   */
+  imported?: boolean;
+  historical_approver_name?: string | null;
+  /** YYYY-MM-DD */
+  historical_approved_at?: string | null;
+  source_url?: string | null;
+  imported_by?: string | null;
+  imported_at?: string | null;
+  /**
+   * #2851 — set on a synced policy (`source_attribution: "synced"`) whose
+   * source page body changed without a version bump: when a sync run
+   * first saw it, and the sha256 of the body the source holds now.
+   */
+  sync_drift?: {
+    detected_at: string;
+    source_body_sha256: string;
+  } | null;
+  /**
+   * #2877 — set on a synced policy whose source page properties (review
+   * date, owner role, audience, ...) changed without a version bump: when
+   * a sync run first saw it, and the page property names that differ now.
+   * Independent of `sync_drift`.
+   */
+  sync_property_drift?: {
+    detected_at: string;
+    keys: string[];
+  } | null;
+  /**
+   * #2837 — on a synced policy, the system it is synced from
+   * ("Confluence", "SharePoint"), named from its sync site. Absent on any
+   * other policy.
+   */
+  sync_source?: string | null;
   created_at: string;
   updated_at: string;
   warnings?: string[];
@@ -85,13 +142,7 @@ export async function listPolicies(bearer: string): Promise<Policy[]> {
 export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
   const res = await fetch(`/api/policies`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as PoliciesListResponse;
@@ -167,14 +218,185 @@ export async function fetchPolicyDetail(
 ): Promise<PolicyDetailResponse> {
   const res = await fetch(`/api/policies/${encodeURIComponent(id)}`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as PolicyDetailResponse;
+}
+
+// ----- #2116: create, edit and the workflow from the app -----
+//
+// Browser-side calls to the policy BFF. The platform enforces every rule
+// (the draft-only edit and discard, the approval rule, the publish block
+// on a policy with no linked control); these only carry the request and
+// surface the platform's message.
+
+/** The fields a draft's author sets; version is fixed at create. */
+export type PolicyDraftInput = {
+  title: string;
+  body_md: string;
+  owner_role: string;
+  approver_role: string;
+  linked_control_ids: string[];
+  acknowledgment_required_roles: string[];
+};
+
+export type CreatePolicyInput = PolicyDraftInput & {
+  version: string;
+  /** Set by "Create new version": the published policy this revises. */
+  predecessor_id?: string;
+};
+
+export type PublishPolicyInput = {
+  new_version: string;
+  /** YYYY-MM-DD; omitted publishes effective today. */
+  effective_date?: string;
+  /** YYYY-MM-DD; omitted publishes with no review date. */
+  next_review_at?: string;
+};
+
+async function parsePolicy(res: Response): Promise<Policy> {
+  if (!res.ok) {
+    const msg = await upstreamErrorMessage(res);
+    throw new APIError(res.status, msg);
+  }
+  return ((await res.json()) as { policy: Policy }).policy;
+}
+
+function jsonInit(method: string, body?: unknown): RequestInit {
+  return body === undefined
+    ? { method }
+    : {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      };
+}
+
+export async function createPolicy(input: CreatePolicyInput): Promise<Policy> {
+  return parsePolicy(await fetch("/api/policies", jsonInit("POST", input)));
+}
+
+export async function updatePolicyDraft(
+  id: string,
+  input: PolicyDraftInput,
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}`,
+      jsonInit("PATCH", input),
+    ),
+  );
+}
+
+export async function discardPolicyDraft(id: string): Promise<void> {
+  const res = await fetch(`/api/policies/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) await parsePolicy(res);
+}
+
+export type PolicyTransition = "submit" | "approve" | "publish";
+
+export async function transitionPolicy(
+  id: string,
+  action: PolicyTransition,
+  body?: PublishPolicyInput,
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}/${action}`,
+      jsonInit("POST", body),
+    ),
+  );
+}
+
+/** #2852 — replace a synced policy's control links in place. The
+ *  platform refuses it (409) for any policy that is not synced. */
+export async function setPolicyControls(
+  id: string,
+  linkedControlIds: string[],
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}/controls`,
+      jsonInit("POST", { linked_control_ids: linkedControlIds }),
+    ),
+  );
+}
+
+// ----- #2465: acknowledging a policy -----
+//
+// Wire shapes: `pendingResponse` and `ackResponse` in
+// `internal/api/policyacks/handlers.go`. The pending list holds the
+// published policies whose audience includes the caller and that the
+// caller has not acknowledged for this version within the year.
+
+export type PendingAcknowledgment = {
+  policy_id: string;
+  policy_version_id: string;
+  title: string;
+  version: string;
+  effective_date?: string | null;
+  required_roles: string[];
+  /** An earlier acknowledgment: of an older version, or over a year ago. */
+  last_acknowledged_at?: string | null;
+  /** #2736 — `overdue` once a lapsed ack lapsed, or once the grace period
+   *  after the effective date has ended for one never made; `due_soon`
+   *  before then. Needs-attention bands the item the same way. */
+  status?: "overdue" | "due_soon";
+  /** #2736 — when the acknowledgement is (or was) due. */
+  due_at?: string | null;
+};
+
+/** #2668 — a policy the caller has acknowledged, for its current version,
+ *  within the year (`currentItem` in the Go handler). */
+export type CurrentAcknowledgment = {
+  policy_id: string;
+  policy_version_id: string;
+  title: string;
+  version: string;
+  acknowledged_at: string;
+};
+
+export type MyAcknowledgmentsResponse = {
+  pending: PendingAcknowledgment[];
+  count: number;
+  window_seconds: number;
+  /** Present because the fetch asks for `?include=current` (#2668). */
+  current?: CurrentAcknowledgment[];
+};
+
+export type PolicyAcknowledgment = {
+  id: string;
+  policy_id: string;
+  policy_version_id: string;
+  acknowledged_at: string;
+  deduplicated: boolean;
+  /** False when the ack was recorded but its evidence record was not. */
+  evidence_emission_ok: boolean;
+};
+
+/** The one query key for the caller's pending list, shared by the policy
+ *  list's callout and the detail page so an ack refreshes both. */
+export const MY_ACKS_QUERY_KEY = ["me", "acknowledgments"] as const;
+
+export async function fetchMyAcknowledgments(): Promise<MyAcknowledgmentsResponse> {
+  return bffControlFetch<MyAcknowledgmentsResponse>(
+    "/api/me/acknowledgments?include=current",
+  );
+}
+
+// The platform records the ack for the caller only. The body pins the
+// version the caller was shown (the pending item's `policy_version_id`):
+// if the policy was re-published since, the platform answers 409 rather
+// than record an ack of a version they never saw (#2668).
+export async function acknowledgePolicy(
+  id: string,
+  policyVersionId: string,
+): Promise<PolicyAcknowledgment> {
+  return bffPostJSON<PolicyAcknowledgment>(
+    `/api/policies/${encodeURIComponent(id)}/acknowledge`,
+    { policy_version_id: policyVersionId },
+  );
 }

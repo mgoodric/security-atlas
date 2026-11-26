@@ -4,7 +4,7 @@
 //     parser (internal/control.ParseDirectory).
 //  2. Every bundle's scf_anchor_id exists in the slice-006 SCF catalog
 //     fixture (migrations/fixtures/scf-sample.json).
-//  3. The 43 unique TSC requirement codes in the slice-007 crosswalk
+//  3. The unique TSC requirement codes in the slice-007 crosswalk
 //     (data/crosswalks/soc2-tsc-2017.yaml) are each covered by at least
 //     one bundle (graph traversal: bundle → scf_anchor_id → STRM edge →
 //     tsc_code). Coverage ratio is printed.
@@ -187,8 +187,8 @@ func run() error {
 
 	// Gate checks.
 	var gateFail []string
-	if bundleCount != 50 {
-		gateFail = append(gateFail, fmt.Sprintf("AC-1: expected 50 bundles, got %d", bundleCount))
+	if bundleCount != 65 {
+		gateFail = append(gateFail, fmt.Sprintf("AC-1: expected 65 bundles, got %d", bundleCount))
 	}
 	if automatedCount*2 < bundleCount {
 		gateFail = append(gateFail, fmt.Sprintf("AC-2: expected ≥%d automated, got %d", (bundleCount+1)/2, automatedCount))

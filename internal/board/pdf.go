@@ -21,12 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-	"time"
-
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -40,18 +35,11 @@ import (
 // Deprecated: use pdfrender.Default().RenderTimeout().
 const PDFTimeout = pdfrender.DefaultRenderTimeout
 
-// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
-// wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
-// Slice 340 diagnosed this watchdog firing on Harden-Runner audit-
-// mode-stretched Chrome startup; this slice fans the fix out to
-// the four sibling PDF renderers. See slice 341.
-const chromedpWSURLReadTimeout = 60 * time.Second
-
 // ErrChromeUnavailable is returned when chromedp could not launch a browser.
 // The HTTP handler maps this to 503 so operators can run the platform
 // without Chrome (PDF endpoint disabled) until they install it — the brief
-// + Markdown still work. Mirrors internal/policy/pdf.ErrChromeUnavailable.
-var ErrChromeUnavailable = errors.New("board/pdf: chrome browser unavailable")
+// + Markdown still work. It is the shared pdfrender sentinel.
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // RenderPDF returns a PDF byte stream for the frozen brief. The returned
 // bytes begin with the literal `%PDF-` magic header.
@@ -68,66 +56,12 @@ func RenderPDF(ctx context.Context, sb StoredBrief) ([]byte, error) {
 	}
 	htmlDoc := buildBriefHTML(sb)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderBriefBytes(ctx, htmlDoc)
-	})
-}
-
-// renderBriefBytes performs the actual chromedp render under the deadline the
-// limiter has already applied to ctx.
-func renderBriefBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	// Browser allocation mirrors internal/policy/pdf: connect to a remote
-	// CDP endpoint when CHROME_DEBUG_URL is set (CI / dev machines without a
-	// local Chrome), otherwise launch a local Chrome with --no-sandbox. We
-	// never load untrusted URLs — only the inline data: URL we construct.
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Run(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("board/pdf: %w", err)
 		}
-		return nil, fmt.Errorf("board/pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("board/pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 // buildBriefHTML renders the frozen brief as a minimal, print-friendly HTML
@@ -162,30 +96,19 @@ th { background: #f5f5f5; font-weight: 600; }
 		html.EscapeString(b.GeneratedAt))
 
 	// Posture stat grid.
-	w.WriteString(`<h2>Program posture</h2><div class="grid">`)
-	for _, fp := range b.Frameworks {
-		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
-		fmt.Fprintf(&w,
-			`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
-				`<div class="meta">%s %s pts · freshness %d%%</div>`+
-				`<div class="meta %s">%s</div></div>`,
-			html.EscapeString(fp.Name), fp.CoveragePct,
-			html.EscapeString(arrowGlyph(fp.TrendArrow)), html.EscapeString(signedInt(fp.Delta)),
-			fp.FreshnessPct,
-			html.EscapeString(stateClass), html.EscapeString(fp.State))
+	w.WriteString(`<h2>Program posture</h2>`)
+	if b.Coverage != nil {
+		writeBriefPosture(&w, b)
+	} else {
+		writeLegacyBriefPosture(&w, b)
 	}
-	w.WriteString(`</div>`)
 
 	// Drift summary.
 	w.WriteString(`<h2>Control drift</h2>`)
-	flipped := "no controls drifted out of passing"
-	if b.Drift.FlippedOutCount > 0 {
-		flipped = fmt.Sprintf("%d control(s) drifted out of passing", b.Drift.FlippedOutCount)
-	}
 	fmt.Fprintf(&w,
-		`<div class="drift">Last %d days (%s to %s): drift count %s — %s.</div>`,
+		`<div class="drift">Last %d days (%s to %s): net change in passing controls %s — %s.</div>`,
 		b.Drift.WindowDays, html.EscapeString(b.Drift.Since), html.EscapeString(b.Drift.Through),
-		html.EscapeString(signedInt(b.Drift.Delta)), html.EscapeString(flipped))
+		html.EscapeString(signedInt(b.Drift.Delta)), html.EscapeString(b.Drift.MovementClause()))
 
 	// Top risks table.
 	w.WriteString(`<h2>Top risks aging</h2>`)
@@ -193,12 +116,12 @@ th { background: #f5f5f5; font-weight: 600; }
 		w.WriteString(`<div class="drift">No open risks in the register.</div>`)
 	} else {
 		w.WriteString(`<table><thead><tr><th>#</th><th>Risk</th><th>Category</th>` +
-			`<th>Treatment</th><th>Residual severity</th><th>Age (days)</th></tr></thead><tbody>`)
+			`<th>Treatment</th><th>Residual</th><th>Age (days)</th></tr></thead><tbody>`)
 		for i, r := range b.TopRisks {
 			fmt.Fprintf(&w,
-				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f</td><td>%d</td></tr>`,
-				i+1, html.EscapeString(r.Title), html.EscapeString(r.Category),
-				html.EscapeString(r.Treatment), r.ResidualSeverity, r.AgeDays)
+				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td></tr>`,
+				i+1, html.EscapeString(r.Title), html.EscapeString(r.CategoryLabel()),
+				html.EscapeString(r.Treatment), html.EscapeString(r.ResidualLabel()), r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)
 	}
@@ -207,29 +130,65 @@ th { background: #f5f5f5; font-weight: 600; }
 	return w.String()
 }
 
-// encodeForDataURL percent-encodes the small set of characters that would
-// confuse chromedp's data-URL parser. Mirrors internal/policy/pdf.
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
+// writeBriefPosture renders the #2210 posture: the program coverage figure
+// the board pack reports, one card per framework version, and the
+// tenant-wide evidence freshness rate under its own name.
+func writeBriefPosture(w *strings.Builder, b Brief) {
+	c := b.Coverage
+	if c.NoScopedFrameworks() {
+		w.WriteString(`<div class="drift">No framework has an activated scope, so no coverage figure is reported.</div>`)
+	} else {
+		fmt.Fprintf(w, `<div class="drift">Requirement coverage averages %s%% across the %d %s with an activated scope.</div>`,
+			html.EscapeString(formatPct(c.CoveragePct)), c.ScopedFrameworkCount,
+			pluralize(c.ScopedFrameworkCount, "framework", "frameworks"))
+	}
+	w.WriteString(`<div class="grid">`)
+	for _, fp := range b.Frameworks {
+		name := fp.Name
+		if fp.Version != "" {
+			name += " " + fp.Version
+		}
+		if fp.ScopeNotSet {
+			fmt.Fprintf(w,
+				`<div class="card"><div class="label">%s</div><div class="pct">Scope not set</div>`+
+					`<div class="meta">no coverage until a framework scope is activated</div></div>`,
+				html.EscapeString(name))
+			continue
+		}
+		trend := noBaselineText
+		if !fp.NoTrendHistory {
+			trend = arrowGlyph(fp.TrendArrow) + " " + signedPts(fp.Delta) + " pts over 90 days"
+		}
+		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
+				`<div class="meta">requirement coverage</div>`+
+				`<div class="meta">%s</div>`+
+				`<div class="meta %s">%s</div></div>`,
+			html.EscapeString(name), html.EscapeString(formatPct(fp.CoveragePct)),
+			html.EscapeString(trend),
+			html.EscapeString(stateClass), html.EscapeString(fp.State))
+	}
+	w.WriteString(`</div>`)
+	fmt.Fprintf(w, `<div class="drift">Evidence freshness rate (tenant-wide): %d%% of controls have fresh evidence.</div>`,
+		c.EvidenceFreshnessRatePct)
 }
 
-// isChromeUnavailable heuristically classifies a chromedp error as
-// "browser executable missing" so the handler can 503 rather than 500.
-// Mirrors internal/policy/pdf.
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
+// writeLegacyBriefPosture renders a brief stored before #2210 exactly as it
+// rendered then: its figures are the tenant-wide evidence freshness rate.
+func writeLegacyBriefPosture(w *strings.Builder, b Brief) {
+	w.WriteString(`<div class="grid">`)
+	for _, fp := range b.Frameworks {
+		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
+				`<div class="meta">evidence freshness rate (tenant-wide)</div>`+
+				`<div class="meta">%s %s pts · controls fresh %d%%</div>`+
+				`<div class="meta %s">%s</div></div>`,
+			html.EscapeString(fp.Name), legacyInt(fp.CoveragePct),
+			html.EscapeString(arrowGlyph(fp.TrendArrow)), html.EscapeString(signedInt(legacyInt(fp.Delta))),
+			legacyInt(fp.FreshnessPct),
+			html.EscapeString(stateClass), html.EscapeString(fp.State))
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
+	w.WriteString(`</div>`)
 }

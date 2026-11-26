@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -10,8 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	connectorsv1 "github.com/mgoodric/security-atlas/gen/proto/connectors/v1"
@@ -22,11 +19,11 @@ import (
 // ConnectorRegistry. Slice 044 uses `<vendor>-connector`; we match.
 const ConnectorName = "1password-connector"
 
-// SupportedKinds is the canonical list of evidence kinds slice 046
-// emits. One kind — slice 046 is a single-emitter connector by design
-// (canvas §4.2: 1Password is Query-only, no event push surface).
+// SupportedKinds is the canonical list of evidence kinds the connector
+// emits. One kind, pulled (canvas §4.2: 1Password is Query-only). #2968
+// moved it to v2, read from the documented Events and Users APIs.
 var SupportedKinds = []string{
-	"1password.org_policy.v1",
+	"1password.org_policy.v2",
 }
 
 // commonFlags is the persistent set every subcommand needs.
@@ -61,9 +58,9 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&common.endpoint, "endpoint", "", "platform gRPC endpoint (env: SECURITY_ATLAS_ENDPOINT)")
-	// The flag is named `--platform-token` to avoid colliding with the
-	// 1Password Service Account `--token`. They are separate secrets and
-	// must not share a flag.
+	// The flag is named `--platform-token` so it is never mistaken for a
+	// 1Password secret, which the connector reads from the environment
+	// only (#2968).
 	root.PersistentFlags().StringVar(&common.token, "platform-token", "", "platform bearer token (env: SECURITY_ATLAS_TOKEN)")
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS to platform (loopback endpoints only)")
 	root.AddCommand(newRegisterCmd())
@@ -75,13 +72,9 @@ func newRootCmd() *cobra.Command {
 // dialConnectorRegistry opens a gRPC connection scoped to the
 // ConnectorRegistry service. The caller owns the returned conn.
 func dialConnectorRegistry() (connectorsv1.ConnectorRegistryServiceClient, *grpc.ClientConn, error) {
-	var transport grpc.DialOption
-	if common.insecure {
-		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
-	} else {
-		transport = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}))
-	}
-	conn, err := grpc.NewClient(common.endpoint, transport)
+	// #2257: sdk.Dial applies the same loopback-only rule to --insecure as
+	// the push path, so the registry dial cannot go plaintext off-box.
+	conn, err := sdk.Dial(common.endpoint, sdkOpts()...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial: %w", err)
 	}
@@ -122,16 +115,15 @@ func sdkOpts() []sdk.Option {
 const longDescription = `security-atlas 1Password connector
 
 Emits one evidence kind:
-  - 1password.org_policy.v1 (run subcommand, pull)
+  - 1password.org_policy.v2 (run subcommand, pull)
 
-1Password Service Account scopes (least-privilege, per-vault):
-  - vault:read_items   (Read)
-  - account:read       (Read)
+It reads two documented 1Password APIs, each with its own credential,
+both from the environment only (no flag carries a 1Password secret):
+  - Events API, GET /api/v2/auth/introspect, with an Events Reporting
+    integration's bearer token in $ONEPASSWORD_EVENTS_TOKEN. Grant the
+    integration the audit events feature.
+  - Users API, GET /v1/accounts/{account}/users, with an OAuth
+    application's client credentials in $ONEPASSWORD_USERS_CLIENT_ID and
+    $ONEPASSWORD_USERS_CLIENT_SECRET. Grant only users.view.
 
-Never grant write_items, manage_vault, or any admin-class Service
-Account. Use the 'scopes' subcommand to print the canonical list.
-
-The Service Account token is read from $ONEPASSWORD_SERVICE_ACCOUNT_TOKEN
-(preferred so the secret never appears in shell history) or, as a
-fallback, --token. The Credential type redacts the bearer from every
-String/Format output.`
+Use the 'scopes' subcommand to print the canonical list.`

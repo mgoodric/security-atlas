@@ -10,18 +10,17 @@
 package questionnaire
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/xuri/excelize/v2"
+	"github.com/mgoodric/security-atlas/internal/xlsxbound"
 )
 
 // MaxUploadBytes caps the inbound Excel size BEFORE parsing. 5 MB is
 // generously larger than the canonical CAIQ v4.1 (283 questions ~ 80 KB)
-// or HECVAT 4.1.5 (321 questions ~ 110 KB) but small enough that a
-// pathological zip-bomb file blows the cap before excelize touches it.
+// or HECVAT 4.1.5 (321 questions ~ 110 KB). It bounds compressed bytes
+// only; MaxDecompressedBytes is the zip-bomb bound.
 const MaxUploadBytes = 5 * 1024 * 1024
 
 // MaxRows is the per-sheet row ceiling. Largest known canonical
@@ -29,11 +28,42 @@ const MaxUploadBytes = 5 * 1024 * 1024
 // vendor questionnaires while denying obvious DoS shapes.
 const MaxRows = 5000
 
+// MaxDecompressedBytes caps the total uncompressed size of every part in
+// the xlsx zip. MaxUploadBytes bounds only the compressed bytes: sheet XML
+// compresses far past 100:1, so a sub-5 MB workbook can declare gigabytes.
+// excelize's own default is 16 GB.
+const MaxDecompressedBytes = 64 << 20
+
+// MaxXMLPartBytes is the per-part size excelize unzips into memory; a
+// larger part spills to a temp file, which MaxDecompressedBytes bounds.
+const MaxXMLPartBytes = 16 << 20
+
+// MaxColumns is the per-row width ceiling, counted to the last non-blank
+// cell. Canonical questionnaires use under 20 columns; 256 is the old
+// Excel IV limit. excelize pads a row to its highest cell index, so
+// without this one cell at XFD costs 16,384 strings per row.
+const MaxColumns = 256
+
+// bounds is the xlsxbound shape of the caps above.
+var bounds = xlsxbound.Limits{
+	MaxDecompressedBytes: MaxDecompressedBytes,
+	MaxXMLPartBytes:      MaxXMLPartBytes,
+	MaxRows:              MaxRows,
+	MaxColumns:           MaxColumns,
+}
+
 // ErrUploadTooLarge is returned when the inbound xlsx exceeds MaxUploadBytes.
 var ErrUploadTooLarge = errors.New("questionnaire: excel upload exceeds size cap")
 
+// ErrDecompressedTooLarge is returned when the xlsx parts would decompress
+// past MaxDecompressedBytes (the zip-bomb shape).
+var ErrDecompressedTooLarge = xlsxbound.ErrDecompressedTooLarge
+
 // ErrTooManyRows is returned when the parsed sheet exceeds MaxRows.
-var ErrTooManyRows = errors.New("questionnaire: excel exceeds row cap")
+var ErrTooManyRows = xlsxbound.ErrTooManyRows
+
+// ErrTooManyColumns is returned when a row is wider than MaxColumns.
+var ErrTooManyColumns = xlsxbound.ErrTooManyColumns
 
 // ErrEmptyWorkbook is returned when the file parses but has no sheets.
 var ErrEmptyWorkbook = errors.New("questionnaire: excel has no sheets")
@@ -78,10 +108,13 @@ var fieldAliases = map[string][]string{
 //
 // Security posture (see docs/audit-log/155-questionnaire-tracer-decisions.md):
 //   - Size cap enforced as the very first action.
+//   - Decompressed size capped at MaxDecompressedBytes before excelize
+//     inflates anything (zip-bomb).
 //   - Formulas are read as their RAW STRING via excelize, never evaluated;
 //     we treat formula cells as opaque text. This neutralizes the
 //     spreadsheet-formula-injection class.
-//   - Row count is capped at MaxRows before we allocate the result slice.
+//   - Rows are streamed and the read stops past MaxRows or at a row wider
+//     than MaxColumns, so an oversized sheet is never materialized.
 //   - Only the first sheet is read — additional sheets are ignored.
 func ParseExcel(raw []byte) (*ParseResult, error) {
 	if len(raw) == 0 {
@@ -91,7 +124,10 @@ func ParseExcel(raw []byte) (*ParseResult, error) {
 		return nil, ErrUploadTooLarge
 	}
 
-	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	f, err := xlsxbound.Open(raw, bounds)
+	if errors.Is(err, xlsxbound.ErrDecompressedTooLarge) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("questionnaire: open xlsx: %w", err)
 	}
@@ -101,13 +137,12 @@ func ParseExcel(raw []byte) (*ParseResult, error) {
 	if len(sheets) == 0 {
 		return nil, ErrEmptyWorkbook
 	}
-	sheet := sheets[0]
-	rows, err := f.GetRows(sheet)
-	if err != nil {
-		return nil, fmt.Errorf("questionnaire: read sheet rows: %w", err)
+	rows, err := xlsxbound.ReadRows(f, sheets[0], bounds)
+	if errors.Is(err, xlsxbound.ErrTooManyRows) || errors.Is(err, xlsxbound.ErrTooManyColumns) {
+		return nil, err
 	}
-	if len(rows) > MaxRows {
-		return nil, ErrTooManyRows
+	if err != nil {
+		return nil, fmt.Errorf("questionnaire: %w", err)
 	}
 	if len(rows) < 2 {
 		return nil, ErrNoHeaderRow

@@ -12,8 +12,12 @@ The `deploy/docker/docker-compose.yml` bundle is the **whole platform on
 one host**: Postgres 16, NATS JetStream, MinIO, the `atlas` server, and
 the Next.js frontend. On first boot a one-shot `atlas-bootstrap`
 container applies migrations, seeds the default tenant + scope cell +
-local user, imports the SCF catalog, and uploads the 50 SOC 2 control
+local user, imports the SCF catalog, and uploads the 65 stock control
 bundles.
+
+No container runtime on the host? Follow the
+[native install](install-native.md) instead: Go, Postgres 16 and Node,
+no Docker.
 
 ## Prerequisites
 
@@ -122,7 +126,10 @@ separately.
 | **Bootstrap OAuth client**       | Machine identity the one-shot `atlas-bootstrap` container uses to upload control bundles | Issued at runtime by `atlas-bootstrap`; persisted to `/var/lib/atlas-bootstrap/oauth-bootstrap-credentials.json` (mode 0600) on the `atlas-bootstrap-data` volume |
 
 The bootstrap OAuth client is created automatically — you do not
-configure it. It is named `atlas-bootstrap-controls-<8-hex-tenant>` and
+configure it. It is bound to your organisation (the bootstrap tenant), so
+the controls it uploads are the ones you see after signing in; see
+[OAuth client binding](cli.md#oauth). It is named
+`atlas-bootstrap-controls-<8-hex-tenant>` and
 its `client_secret` never leaves the `atlas-bootstrap-data` volume
 inside the docker network. To inspect it:
 
@@ -150,13 +157,15 @@ new client.
 
 ## What's seeded for you
 
-- A default tenant. (security-atlas is multi-tenant from day one; the UI
-  hides tenant chrome when only one tenant exists.)
+- Your organisation: the one tenant, `ATLAS_BOOTSTRAP_TENANT`. A
+  single-tenant install never asks you for a tenant ID, and the UI shows no
+  tenant chrome. Multi-tenant is a one-way opt-in; see
+  [Tenant membership](tenant-membership.md#opting-in-to-multi-tenant).
 - A default scope cell — `environment = prod`, the "everything" cell a
   solo operator starts from. Add scope dimensions as your environment
   grows.
 - The full SCF catalog — the spine every framework maps through.
-- 50 SOC 2 control bundles — each is a control definition plus its
+- 65 stock control bundles — each is a control definition plus its
   `evidence_query`. Forkable as-is.
 
 ## Verifying your install

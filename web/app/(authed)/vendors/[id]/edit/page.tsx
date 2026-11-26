@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { APIError } from "@/lib/api/base";
 import { Vendor } from "@/lib/api/vendors";
 
@@ -31,6 +33,7 @@ export default function VendorEditPage({
   const { id } = use(params);
   const router = useRouter();
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data, isLoading, error } = useQuery({
     queryKey: ["vendor", id],
     queryFn: () => fetchVendor(id),
@@ -43,23 +46,20 @@ export default function VendorEditPage({
   }, [error, id, router]);
 
   return (
-    <div className="space-y-6">
-      <div className="text-sm">
+    <PageShell
+      title="Edit vendor"
+      subtitle="Save updates the record and re-binds scope cells. Delete removes the row and its cell bindings."
+      width="reading"
+      actions={
         <Link
           href={`/vendors/${id}`}
-          className="text-muted-foreground hover:underline"
+          className="text-sm text-muted-foreground hover:underline"
           data-testid="vendor-edit-back"
         >
           ← Vendor detail
         </Link>
-      </div>
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Edit vendor</h1>
-        <p className="text-sm text-muted-foreground">
-          Save updates the record and re-binds scope cells. Delete removes the
-          row and its cell bindings.
-        </p>
-      </div>
+      }
+    >
       {isLoading ? <Skeleton className="h-96 w-full" /> : null}
       {error && !(error instanceof APIError && error.status === 401) ? (
         <Alert variant="destructive">
@@ -96,11 +96,12 @@ export default function VendorEditPage({
               // not block the navigation.
               void qc.invalidateQueries({ queryKey: ["vendors"] });
               void qc.invalidateQueries({ queryKey: ["vendors-burndown"] });
+              toast("Vendor updated");
               router.push(`/vendors/${id}`);
             }}
             submitLabel="Save changes"
           />
-          <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-4">
             <div>
               <p className="text-sm font-medium">Delete vendor</p>
               <p className="text-xs text-muted-foreground">
@@ -115,6 +116,6 @@ export default function VendorEditPage({
           </div>
         </>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

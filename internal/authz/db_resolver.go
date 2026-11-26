@@ -3,10 +3,12 @@ package authz
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -27,9 +29,20 @@ func NewDBRolesResolver(pool *pgxpool.Pool) *DBRolesResolver {
 // (nil, nil) when no rows match -- the caller falls back to the
 // credential-derived roles.
 //
-// userID is the credential's UserID -- "key_..." for slice-014/034
-// machine credentials, or the user UUID for slice-034 human users.
-// Both shapes are TEXT in user_roles.user_id, so no parsing.
+// userID is the credential's raw UserID: "key_..." for slice-014/034
+// machine credentials, the bare user UUID for a user-bound key, or the
+// "user:<uuid>" subject of a local-login / OIDC / PKCE / device-grant JWT.
+// Role assignment stores the bare uuid, so the lookup key goes through
+// identity.RolesKey, which strips the "user:" prefix and leaves every other
+// shape as it is (#2239). Before that, JWT users matched no row and
+// decided on credential-derived roles alone.
+//
+// A user whose users row is not 'active' gets no rows (#2239). A SCIM
+// deactivation flips users.status and keeps user_roles, and an access token
+// minted before it stays valid until it expires; without this check the
+// resolver would hand that token the user's roles, and with the auditor role
+// any leftover auditor_assignments row. A principal that names no user
+// (a key or machine id) has no users row and is unaffected.
 //
 // The SELECT runs inside a transaction that first applies the
 // `app.current_tenant` GUC via tenancy.ApplyTenant. user_roles carries
@@ -51,7 +64,25 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 	const q = `
 		SELECT role FROM user_roles
 		WHERE tenant_id = $1::uuid AND user_id = $2
+		  AND NOT EXISTS (
+		      SELECT 1 FROM users
+		      WHERE id = $3::uuid AND tenant_id = $1::uuid AND status <> 'active'
+		  )
 	`
+	key := identity.RolesKey(userID)
+	// $3 is the users(id) the key names, or NULL when it names none, which
+	// makes the NOT EXISTS vacuously true.
+	var user any
+	if u, ok := identity.UserID(key); ok {
+		user = u.String()
+	} else if _, err := uuid.Parse(strings.TrimPrefix(key, "user:")); err == nil {
+		// uuid-shaped but not canonical (upper-case, braced, urn, 32-hex,
+		// the nil uuid): it names no user, so $3 would be NULL and the
+		// deactivation guard would never fire, while user_id = $2 could
+		// still match a row stored in exactly that text. No path writes
+		// such a row; fail closed rather than rely on that (#2483).
+		return nil, nil
+	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -63,7 +94,7 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 		return nil, fmt.Errorf("authz: apply tenant to user_roles tx: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, q, tenantID, userID)
+	rows, err := tx.Query(ctx, q, tenantID, key, user)
 	if err != nil {
 		return nil, fmt.Errorf("authz: query user_roles: %w", err)
 	}

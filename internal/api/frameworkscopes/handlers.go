@@ -1,14 +1,16 @@
 // Package frameworkscopes serves the slice-018 HTTP API for the
 // FrameworkScope predicate + four-state workflow. Routes:
 //
-//	POST   /v1/framework-scopes                        — create a draft scope
+//	POST   /v1/framework-scopes                        — create a draft scope, or a new revision of one (from_scope_id)
 //	GET    /v1/framework-scopes                        — list (filter by framework_version, state, as_of)
 //	GET    /v1/framework-scopes/{id}                   — get one
-//	PATCH  /v1/framework-scopes/{id}                   — edit predicate (triggers re-approval if review/approved)
+//	PATCH  /v1/framework-scopes/{id}                   — edit predicate (triggers re-approval if review/approved; 409 if activated/superseded)
 //	PATCH  /v1/framework-scopes/{id}/submit            — draft → review
 //	PATCH  /v1/framework-scopes/{id}/approve           — review → approved (approver-role gate)
 //	PATCH  /v1/framework-scopes/{id}/activate          — approved → activated
 //	GET    /v1/controls/{id}/effective-scope?framework_version=… — intersection compute (AC-11)
+//
+// Applicability (SoA) decision routes live in applicability.go.
 //
 // Auth: the existing httpAuthMiddleware mounts the credential into context;
 // each handler reads the tenant id off the credential and (for approve)
@@ -27,8 +29,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -55,6 +59,10 @@ type createReq struct {
 	FrameworkVersionID string          `json:"framework_version_id"`
 	Name               string          `json:"name"`
 	Predicate          json.RawMessage `json:"predicate"`
+	// FromScopeID makes the new draft a revision of that scope (#1965):
+	// framework_version_id, name and predicate default to the source's,
+	// and its decisions are copied.
+	FromScopeID string `json:"from_scope_id"`
 }
 
 type approveReq struct {
@@ -82,11 +90,16 @@ type scopeWire struct {
 	PredicateHashAtApproval  *string         `json:"predicate_hash_at_approval,omitempty"`
 	ApprovalEvidenceFileURL  *string         `json:"approval_evidence_file_url,omitempty"`
 	ApprovalEvidenceFileHash *string         `json:"approval_evidence_file_hash,omitempty"`
-	EffectiveFrom            *time.Time      `json:"effective_from,omitempty"`
-	SupersededBy             *string         `json:"superseded_by,omitempty"`
-	SupersededAt             *time.Time      `json:"superseded_at,omitempty"`
-	CreatedAt                time.Time       `json:"created_at"`
-	UpdatedAt                time.Time       `json:"updated_at"`
+	// SubmittedBy / SelfApproved (#2101): who submitted the scope for
+	// review, and whether that person approved it under the organisation's
+	// Allow self-approval setting.
+	SubmittedBy   *string    `json:"submitted_by,omitempty"`
+	SelfApproved  bool       `json:"self_approved"`
+	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
+	SupersededBy  *string    `json:"superseded_by,omitempty"`
+	SupersededAt  *time.Time `json:"superseded_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func toWire(s frameworkscope.FrameworkScope) scopeWire {
@@ -100,6 +113,8 @@ func toWire(s frameworkscope.FrameworkScope) scopeWire {
 		PredicateHashAtApproval:  s.PredicateHashAtApproval,
 		ApprovalEvidenceFileURL:  s.ApprovalEvidenceFileURL,
 		ApprovalEvidenceFileHash: s.ApprovalEvidenceFileHash,
+		SubmittedBy:              s.SubmittedBy,
+		SelfApproved:             s.SelfApproved,
 		EffectiveFrom:            s.EffectiveFrom,
 		ApprovedAt:               s.ApprovedAt,
 		SupersededAt:             s.SupersededAt,
@@ -121,9 +136,8 @@ func toWire(s frameworkscope.FrameworkScope) scopeWire {
 
 // Create — AC-5. POST /v1/framework-scopes.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
@@ -133,23 +147,43 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Name) == "" {
+	var fromID uuid.UUID
+	if req.FromScopeID != "" {
+		id, perr := uuid.Parse(req.FromScopeID)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "from_scope_id must be a UUID")
+			return
+		}
+		fromID = id
+	}
+	if fromID == uuid.Nil && strings.TrimSpace(req.Name) == "" {
 		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	fvID, err := uuid.Parse(req.FrameworkVersionID)
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
-		return
+	var fvID uuid.UUID
+	if fromID == uuid.Nil || req.FrameworkVersionID != "" {
+		id, perr := uuid.Parse(req.FrameworkVersionID)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+			return
+		}
+		fvID = id
 	}
 	out, err := h.store.Create(ctx, frameworkscope.CreateRequest{
 		FrameworkVersionID: fvID,
-		Name:               req.Name,
+		Name:               strings.TrimSpace(req.Name),
 		Predicate:          []byte(req.Predicate),
+		Actor:              actorOf(r),
+		FromScopeID:        fromID,
 	})
 	if err != nil {
-		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
+		if errors.Is(err, frameworkscope.ErrPredicateMalformed) ||
+			errors.Is(err, frameworkscope.ErrRevisionVersionMismatch) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, frameworkscope.ErrNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "from_scope_id: framework_scope not found")
 			return
 		}
 		httperr.WriteInternal(w, r, "create framework_scope", err)
@@ -160,11 +194,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Patch — AC-9. PATCH /v1/framework-scopes/{id}. Body may include predicate.
 // When the row was in `review` or `approved`, the DB trigger bounces it back
-// to `draft`; we surface this as `approval_invalidated: true`.
+// to `draft`; we surface this as `approval_invalidated: true`. An activated
+// or superseded row is immutable (#1965): 409, create a new revision.
 func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -180,7 +214,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "predicate is required for PATCH")
 		return
 	}
-	out, invalidated, err := h.store.UpdatePredicate(ctx, id, []byte(req.Predicate))
+	out, invalidated, err := h.store.UpdatePredicate(ctx, id, []byte(req.Predicate), actorOf(r))
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
@@ -188,6 +222,10 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, frameworkscope.ErrPredicateFrozen) {
+			httpresp.WriteError(w, http.StatusConflict, err.Error()+" (POST /v1/framework-scopes with from_scope_id)")
 			return
 		}
 		httperr.WriteInternal(w, r, "patch framework_scope", err)
@@ -202,16 +240,15 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 
 // Submit — AC-6. PATCH /v1/framework-scopes/{id}/submit.
 func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	out, err := h.store.Submit(ctx, id)
+	out, err := h.store.Submit(ctx, id, actorOf(r), personOf(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
@@ -239,7 +276,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
@@ -279,7 +316,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	out, err := h.store.Approve(ctx, frameworkscope.ApproveRequest{
 		ID:               id,
-		ApproverUserID:   cred.UserID,
+		ApproverUserID:   credstore.MinterUserID(cred),
+		Actor:            cred.ID,
 		EvidenceFileURL:  req.ApprovalEvidenceFileURL,
 		EvidenceFileHash: req.ApprovalEvidenceFileHash,
 	})
@@ -287,6 +325,12 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
+		case errors.Is(err, frameworkscope.ErrSelfApproval):
+			httpresp.WriteError(w, http.StatusForbidden, frameworkscope.ErrSelfApproval.Error())
+		case errors.Is(err, frameworkscope.ErrApproverNotPerson):
+			httpresp.WriteError(w, http.StatusForbidden, frameworkscope.ErrApproverNotPerson.Error())
+		case errors.Is(err, frameworkscope.ErrSubmitterUnknown):
+			httpresp.WriteError(w, http.StatusConflict, frameworkscope.ErrSubmitterUnknown.Error())
 		case errors.Is(err, frameworkscope.ErrWrongState):
 			httpresp.WriteError(w, http.StatusConflict, "scope must be in `review` to approve")
 		default:
@@ -299,9 +343,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 
 // Activate — AC-8. PATCH /v1/framework-scopes/{id}/activate.
 func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -322,7 +365,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "effective_from must be RFC3339: "+err.Error())
 		return
 	}
-	out, err := h.store.Activate(ctx, id, t)
+	out, err := h.store.Activate(ctx, id, actorOf(r), t)
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
@@ -331,6 +374,8 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusConflict, "scope must be in `approved` to activate")
 		case errors.Is(err, frameworkscope.ErrAnotherActivated):
 			httpresp.WriteError(w, http.StatusConflict, "another scope is already activated for this framework version")
+		case errors.Is(err, frameworkscope.ErrEffectiveBeforeFreeze):
+			httpresp.WriteError(w, http.StatusConflict, "effective_from must be after the freeze of every audit period on this framework version; a frozen period cannot be changed")
 		default:
 			httperr.WriteInternal(w, r, "activate framework_scope", err)
 		}
@@ -516,6 +561,24 @@ func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 	return r.Context(), true
 }
 
+// writerContext is tenantContext for the framework_scope writes (create,
+// edit, submit, activate and the applicability decisions): the caller must
+// also be a tenant approver, admin or grc_engineer by its live roles
+// (authz.IsTenantApprover), as OPA admits it (#2664). It writes the 401 or
+// 403 itself.
+func (h *Handler) writerContext(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return nil, false
+	}
+	if cred, _ := authctx.CredentialFromContext(ctx); !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return nil, false
+	}
+	return ctx, true
+}
+
 func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -538,4 +601,24 @@ func isLikelySha256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// actorOf returns the calling credential id recorded on the framework-scope
+// workflow log, the same attribution exception_audit_log uses. Handlers run
+// behind tenantContext, which has already confirmed a credential is present.
+func actorOf(r *http.Request) string {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	return cred.ID
+}
+
+// personOf names who is behind the calling credential: the bare users(id)
+// uuid for a person, else the credential's principal (an unbound key's own
+// id, "oauth_client:<id>", "bootstrap-admin"). It is the submitter
+// approval compares against (#2101). Never the JWT credential id: that is
+// per token ("jwt:<jti>"), so one person could submit through one session
+// and approve through another, and approval reads that prefix as a
+// pre-#1807 session submitter.
+func personOf(r *http.Request) string {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	return credstore.PrincipalOf(cred)
 }

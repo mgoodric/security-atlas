@@ -1,7 +1,8 @@
 // Slice 100 — vitest unit coverage for /risks filter + formatter logic.
 //
-// Pure-data tests. No React, no DOM, no fetch. Just the row-narrowing,
-// filter-set, and per-row formatter helpers from `./filters`.
+// Pure-data tests. No React, no DOM, no fetch. The per-row formatter
+// helpers and category options from `./filters` (#2132 moved filtering to
+// the server; see server-query.test.ts).
 //
 // All test fixtures use neutral identifiers — NO vendor token prefixes,
 // NO real names that could look like seeded data (per slice 100 P0-A4
@@ -9,110 +10,88 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Risk } from "@/lib/api/risks";
+import type { RiskCategory } from "@/lib/api/risks";
 
 import {
   ALL,
-  applyFilters,
-  clearFilters,
-  DEFAULT_FILTERS,
+  categoryDisplay,
+  categoryOptions,
   fairScore,
   formatDollars,
+  patternNoLongerMet,
   formatResidualScore,
-  isDefault,
+  isUnscored,
   residualClass,
+  residualSeverity,
   residualState,
   reviewDuePending,
-  setFilter,
+  reviewOverdue,
   severityBand,
+  severityBandLabel,
   severityClasses,
-  uniqueOwners,
 } from "./filters";
 
-function risk(id: string, overrides: Partial<Risk> = {}): Risk {
-  return {
-    id: `00000000-0000-0000-0000-0000000000${id}`,
-    title: `test risk ${id}`,
-    description: "",
-    category: "operational",
-    methodology: "nist_800_30",
-    inherent_score: { likelihood: 3, impact: 3 },
-    treatment: "mitigate",
-    treatment_owner: "alpha",
-    residual_score: { likelihood: 2, impact: 3 },
-    accepter: "",
-    instrument_reference: "",
-    linked_control_ids: [],
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    themes: [],
-    severity: 9,
-    ...overrides,
-  };
-}
+describe("categoryOptions / categoryDisplay (#1817)", () => {
+  function cat(slug: string, name: string, archived = false): RiskCategory {
+    return {
+      id: `id-${slug}`,
+      slug,
+      name,
+      description: "",
+      archived,
+      is_default: false,
+      risk_count: 0,
+      rule_count: 0,
+    };
+  }
+  const cats = [
+    cat("operational", "Operational"),
+    cat("legacy", "Legacy", true),
+    cat("cloud", "Cloud posture"),
+  ];
 
-describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
-  test("DEFAULT_FILTERS is all-ALL across all six pills (slice 244)", () => {
-    expect(DEFAULT_FILTERS.treatment).toBe(ALL);
-    expect(DEFAULT_FILTERS.severity).toBe(ALL);
-    expect(DEFAULT_FILTERS.owner).toBe(ALL);
-    expect(DEFAULT_FILTERS.category).toBe(ALL);
-    expect(DEFAULT_FILTERS.methodology).toBe(ALL);
-    expect(DEFAULT_FILTERS.org_unit).toBe(ALL);
+  test("lists active categories by name, matched by slug", () => {
+    expect(categoryOptions(cats, false, ALL)).toEqual([
+      { value: ALL, label: "All categories" },
+      { value: "cloud", label: "Cloud posture" },
+      { value: "operational", label: "Operational" },
+    ]);
   });
 
-  test("isDefault is true for the default set", () => {
-    expect(isDefault(DEFAULT_FILTERS)).toBe(true);
+  test("show archived adds archived categories, marked", () => {
+    expect(categoryOptions(cats, true, ALL)).toContainEqual({
+      value: "legacy",
+      label: "Legacy (archived)",
+    });
   });
 
-  test("isDefault is false when any filter is narrowed", () => {
-    expect(isDefault({ ...DEFAULT_FILTERS, treatment: "mitigate" })).toBe(
-      false,
-    );
-    expect(isDefault({ ...DEFAULT_FILTERS, severity: "high" })).toBe(false);
-    expect(isDefault({ ...DEFAULT_FILTERS, owner: "alpha" })).toBe(false);
-    // Slice 244 — three new pills each break the default set.
-    expect(isDefault({ ...DEFAULT_FILTERS, category: "operational" })).toBe(
-      false,
-    );
-    expect(isDefault({ ...DEFAULT_FILTERS, methodology: "fair" })).toBe(false);
+  test("keeps a selected archived category listed when hidden", () => {
     expect(
-      isDefault({
-        ...DEFAULT_FILTERS,
-        org_unit: "00000000-0000-0000-0000-000000000001",
-      }),
-    ).toBe(false);
+      categoryOptions(cats, false, "legacy").map((o) => o.value),
+    ).toContain("legacy");
   });
 
-  test("clearFilters returns a fresh ALL set (no shared reference)", () => {
-    const cleared = clearFilters();
-    expect(cleared).toEqual(DEFAULT_FILTERS);
-    expect(cleared).not.toBe(DEFAULT_FILTERS);
-  });
-});
-
-describe("setFilter", () => {
-  test("merges one key without mutating the input", () => {
-    const input = clearFilters();
-    const next = setFilter(input, "treatment", "mitigate");
-    expect(next.treatment).toBe("mitigate");
-    expect(input.treatment).toBe(ALL);
-  });
-
-  test("multiple sets compose left-to-right", () => {
-    const next = setFilter(
-      setFilter(clearFilters(), "treatment", "mitigate"),
-      "severity",
-      "high",
-    );
-    expect(next.treatment).toBe("mitigate");
-    expect(next.severity).toBe("high");
+  test("categoryDisplay prefers category_name and marks archived", () => {
+    expect(
+      categoryDisplay({ category: "legacy", category_name: "Old name" }, cats),
+    ).toEqual({ name: "Old name", archived: true });
+    expect(categoryDisplay({ category: "cloud" }, cats)).toEqual({
+      name: "Cloud posture",
+      archived: false,
+    });
+    expect(categoryDisplay({ category: "unknown" }, [])).toEqual({
+      name: "unknown",
+      archived: false,
+    });
   });
 });
 
 describe("severityBand", () => {
   test("0 is the 'none' band (no numeric score)", () => {
     expect(severityBand(0)).toBe("none");
+    // #2185: any value above 0 is low, so a small residual is not "none".
+    expect(severityBand(0.4)).toBe("low");
+    expect(severityBand(0.01)).toBe("low");
   });
 
   test("1..7 is the 'low' band", () => {
@@ -135,259 +114,29 @@ describe("severityBand", () => {
   });
 });
 
-describe("uniqueOwners", () => {
-  test("returns named owners sorted alphabetically", () => {
-    const rows = [
-      risk("01", { treatment_owner: "charlie" }),
-      risk("02", { treatment_owner: "alpha" }),
-      risk("03", { treatment_owner: "bravo" }),
-    ];
-    expect(uniqueOwners(rows)).toEqual(["alpha", "bravo", "charlie"]);
-  });
-
-  test("deduplicates repeated owners", () => {
-    const rows = [
-      risk("01", { treatment_owner: "alpha" }),
-      risk("02", { treatment_owner: "alpha" }),
-      risk("03", { treatment_owner: "bravo" }),
-    ];
-    expect(uniqueOwners(rows)).toEqual(["alpha", "bravo"]);
-  });
-
-  test("pins 'unassigned' last when any row has an empty owner", () => {
-    const rows = [
-      risk("01", { treatment_owner: "alpha" }),
-      risk("02", { treatment_owner: "" }),
-      risk("03", { treatment_owner: "bravo" }),
-    ];
-    expect(uniqueOwners(rows)).toEqual(["alpha", "bravo", "unassigned"]);
-  });
-
-  test("returns empty array for empty input", () => {
-    expect(uniqueOwners([])).toEqual([]);
-  });
-});
-
-describe("applyFilters", () => {
-  const allRows: Risk[] = [
-    risk("01", {
-      treatment: "mitigate",
-      treatment_owner: "alpha",
-      severity: 20,
-    }),
-    risk("02", {
-      treatment: "mitigate",
-      treatment_owner: "bravo",
-      severity: 9,
-    }),
-    risk("03", { treatment: "accept", treatment_owner: "alpha", severity: 4 }),
-    risk("04", { treatment: "transfer", treatment_owner: "", severity: 0 }),
-  ];
-
-  test("DEFAULT_FILTERS returns every row", () => {
-    expect(applyFilters(allRows, DEFAULT_FILTERS)).toHaveLength(4);
-  });
-
-  test("treatment filter narrows by exact wire value", () => {
-    const out = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      treatment: "mitigate",
-    });
-    expect(out).toHaveLength(2);
-    expect(out.every((r) => r.treatment === "mitigate")).toBe(true);
-  });
-
-  test("severity filter narrows by band", () => {
-    const high = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      severity: "high",
-    });
-    expect(high).toHaveLength(1);
-    expect(high[0]?.severity).toBe(20);
-
-    const medium = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      severity: "medium",
-    });
-    expect(medium).toHaveLength(1);
-    expect(medium[0]?.severity).toBe(9);
-
-    const none = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      severity: "none",
-    });
-    expect(none).toHaveLength(1);
-    expect(none[0]?.severity).toBe(0);
-  });
-
-  test("owner filter narrows by exact owner string", () => {
-    const out = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      owner: "alpha",
-    });
-    expect(out).toHaveLength(2);
-    expect(out.every((r) => r.treatment_owner === "alpha")).toBe(true);
-  });
-
-  test("owner filter 'unassigned' matches empty treatment_owner", () => {
-    const out = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      owner: "unassigned",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.treatment_owner).toBe("");
-  });
-
-  test("combining filters narrows on every active predicate", () => {
-    const out = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      treatment: "mitigate",
-      owner: "alpha",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.treatment).toBe("mitigate");
-    expect(out[0]?.treatment_owner).toBe("alpha");
-  });
-
-  test("returns empty when no row matches", () => {
-    const out = applyFilters(allRows, {
-      ...DEFAULT_FILTERS,
-      treatment: "avoid",
-    });
-    expect(out).toEqual([]);
-  });
-});
-
-// Slice 244 — table-driven coverage for the three new filter branches.
-//
-// Each branch gets:
-//   - ALL-passthrough: filter set to ALL leaves the row set untouched.
-//   - positive match: at least one row carries the value, narrows
-//     correctly.
-//   - negative match: no row carries the value, returns empty.
-describe("applyFilters — slice 244 additions", () => {
-  const mixedRows: Risk[] = [
-    risk("11", {
-      category: "operational",
-      methodology: "nist_800_30",
-      org_unit_id: "00000000-0000-0000-0000-0000000000aa",
-    }),
-    risk("12", {
-      category: "regulatory",
-      methodology: "fair",
-      org_unit_id: "00000000-0000-0000-0000-0000000000bb",
-    }),
-    risk("13", {
-      category: "operational",
-      methodology: "qualitative_5x5",
-      org_unit_id: undefined,
-    }),
-  ];
-
-  test("category ALL passes every row through", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      category: ALL,
-    });
-    expect(out).toHaveLength(3);
-  });
-
-  test("category filter narrows by exact wire-enum value", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      category: "operational",
-    });
-    expect(out).toHaveLength(2);
-    expect(out.every((r) => r.category === "operational")).toBe(true);
-  });
-
-  test("category negative match returns empty", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      category: "privacy",
-    });
-    expect(out).toEqual([]);
-  });
-
-  test("methodology ALL passes every row through", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      methodology: ALL,
-    });
-    expect(out).toHaveLength(3);
-  });
-
-  test("methodology filter narrows by exact wire-enum value", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      methodology: "fair",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.methodology).toBe("fair");
-  });
-
-  test("methodology negative match returns empty", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      methodology: "cis_ram",
-    });
-    expect(out).toEqual([]);
-  });
-
-  test("org_unit ALL passes every row through (including unassigned)", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      org_unit: ALL,
-    });
-    expect(out).toHaveLength(3);
-  });
-
-  test("org_unit filter narrows by exact UUID match", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      org_unit: "00000000-0000-0000-0000-0000000000aa",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.org_unit_id).toBe("00000000-0000-0000-0000-0000000000aa");
-  });
-
-  test("org_unit filter excludes rows with no org_unit_id", () => {
-    // Row 13 has org_unit_id = undefined; narrowing to a specific
-    // UUID must NOT match it (spec D3).
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      org_unit: "00000000-0000-0000-0000-0000000000bb",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.id).toContain("12");
-  });
-
-  test("org_unit negative match returns empty", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      org_unit: "00000000-0000-0000-0000-0000000000ff",
-    });
-    expect(out).toEqual([]);
-  });
-
-  test("composing the three new filters narrows on every predicate", () => {
-    const out = applyFilters(mixedRows, {
-      ...DEFAULT_FILTERS,
-      category: "operational",
-      methodology: "nist_800_30",
-      org_unit: "00000000-0000-0000-0000-0000000000aa",
-    });
-    expect(out).toHaveLength(1);
-    expect(out[0]?.id.endsWith("11")).toBe(true);
-  });
-});
-
 describe("formatResidualScore", () => {
-  test("formats a 5x5 score as a normalized 0..1 decimal", () => {
-    // likelihood=4 × impact=5 = 20 / 25 = 0.80
-    expect(formatResidualScore({ likelihood: 4, impact: 5 })).toBe("0.80");
-    // likelihood=2 × impact=3 = 6 / 25 = 0.24
-    expect(formatResidualScore({ likelihood: 2, impact: 3 })).toBe("0.24");
+  test("formats a 5x5 score on the 1..25 inherent scale (#2058)", () => {
+    expect(formatResidualScore({ likelihood: 4, impact: 5 })).toBe("20");
+    expect(formatResidualScore({ likelihood: 2, impact: 3 })).toBe("6");
+  });
+
+  test("formats a backend-derived {score, inherent_score, ...} residual (#2058)", () => {
+    // internal/risk/residual_store.go residualBlob: score = inherent ×
+    // (1 − effectiveness), already on 1..25.
+    expect(
+      formatResidualScore({
+        score: 12,
+        inherent_score: 20,
+        weighted_control_effectiveness: 0.4,
+        breakdown: [],
+      }),
+    ).toBe("12");
+    expect(formatResidualScore({ score: 7.2, inherent_score: 12 })).toBe("7.2");
+    expect(formatResidualScore({ severity: 16 })).toBe("16");
+  });
+
+  test("formats a deriver {score} on a FAIR risk as dollars", () => {
+    expect(formatResidualScore({ score: 60000 }, "fair")).toBe("$60,000");
   });
 
   test("renders '—' for null / undefined / non-object", () => {
@@ -408,12 +157,9 @@ describe("formatResidualScore", () => {
     expect(formatResidualScore({ likelihood: 3, impact: "four" })).toBe("—");
   });
 
-  test("clamps a score above the 5x5 ceiling", () => {
-    // The formatter doesn't clamp the value itself — it just normalizes
-    // by 25. A risk with L=6, I=6 normalizes to 1.44 (the operator's
-    // problem to spot, not the renderer's). Still finite, still
-    // formatted as a fixed-2.
-    expect(formatResidualScore({ likelihood: 6, impact: 6 })).toBe("1.44");
+  test("does not clamp a score above the 5x5 ceiling", () => {
+    // L=6, I=6 is the operator's problem to spot, not the renderer's.
+    expect(formatResidualScore({ likelihood: 6, impact: 6 })).toBe("36");
   });
 
   test("formats FAIR annualized loss exposure as dollars", () => {
@@ -428,6 +174,21 @@ describe("formatResidualScore", () => {
 
   test("renders '—' when the 5x5 product is not finite", () => {
     expect(formatResidualScore({ likelihood: Infinity, impact: 2 })).toBe("—");
+  });
+});
+
+describe("residualSeverity (#2058)", () => {
+  test("reads score, then severity, then likelihood × impact", () => {
+    expect(residualSeverity({ score: 12, severity: 3 })).toBe(12);
+    expect(residualSeverity({ severity: 16 })).toBe(16);
+    expect(residualSeverity({ likelihood: 3, impact: 4 })).toBe(12);
+  });
+
+  test("returns null when no shape carries a finite number", () => {
+    expect(residualSeverity({})).toBeNull();
+    expect(residualSeverity(null)).toBeNull();
+    expect(residualSeverity({ score: Number.NaN })).toBeNull();
+    expect(residualSeverity({ likelihood: 3 })).toBeNull();
   });
 });
 
@@ -481,11 +242,18 @@ describe("severityClasses + residualClass", () => {
     expect(severityClasses("none")).toContain("muted");
   });
 
-  test("residualClass maps formatted strings to the matching palette", () => {
-    expect(residualClass("0.80")).toContain("rose");
-    expect(residualClass("0.45")).toContain("amber");
-    expect(residualClass("0.15")).toContain("emerald");
+  test("residualClass bands a 1..25 residual like inherent severity (#2058)", () => {
+    expect(residualClass("20")).toBe(severityClasses("high"));
+    expect(residualClass("12")).toBe(severityClasses("medium"));
+    expect(residualClass("7.2")).toBe(severityClasses("low"));
     expect(residualClass("—")).toContain("muted");
+  });
+
+  test("severityBandLabel names every band", () => {
+    expect(severityBandLabel("high")).toBe("High");
+    expect(severityBandLabel("medium")).toBe("Medium");
+    expect(severityBandLabel("low")).toBe("Low");
+    expect(severityBandLabel("none")).toBe("None");
   });
 
   test("residualClass mutes a string that does not parse as a number", () => {
@@ -520,6 +288,21 @@ describe("residualState (slice 680 / ATLAS-029)", () => {
     expect(residualState({ likelihood: 4, impact: 5 })).toBe("scored");
   });
 
+  test("a backend-derived {score, ...} residual is scored, not pending (#2058)", () => {
+    expect(
+      residualState({
+        score: 12,
+        inherent_score: 20,
+        weighted_control_effectiveness: 0.4,
+        breakdown: [],
+      }),
+    ).toBe("scored");
+    // A zero residual (fully effective controls) is a real residual.
+    expect(residualState({ score: 0, inherent_score: 9 })).toBe("scored");
+    expect(residualState({ severity: 16 })).toBe("scored");
+    expect(residualState({ score: "12" })).toBe("pending");
+  });
+
   test("a FAIR residual is scored", () => {
     expect(
       residualState({ loss_event_frequency: 1.5, loss_magnitude: 40000 }),
@@ -540,5 +323,61 @@ describe("reviewDuePending (slice 680 / ATLAS-029)", () => {
 
   test("a real ISO date is not pending", () => {
     expect(reviewDuePending("2026-09-30T00:00:00Z")).toBe(false);
+  });
+});
+
+describe("reviewOverdue (#2059)", () => {
+  const now = new Date("2026-11-14T10:00:00Z");
+
+  test("a due day before today (UTC) is overdue", () => {
+    expect(reviewOverdue("2026-11-13T23:59:59Z", now)).toBe(true);
+  });
+
+  test("a review due today is not overdue yet, even past its hour", () => {
+    expect(reviewOverdue("2026-11-14T00:00:00Z", now)).toBe(false);
+  });
+
+  test("a future due day is not overdue", () => {
+    expect(reviewOverdue("2027-11-14T00:00:00Z", now)).toBe(false);
+  });
+
+  test("an absent or unparseable date is never overdue", () => {
+    expect(reviewOverdue(undefined, now)).toBe(false);
+    expect(reviewOverdue("not a date", now)).toBe(false);
+  });
+});
+
+describe("patternNoLongerMet (#1867)", () => {
+  test("a rule-generated meta-risk with 0 children is flagged", () => {
+    expect(
+      patternNoLongerMet({ rule_generated: true, child_count: 0, severity: 0 }),
+    ).toBe(true);
+  });
+  test("a meta-risk that still has children is not", () => {
+    expect(patternNoLongerMet({ rule_generated: true, child_count: 2 })).toBe(
+      false,
+    );
+  });
+  test("a manual risk or a malformed score is not", () => {
+    expect(patternNoLongerMet({ likelihood: 1, impact: 1 })).toBe(false);
+    expect(patternNoLongerMet({ child_count: 0 })).toBe(false);
+    expect(patternNoLongerMet(null)).toBe(false);
+    expect(patternNoLongerMet("x")).toBe(false);
+  });
+});
+
+describe("isUnscored (#2511)", () => {
+  test("an absent, null or empty score is unscored", () => {
+    expect(isUnscored(undefined)).toBe(true);
+    expect(isUnscored(null)).toBe(true);
+    expect(isUnscored({})).toBe(true);
+  });
+  test("any score with a field is scored, even an unreadable one", () => {
+    expect(isUnscored({ likelihood: 1, impact: 1 })).toBe(false);
+    expect(isUnscored({ loss_event_frequency: 1, loss_magnitude: 10 })).toBe(
+      false,
+    );
+    expect(isUnscored({ note: "high" })).toBe(false);
+    expect(isUnscored([])).toBe(false);
   });
 });

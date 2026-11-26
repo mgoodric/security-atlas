@@ -74,16 +74,20 @@ export type ControlsCountLabel = {
  * `visible` is a subset of `rows`) is clamped to `total` so the label
  * can never read "60 of 53".
  */
+//
+// Issue #1741: `noun` names what is counted — "controls" in the default
+// view, SCF anchors in the catalog view.
 export function controlsCountLabel(
   filtered: number,
   total: number,
+  noun: string = SCF_ANCHOR_NOUN,
 ): ControlsCountLabel {
   const safeTotal = Math.max(0, Math.floor(total));
   const safeFiltered = Math.min(safeTotal, Math.max(0, Math.floor(filtered)));
   const isFiltered = safeFiltered < safeTotal;
   const text = isFiltered
-    ? `${safeFiltered} of ${safeTotal} ${SCF_ANCHOR_NOUN}`
-    : `${safeTotal} ${SCF_ANCHOR_NOUN}`;
+    ? `${safeFiltered} of ${safeTotal} ${noun}`
+    : `${safeTotal} ${noun}`;
   return {
     filtered: safeFiltered,
     total: safeTotal,

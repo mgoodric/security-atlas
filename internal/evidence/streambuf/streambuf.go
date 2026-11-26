@@ -543,7 +543,7 @@ func (c *Consumer) handle(ctx context.Context, msg jetstream.Msg) {
 			slog.String("idempotency_key", hdr.Get(HeaderIdempotencyKey)),
 			slog.String("err", perr.Error()),
 		)
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(RedeliveryDelay(msg))
 		return
 	}
 

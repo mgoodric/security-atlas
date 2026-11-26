@@ -52,7 +52,7 @@ VALUES
     'monthly',
     'push',
     '{"actor":"demo-operator@example.invalid"}'::jsonb,
-    'CRY-05',
+    'CRY-07',
     'demo.encryption_state.v1',
     '1.0.0'
 ),
@@ -69,7 +69,7 @@ VALUES
     'monthly',
     'push',
     '{"actor":"demo-operator@example.invalid"}'::jsonb,
-    'CRY-05',
+    'CRY-07',
     'demo.encryption_state.v1',
     '1.0.0'
 ),
@@ -86,7 +86,7 @@ VALUES
     'monthly',
     'push',
     '{"actor":"demo-operator@example.invalid"}'::jsonb,
-    'CRY-05',
+    'CRY-07',
     'demo.encryption_state.v1',
     '1.0.0'
 )

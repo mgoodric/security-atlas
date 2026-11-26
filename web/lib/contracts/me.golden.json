@@ -5,24 +5,32 @@
     "synthetic_admin": {
       "display_name": "API key ad01",
       "email": "",
+      "has_tenant_role": true,
       "idp_subject": "",
       "is_admin": true,
+      "is_approver": true,
+      "is_tenant_admin": true,
       "owner_roles": null,
       "roles": [],
       "tenant_id": "22222222-2222-4222-8222-222222222222",
       "tenant_role": "admin",
+      "theme": null,
       "time_zone": null,
       "user_id": "key_admin"
     },
     "synthetic_non_admin": {
       "display_name": "API key vw02",
       "email": "",
+      "has_tenant_role": true,
       "idp_subject": "",
       "is_admin": false,
+      "is_approver": false,
+      "is_tenant_admin": false,
       "owner_roles": ["control_owner"],
       "roles": [],
       "tenant_id": "22222222-2222-4222-8222-222222222222",
       "tenant_role": "user",
+      "theme": null,
       "time_zone": null,
       "user_id": "key_viewer"
     }

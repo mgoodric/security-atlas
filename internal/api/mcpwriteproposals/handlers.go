@@ -9,11 +9,15 @@
 //	POST   /v1/mcp/write-proposals/{id}/reject  operator rejects
 //
 // AuthZ:
-//   - POST /v1/mcp/write-proposals — any authenticated bearer (the MCP
-//     server proxies the caller's bearer; gating happens at the MCP
-//     tool layer + the operator's own role).
-//   - confirm / reject — REQUIRE IsApprover or IsAdmin. Mirrors slice-021
-//     exception approval (AC-3 segregation gate).
+//   - POST /v1/mcp/write-proposals — admin or grc_engineer, as OPA admits
+//     (#3031). The MCP server proxies the caller's bearer, so the
+//     operator's own role decides.
+//   - confirm / reject — REQUIRE a tenant admin (authz.IsTenantAdmin, the
+//     role set OPA admits on these two routes, #2428; grc_engineer files
+//     but does not decide, #3031). Mirrors slice-021 exception approval
+//     (AC-3 segregation gate). The proposer may confirm its own proposal:
+//     the AI is the proposer, the bearer's holder the confirmer
+//     (docs/audit-log/3031-grc-engineer-mcp-proposals-decisions.md D3).
 //   - list / get — any authenticated bearer; RLS scopes to caller's tenant.
 //
 // Wire shapes mirror the store layer 1:1; payload_json equivalents
@@ -40,7 +44,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -203,8 +212,8 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -212,7 +221,17 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	confirmed, err := h.store.Confirm(ctx, id, cred.ID)
+	// The confirming person is handed to the applier, so a confirmed
+	// acceptance approval runs the approval rule against them (#2105). The
+	// principal is the actor the applier records, as REST records it
+	// (#2371).
+	confirmed, err := h.store.ConfirmAs(ctx, id, cred.ID, writeproposals.Confirmer{
+		Approver: approval.Approver{
+			UserID:       credstore.MinterUserID(cred),
+			CredentialID: cred.ID,
+		},
+		Principal: credstore.PrincipalOf(cred),
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -227,8 +246,8 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -258,6 +277,12 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, writeproposals.ErrPendingCapExceeded):
 		httpresp.WriteError(w, http.StatusTooManyRequests, "pending proposal cap exceeded; approve or reject existing proposals before filing more")
 	default:
+		// A create_risk score refusal (#2502) takes the status and code
+		// it takes on confirm, which are POST /v1/risks' statuses.
+		if status, code, ok := scoreErrStatus(err); ok {
+			httpresp.WriteJSON(w, status, transitionErrBody{Error: err.Error(), Code: code})
+			return
+		}
 		httperr.WriteInternal(w, r, "create proposal", err)
 	}
 }
@@ -270,9 +295,107 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusConflict, "proposal not in ai_proposed state")
 	case errors.Is(err, writeproposals.ErrUnknownTool):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, writeproposals.ErrModuleOff):
+		// #2175: the proposal stays pending until its module is back on.
+		httpresp.WriteJSON(w, http.StatusConflict, transitionErrBody{
+			Error: "The module this proposal writes into is switched off. It stays pending; switch the module on in Admin > Features to apply it.",
+			Code:  "module_switched_off",
+		})
+	case errors.Is(err, featureflag.ErrStoreUnavailable):
+		// #2575: the module switch could not be read. The proposal stays
+		// pending rather than apply into a module that may be off.
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, "module switch", err, "module_state_unavailable")
 	default:
+		if status, code, ok := applyErrStatus(err); ok {
+			if status >= http.StatusInternalServerError {
+				// CWE-209: a 5xx body never carries the wrapped error.
+				httpresp.WriteJSON(w, status, transitionErrBody{Error: "evidence ingest unavailable", Code: code})
+				return
+			}
+			httpresp.WriteJSON(w, status, transitionErrBody{Error: err.Error(), Code: code})
+			return
+		}
 		httperr.WriteInternal(w, r, "transition", err)
 	}
+}
+
+// transitionErrBody is the error shape for a confirm refused by the
+// applier. Code is stable; clients route on it, not on Error.
+type transitionErrBody struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// applyErrStatus maps an applier refusal on confirm to a status and a
+// stable code. The evidence appliers return ingest's sentinels (#1751), so
+// the codes match the REST push surface (internal/api/evidence/http.go);
+// an unknown kind is a 400 here because the proposal's input is at fault,
+// not a precondition the caller can fix by registering a schema first.
+// The risk appliers' treatment-validation refusal carries the code
+// POST /v1/risks uses (internal/api/risks/handlers.go, #1844). The
+// hierarchy-link appliers' refusals take the statuses
+// POST /v1/risks/{id}/children returns (#1748). The treatment applier's
+// transition refusals take the statuses the #2105 transition routes return.
+func applyErrStatus(err error) (int, string, bool) {
+	if status, code, ok := scoreErrStatus(err); ok {
+		return status, code, true
+	}
+	switch {
+	case risk.IsTreatmentValidation(err):
+		return http.StatusBadRequest, "treatment_validation_failed", true
+	case risk.IsTransitionInput(err):
+		return http.StatusBadRequest, "invalid_input", true
+	case errors.Is(err, risk.ErrTransitionState):
+		return http.StatusConflict, "transition_not_allowed", true
+	case risk.IsApprovalRefusal(err):
+		return http.StatusForbidden, "approval_refused", true
+	case errors.Is(err, risk.ErrAggregationCycle):
+		return http.StatusConflict, "hierarchy_cycle", true
+	case risk.IsChildLinkValidation(err):
+		return http.StatusBadRequest, "hierarchy_validation_failed", true
+	case errors.Is(err, risk.ErrNotFound), errors.Is(err, risk.ErrChildrenNotFound):
+		return http.StatusNotFound, "risk_not_found", true
+	case errors.Is(err, risk.ErrLinkNotFound):
+		return http.StatusNotFound, "link_not_found", true
+	case errors.Is(err, ingest.ErrObservedAtSkew):
+		return http.StatusBadRequest, "observed_at_skew", true
+	case errors.Is(err, ingest.ErrValidation):
+		return http.StatusBadRequest, "schema_validation_failed", true
+	case errors.Is(err, ingest.ErrUnknownKind):
+		return http.StatusBadRequest, "unknown_evidence_kind", true
+	case errors.Is(err, ingest.ErrMissingField):
+		return http.StatusBadRequest, "missing_field", true
+	case errors.Is(err, ingest.ErrOversized):
+		return http.StatusRequestEntityTooLarge, "oversized_payload", true
+	case errors.Is(err, ingest.ErrScopeViolation):
+		return http.StatusForbidden, "scope_violation", true
+	case errors.Is(err, ingest.ErrIdempotencyMismatch):
+		return http.StatusConflict, "idempotency_mismatch", true
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt;
+		// nothing was written, and a retry succeeds.
+		return http.StatusConflict, httpresp.CodeConcurrentFreeze, true
+	case errors.Is(err, writeproposals.ErrInvalidInput):
+		return http.StatusBadRequest, "invalid_input", true
+	case errors.Is(err, writeproposals.ErrIngestUnavailable):
+		return http.StatusServiceUnavailable, "ingest_unavailable", true
+	}
+	return 0, "", false
+}
+
+// scoreErrStatus maps a create_risk score refusal to the status
+// POST /v1/risks returns for it (internal/api/risks/handlers.go): 422 for a
+// score field that is not a number in range, 400 for an unknown
+// methodology or a score that fails its methodology's schema (#2502).
+func scoreErrStatus(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, risk.ErrScoreNotNumeric):
+		return http.StatusUnprocessableEntity, "score_validation_failed", true
+	case errors.Is(err, risk.ErrInvalidMethodology),
+		errors.Is(err, risk.ErrInherentScoreInvalid):
+		return http.StatusBadRequest, "score_validation_failed", true
+	}
+	return 0, "", false
 }
 
 func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore.Credential, bool) {

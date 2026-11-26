@@ -80,7 +80,6 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/iso27001-2022.yaml
 # if present) — see [OSCAL catalog import](../oscal-catalog-import.md).
 atlas-oscal import-catalog ./iso-27001-2022.oscal.json \
   --dsn "$DATABASE_URL_APP" \
-  --tenant-id <tenant uuid> \
   --source-label "ISO/IEC 27001:2022" \
   --imported-by "you@example.com"
 ```

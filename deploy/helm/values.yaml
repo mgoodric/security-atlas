@@ -61,6 +61,14 @@ atlas:
   # -- Set the session cookie Secure flag. Leave false for plain-HTTP dev;
   #    set true once the deployment is behind TLS (Ingress).
   secureCookies: false
+  # -- TRUSTED_PROXY_CIDRS: comma-separated CIDRs whose X-Forwarded-For the
+  #    server honours (right-to-left walk, slice 466). Set it to the range the
+  #    web pods connect from (usually the cluster pod CIDR, e.g.
+  #    "10.244.0.0/16") so the login BFF's forwarded client IP gives each
+  #    browser its own per-IP login bucket (#2040). Empty trusts no proxy and
+  #    every UI login shares the web pod's bucket. List only in-cluster
+  #    ranges; 0.0.0.0/0 lets any client forge its IP.
+  trustedProxyCIDRs: ""
   # -- Node scheduling controls.
   nodeSelector: {}
   tolerations: []
@@ -92,6 +100,13 @@ web:
   #    absolute URL only when the browser must reach atlas at a different
   #    origin than the frontend.
   publicApiBaseUrl: ""
+  # -- WEB_TRUSTED_PROXY_CIDRS: comma-separated CIDRs of the proxies in front
+  #    of web (the Ingress controller pods, usually the cluster pod CIDR). The
+  #    web container walks X-Forwarded-For through these to find the
+  #    browser's IP and replaces the header with only that (#2040). Empty:
+  #    web takes its direct peer as the client, which behind an Ingress is
+  #    the controller. A malformed value stops web at boot.
+  trustedProxyCIDRs: ""
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -188,6 +203,19 @@ artifacts:
   # -- External S3 endpoint URL. Required when minio.enabled is false;
   #    ignored when minio.enabled is true.
   s3Endpoint: ""
+  # -- Endpoint baked into presigned download URLs. Browsers follow those
+  #    links, so it must be reachable from them: with the bundled MinIO the
+  #    server-side endpoint is the in-cluster Service DNS
+  #    (http://<release>-minio:9000), which a browser cannot resolve. Set
+  #    this to the MinIO address users reach (an Ingress or LoadBalancer).
+  #    Empty falls back to the server-side endpoint, which suits external
+  #    S3 where one endpoint serves both.
+  s3PublicEndpoint: ""
+  # -- Path-style addressing (bucket in the path, not the host). Empty lets
+  #    the server decide: on when an endpoint is set, which is always the
+  #    case in this chart, so MinIO works out of the box. Set "false" for
+  #    AWS S3 virtual-hosted addressing, "true" to force path-style.
+  forcePathStyle: ""
   # -- AWS region label sent to the S3 client.
   region: us-east-1
 
@@ -205,6 +233,20 @@ oidc:
   # -- OIDC redirect URL (the atlas server's callback). Typically
   #    https://<your-host>/auth/callback.
   redirectUrl: ""
+  # The key that seals the OIDC client secret an admin saves on the SSO
+  # page (ATLAS_OIDC_SECRET_KEY, #2034): base64 of 32 random bytes,
+  # `openssl rand -base64 32`, the same on every replica. Unset, the SSO
+  # page cannot save a client secret and sign-in through a saved config is
+  # refused; local login is unaffected. A malformed key stops the server at
+  # boot. Changing it means re-entering the client secret on the SSO page.
+  secretKey:
+    # -- Name of a pre-created Secret holding the key (PRODUCTION). It is
+    #    mounted read-only and passed as ATLAS_OIDC_SECRET_KEY_FILE, so the
+    #    key never sits in an environment variable. Takes precedence over
+    #    secrets.oidcSecretKey.
+    existingSecret: ""
+    # -- The key inside existingSecret that holds the base64 value.
+    secretKey: oidc-secret-key
 
 # ---------------------------------------------------------------------------
 # bootstrap — first-boot seed configuration consumed by the migration Job.
@@ -257,6 +299,9 @@ secrets:
   defaultUserPassword: changeme
   # -- OIDC client secret. Only used when oidc.issuer is set.
   oidcClientSecret: changeme
+  # -- Inline ATLAS_OIDC_SECRET_KEY (dev convenience). Empty renders
+  #    nothing. Production: use oidc.secretKey.existingSecret instead.
+  oidcSecretKey: ""
   # -- S3 access key ID. Used only when minio.enabled is false (external S3).
   #    When minio.enabled is true the MinIO root credentials are used instead.
   s3AccessKeyId: changeme

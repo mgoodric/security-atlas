@@ -1,6 +1,71 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+// TestRunResetBootstrap_SendsOperatorTokenAsBearer pins #1851/#1885: a JWT
+// (as --token) resets over HTTP (#2121); the reset POST is authorized by the
+// operator's --token, and the body carries
+// --tenant and --force (no caller-minted token). The response's credential
+// is printed.
+func TestRunResetBootstrap_SendsOperatorTokenAsBearer(t *testing.T) {
+	var gotAuth, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"status_reset":true,"file_written":true,"credential_id":"key_1","tenant_id":"t-1","bearer_token":"minted-admin"}`))
+	}))
+	defer srv.Close()
+
+	prevToken := common.token
+	common.token = "eyJoperator.jwt"
+	defer func() { common.token = prevToken }()
+	var out bytes.Buffer
+	prevStdout := cmdCredentialsStdout
+	cmdCredentialsStdout = func() io.Writer { return &out }
+	defer func() { cmdCredentialsStdout = prevStdout }()
+
+	if err := runResetBootstrap("t-1", true, srv.URL, 0); err != nil {
+		t.Fatalf("runResetBootstrap: %v", err)
+	}
+	if gotAuth != "Bearer eyJoperator.jwt" {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer eyJoperator.jwt")
+	}
+	if gotPath != "/v1/admin/install/reset-bootstrap" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["tenant_id"] != "t-1" || gotBody["force"] != true {
+		t.Fatalf("body = %v, want tenant_id t-1 and force true", gotBody)
+	}
+	if _, ok := gotBody["token"]; ok {
+		t.Fatalf("body carries a caller token %v; the server mints it (#1885)", gotBody["token"])
+	}
+	if !strings.Contains(out.String(), "minted-admin") {
+		t.Fatalf("stdout does not print the minted bearer: %s", out.String())
+	}
+}
+
+// A 409 from the foot-gun gate surfaces as the --force hint.
+func TestRunResetBootstrap_ConflictSuggestsForce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer srv.Close()
+	err := runResetBootstrapHTTP("t-1", false, srv.URL, 0)
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want the --force hint", err)
+	}
+}
 
 // TestDeriveHTTPEndpoint covers the small heuristic that converts the
 // gRPC --endpoint into the conventional HTTP endpoint for the
@@ -24,6 +89,44 @@ func TestDeriveHTTPEndpoint(t *testing.T) {
 		got := deriveHTTPEndpoint(c.in)
 		if got != c.want {
 			t.Errorf("deriveHTTPEndpoint(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// #2100: --ttl accepts a whole number of days, which the help text and
+// cli.md have always shown (30d) but time.ParseDuration refuses.
+func TestParseDurationDays(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{in: "0", want: 0},
+		{in: "", want: 0},
+		{in: "24h", want: 24 * time.Hour},
+		{in: "90m", want: 90 * time.Minute},
+		{in: "30d", want: 30 * 24 * time.Hour},
+		{in: "1d", want: 24 * time.Hour},
+		{in: "0d", want: 0}, // #2165: zero days is no expiry, like "0"
+		{in: "0h", want: 0},
+		{in: "d", wantErr: true},
+		{in: "1.5d", wantErr: true},
+		{in: "-1d", wantErr: true},
+		{in: "1h30d", wantErr: true},
+		{in: "999999999999d", wantErr: true},
+		{in: "30x", wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := parseDuration(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseDuration(%q) = %v, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("parseDuration(%q) = %v, %v; want %v", tc.in, got, err, tc.want)
 		}
 	}
 }

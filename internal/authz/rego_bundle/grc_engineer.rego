@@ -9,10 +9,13 @@
 
 package authz
 
-# Read access to all tenant-scoped resources.
+# Read access to all tenant-scoped resources, except the tenant-admin-only
+# surfaces (#2358, admin.rego).
 allow if {
     has_role("grc_engineer")
     input.action == "read"
+    not super_admin_only_resource
+    not tenant_admin_only_resource
 }
 
 # Write + state transitions on the GRC operator surface.
@@ -20,6 +23,21 @@ allow if {
     has_role("grc_engineer")
     grc_writable_resources[input.resource.type]
     grc_actions[input.action]
+    not risk_hard_delete
+}
+
+# #2107: hard-deleting a risk (DELETE /v1/risks/{id}) is admin-only.
+# grc_engineer closes a risk instead (PATCH /v1/risks/{id}/close). Deletes
+# under a risk (/children/{id}, /themes/{theme}) and of risk categories
+# have more path segments and stay grc_engineer's.
+risk_hard_delete if {
+    input.request.method == "DELETE"
+    parts := split(input.request.path, "/")
+    count(parts) == 4
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "risks"
+    parts[3] != ""
 }
 
 grc_writable_resources := {
@@ -57,6 +75,10 @@ grc_writable_resources := {
     # task tracking only; no route provisions or deprovisions access
     # (the OE-630 boundary).
     "personnel-security",
+    # #1797: tenant overlay edges (requirement -> SCF anchor) under
+    # /v1/mapping-overlays. Tenant-owned mappings, RLS-scoped; the catalog
+    # edges stay read-only.
+    "mapping-overlays",
 }
 
 grc_actions := {
@@ -81,4 +103,60 @@ allow if {
     input.action == "write"
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
+}
+
+# #2113: grc_engineer revokes an active exception (PATCH
+# /v1/exceptions/{id}/revoke). The path's terminal segment promotes the
+# action to "revoke", which grc_actions does not hold because revoke on
+# other resources (API keys, sessions, grants) stays admin's. This admit
+# is bound to exceptions only. The handler gate is IsTenantApprover, which
+# admits the live grc_engineer role (#2428), so it adds no refusal for a
+# grc_engineer; it refuses roles OPA would not admit here anyway.
+allow if {
+    has_role("grc_engineer")
+    input.action == "revoke"
+    input.resource.type == "exceptions"
+}
+
+# #2105: grc_engineer revokes an approved risk acceptance (PATCH
+# /v1/risks/{id}/acceptance/revoke), as it approves one. Bound to risks
+# like the exceptions admit above; the handler gate is the same
+# IsTenantApprover.
+allow if {
+    has_role("grc_engineer")
+    input.action == "revoke"
+    input.resource.type == "risks"
+}
+
+# #3031 (decided on #3022): grc_engineer files an MCP write proposal
+# (POST /v1/mcp/write-proposals). Confirm and reject
+# (/v1/mcp/write-proposals/{id}/confirm|reject) derive the same "write"
+# action on the same "mcp" resource, so the admit is bound to the
+# collection path, as the metrics target admit below is. Deciding a
+# proposal stays admin's, here and in the handler gate (IsTenantAdmin).
+allow if {
+    has_role("grc_engineer")
+    input.action == "write"
+    input.resource.type == "mcp"
+    input.request.method == "POST"
+    input.request.path == "/v1/mcp/write-proposals"
+}
+
+# #2572: grc_engineer sets a metric's target (PUT /v1/metrics/{id}/target),
+# as it sets a framework posture target (#2136); the handler gate is the
+# same IsTenantApprover. Bound to that one path: "metrics" is not in
+# grc_writable_resources, so manual input (POST /v1/metrics/{id}/inputs)
+# stays admin's.
+allow if {
+    has_role("grc_engineer")
+    input.action == "write"
+    input.resource.type == "metrics"
+    input.request.method == "PUT"
+    parts := split(input.request.path, "/")
+    count(parts) == 5
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "metrics"
+    parts[3] != ""
+    parts[4] == "target"
 }

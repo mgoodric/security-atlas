@@ -89,7 +89,7 @@ func TestBuildNetpolRecord_Shape(t *testing.T) {
 		},
 		Result: netpol.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildNetpolRecord(c, "cluster-1", "prod", "scf:NET-04")
+	rec, err := buildNetpolRecord(c, "cluster-1", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestBuildNetpolRecord_OmitsEmptyPolicies(t *testing.T) {
 		Namespace: "dev", PolicyCount: 0, Result: netpol.ResultFail,
 		ObservedAt: time.Now().UTC(),
 	}
-	rec, err := buildNetpolRecord(c, "c", "prod", "scf:NET-04")
+	rec, err := buildNetpolRecord(c, "c", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestBuildPSSRecord_Shape(t *testing.T) {
 		AuditLevel: pss.LevelBaseline, WarnLevel: pss.LevelBaseline,
 		Result: pss.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildPSSRecord(a, "cluster-1", "prod", "scf:CFG-02")
+	rec, err := buildPSSRecord(a, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildPSSRecord: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestBuildPSSRecord_OmitsUnsetModesAndVersions(t *testing.T) {
 		Namespace: "dev", Configured: false, Result: pss.ResultFail,
 		ObservedAt: time.Now().UTC(),
 	}
-	rec, err := buildPSSRecord(a, "c", "prod", "scf:CFG-02")
+	rec, err := buildPSSRecord(a, "c", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildPSSRecord: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestBuildSecretMetaRecord_Shape(t *testing.T) {
 		AgeDays: 30, CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
 		KeyNames: []string{"tls.crt", "tls.key"}, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildSecretMetaRecord(s, "cluster-1", "prod", "scf:CRY-01")
+	rec, err := buildSecretMetaRecord(s, "cluster-1", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestBuildSecretMetaRecord_OmitsEmptyOptionals(t *testing.T) {
 		AgeDays: 0, ObservedAt: time.Now().UTC(),
 		// no CreatedAt, no KeyNames
 	}
-	rec, err := buildSecretMetaRecord(s, "c", "prod", "scf:CRY-01")
+	rec, err := buildSecretMetaRecord(s, "c", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestBuildAdmissionWebhookRecord_Shape(t *testing.T) {
 		InterceptedOperations: []string{"CREATE", "UPDATE"},
 		ObservedAt:            time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildAdmissionWebhookRecord(w, "cluster-1", "prod", "scf:CFG-02")
+	rec, err := buildAdmissionWebhookRecord(w, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAdmissionWebhookRecord: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestBuildAdmissionWebhookRecord_OmitsEmptyOptionals(t *testing.T) {
 		Kind: admission.KindMutating, ConfigName: "mcfg", WebhookName: "m.example.com",
 		FailurePolicy: admission.FailurePolicyUnset, ObservedAt: time.Now().UTC(),
 	}
-	rec, err := buildAdmissionWebhookRecord(w, "c", "prod", "scf:CFG-02")
+	rec, err := buildAdmissionWebhookRecord(w, "c", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAdmissionWebhookRecord: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestBuildAdmissionPolicyRecord_Shape(t *testing.T) {
 		Scope: admission.ScopeNamespaced, PolicyKind: "Policy", EnforcementAction: "enforce",
 		Enforcing: true, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildAdmissionPolicyRecord(p, "cluster-1", "prod", "scf:CFG-02")
+	rec, err := buildAdmissionPolicyRecord(p, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAdmissionPolicyRecord: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestBuildAdmissionPolicyRecord_ClusterScopeOmitsNamespace(t *testing.T) {
 		Engine: admission.EngineGatekeeper, Name: "k8srequiredlabels", Scope: admission.ScopeCluster,
 		PolicyKind: "K8sRequiredLabels", ObservedAt: time.Now().UTC(),
 	}
-	rec, err := buildAdmissionPolicyRecord(p, "c", "prod", "scf:CFG-02")
+	rec, err := buildAdmissionPolicyRecord(p, "c", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAdmissionPolicyRecord: %v", err)
 	}
@@ -704,7 +704,7 @@ func TestBuildRBACRecord_Shape(t *testing.T) {
 		Rules:      []rbac.Rule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}},
 		ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildRBACRecord(b, "cluster-1", "prod", "scf:IAC-21")
+	rec, err := buildRBACRecord(b, "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
@@ -736,7 +736,7 @@ func TestBuildRBACRecord_OmitsEmptyOptionals(t *testing.T) {
 		BindingName: "b", BindingScope: rbac.ScopeCluster, RoleKind: rbac.RoleKindClusterRole,
 		RoleName: "r", ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildRBACRecord(b, "c", "prod", "scf:IAC-21")
+	rec, _ := buildRBACRecord(b, "c", "prod", "scf:IAC-10")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"namespace", "subjects", "rules"} {
 		if _, ok := pl[k]; ok {
@@ -752,7 +752,7 @@ func TestBuildWorkloadRecord_Shape(t *testing.T) {
 		AllowPrivilegeEscalation: false, ContainerCount: 2,
 		Result: workload.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildWorkloadRecord(w, "cluster-1", "prod", "scf:CFG-02")
+	rec, err := buildWorkloadRecord(w, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildWorkloadRecord: %v", err)
 	}

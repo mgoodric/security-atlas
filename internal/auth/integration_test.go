@@ -35,6 +35,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
 // Fixed 32-byte test key. Generated via crypto/rand on machine outside the
 // repo and pasted in here as a constant — never touches real systems.
 const testHashKey = "atlas-slice-034-test-hash-key!!1"
@@ -101,7 +104,7 @@ func TestAPIKeys_CrossTenantRLS(t *testing.T) {
 	store := apikeystore.NewStore(appPool, adminPool, testHasher, 0)
 	store.SetPrefix(bearer.PrefixTest)
 
-	_, _, err := store.Issue(withTenant(t, tenantA), tenantA.String(), apikeystore.IssueInput{})
+	_, _, err := store.Issue(withTenant(t, tenantA), tenantA.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue(A): %v", err)
 	}
@@ -135,7 +138,7 @@ func TestAPIKeys_AuthenticateAndRevoke(t *testing.T) {
 	store := apikeystore.NewStore(appPool, adminPool, testHasher, 0)
 	store.SetPrefix(bearer.PrefixTest)
 
-	cred, plain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{})
+	cred, plain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -152,7 +155,7 @@ func TestAPIKeys_AuthenticateAndRevoke(t *testing.T) {
 	}
 
 	credUUID, _ := parseCredID(cred.ID)
-	if err := store.Revoke(withTenant(t, tenant), tenant.String(), credUUID); err != nil {
+	if err := store.Revoke(withTenant(t, tenant), tenant.String(), credUUID, apikeystore.Actor{}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if _, err := store.Authenticate(context.Background(), plain); !errors.Is(err, apikeystore.ErrUnknownKey) {
@@ -193,12 +196,12 @@ func TestAPIKeys_RotationGraceWindow(t *testing.T) {
 		})
 	store.SetPrefix(bearer.PrefixTest)
 
-	cred, predPlain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{})
+	cred, predPlain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 	predUUID, _ := parseCredID(cred.ID)
-	successor, succPlain, predExpiresAt, err := store.Rotate(withTenant(t, tenant), tenant.String(), predUUID)
+	successor, succPlain, predExpiresAt, err := store.Rotate(withTenant(t, tenant), tenant.String(), predUUID, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -328,7 +331,7 @@ func TestSessions_CreateReadRevoke(t *testing.T) {
 
 func TestOIDC_CallbackStateMismatchRejected(t *testing.T) {
 	// We don't need a real IdP — the state check happens before any IdP call.
-	auth := oidc.New(staticResolver{})
+	auth := oidc.New(staticResolver{}, testStateKey)
 	r := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=anything&state=DIFFERENT", nil)
 	// Cookies say one state, query param says another → CSRF guard fires.
 	r.AddCookie(&http.Cookie{Name: oidc.StateCookie, Value: "FIXED_STATE"})
@@ -343,7 +346,7 @@ func TestOIDC_CallbackStateMismatchRejected(t *testing.T) {
 	// slice-365 ErrStateMismatch test in oidc_nonce_integration_test.go.)
 	r.AddCookie(&http.Cookie{Name: oidc.NonceCookie, Value: "fixed-nonce"})
 
-	_, err := auth.HandleCallback(context.Background(), r, uuid.New())
+	_, err := auth.HandleCallback(context.Background(), r, uuid.New(), false)
 	if !errors.Is(err, oidc.ErrStateMismatch) {
 		t.Fatalf("expected ErrStateMismatch, got %v", err)
 	}
@@ -352,10 +355,10 @@ func TestOIDC_CallbackStateMismatchRejected(t *testing.T) {
 // === ISC-22 (with cookie missing): callback rejects when state cookie absent ===
 
 func TestOIDC_CallbackMissingCookieRejected(t *testing.T) {
-	auth := oidc.New(staticResolver{})
+	auth := oidc.New(staticResolver{}, testStateKey)
 	r := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=x&state=y", nil)
 	// No cookies → CSRF guard fires.
-	_, err := auth.HandleCallback(context.Background(), r, uuid.New())
+	_, err := auth.HandleCallback(context.Background(), r, uuid.New(), false)
 	if !errors.Is(err, oidc.ErrStateMismatch) {
 		t.Fatalf("expected ErrStateMismatch (no cookies), got %v", err)
 	}

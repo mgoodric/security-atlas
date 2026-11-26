@@ -1,0 +1,1081 @@
+# github.repo_protection.v2 records, shaped as the GitHub connector emits
+# them (connectors/github/cmd/atlas-github/cmd_run.go
+# buildRepoProtectionRecord, #2925, 2.1.0 fields #2827). repo_id,
+# repo_full_name and default_branch are always present, and topics plus
+# deploys_to_production whenever the listing reports topics, even for an
+# unread repo. A protection field the connector read is present; one it
+# could not read is omitted, and that record is pushed inconclusive with a
+# reason. A repo with no classic protection and no
+# ruleset is pushed as fail with every field read and off. `result` is the
+# connector's own verdict (required_reviews >= 1), which the query ignores.
+cases:
+  - name: every-repo-reviewed-and-admin-enforced-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: acme/infra
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 2
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic_and_rulesets
+
+  - name: admins-not-enforced-fails
+    description: the connector passes this repo; the review does not bind admins
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: acme/infra
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+          protection_source: classic
+
+  - name: admin-enforcement-unread-is-inconclusive
+    description: a reviewing ruleset withholds its bypass actors, so enforce_admins is omitted
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          protection_source: rulesets
+
+  - name: tie-admins-off-fails-closed
+    description: at one instant, admin enforcement on and off disagree; off decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+          protection_source: classic
+
+  - name: no-approving-review-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: acme/infra
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: no-protection-or-ruleset-fails
+    description: nothing protects the branch; every field is read and off
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+          protection_source: none
+
+  - name: ruleset-only-protection-counts
+    description: classic protection 404s; an org ruleset requires the review
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 2
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: rulesets
+
+  - name: unread-repo-is-inconclusive
+    description: a failed protection fetch omits the fields instead of reporting them off
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: acme/infra
+          default_branch: main
+          topics: [production]
+          deploys_to_production: true
+          reason: "branch protection: github: HTTP 502"
+
+  - name: observed-failure-outranks-unread
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: acme/infra
+          default_branch: main
+          topics: [production]
+          deploys_to_production: true
+          reason: "branch protection: github: HTTP 502"
+
+  - name: connector-verdict-is-ignored
+    description: the connector says pass; the payload requires no review
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: non-numeric-required-reviews-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: "1"
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: missing-repo-id-is-left-out
+    description: a record with no repo_id names no repository and is left out, so nothing is checked
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: non-numeric-repo-id-is-left-out
+    description: a record whose repo_id is not a number is left out, so nothing is checked
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: "1296269"
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: rename-keeps-one-repo
+    description: the repo was renamed between runs; its latest record, under the new name, decides
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/old-name
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/new-name
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: latest-record-per-repo-decides-on
+    description: review was required after an earlier in-window record had none
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: latest-record-per-repo-decides-off
+    description: review was dropped after an earlier in-window record required it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: latest-unread-record-decides
+    description: a later run could not read the repo, so its earlier pass no longer stands
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          topics: [production]
+          deploys_to_production: true
+          reason: "branch protection: github: HTTP 502"
+
+  - name: tie-at-one-instant-fails-closed
+    description: two records for one repo at the same observed_at disagree; the failing one decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: fail
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+
+  - name: tie-unread-and-pass-is-inconclusive
+    description: at one instant, an unread record outranks a passing one
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          required_status_checks: [ci/build]
+          allow_force_pushes: false
+          topics: [production]
+          deploys_to_production: true
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: classic
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: acme/api
+          default_branch: main
+          topics: [production]
+          deploys_to_production: true
+          reason: "branch protection: github: HTTP 502"
+
+  - name: v1-record-is-not-read
+    description: the query declares github.repo_protection.v2, so a v1 record is filtered out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+
+  - name: production-repo-without-status-check-fails
+    description: the production repo requires no status check
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: "acme/web"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: production-repo-allowing-force-pushes-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: "acme/web"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: true
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: non-production-repo-skips-production-conditions
+    description: a repo not deploying to production needs only the review enforced on admins
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: "acme/tools"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: true
+          protection_source: "classic"
+          topics: ["internal"]
+          deploys_to_production: false
+
+  - name: non-production-repo-still-needs-review
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: "acme/tools"
+          default_branch: "main"
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: true
+          protection_source: "classic"
+          topics: []
+          deploys_to_production: false
+
+  - name: production-status-checks-unread-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: production-force-pushes-unread-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: deploys-unread-meeting-production-conditions-passes
+    description: the listing gave no topics, but the repo meets the production conditions anyway
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+
+  - name: deploys-unread-missing-production-conditions-is-inconclusive
+    description: the listing gave no topics, so the repo may deploy to production
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: true
+          protection_source: "classic"
+
+  - name: v200-record-is-inconclusive
+    description: a 2.0.0 record (connector older than #2827) carries no production fields
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          protection_source: "classic"
+
+  - name: observed-failure-outranks-unread-field
+    description: one record omits required_reviews and has enforce_admins off; the known failure decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: non-boolean-deploys-counts-as-production
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: false
+          protection_source: "classic"
+          deploys_to_production: "yes"
+
+  - name: non-array-status-checks-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: "ci/build"
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: non-boolean-force-pushes-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: "false"
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: keyless-record-is-left-out
+    description: a failing record with no repo_id does not decide the control
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: "acme/ghost"
+          default_branch: "main"
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+          required_status_checks: []
+          allow_force_pushes: true
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+
+  - name: tie-production-and-not-fails-closed
+    description: at one instant the repo is and is not a production repo; the production verdict decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: []
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: []
+          deploys_to_production: false
+
+  - name: unread-repo-keeps-its-topics
+    description: an unread production repo is inconclusive, not out of scope
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296269
+          repo_full_name: "acme/api"
+          default_branch: "main"
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+          required_status_checks: ["ci/build"]
+          allow_force_pushes: false
+          protection_source: "classic"
+          topics: ["production"]
+          deploys_to_production: true
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_id: 1296270
+          repo_full_name: "acme/infra"
+          default_branch: "main"
+          topics: ["production"]
+          deploys_to_production: true
+          reason: "branch protection: github: HTTP 502"

@@ -116,7 +116,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rbac.Pull: %v", err)
 	}
-	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workload.Inspect: %v", err)
 	}
-	wlRec, err := buildWorkloadRecord(workloads[0], "cluster-1", "prod", "scf:CFG-02")
+	wlRec, err := buildWorkloadRecord(workloads[0], "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildWorkloadRecord: %v", err)
 	}
@@ -167,6 +167,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	npAPI := &fakeNetpolForIntegration{namespaces: []netpol.RawNamespace{
 		{Name: "prod", Policies: []netpol.RawPolicy{
 			{Name: "default-deny-ingress", PolicyTypes: []string{netpol.PolicyTypeIngress}, SelectsAllPods: true},
+			{Name: "default-deny-egress", PolicyTypes: []string{netpol.PolicyTypeEgress}, SelectsAllPods: true},
 		}},
 		{Name: "dev"}, // unprotected — no policies
 	}}
@@ -183,10 +184,10 @@ func TestRun_PushesAllKinds(t *testing.T) {
 			prodCov = &coverage[i]
 		}
 	}
-	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress {
-		t.Fatalf("prod namespace should PASS with default-deny ingress; got %+v", prodCov)
+	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress || !prodCov.DefaultDenyEgress {
+		t.Fatalf("prod namespace should PASS with default-deny ingress and egress; got %+v", prodCov)
 	}
-	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-04")
+	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if prodAdm == nil || prodAdm.Result != pss.ResultPass || !prodAdm.Configured {
 		t.Fatalf("prod namespace should PASS with enforce=restricted; got %+v", prodAdm)
 	}
-	pssRec, err := buildPSSRecord(*prodAdm, "cluster-1", "prod", "scf:CFG-02")
+	pssRec, err := buildPSSRecord(*prodAdm, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildPSSRecord: %v", err)
 	}
@@ -258,7 +259,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if len(inventory) != 1 || inventory[0].AgeDays != 30 {
 		t.Fatalf("secret inventory wrong: %+v", inventory)
 	}
-	secRec, err := buildSecretMetaRecord(inventory[0], "cluster-1", "prod", "scf:CRY-01")
+	secRec, err := buildSecretMetaRecord(inventory[0], "cluster-1", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}
@@ -293,8 +294,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 			RunAsNonRoot: true, ReadOnlyRootFilesystem: true, ContainerCount: 1},
 	}}
 	wls, _ := workload.Inspect(context.Background(), wlAPI, fixed)
-	r1, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
-	r2, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
+	r1, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
+	r2, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -320,13 +321,13 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 			Rules:    []rbac.Rule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}},
 	}}
 	bindings, _ := rbac.Pull(context.Background(), rbacAPI, fixed)
-	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 
 	wlAPI := &fakeWorkloadForIntegration{workloads: []workload.RawWorkload{
 		{Kind: workload.KindDeployment, Name: "api", Namespace: "prod", RunAsNonRoot: true, ReadOnlyRootFilesystem: true, ContainerCount: 1},
 	}}
 	wls, _ := workload.Inspect(context.Background(), wlAPI, fixed)
-	wlRec, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
+	wlRec, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
 
 	// NetworkPolicy coverage: the faked policy embeds a podSelector label + an
 	// ingress peer that must NOT escape into the record.
@@ -336,7 +337,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		}},
 	}}
 	covs, _ := netpol.Assess(context.Background(), npAPI, fixed)
-	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-04")
+	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-03")
 
 	// PSS admission: the faked namespace carries unrelated labels + annotations
 	// (via the client boundary) — but the RawNamespace the assessment consumes
@@ -345,7 +346,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		{Name: "prod", EnforceLevel: pss.LevelRestricted, EnforceVersion: "v1.29", AuditLevel: pss.LevelBaseline},
 	}}
 	adms, _ := pss.Assess(context.Background(), pssAPI, fixed)
-	pssRec, _ := buildPSSRecord(adms[0], "cluster-1", "prod", "scf:CFG-02")
+	pssRec, _ := buildPSSRecord(adms[0], "cluster-1", "prod", "scf:CFG-04")
 
 	// Allow-list of permitted top-level payload keys per kind. Any key NOT in
 	// the allow-list is a leak and fails the test (config / authz metadata only).
@@ -404,7 +405,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 			CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC), KeyNames: []string{"tls.crt", "tls.key", "token"}},
 	}}
 	inv, _ := secretmeta.Collect(context.Background(), secAPI, fixed)
-	secRec, _ := buildSecretMetaRecord(inv[0], "cluster-1", "prod", "scf:CRY-01")
+	secRec, _ := buildSecretMetaRecord(inv[0], "cluster-1", "prod", "scf:CRY-02")
 	secretAllowed := map[string]bool{
 		"namespace": true, "secret_name": true, "secret_type": true,
 		"age_days": true, "key_count": true, "created_at": true, "key_names": true,

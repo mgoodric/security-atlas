@@ -108,6 +108,17 @@ inputs:
       `keystore-path` under it) is created with `mkdir -p` before boot.
     required: false
     default: /tmp/atlas-ci
+  generate-oidc-secret-key:
+    description: >-
+      'true' gives the `atlas serve` process a fresh random
+      `ATLAS_OIDC_SECRET_KEY` (`openssl rand -base64 32`), the key that
+      seals the client secret saved on the SSO page (#2034). It lives
+      only in that process's env and seals secrets in the disposable CI
+      database only. The default 'false' leaves the key unset, so
+      `PATCH /v1/admin/sso` refuses any client secret with 503; the
+      Playwright jobs pass 'true' so the SSO save flow can run (#2773).
+    required: false
+    default: "false"
   atlas-health-url:
     description: >-
       URL the post-boot readiness loop polls with `curl -sf`, up to 30
@@ -188,8 +199,12 @@ runs:
       if: inputs.start-services == 'true'
       shell: bash
       run: |
-        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-          -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+        # The password goes in on stdin and psql reads it with \getenv,
+        # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv atlas_app_password ATLAS_APP_PASSWORD
+        ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+        SQL
         echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
 
     - name: Apply forward migrations
@@ -228,6 +243,7 @@ runs:
         ATLAS_TEST_MODE: ${{ inputs.atlas-test-mode }}
         ATLAS_ISSUER_URL: ${{ inputs.atlas-issuer-url }}
         ATLAS_HEALTH_URL: ${{ inputs.atlas-health-url }}
+        GENERATE_OIDC_SECRET_KEY: ${{ inputs.generate-oidc-secret-key }}
       run: |
         # Reproduces the inlined `mkdir -p /tmp/atlas-ci/keys`: with the
         # default inputs these two paths ARE /tmp/atlas-ci and
@@ -235,6 +251,10 @@ runs:
         # both keeps it correct if a call-site ever points the keystore
         # outside the data dir.
         mkdir -p "$ATLAS_DATA_DIR" "$ATLAS_KEYSTORE_PATH"
+        if [ "$GENERATE_OIDC_SECRET_KEY" = "true" ]; then
+          ATLAS_OIDC_SECRET_KEY="$(openssl rand -base64 32)"
+          export ATLAS_OIDC_SECRET_KEY
+        fi
         atlas serve > /tmp/atlas.log 2>&1 &
         echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
         for i in $(seq 1 30); do

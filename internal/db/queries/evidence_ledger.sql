@@ -51,13 +51,22 @@ WHERE id = $1
   AND tenant_id = $2;
 
 -- name: ListEvidenceRecordsByControl :many
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
+-- The same leg is on the three by-control readers below.
 -- Replay-friendly read for evaluation (slice 012+). Append-only ordering
 -- on observed_at lets the evaluator stream historical state without
 -- worrying about UPDATEs since slice 002.
 SELECT *
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
 
@@ -71,8 +80,14 @@ SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 -- mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3);
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))));
 
 -- name: ListEvidenceRecordsByControlBeforeHorizon :many
 -- Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
@@ -86,13 +101,28 @@ WHERE tenant_id = $1
 -- never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
 -- NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
 -- (frozen_at NULL) falls through to live state, but the slice-749 surface only
--- summarizes FROZEN periods, so in practice the horizon is always set.
+-- summarizes FROZEN periods, so in practice the horizon is always set. The
+-- horizon bounds ingested_at too (#1699): a record written after the freeze
+-- with a backdated observed_at is not in the frozen population. amended_ids
+-- adds the records a later freeze revision put in the population (#1742);
+-- pass an empty array for the original freeze.
 SELECT *
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
 
@@ -104,10 +134,21 @@ LIMIT $4 OFFSET $5;
 -- count and the bounded list agree on the frozen population (P0-749-1).
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz);
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)));
 
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
@@ -132,12 +173,17 @@ LIMIT sqlc.arg('page_size');
 --
 -- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 -- the DB layer; explicit-is-clearer per AC-5).
+--
+-- #1742: import_batch_id ties a historical-import attempt to its batch;
+-- NULL on every other ingestion path.
 INSERT INTO evidence_audit_log (
     id, tenant_id, credential_id,
     decision, reason_code,
-    idempotency_key, evidence_kind, record_id, subject_module
+    idempotency_key, evidence_kind, record_id, subject_module,
+    import_batch_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'core'
+    $1, $2, $3, $4, $5, $6, $7, $8, 'core',
+    sqlc.narg('import_batch_id')
 )
 RETURNING *;
 
@@ -158,3 +204,28 @@ WHERE tenant_id = $1
   AND record_id = $3
 ORDER BY received_at DESC
 LIMIT 1;
+
+-- name: ExistsAttestationAfter :one
+-- #2520: is there an attestation for the control later than the given one,
+-- under the evaluation engine's latest-attestation order (internal/eval
+-- latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+-- then id compared bytewise? The attest handler asks this on a dedupe hit
+-- for a server-derived key, so a repeat of an older attestation is recorded
+-- when a newer one would otherwise stand. Control resolution mirrors
+-- ListEvidenceForControlAsOf.
+SELECT EXISTS (
+    SELECT 1
+    FROM evidence_records
+    WHERE tenant_id = sqlc.arg(tenant_id)
+      AND (control_id = sqlc.arg(control_id) OR control_ref = sqlc.arg(control_ref)::text)
+      AND evidence_kind = sqlc.arg(evidence_kind)::text
+      AND id <> sqlc.arg(id)
+      AND (
+        LEAST(observed_at, ingested_at) > sqlc.arg(attested_at)::timestamptz
+        OR (LEAST(observed_at, ingested_at) = sqlc.arg(attested_at)::timestamptz
+            AND ingested_at > sqlc.arg(ingested_at)::timestamptz)
+        OR (LEAST(observed_at, ingested_at) = sqlc.arg(attested_at)::timestamptz
+            AND ingested_at = sqlc.arg(ingested_at)::timestamptz
+            AND id::text COLLATE "C" > sqlc.arg(id_text)::text)
+      )
+) AS newer;

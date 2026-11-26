@@ -10,7 +10,7 @@ Once connected, the assistant can answer questions from your **live data**:
 - _"What are my top risks in treatment right now?"_
 - _"Which controls have stale or missing evidence?"_
 - _"Show me the audit periods and which ones are frozen."_
-- _"Draft a new risk for the unencrypted-backups finding"_ — filed as a proposal for you to approve.
+- _"Draft a new risk for the unencrypted-backups finding"_ — filed as a proposal for a tenant admin to approve.
 
 !!! warning "Status: experimental"
 
@@ -28,7 +28,7 @@ Once connected, the assistant can answer questions from your **live data**:
 - **Reads are read-only.** The read tools only call `GET` endpoints. Evidence
   reads never return raw evidence payloads.
 - **Writes are never unattended.** Every write tool files a **proposal**; nothing
-  reaches your canonical records until a human approver confirms it (see
+  reaches your canonical records until a tenant admin confirms it (see
   [The write-approval flow](#the-write-approval-flow)). This is enforced by a
   database constraint, not just by convention — an AI cannot publish an
   audit-binding change on its own.
@@ -37,41 +37,49 @@ Once connected, the assistant can answer questions from your **live data**:
 
 ### Read tools
 
-| Tool                     | Answers questions like…                                           |
-| ------------------------ | ----------------------------------------------------------------- |
-| `list_controls`          | "List my active controls and their framework mappings."           |
-| `get_control`            | "Show me control IAC-06 and where its evidence stands."           |
-| `list_risks`             | "What risks are in the mitigate treatment?" (filter by treatment) |
-| `get_risk`               | "Show risk R-14 with its linked controls and residual score."     |
-| `list_evidence`          | "What evidence landed in the last 30 days?" (never raw payloads)  |
-| `list_audit_periods`     | "Which audit periods exist and which are frozen?"                 |
-| `list_policies`          | "List my policies and their acknowledgment state."                |
-| `list_vendors`           | "Show my third-party vendors and their review cadence."           |
-| `list_exceptions`        | "What exceptions are active, and when do they expire?"            |
-| `list_action_plans`      | "What remediation (OSCAL POA&M) is still open?"                   |
-| `list_framework_posture` | "How does my program score against each framework?"               |
+| Tool                     | Answers questions like…                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `list_controls`          | "List my active controls and their framework mappings."                                                            |
+| `get_control`            | "Show me control IAC-37 and where its evidence stands."                                                            |
+| `list_risks`             | "What risks are in the mitigate treatment?" (filter by treatment)                                                  |
+| `get_risk`               | "Show risk R-14 with its linked controls and residual score."                                                      |
+| `list_risk_categories`   | "Which risk categories does my organisation use?" (the valid values for `create_risk` and the `list_risks` filter) |
+| `list_evidence`          | "What evidence landed in the last 30 days?" (never raw payloads)                                                   |
+| `list_audit_periods`     | "Which audit periods exist and which are frozen?"                                                                  |
+| `list_policies`          | "List my policies and their acknowledgment state."                                                                 |
+| `list_vendors`           | "Show my third-party vendors and their review cadence."                                                            |
+| `list_exceptions`        | "What exceptions are active, and when do they expire?"                                                             |
+| `list_action_plans`      | "What remediation (OSCAL POA&M) is still open?"                                                                    |
+| `list_framework_posture` | "How does my program score against each framework?"                                                                |
 
 Every list tool returns up to 100 rows by default; pass `limit=N` (max 500) to
 widen. There is no "return everything" option — a request over 500 is rejected.
 
+`list_risks` leaves out roll-ups (risks with at least one child risk linked) by
+default, so a parent and the children it summarises are not counted twice. Pass
+`include_rollups=true` to list them too; each roll-up then carries
+`child_count`.
+
 ### Write tools (human-approved)
 
-| Tool                    | Proposes…                                                    |
-| ----------------------- | ------------------------------------------------------------ |
-| `create_risk`           | A new risk (draft)                                           |
-| `update_control_state`  | A control-state override (recorded as evidence)              |
-| `push_evidence`         | A new evidence record                                        |
-| `update_risk_treatment` | A change to a risk's treatment and owner                     |
-| `confirm_write`         | **Approver-only** — approves a pending proposal, applying it |
+| Tool                    | Proposes…                                                        |
+| ----------------------- | ---------------------------------------------------------------- |
+| `create_risk`           | A new risk (draft)                                               |
+| `update_control_state`  | A control-state override (recorded as evidence)                  |
+| `push_evidence`         | A new evidence record                                            |
+| `update_risk_treatment` | A change to a risk's treatment and owner                         |
+| `link_child_risks`      | Attaching existing risks under an existing parent risk           |
+| `unlink_child_risk`     | Detaching a child risk from its parent                           |
+| `confirm_write`         | **Tenant-admin-only** — approves a pending proposal, applying it |
 
 ## The write-approval flow
 
 1. The assistant calls a write tool (say `create_risk`). Instead of writing to
    your risk register, it files a **proposal** in the `mcp_write_proposals`
    table with `state = ai_proposed`, `ai_assisted = true`, `human_approved = false`.
-2. Nothing is in your canonical data yet. The proposal is visible to approvers in
-   the web UI and via the assistant.
-3. An authorized approver (a credential with approver or admin rights) confirms —
+2. Nothing is in your canonical data yet. The proposal is visible in the web UI
+   and via the assistant; only a tenant admin can confirm or reject it.
+3. A tenant admin confirms —
    either by the **Approve** button in the web UI, or by the assistant calling
    `confirm_write` with the proposal ID. Only then does the platform apply the
    change, inside a single transaction.
@@ -80,7 +88,7 @@ widen. There is no "return everything" option — a request over 500 is rejected
    database-level peer to the platform's [AI-assist boundary](https://github.com/mgoodric/security-atlas/blob/main/CLAUDE.md).
 
 Each credential may hold at most **5 pending proposals** at once; a sixth is
-rejected until you approve or reject the existing ones.
+rejected until a tenant admin approves or rejects the existing ones.
 
 ## Setup
 

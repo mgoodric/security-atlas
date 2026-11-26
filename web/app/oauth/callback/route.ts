@@ -12,8 +12,9 @@
 //      atlas /oauth/token endpoint via completeLoginFlow.
 //   2. On success, sets the atlas_jwt cookie (D1 — see decisions
 //      log) with HttpOnly + Secure + SameSite=Lax (P0-189-9).
-//   3. Redirects the user to the stored return_to URL or `/` on
-//      missing.
+//   3. Redirects the user to the stored return_to URL, which
+//      completeLoginFlow passes through safeRedirectTarget (#2211),
+//      or `/dashboard` when it is missing or unsafe.
 //
 // LIMITATION — v1 puts the token-exchange + cookie-set on the
 // CLIENT side because the verifier lives in sessionStorage (P0-189-8
@@ -134,7 +135,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           body: JSON.stringify({ access_token: result.accessToken, expires_in: result.expiresIn }),
         });
         if (!finalize.ok) throw new Error('finalize failed: ' + finalize.status);
-        window.location.assign(result.returnTo || '/');
+        window.location.assign(result.returnTo || '/dashboard');
       } catch (e) {
         // textContent renders as text — no HTML/attribute injection
         // surface, no escape sequence required.

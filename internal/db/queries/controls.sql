@@ -13,13 +13,31 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
 FROM controls
 WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL;
 
--- name: GetControlByID :one
+-- name: LockActiveControlByBundleID :one
+-- Issue #1958: GetActiveControlByBundleID plus a row lock, for the upload
+-- path. Two concurrent uploads of one bundle serialise on the active row,
+-- so the second decides no-op / in-place / supersede against what the
+-- first committed. Without it, two in-place uploads could both copy the
+-- same manifest into control_manifest_revisions and the first one's text
+-- would be overwritten without a trace.
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, description, control_family, implementation_type,
        owner_role, lifecycle_state, applicability_expr,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
        bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at
+FROM controls
+WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL
+FOR UPDATE;
+
+-- name: GetControlByID :one
+SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
+       title, description, control_family, implementation_type,
+       owner_role, lifecycle_state, applicability_expr,
+       evidence_queries, manual_evidence_schema, linked_policy_ids,
+       freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
+       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
+       external_refs, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND id = $2;
 
@@ -96,7 +114,7 @@ ORDER BY bundle_id ASC;
 SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,
        applicability_expr, freshness_class, bundle_manifest_hash,
-       created_at, updated_at
+       created_at, updated_at, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
 ORDER BY bundle_id ASC, version DESC
@@ -196,8 +214,10 @@ LIMIT $2;
 -- RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
 -- the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
 -- GUC so the read is tenant-scoped (invariant #6).
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
 WITH matched_controls AS (
-    SELECT c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id
+    SELECT c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id, c.evidence_queries
     FROM controls c
     WHERE c.tenant_id = $1
       AND c.superseded_by IS NULL
@@ -221,7 +241,11 @@ ranked_controls AS (
     FROM matched_controls c
     LEFT JOIN evidence_records e
         ON e.tenant_id = $1
-       AND (e.control_id = c.id OR e.control_ref = c.id::text)
+       AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+           OR (e.control_id IS NULL
+               AND e.evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+               AND c.evidence_queries @> jsonb_build_array(
+                     jsonb_build_object('evidence_kind', e.evidence_kind))))
     LEFT JOIN evidence_freshness ef
         ON ef.tenant_id = $1
        AND ef.control_id = c.id
@@ -250,20 +274,24 @@ LIMIT $2;
 -- name: InsertControlVersion :one
 -- Insert a new control row (initial upload or supersession). Caller is
 -- responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+-- anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+-- manifest's value with 'exact' filled in for an omitted one.
 INSERT INTO controls (
     id, tenant_id, bundle_id, version, superseded_by,
     scf_id, scf_anchor_id, title, description, control_family,
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by
+    bundle_uploaded_at, bundle_uploaded_by, external_refs,
+    anchor_fit, anchor_fit_note
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20
+    now(), $20, $21,
+    $22, $23
 )
 RETURNING *;
 
@@ -273,7 +301,661 @@ UPDATE controls
 SET superseded_by = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: InsertControlManifestRevision :execrows
+-- Issue #1908: record the manifest an in-place metadata update is about
+-- to overwrite. Copies the active row's current values in the same
+-- transaction, just before UpdateControlMetadataInPlace, so the prose
+-- and external-refs history is append-only in control_manifest_revisions.
+INSERT INTO control_manifest_revisions (
+    tenant_id, control_id, bundle_manifest_yaml, bundle_manifest_hash,
+    bundle_uploaded_by, bundle_uploaded_at
+)
+SELECT c.tenant_id, c.id, c.bundle_manifest_yaml, c.bundle_manifest_hash,
+       c.bundle_uploaded_by, c.bundle_uploaded_at
+FROM controls c
+WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NULL;
+
+-- name: UpdateControlMetadataInPlace :execrows
+-- Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
+-- active row's only in `description`, `external_refs` and/or
+-- `anchor_fit_note`, plus evidence_queries[].description (#2891), updates
+-- that row in place instead of versioning, so every control-keyed row
+-- (owners, evidence, exceptions, links) stays attached. evidence_queries
+-- is rewritten so the stored copy carries the new query descriptions; the
+-- caller has already checked nothing else in it changed. The hash moves
+-- with the YAML so a repeat upload is a no-op.
+UPDATE controls
+SET description = $3,
+    external_refs = $4,
+    bundle_manifest_yaml = $5,
+    bundle_manifest_hash = $6,
+    bundle_uploaded_at = now(),
+    bundle_uploaded_by = $7,
+    anchor_fit_note = $8,
+    evidence_queries = $9,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
+-- name: RebindControlAnchorInPlace :execrows
+-- Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+-- whose code now resolves to a different anchor row because a new SCF
+-- release was imported (#1768 mints new anchor rows per release), moves the
+-- active row to the current release's anchor in place. The manifest itself
+-- is unchanged, so superseding would orphan owners, evidence and links for
+-- nothing; coverage joins controls to edges by anchor row, so leaving the
+-- control on the legacy row would drop it out of coverage.
+UPDATE controls
+SET scf_anchor_id = $3,
+    scf_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
+-- name: ListControlsOnLegacySCFAnchors :many
+-- Issue #1971 (D3): active controls still bound to an anchor of an SCF
+-- release that is no longer current. Coverage joins controls to crosswalk
+-- edges by anchor row, so these controls earn no framework credit until they
+-- move. For each one: the legacy anchor; the current release's anchor with
+-- the same code, if any (current_anchor_id is NULL when the code is gone);
+-- and the current anchor that SCF lists the legacy code as the legacy ID of
+-- (#1769), if any. The upgrade re-binds a control only when the current
+-- anchor has the same code AND the same title; every other row is reported
+-- as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+-- role, at upgrade); a tenant id lists that tenant's controls.
+SELECT
+    c.id                  AS control_id,
+    c.tenant_id,
+    c.bundle_id,
+    c.title               AS control_title,
+    -- The stored control.yaml: a bundle that declares scf_release (#1770)
+    -- is pinned to that release and is never re-bound.
+    c.bundle_manifest_yaml,
+    la.id                 AS legacy_anchor_id,
+    la.scf_id             AS legacy_scf_id,
+    la.title              AS legacy_anchor_title,
+    lfv.version           AS legacy_release,
+    cfv.version           AS current_release,
+    ca.id                 AS current_anchor_id,
+    ca.title              AS current_anchor_title,
+    -- '' when SCF lists no current anchor with this legacy code.
+    COALESCE((SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
+    -- #1775 remap queue: the current release's id, the legacy ID of the
+    -- current anchor with this code ('' when it lists none, or the code is
+    -- gone), every current anchor that SCF lists the legacy code as the
+    -- legacy ID of (codes and titles in the same order), and whether the
+    -- current release carries any legacy IDs at all.
+    cfv.id                AS current_framework_version_id,
+    COALESCE(btrim(ca.legacy_scf_id), '')::text AS current_anchor_legacy_scf_id,
+    ARRAY(SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
+    ARRAY(SELECT s.title FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
+    EXISTS (SELECT 1 FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id
+        AND COALESCE(btrim(s.legacy_scf_id), '') <> '') AS current_release_has_legacy_ids
+FROM controls c
+JOIN scf_anchors la            ON la.id = c.scf_anchor_id
+JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
+JOIN frameworks f              ON f.id = lfv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+JOIN framework_versions cfv    ON cfv.framework_id = f.id AND cfv.status = 'current'
+LEFT JOIN scf_anchors ca       ON ca.framework_version_id = cfv.id AND ca.scf_id = la.scf_id
+WHERE c.superseded_by IS NULL
+  AND lfv.id <> cfv.id
+  AND (sqlc.narg(tenant_id)::uuid IS NULL OR c.tenant_id = sqlc.narg(tenant_id)::uuid)
+ORDER BY c.tenant_id, c.bundle_id, c.id;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries
 -- facade.
+
+-- name: ListActiveControlsWithState :many
+-- Issue #1741 — the /controls page's default "My controls" view.
+--
+-- One row per active (non-superseded) control for the active tenant, with
+-- the worst-state-wins rollup over THAT control's latest evaluation per
+-- scope cell, plus the framework set its SCF anchor satisfies. Same rank
+-- order and CTE shape as ListSCFAnchorsLatestWithState (slice 104/224/226),
+-- grouped by control instead of by anchor, so two controls on one anchor
+-- never borrow each other's state.
+--
+-- Paged server-side (row_limit / row_offset); CountActiveControls is the
+-- matching total and takes the same filters. The optional scope_cell_id
+-- narrows the rollup exactly as slice 224 does on the anchor list.
+--
+-- #2131: filters on state, freshness, family, framework, anchor fit and
+-- owner (a person, or unowned), and an allow-listed sort. #2392:
+-- legacy_anchor_only keeps only controls with an open or rejected remap
+-- proposal, the same predicate as the legacy_anchor column; the WHERE
+-- here and in CountActiveControls repeat it and must stay in step with
+-- it (and with isPending in web/lib/remap-review.ts). sort_key is one
+-- of the fixed keys in the ORDER BY; the handler refuses any other value
+-- before it gets here, and a key this query does not name falls through
+-- to the tiebreakers. The default order is failing first (worst state
+-- rank), then the stalest evidence (never observed first, then the oldest
+-- last_observed_at). Every order ends on c.id, so offset paging has no
+-- duplicates or gaps. Text keys sort lower-cased under COLLATE "C", so the
+-- order is the same on every deployment whatever its default collation.
+--
+-- RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
+-- belt-and-suspenders alongside the GUC-driven RLS on `controls` and
+-- `control_evaluations` (invariant #6).
+WITH RECURSIVE eval_cells AS (
+    -- #2765: the distinct non-NULL scope cells each active control has
+    -- evaluations for, found by a skip scan on
+    -- idx_control_evaluations_latest: one index probe per (control, cell)
+    -- instead of reading the whole ledger. Postgres 16 has no native skip
+    -- scan, so the recursion steps to the next cell above the last one.
+    SELECT c.id AS control_id, f.scope_cell_id
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+    UNION ALL
+    SELECT ec.control_id, n.scope_cell_id
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id > ec.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+),
+latest_eval AS (
+    -- The latest evaluation per (control, cell): a LIMIT 1 probe per cell,
+    -- plus one per control for the NULL whole-tenant cell (= cannot match
+    -- NULL, and IS NOT DISTINCT FROM is not indexable, so it is its own
+    -- branch). Same order and tiebreak as the DISTINCT ON this replaced.
+    -- Only active controls are probed; the outer query dropped superseded
+    -- ones anyway.
+    SELECT ec.control_id, ec.scope_cell_id,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id = ec.scope_cell_id
+          -- #3071: a replay of an earlier instant is not today's state.
+          AND ce.evaluated_as_of IS NULL
+        ORDER BY ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    UNION ALL
+    SELECT c.id, NULL::uuid,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NULL
+          AND ce.evaluated_as_of IS NULL
+        -- Leading scope_cell_id (constant here) lets the planner read the
+        -- index in order: IS NULL does not make the column a pathkey
+        -- constant the way = does, so without it this sorts every row.
+        ORDER BY ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+),
+ranked_per_control AS (
+    SELECT
+        le.control_id,
+        MAX(CASE le.result
+                WHEN 'fail'         THEN 5
+                WHEN 'inconclusive' THEN 4
+                -- #2112: excepted is never a pass. A control with one
+                -- excepted cell and the rest passing rolls up excepted.
+                WHEN 'excepted'     THEN 3
+                WHEN 'pass'         THEN 2
+                WHEN 'na'           THEN 1
+                ELSE 0
+             END) AS result_rank,
+        MAX(CASE le.freshness_status
+                WHEN 'expired'     THEN 4
+                WHEN 'stale'       THEN 3
+                WHEN 'no_evidence' THEN 2
+                WHEN 'fresh'       THEN 1
+                ELSE 0
+             END) AS freshness_rank,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM latest_eval le
+    WHERE (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
+    GROUP BY le.control_id
+),
+worst_per_control AS (
+    SELECT
+        rpc.control_id,
+        rpc.result_rank,
+        rpc.freshness_rank,
+        CASE rpc.result_rank
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        (CASE rpc.freshness_rank
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END)::text AS freshness_status,
+        rpc.last_observed_at,
+        rpc.evaluated_at
+    FROM ranked_per_control rpc
+),
+anchor_frameworks AS (
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM effective_fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
+)
+SELECT
+    c.id, c.bundle_id, c.scf_id, c.scf_anchor_id, c.title, c.control_family,
+    c.lifecycle_state, c.anchor_fit, c.anchor_fit_note,
+    wpc.result                        AS state_result,
+    wpc.freshness_status              AS state_freshness_status,
+    wpc.last_observed_at::timestamptz AS state_last_observed_at,
+    wpc.evaluated_at::timestamptz     AS state_evaluated_at,
+    af.framework_slugs::text[]        AS framework_slugs,
+    coa.owner_user_id                 AS owner_user_id,
+    -- #2392: the control still has an undecided SCF remap proposal (open,
+    -- or rejected and so open to revisit). The active row is the one a
+    -- pending proposal names; a proposal on a superseded row is stale.
+    EXISTS (SELECT 1 FROM scf_remap_proposals rp
+            WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+              AND rp.status IN ('open', 'rejected')) AS legacy_anchor
+FROM controls c
+LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
+LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
+-- #2128: the person-owner "assign owner" writes (slice 468).
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
+-- #2131: the owner's name, read by the owner sort only.
+LEFT JOIN users ou
+       ON ou.tenant_id = c.tenant_id AND ou.id = coa.owner_user_id
+WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid)
+  AND (NOT sqlc.arg(unowned)::bool OR coa.owner_user_id IS NULL)
+  AND (sqlc.narg('result')::text IS NULL OR wpc.result::text = sqlc.narg('result')::text)
+  AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
+  AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
+  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs))
+  AND (NOT sqlc.arg(legacy_anchor_only)::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')))
+ORDER BY
+    -- default: failing first, then the stalest evidence.
+    CASE WHEN sqlc.arg(sort_key)::text = 'default' THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'default' THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'scf_id' AND NOT sqlc.arg(sort_desc)::bool THEN c.scf_id COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'scf_id' AND sqlc.arg(sort_desc)::bool THEN c.scf_id COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'name' AND NOT sqlc.arg(sort_desc)::bool THEN lower(c.title) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'name' AND sqlc.arg(sort_desc)::bool THEN lower(c.title) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'family' AND NOT sqlc.arg(sort_desc)::bool THEN lower(c.control_family) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'family' AND sqlc.arg(sort_desc)::bool THEN lower(c.control_family) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'state' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.result_rank, 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'state' AND sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'freshness' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.freshness_rank, 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'freshness' AND sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.freshness_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'last_observed_at' AND NOT sqlc.arg(sort_desc)::bool THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'last_observed_at' AND sqlc.arg(sort_desc)::bool THEN wpc.last_observed_at END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND NOT sqlc.arg(sort_desc)::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND sqlc.arg(sort_desc)::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'frameworks' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'frameworks' AND sqlc.arg(sort_desc)::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END DESC,
+    c.scf_id NULLS LAST,
+    c.id
+LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
+
+-- name: CountActiveControls :one
+-- Issue #1741 — total for the paged ListActiveControlsWithState read.
+-- Takes every filter the list does (#1736 anchor_fit, #2128 owner, #2131
+-- unowned / state / freshness / family / framework), so the total counts
+-- exactly what the filtered list pages over. The rollup CTEs repeat the
+-- list's.
+WITH RECURSIVE eval_cells AS (
+    -- #2765: the distinct non-NULL scope cells each active control has
+    -- evaluations for, found by a skip scan on
+    -- idx_control_evaluations_latest: one index probe per (control, cell)
+    -- instead of reading the whole ledger. Postgres 16 has no native skip
+    -- scan, so the recursion steps to the next cell above the last one.
+    SELECT c.id AS control_id, f.scope_cell_id
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+    UNION ALL
+    SELECT ec.control_id, n.scope_cell_id
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id > ec.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+),
+latest_eval AS (
+    -- The latest evaluation per (control, cell): a LIMIT 1 probe per cell,
+    -- plus one per control for the NULL whole-tenant cell (= cannot match
+    -- NULL, and IS NOT DISTINCT FROM is not indexable, so it is its own
+    -- branch). Same order and tiebreak as the DISTINCT ON this replaced.
+    -- Only active controls are probed; the outer query dropped superseded
+    -- ones anyway.
+    SELECT ec.control_id, ec.scope_cell_id,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id = ec.scope_cell_id
+          -- #3071: a replay of an earlier instant is not today's state.
+          AND ce.evaluated_as_of IS NULL
+        ORDER BY ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    UNION ALL
+    SELECT c.id, NULL::uuid,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NULL
+          AND ce.evaluated_as_of IS NULL
+        -- Leading scope_cell_id (constant here) lets the planner read the
+        -- index in order: IS NULL does not make the column a pathkey
+        -- constant the way = does, so without it this sorts every row.
+        ORDER BY ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+),
+worst_per_control AS (
+    SELECT
+        le.control_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    WHEN 'excepted'     THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::text AS result,
+        (CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END)::text AS freshness_status
+    FROM latest_eval le
+    WHERE (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
+    GROUP BY le.control_id
+),
+anchor_frameworks AS (
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM effective_fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
+)
+SELECT count(*)::bigint AS total
+FROM controls c
+LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
+LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
+WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid)
+  AND (NOT sqlc.arg(unowned)::bool OR coa.owner_user_id IS NULL)
+  AND (sqlc.narg('result')::text IS NULL OR wpc.result = sqlc.narg('result')::text)
+  AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
+  AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
+  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs))
+  AND (NOT sqlc.arg(legacy_anchor_only)::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')));
+
+-- name: ListActiveControlFamilies :many
+-- #2131: the distinct families of the active tenant's active controls. The
+-- /controls Family filter reads it, since the page now holds one page of
+-- rows rather than every control.
+SELECT DISTINCT c.control_family
+FROM controls c
+WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND c.control_family <> ''
+ORDER BY c.control_family;
+
+-- name: InsertSCFRemapProposal :execrows
+-- Issue #1775: queue one remap proposal for a control on a legacy SCF
+-- anchor. Written by the migrate role during `catalog import-scf` (source
+-- 'boot') and by the app role when an upload re-binds or flags a control in
+-- place (source 'upload', #2236). A re-run leaves the existing proposal
+-- alone, except that an open proposal whose control this run re-bound
+-- becomes rebound, taking the run's target anchor and source (#2321: a stock
+-- control flagged before the title-only rule moves on the re-run).
+-- target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+-- 'open' one.
+INSERT INTO scf_remap_proposals (
+    tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
+    legacy_release, target_framework_version_id, target_release, class,
+    status, successor_scf_ids, target_anchor_id, source
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(control_id), sqlc.arg(bundle_id),
+    sqlc.arg(legacy_anchor_id), sqlc.arg(legacy_scf_id),
+    sqlc.arg(legacy_release), sqlc.arg(target_framework_version_id),
+    sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
+    sqlc.arg(successor_scf_ids)::text[], sqlc.narg(target_anchor_id),
+    sqlc.arg(source)
+)
+ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
+    SET status = 'rebound',
+        target_anchor_id = EXCLUDED.target_anchor_id,
+        source = EXCLUDED.source
+    WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound';
+
+-- name: ListSCFRemapProposals :many
+-- Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+-- proposals, newest first, optionally filtered by class, by a class to
+-- leave out (class_not, #2325: rebound rows a person may still review) and
+-- by status. RLS (tenant_read) and the explicit tenant id both bind the read.
+--
+-- #2325: a pending proposal (open or rejected) whose control has a newer
+-- version is stale, so it is left out; decide refuses it anyway
+-- (ErrRemapControlChanged). A decided one stays: an approved proposal's
+-- control is the version the approval superseded.
+--
+-- Keyset paged: the order is (created_at DESC, bundle_id, id), and a page
+-- starts after the cursor row (after_created_at, after_bundle_id, after_id,
+-- all NULL for the first page). CountSCFRemapProposals takes the same
+-- filters.
+SELECT p.id, p.control_id, p.bundle_id, c.title AS control_title,
+       p.legacy_scf_id, p.legacy_release, p.target_release, p.class,
+       p.status, p.successor_scf_ids, p.created_at
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg(class)::text IS NULL OR p.class = sqlc.narg(class)::text)
+  AND (sqlc.narg(class_not)::text IS NULL OR p.class <> sqlc.narg(class_not)::text)
+  AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
+  AND (c.superseded_by IS NULL OR p.status NOT IN ('open', 'rejected'))
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR p.created_at < sqlc.narg(after_created_at)::timestamptz
+       OR (p.created_at = sqlc.narg(after_created_at)::timestamptz
+           AND (p.bundle_id, p.id) > (sqlc.narg(after_bundle_id)::text, sqlc.narg(after_id)::uuid)))
+ORDER BY p.created_at DESC, p.bundle_id, p.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: CountSCFRemapProposals :one
+-- Issue #2325: the total ListSCFRemapProposals pages through, with the same
+-- filters and no cursor.
+SELECT count(*)
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg(class)::text IS NULL OR p.class = sqlc.narg(class)::text)
+  AND (sqlc.narg(class_not)::text IS NULL OR p.class <> sqlc.narg(class_not)::text)
+  AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
+  AND (c.superseded_by IS NULL OR p.status NOT IN ('open', 'rejected'));
+
+-- name: ApprovedRemapLineageRevision :one
+-- Issues #1776, #2358: the approved SCF remap revision a control row is, or
+-- descends from. The walk follows superseded_by back from the row through
+-- its earlier revisions and returns the nearest one that a person's approved
+-- remap decision created. The upload path keeps such a lineage when the
+-- boot seed re-uploads the stock manifest it replaced, so neither a
+-- reviewed re-anchor nor a person's later edit on top of it is undone
+-- silently. No row when the lineage holds no approved revision.
+WITH RECURSIVE lineage AS (
+    SELECT c.id, 0 AS depth
+    FROM controls c
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.id = sqlc.arg(control_id)
+    UNION ALL
+    SELECT p.id, l.depth + 1
+    FROM controls p
+    JOIN lineage l ON p.superseded_by = l.id
+    WHERE p.tenant_id = sqlc.arg(tenant_id) AND l.depth < 10000
+)
+SELECT l.id
+FROM lineage l
+JOIN scf_remap_decisions d
+  ON d.tenant_id = sqlc.arg(tenant_id)
+ AND d.new_control_id = l.id
+ AND d.decision = 'approved'
+ORDER BY l.depth
+LIMIT 1;
+
+-- name: RecordStockControlHoldback :exec
+-- Issue #2358: the boot seed kept a reviewed lineage (keepReviewedAnchor)
+-- instead of applying a shipped manifest. One row per tenant and bundle;
+-- first_held_at restarts when a different shipped manifest is held back.
+INSERT INTO stock_control_holdbacks
+    (tenant_id, bundle_id, approved_control_id, shipped_manifest_hash)
+VALUES (sqlc.arg(tenant_id), sqlc.arg(bundle_id), sqlc.arg(approved_control_id), sqlc.arg(shipped_manifest_hash))
+ON CONFLICT (tenant_id, bundle_id) DO UPDATE
+SET approved_control_id   = EXCLUDED.approved_control_id,
+    first_held_at         = CASE
+                                WHEN stock_control_holdbacks.shipped_manifest_hash = EXCLUDED.shipped_manifest_hash
+                                THEN stock_control_holdbacks.first_held_at
+                                ELSE now()
+                            END,
+    shipped_manifest_hash = EXCLUDED.shipped_manifest_hash,
+    last_held_at          = now();
+
+-- name: ClearStockControlHoldback :exec
+-- Issue #2599: the boot seed found the tenant's active revision already is
+-- the shipped manifest, so nothing is held back any more. The row named an
+-- earlier shipped manifest; without this it would be listed for good.
+DELETE FROM stock_control_holdbacks
+WHERE tenant_id = sqlc.arg(tenant_id) AND bundle_id = sqlc.arg(bundle_id);
+
+-- name: ListStockControlHoldbacks :many
+-- Issue #2358: the tenant's stock controls whose shipped update the boot
+-- seed holds back. Each row names the active revision, the approved
+-- re-anchor that caused the hold, the shipped manifest being missed, and
+-- the stock manifest the approval replaced; the shipped manifest is an
+-- update the tenant has not received when the two hashes differ.
+SELECT h.bundle_id,
+       a.id              AS active_control_id,
+       a.version         AS active_version,
+       a.title           AS title,
+       a.bundle_manifest_hash AS active_manifest_hash,
+       a.bundle_uploaded_at   AS active_uploaded_at,
+       ap.id             AS approved_control_id,
+       ap.version        AS approved_version,
+       d.new_scf_id      AS approved_scf_id,
+       d.new_release     AS approved_release,
+       d.decided_at      AS approved_at,
+       lg.bundle_manifest_hash AS replaced_manifest_hash,
+       h.shipped_manifest_hash,
+       h.first_held_at,
+       h.last_held_at
+FROM stock_control_holdbacks h
+JOIN controls a
+  ON a.tenant_id = h.tenant_id AND a.bundle_id = h.bundle_id AND a.superseded_by IS NULL
+JOIN controls ap
+  ON ap.tenant_id = h.tenant_id AND ap.id = h.approved_control_id
+JOIN LATERAL (
+    SELECT dd.new_scf_id, dd.new_release, dd.decided_at, dd.legacy_control_id
+    FROM scf_remap_decisions dd
+    WHERE dd.tenant_id = h.tenant_id
+      AND dd.new_control_id = h.approved_control_id
+      AND dd.decision = 'approved'
+    ORDER BY dd.decided_at DESC
+    LIMIT 1
+) d ON true
+JOIN controls lg
+  ON lg.tenant_id = h.tenant_id AND lg.id = d.legacy_control_id
+WHERE h.tenant_id = sqlc.arg(tenant_id)
+ORDER BY h.bundle_id;

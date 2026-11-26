@@ -16,15 +16,94 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/incident"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type Handler struct {
 	store *incident.Store
+	views *moduleaccess.Views
 }
 
 func New(store *incident.Store) *Handler { return &Handler{store: store} }
+
+// WithModules wires the module views that strip links into hidden modules
+// (#2174). Without them (a unit-test server) every link is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// writeDetail writes one incident with its links, leaving out the links
+// into a module the caller cannot see (#2174): a switched-off module, or
+// one outside their module access. The links stay stored; an empty list
+// says nothing about how many were left out. A failed access read fails
+// closed: 503 module_state_unavailable when the flag store is down
+// (#2702), else 500.
+func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int, d incident.Detail) {
+	viewer, err := h.views.For(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "incident link modules", err)
+		return
+	}
+	for path, ids := range map[string]*[]uuid.UUID{
+		riskRoute:   &d.Links.RiskIDs,
+		vendorRoute: &d.Links.VendorIDs,
+	} {
+		sees, err := viewer.Sees(path)
+		if err != nil {
+			moduleaccess.WriteError(w, r, "incident link modules", err)
+			return
+		}
+		if !sees {
+			*ids = []uuid.UUID{}
+		}
+	}
+	httpresp.WriteJSON(w, status, map[string]any{"incident": detailWireFrom(d)})
+}
+
+// Routes the registry places under the modules an incident links into.
+const (
+	riskRoute   = "/v1/risks"
+	vendorRoute = "/v1/vendors"
+)
+
+// refuseHiddenLinks answers 403 when a create names risk_ids or
+// vendor_ids in a module the caller cannot see (#2501), and reports
+// whether it answered. It runs before the store, and the answer names only
+// the field, so it is the same whether the ids exist or not: a caller
+// cannot probe a hidden module's records through it. A failed access read
+// fails closed, as writeDetail does.
+func (h *Handler) refuseHiddenLinks(w http.ResponseWriter, r *http.Request, ids parsedLinks) bool {
+	viewer, err := h.views.For(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "incident link modules", err)
+		return true
+	}
+	for _, l := range []struct {
+		field, path string
+		ids         []uuid.UUID
+	}{
+		{"risk_ids", riskRoute, ids.RiskIDs},
+		{"vendor_ids", vendorRoute, ids.VendorIDs},
+	} {
+		if len(l.ids) == 0 {
+			continue
+		}
+		sees, err := viewer.Sees(l.path)
+		if err != nil {
+			moduleaccess.WriteError(w, r, "incident link modules", err)
+			return true
+		}
+		if !sees {
+			httpresp.WriteError(w, http.StatusForbidden, l.field+": links into a module you cannot use")
+			return true
+		}
+	}
+	return false
+}
 
 type createReq struct {
 	Title              string          `json:"title"`
@@ -64,6 +143,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.refuseHiddenLinks(w, r, ids) {
+		return
+	}
 	detectedAt := time.Time{}
 	if req.DetectedAt != nil {
 		detectedAt = req.DetectedAt.UTC()
@@ -85,7 +167,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "create incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusCreated, detail)
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +203,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "get incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusOK, detail)
 }
 
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +257,7 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "close incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusOK, detail)
 }
 
 func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, err error) {
@@ -191,6 +273,24 @@ func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, er
 		errors.Is(err, incident.ErrPostmortemRequired),
 		errors.Is(err, incident.ErrIRControlRequired):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ingest.ErrObservedAtSkew):
+		// #1830: the postmortem evidence goes through ingest, which
+		// refuses an observed_at outside the skew window.
+		httpresp.WriteError(w, http.StatusBadRequest, "observed_at outside permitted skew window")
+	case errors.Is(err, ingest.ErrValidation), errors.Is(err, ingest.ErrMissingField):
+		httpresp.WriteError(w, http.StatusBadRequest, "postmortem evidence failed validation")
+	case errors.Is(err, ingest.ErrScopeViolation):
+		httpresp.WriteError(w, http.StatusBadRequest, "postmortem evidence outside the incident register's evidence scope")
+	case errors.Is(err, ingest.ErrIdempotencyMismatch):
+		// The postmortem evidence for this incident already exists with
+		// different content.
+		httpresp.WriteError(w, http.StatusConflict, "postmortem evidence already recorded with different content")
+	case errors.Is(err, ingest.ErrUnavailable):
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: an audit period froze while the close was open; nothing
+		// was written, and a retry starts after the freeze.
+		httpresp.WriteConcurrentFreeze(w, "an audit period was frozen while the incident closed; nothing was written, retry")
 	default:
 		if strings.Contains(err.Error(), "target does not exist in tenant") {
 			httpresp.WriteError(w, http.StatusBadRequest, "linked target does not exist in tenant")

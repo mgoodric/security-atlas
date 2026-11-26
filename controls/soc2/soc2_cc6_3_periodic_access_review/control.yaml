@@ -1,15 +1,36 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_periodic_access_review
-title: "Quarterly access review completed for in-scope systems"
+title: "An access review was completed within the last 90 days"
 description: |
-  Periodic review and validation of user accounts and access privileges
-  is required to satisfy the "modifies, or removes access" half of TSC
-  CC6.3. The query reads the `access_review.completion` ledger and
-  asserts each in-scope system has a completed review record within
-  the last 90 days (i.e. quarterly cadence). The reviewer and
-  remediation actions are captured in the evidence record.
+  Regular review of accounts and their privileges covers the
+  change-and-revoke side of TSC CC6.3. The intended test is that each
+  in-scope system has a completed access review within the quarter, with
+  the reviewer and remediation actions captured in the record.
 
-scf_anchor_id: IAC-15
+  What runs today: a SQL query over the platform's
+  `access_review.completion.v1` records. The platform writes one when a
+  review campaign is completed with no item left pending, and the
+  record's `observed_at` is the completion instant. The control passes
+  when any completed review, keyed by `review_id`, has an `observed_at`
+  within 90 days before the evaluation instant (`evaluated_at`). It fails
+  when every completed review is older than that, and no record leaves it
+  inconclusive. Records count for the quarterly window of 120 days, so a
+  review completed 91 to 120 days ago fails the control and one older
+  than that is not seen. The 90 days are counted as 2,160 hours, so the
+  bound does not move with daylight saving. The record's `result`, which
+  the platform always writes as pass, is not used.
+
+  An `observed_at` more than an hour after the evaluation instant does not
+  show a review was completed before it; such a record is treated as
+  unreadable, and the control is inconclusive unless another review is
+  within the 90 days. Records without a `review_id` are left out.
+
+  Pending: every in-scope system reviewed. The record names the campaign,
+  not the systems it covered, so which systems were reviewed is not
+  checked; that half needs a system inventory (#2834).
+
+scf_anchor_id: IAC-12
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering
@@ -17,20 +38,17 @@ lifecycle_state: active
 freshness_class: quarterly
 
 evidence_queries:
-  - id: every_in_scope_system_reviewed_in_90d
-    language: rego
+  - id: access_review_completed_within_90d
+    language: sql
     evidence_kind: access_review.completion.v1
-    description: "Every in-scope system has a completed access review within 90 days"
+    description: "A completed access review has an observed_at within 90 days of the evaluation instant"
     expression: |
-      package atlas.controls.soc2.cc6_3_review
-
-      default allow := false
-
-      allow if {
-        every s in input.in_scope_systems {
-          some r in input.review_records
-          r.system_id == s.id
-          r.status == "completed"
-          time.parse_rfc3339_ns(r.completed_at) > (time.now_ns() - (90 * 24 * 60 * 60 * 1000000000))
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(observed_at >= evaluated_at - interval '2160 hours'
+                            AND observed_at <= evaluated_at + interval '1 hour') THEN 'pass'
+               WHEN bool_or(observed_at > evaluated_at + interval '1 hour') THEN 'inconclusive'
+               ELSE 'fail'
+             END
+      FROM evidence
+      WHERE coalesce(payload->>'review_id', '') <> ''

@@ -2,7 +2,7 @@
 //
 // Three emitters, three key shapes:
 //
-//   - RepoProtectionKey: same repo + same hour → same key (dedup).
+//   - RepoProtectionKey: same repo id + same hour → same key (dedup).
 //   - SCIMUserKey: same SCIM user id + same hour → same key.
 //   - DeliveryKey: GitHub's X-GitHub-Delivery UUID is already unique per
 //     delivery, so we use it directly without hashing. This makes
@@ -12,16 +12,19 @@ package idem
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// RepoProtectionKey returns the idempotency key for a (repo_full_name,
+// RepoProtectionKey returns the idempotency key for a (repo_id,
 // observed_at) pair. Truncated to the hour in UTC so two runs within the
-// same hour produce identical keys.
-func RepoProtectionKey(repoFullName string, observedAt time.Time) string {
+// same hour produce identical keys. It keys on GitHub's stable repository
+// id, so a rename within the hour does not mint a second record, and on
+// the v2 kind, so it never collides with a v1 record's key (#2925).
+func RepoProtectionKey(repoID int64, observedAt time.Time) string {
 	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
-	sum := sha256.Sum256([]byte("github.repo_protection|" + repoFullName + "|" + hour))
+	sum := sha256.Sum256([]byte("github.repo_protection.v2|" + strconv.FormatInt(repoID, 10) + "|" + hour))
 	return hex.EncodeToString(sum[:])
 }
 

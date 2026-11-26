@@ -36,6 +36,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { switchTenant } from "@/lib/auth/switch-tenant";
+import { getQueryClient } from "@/lib/queryClient";
+import { forgetTenantCaches } from "@/lib/tenant-cache";
 import {
   onTenantSwitched,
   postTenantSwitched,
@@ -191,6 +193,8 @@ export function TenantSwitcher() {
       if (refetch) {
         void refetch();
       }
+      // #2085, #2621: nothing cached for the old tenant may render.
+      forgetTenantCaches(getQueryClient());
       router.refresh();
     });
     return unsub;
@@ -243,6 +247,9 @@ export function TenantSwitcher() {
         // broadcast goes out promptly — router.refresh() does not
         // block on it, but the ordering documents intent.
         postTenantSwitched(targetId);
+        // #2085, #2621: reset every query cached for the old tenant,
+        // the people directory included.
+        forgetTenantCaches(getQueryClient());
         // Hard refresh so server components re-render with the new
         // tenant scope (the JWT cookie carries it).
         router.refresh();
@@ -281,7 +288,7 @@ export function TenantSwitcher() {
           aria-label="Switch tenant"
           className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <span className="max-w-[16rem] truncate">
+          <span className="max-w-[6rem] truncate sm:max-w-[10rem] lg:max-w-[16rem]">
             {currentTenant?.name || "Select tenant"}
           </span>
           <svg

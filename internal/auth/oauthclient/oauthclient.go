@@ -41,6 +41,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,6 +78,15 @@ var ErrDuplicateName = errors.New("oauthclient: client with that name already ex
 // client-existence oracles.
 var ErrUnknownClient = errors.New("oauthclient: unknown client")
 
+// ErrAlreadyBound is returned by Bind when the client is already bound to
+// a different tenant. Moving a client between tenants would silently
+// redirect every write its tokens make, so it is refused rather than done.
+var ErrAlreadyBound = errors.New("oauthclient: client is bound to a different tenant")
+
+// ErrNilTenant is returned when a caller asks to bind a client to the
+// all-zeros tenant, which is not a tenant anyone means.
+var ErrNilTenant = errors.New("oauthclient: refusing to bind to the all-zeros tenant")
+
 // Client is the in-memory projection of an oauth_clients row. The
 // `client_secret_hash` column is deliberately NOT exposed — the hash
 // is an implementation detail of the verification path.
@@ -85,20 +96,64 @@ type Client struct {
 	Name       string
 	CreatedAt  time.Time
 	DisabledAt *time.Time
+	// TenantID is the tenant this client's client_credentials tokens act
+	// in (security-atlas#1739). Nil means unbound: its tokens carry no
+	// tenant and every write they attempt is refused.
+	TenantID *uuid.UUID
 }
 
 // Store wraps a pgxpool with the issuance and verification primitives
 // the OAuth token endpoint needs.
 type Store struct {
 	pool *pgxpool.Pool
+	// verifier and dummyHash are seams for the timing-equalizer unit
+	// test; New wires password.Verify and timingDummyHash.
+	verifier  secretVerifier
+	dummyHash func() string
 }
+
+// secretVerifier checks a plaintext secret against an encoded argon2id
+// hash. Production uses password.Verify; the unit test counts calls.
+type secretVerifier interface {
+	Verify(plaintext, encoded string) (bool, error)
+}
+
+type passwordVerifier struct{}
+
+func (passwordVerifier) Verify(plaintext, encoded string) (bool, error) {
+	return password.Verify(plaintext, encoded)
+}
+
+// timingDummyHash is a client-secret hash no presented secret is expected
+// to match. Verify checks the presented secret against it when the
+// client_id is unknown, empty or disabled, so every rejection costs the
+// same argon2id work as a wrong secret and response time on /oauth/token,
+// /oauth/introspect and /oauth/revoke is no client_id oracle
+// (security-atlas#2241). It is built with password.Hash, the function
+// that hashes real client secrets, so the two share argon2id parameters.
+//
+// A failed build is logged and returns "": Verify then fails every call
+// closed rather than answering a fast rejection.
+var timingDummyHash = sync.OnceValue(func() string {
+	h, err := password.Hash("atlas-oauth-client-timing-equalizer")
+	if err != nil {
+		slog.Error("oauthclient: build timing-equalizer hash; client authentication fails closed", "err", err)
+		return ""
+	}
+	return h
+})
+
+// errTimingEqualizerUnavailable fails every Verify closed when the dummy
+// hash could not be built: rejecting without the argon2id work would make
+// response time a client_id oracle.
+var errTimingEqualizerUnavailable = errors.New("oauthclient: timing equalizer unavailable")
 
 // New returns a Store backed by pool. The pool can be either the
 // tenant-scoped atlas_app pool or a BYPASSRLS pool — oauth_clients
 // has no RLS, so either works. Production wiring passes the
 // app-tenant pool; tests pass the integration test pool.
 func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+	return &Store{pool: pool, verifier: passwordVerifier{}, dummyHash: timingDummyHash}
 }
 
 // Issue creates a new OAuth client identity. Returns the public
@@ -111,6 +166,19 @@ func New(pool *pgxpool.Pool) *Store {
 // unique_violation SQLSTATE. The DB UNIQUE constraint on (name) is
 // the source of truth.
 func (s *Store) Issue(ctx context.Context, name string) (*Client, string, error) {
+	return s.issue(ctx, name, nil)
+}
+
+// IssueForTenant is Issue for a client bound to tenant at creation, so its
+// client_credentials tokens act in that tenant (security-atlas#1739).
+func (s *Store) IssueForTenant(ctx context.Context, name string, tenant uuid.UUID) (*Client, string, error) {
+	if tenant == uuid.Nil {
+		return nil, "", ErrNilTenant
+	}
+	return s.issue(ctx, name, &tenant)
+}
+
+func (s *Store) issue(ctx context.Context, name string, tenant *uuid.UUID) (*Client, string, error) {
 	if name == "" {
 		return nil, "", errors.New("oauthclient: name is empty")
 	}
@@ -128,15 +196,16 @@ func (s *Store) Issue(ctx context.Context, name string) (*Client, string, error)
 		ID:       uuid.New(),
 		ClientID: clientID,
 		Name:     name,
+		TenantID: tenant,
 	}
 
 	const q = `
-		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name, bound_tenant_id)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING created_at
 	`
 	if err := s.pool.QueryRow(ctx, q,
-		row.ID, row.ClientID, hash, row.Name,
+		row.ID, row.ClientID, hash, row.Name, row.TenantID,
 	).Scan(&row.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgErrUniqueViolation {
@@ -156,49 +225,80 @@ func (s *Store) Issue(ctx context.Context, name string) (*Client, string, error)
 // The error collapse is deliberate per RFC 6749 §5.2: a token
 // endpoint MUST NOT reveal whether the client_id existed vs the
 // secret was wrong — the security boundary is the joint check.
+//
+// Every rejection costs one argon2id verification, so response time does
+// not tell an unknown client_id from a known one (security-atlas#2241).
+// Without the timing-equalizer hash every call fails closed before the
+// lookup.
 func (s *Store) Verify(ctx context.Context, clientID, secretPlaintext string) (*Client, error) {
-	if clientID == "" || secretPlaintext == "" {
-		return nil, ErrUnknownClient
+	dummyHash := s.dummyHash()
+	if dummyHash == "" {
+		return nil, errTimingEqualizerUnavailable
 	}
+	var (
+		row  *Client
+		hash string
+	)
+	if clientID != "" {
+		var err error
+		row, hash, err = s.lookupForVerify(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.authenticate(row, hash, secretPlaintext, dummyHash)
+}
+
+// lookupForVerify reads the client row and its secret hash. A missing row
+// is (nil, "", nil), not an error: authenticate owns every rejection so
+// each one does the same argon2id work.
+func (s *Store) lookupForVerify(ctx context.Context, clientID string) (*Client, string, error) {
 	const q = `
-		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at
+		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
 	var (
-		c        Client
-		hash     string
-		disabled *time.Time
+		c    Client
+		hash string
 	)
 	err := s.pool.QueryRow(ctx, q, clientID).Scan(
-		&c.ID, &c.ClientID, &hash, &c.Name, &disabled, &c.CreatedAt,
+		&c.ID, &c.ClientID, &hash, &c.Name, &c.DisabledAt, &c.CreatedAt, &c.TenantID,
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrUnknownClient
-		}
-		return nil, fmt.Errorf("oauthclient: query: %w", err)
+		return nil, "", fmt.Errorf("oauthclient: query: %w", err)
 	}
-	if disabled != nil {
-		// Disabled clients always return the same opaque error as
-		// "unknown client" — an operator-revoked client_id MUST NOT
-		// be distinguishable from a typo.
-		return nil, ErrUnknownClient
-	}
-	c.DisabledAt = disabled
+	return &c, hash, nil
+}
 
-	// Constant-time compare via the existing argon2id surface.
-	ok, err := password.Verify(secretPlaintext, hash)
+// authenticate decides a Verify call once the row is read. row is nil when
+// no client matched. Every path runs one argon2id verification: an
+// unknown, empty or disabled (revoked) client_id is checked against
+// dummyHash in place of a real hash.
+func (s *Store) authenticate(row *Client, hash, secretPlaintext, dummyHash string) (*Client, error) {
+	usable := row != nil && row.DisabledAt == nil
+	if !usable {
+		// Unknown and disabled clients return the same opaque error as
+		// a wrong secret: an operator-revoked client_id MUST NOT be
+		// distinguishable from a typo, by error or by timing.
+		hash = dummyHash
+	}
+	ok, err := s.verifier.Verify(secretPlaintext, hash)
 	if err != nil {
-		// password.Verify returns ErrInvalidHash if the stored hash
-		// is corrupt; collapse to unknown-client to avoid leaking
-		// the corruption to the caller.
+		// A corrupt stored hash fails decode before any argon2id work.
+		// Burn the dummy verify so the rejection still costs the same,
+		// and collapse to unknown-client so the corruption does not
+		// leak to the caller.
+		_, _ = s.verifier.Verify(secretPlaintext, dummyHash)
 		return nil, ErrUnknownClient
 	}
-	if !ok {
+	if !ok || !usable || secretPlaintext == "" {
 		return nil, ErrUnknownClient
 	}
-	return &c, nil
+	return row, nil
 }
 
 // Lookup is the secret-less read path the slice-191 device
@@ -214,7 +314,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 		return nil, ErrUnknownClient
 	}
 	const q = `
-		SELECT id, client_id, name, disabled_at, created_at
+		SELECT id, client_id, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
@@ -223,7 +323,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 		disabled *time.Time
 	)
 	err := s.pool.QueryRow(ctx, q, clientID).Scan(
-		&c.ID, &c.ClientID, &c.Name, &disabled, &c.CreatedAt,
+		&c.ID, &c.ClientID, &c.Name, &disabled, &c.CreatedAt, &c.TenantID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -236,6 +336,46 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 	}
 	c.DisabledAt = disabled
 	return &c, nil
+}
+
+// Bind binds the client identified by clientID (the public client_id) to
+// tenant, so its client_credentials tokens act in that tenant
+// (security-atlas#1739). Binding an unbound client, or re-binding to the
+// tenant it already has, succeeds; a client bound to a different tenant
+// returns ErrAlreadyBound. A disabled or missing client returns
+// ErrUnknownClient. The tenant must exist (oauth_clients.bound_tenant_id is a
+// foreign key to tenants).
+func (s *Store) Bind(ctx context.Context, clientID string, tenant uuid.UUID) (*Client, error) {
+	if tenant == uuid.Nil {
+		return nil, ErrNilTenant
+	}
+	if clientID == "" {
+		return nil, ErrUnknownClient
+	}
+	const q = `
+		UPDATE oauth_clients
+		SET bound_tenant_id = $2
+		WHERE client_id = $1
+		  AND disabled_at IS NULL
+		  AND (bound_tenant_id IS NULL OR bound_tenant_id = $2)
+		RETURNING id, client_id, name, created_at, bound_tenant_id
+	`
+	var c Client
+	err := s.pool.QueryRow(ctx, q, clientID, tenant).Scan(
+		&c.ID, &c.ClientID, &c.Name, &c.CreatedAt, &c.TenantID,
+	)
+	if err == nil {
+		return &c, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("oauthclient: bind: %w", err)
+	}
+	// No row updated: the client is missing, disabled, or bound to
+	// another tenant. Lookup tells the first two from the third.
+	if _, lerr := s.Lookup(ctx, clientID); lerr != nil {
+		return nil, lerr
+	}
+	return nil, ErrAlreadyBound
 }
 
 // generateSecret produces a 32-byte random secret encoded as

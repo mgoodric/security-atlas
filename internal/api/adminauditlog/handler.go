@@ -53,11 +53,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/authz"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -76,11 +79,24 @@ const (
 type Handler struct {
 	pool    *pgxpool.Pool
 	limiter *export.Limiter
+	// engine decides which unified-log payloads a caller may see
+	// (#2375, payloadgate.go). Nil hides every payload from a
+	// non-admin caller.
+	engine *authz.Engine
+	// views leaves hidden modules' rows out of the Activity feed (#2173,
+	// modules.go). Nil shows every module.
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool}
+}
+
+// WithAuthz sets the OPA engine the unified-log payload gate decides with.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // --- response shapes ---
@@ -249,7 +265,9 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503 D5 (Matt, 2026-11-18): a tenant admin by its live roles reads
+	// its own tenant's admin audit log, under RLS.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}

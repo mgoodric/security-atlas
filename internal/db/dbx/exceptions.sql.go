@@ -21,7 +21,7 @@ SET status = 'active',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 `
 
 type ActivateExceptionParams struct {
@@ -65,6 +65,9 @@ func (q *Queries) ActivateException(ctx context.Context, arg ActivateExceptionPa
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
 	)
 	return i, err
 }
@@ -74,27 +77,36 @@ UPDATE exceptions
 SET status = 'approved',
     approved_by = $3,
     approved_at = now(),
+    self_approved = $4,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'requested'
-RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 `
 
 type ApproveExceptionParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ID         pgtype.UUID `json:"id"`
-	ApprovedBy *string     `json:"approved_by"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ID           pgtype.UUID `json:"id"`
+	ApprovedBy   *string     `json:"approved_by"`
+	SelfApproved bool        `json:"self_approved"`
 }
 
 // AC-3 transition: requested -> approved. The application MUST verify the
-// caller has IsApprover before invoking this query AND that approved_by
-// differs from requested_by (segregation of duties). The WHERE
+// caller has IsApprover before invoking this query AND apply the approval
+// rule (internal/approval, #2101): approved_by differs from requested_by
+// unless the organisation allows self-approval, in which case self_approved
+// is true and exceptions_sod admits the same person. The WHERE
 // status='requested' clause guards against double-approval / out-of-order
 // transitions; zero rows returned indicates either a missing row or a wrong
 // prior state -- the application probes after to disambiguate.
 func (q *Queries) ApproveException(ctx context.Context, arg ApproveExceptionParams) (Exception, error) {
-	row := q.db.QueryRow(ctx, approveException, arg.TenantID, arg.ID, arg.ApprovedBy)
+	row := q.db.QueryRow(ctx, approveException,
+		arg.TenantID,
+		arg.ID,
+		arg.ApprovedBy,
+		arg.SelfApproved,
+	)
 	var i Exception
 	err := row.Scan(
 		&i.ID,
@@ -117,6 +129,9 @@ func (q *Queries) ApproveException(ctx context.Context, arg ApproveExceptionPara
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
 	)
 	return i, err
 }
@@ -130,7 +145,7 @@ INSERT INTO exceptions (
     expires_at, status
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'requested')
-RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 `
 
 type CreateExceptionParams struct {
@@ -187,6 +202,9 @@ func (q *Queries) CreateException(ctx context.Context, arg CreateExceptionParams
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
 	)
 	return i, err
 }
@@ -200,7 +218,7 @@ SET status = 'denied',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'requested'
-RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 `
 
 type DenyExceptionParams struct {
@@ -234,6 +252,9 @@ func (q *Queries) DenyException(ctx context.Context, arg DenyExceptionParams) (E
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
 	)
 	return i, err
 }
@@ -246,7 +267,7 @@ SET status = 'expired',
 WHERE tenant_id = $1
   AND status = 'active'
   AND expires_at < $2
-RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 `
 
 type ExpireActiveExceptionsBeforeParams struct {
@@ -291,6 +312,9 @@ func (q *Queries) ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireAc
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +327,7 @@ func (q *Queries) ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireAc
 }
 
 const getExceptionByID = `-- name: GetExceptionByID :one
-SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 FROM exceptions
 WHERE tenant_id = $1 AND id = $2
 `
@@ -337,7 +361,44 @@ func (q *Queries) GetExceptionByID(ctx context.Context, arg GetExceptionByIDPara
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
 	)
+	return i, err
+}
+
+const getExceptionIdempotencyKey = `-- name: GetExceptionIdempotencyKey :one
+SELECT exception_id, request_hash
+FROM exception_idempotency_keys
+WHERE tenant_id = $1
+  AND requested_by = $2
+  AND idempotency_key = $3
+  AND created_at > $4::timestamptz
+`
+
+type GetExceptionIdempotencyKeyParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	NotBefore      pgtype.Timestamptz `json:"not_before"`
+}
+
+type GetExceptionIdempotencyKeyRow struct {
+	ExceptionID pgtype.UUID `json:"exception_id"`
+	RequestHash string      `json:"request_hash"`
+}
+
+// #2618: the exception a key created, while the key is inside its window.
+func (q *Queries) GetExceptionIdempotencyKey(ctx context.Context, arg GetExceptionIdempotencyKeyParams) (GetExceptionIdempotencyKeyRow, error) {
+	row := q.db.QueryRow(ctx, getExceptionIdempotencyKey,
+		arg.TenantID,
+		arg.RequestedBy,
+		arg.IdempotencyKey,
+		arg.NotBefore,
+	)
+	var i GetExceptionIdempotencyKeyRow
+	err := row.Scan(&i.ExceptionID, &i.RequestHash)
 	return i, err
 }
 
@@ -385,7 +446,7 @@ func (q *Queries) ListExceptionAuditLog(ctx context.Context, arg ListExceptionAu
 }
 
 const listExceptions = `-- name: ListExceptions :many
-SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 FROM exceptions
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -425,6 +486,9 @@ func (q *Queries) ListExceptions(ctx context.Context, tenantID pgtype.UUID) ([]E
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -437,7 +501,7 @@ func (q *Queries) ListExceptions(ctx context.Context, tenantID pgtype.UUID) ([]E
 }
 
 const listExceptionsByControl = `-- name: ListExceptionsByControl :many
-SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 FROM exceptions
 WHERE tenant_id = $1
   AND control_id = $2
@@ -483,6 +547,76 @@ func (q *Queries) ListExceptionsByControl(ctx context.Context, arg ListException
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExceptionsByControlAsOf = `-- name: ListExceptionsByControlAsOf :many
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
+FROM exceptions
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND activated_at <= $3::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > $3::timestamptz)
+ORDER BY expires_at ASC, id ASC
+`
+
+type ListExceptionsByControlAsOfParams struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	ControlID pgtype.UUID        `json:"control_id"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+// #3037: the control's exceptions as they stood at a past instant, for a
+// replay of that instant. Activated by then and not revoked by then; the
+// evaluator applies the [effective_from, expires_at) window itself, so an
+// exception expired since is still in force at an instant before its
+// expires_at. This reconstruction holds because effective_from and
+// expires_at never change after activation (#2526); oscal/excepted.go's
+// inForceAt applies the same rule.
+func (q *Queries) ListExceptionsByControlAsOf(ctx context.Context, arg ListExceptionsByControlAsOfParams) ([]Exception, error) {
+	rows, err := q.db.Query(ctx, listExceptionsByControlAsOf, arg.TenantID, arg.ControlID, arg.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Exception
+	for rows.Next() {
+		var i Exception
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.CompensatingControls,
+			&i.RequestedBy,
+			&i.RequestedAt,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.DeniedBy,
+			&i.DeniedAt,
+			&i.ActivatedBy,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.ExpiredAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -495,7 +629,7 @@ func (q *Queries) ListExceptionsByControl(ctx context.Context, arg ListException
 }
 
 const listExpiringExceptions = `-- name: ListExpiringExceptions :many
-SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
 FROM exceptions
 WHERE tenant_id = $1
   AND status = 'active'
@@ -541,6 +675,64 @@ func (q *Queries) ListExpiringExceptions(ctx context.Context, arg ListExpiringEx
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequestedExceptions = `-- name: ListRequestedExceptions :many
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
+FROM exceptions
+WHERE tenant_id = $1
+  AND status = 'requested'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the exceptions waiting for approval, for GET /v1/approvals and
+// its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+// (tenant_id, status) prefix.
+func (q *Queries) ListRequestedExceptions(ctx context.Context, tenantID pgtype.UUID) ([]Exception, error) {
+	rows, err := q.db.Query(ctx, listRequestedExceptions, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Exception
+	for rows.Next() {
+		var i Exception
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.CompensatingControls,
+			&i.RequestedBy,
+			&i.RequestedAt,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.DeniedBy,
+			&i.DeniedAt,
+			&i.ActivatedBy,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.ExpiredAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -580,6 +772,115 @@ func (q *Queries) ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockExceptionIdempotencyKey = `-- name: LockExceptionIdempotencyKey :exec
+SELECT pg_advisory_xact_lock(
+    12,
+    hashtext($1::text || '|' || $2::text || '|' || $3::text)
+)
+`
+
+type LockExceptionIdempotencyKeyParams struct {
+	TenantID       string `json:"tenant_id"`
+	RequestedBy    string `json:"requested_by"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// #2618: serialises two requests carrying the same Idempotency-Key, so the
+// second waits for the first to commit and then replays it. Released at
+// the end of the transaction. Namespace 12 is
+// advisorylock.ExceptionIdempotencyKey.
+func (q *Queries) LockExceptionIdempotencyKey(ctx context.Context, arg LockExceptionIdempotencyKeyParams) error {
+	_, err := q.db.Exec(ctx, lockExceptionIdempotencyKey, arg.TenantID, arg.RequestedBy, arg.IdempotencyKey)
+	return err
+}
+
+const putExceptionIdempotencyKey = `-- name: PutExceptionIdempotencyKey :exec
+INSERT INTO exception_idempotency_keys (
+    tenant_id, requested_by, idempotency_key, request_hash, exception_id, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, requested_by, idempotency_key) DO UPDATE
+SET request_hash = EXCLUDED.request_hash,
+    exception_id = EXCLUDED.exception_id,
+    created_at   = EXCLUDED.created_at
+`
+
+type PutExceptionIdempotencyKeyParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	ExceptionID    pgtype.UUID        `json:"exception_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// #2618: records the key against the exception it created. A key past its
+// window is overwritten.
+func (q *Queries) PutExceptionIdempotencyKey(ctx context.Context, arg PutExceptionIdempotencyKeyParams) error {
+	_, err := q.db.Exec(ctx, putExceptionIdempotencyKey,
+		arg.TenantID,
+		arg.RequestedBy,
+		arg.IdempotencyKey,
+		arg.RequestHash,
+		arg.ExceptionID,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const revokeException = `-- name: RevokeException :one
+UPDATE exceptions
+SET status = 'revoked',
+    revoked_by = $3,
+    revoked_at = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 'active'
+RETURNING id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
+`
+
+type RevokeExceptionParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ID        pgtype.UUID `json:"id"`
+	RevokedBy *string     `json:"revoked_by"`
+}
+
+// #2113: active -> revoked (terminal). An approver ends an active
+// exception before its expires_at; the reason lives on the paired audit
+// row. expires_at is left as granted, so the record shows both the
+// window that was approved and the moment it was cut short.
+func (q *Queries) RevokeException(ctx context.Context, arg RevokeExceptionParams) (Exception, error) {
+	row := q.db.QueryRow(ctx, revokeException, arg.TenantID, arg.ID, arg.RevokedBy)
+	var i Exception
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ControlID,
+		&i.ScopeCellPredicate,
+		&i.Justification,
+		&i.CompensatingControls,
+		&i.RequestedBy,
+		&i.RequestedAt,
+		&i.ApprovedBy,
+		&i.ApprovedAt,
+		&i.DeniedBy,
+		&i.DeniedAt,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.EffectiveFrom,
+		&i.ExpiresAt,
+		&i.ExpiredAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SelfApproved,
+		&i.RevokedBy,
+		&i.RevokedAt,
+	)
+	return i, err
 }
 
 const writeExceptionAuditLog = `-- name: WriteExceptionAuditLog :one

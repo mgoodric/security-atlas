@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 
 import {
   DEFAULT_GATE_MODE,
@@ -23,13 +24,14 @@ import {
   describeGateMode,
   parseGateMode,
 } from "../gate-mode";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 // --- Section 1.5: Tenant (admin/super_admin only) -------------------------
 //
 // Slice 144: rename-tenant flow. Admins see a tenant-name input field
 // + Save button. Renders only when the caller holds the admin role on
-// the CURRENT tenant (per slice 097 D3 pattern: client-side via
-// getSessionMe + an upstream-enforced 403 from the platform). The
+// the CURRENT tenant or is a super-admin (#2443: the page's
+// is_tenant_admin read, plus an upstream-enforced 403 from the platform). The
 // platform's authority gate is the canonical guard; the
 // hide-when-not-admin is UX-only and not load-bearing.
 //
@@ -67,15 +69,8 @@ async function patchTenantName(
     body: JSON.stringify({ name }),
   });
   if (!res.ok) {
-    const body = await res.text();
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(body) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
     const err = new Error(
-      parsed.error ?? `rename tenant: ${res.status}`,
+      await upstreamErrorMessage(res, `rename tenant: ${res.status}`),
     ) as Error & {
       status?: number;
     };
@@ -100,15 +95,8 @@ async function patchTenantGateMode(
     body: JSON.stringify({ bundle_gate_mode }),
   });
   if (!res.ok) {
-    const body = await res.text();
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(body) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
     const err = new Error(
-      parsed.error ?? `set gate policy: ${res.status}`,
+      await upstreamErrorMessage(res, `set gate policy: ${res.status}`),
     ) as Error & { status?: number };
     err.status = res.status;
     throw err;
@@ -123,6 +111,10 @@ async function patchTenantGateMode(
 
 export function TenantSection() {
   const qc = useQueryClient();
+  // #1764: on a single-tenant install the tenant is "your organisation"
+  // and its ID is not shown. Two or more tenants: as before.
+  const multiTenant = showTenantChrome(useTenancy());
+  const noun = multiTenant ? "tenant" : "organisation";
   const tenantsQuery = useQuery({
     queryKey: ["settings-my-tenants"],
     queryFn: fetchMyTenants,
@@ -160,10 +152,10 @@ export function TenantSection() {
       setSuccess(null);
       if (err.status === 409) {
         setConflict(
-          "Another tenant already uses that name. Pick a different one.",
+          `Another ${noun} already uses that name. Pick a different one.`,
         );
       } else if (err.status === 403) {
-        setConflict("You do not have permission to rename this tenant.");
+        setConflict(`You do not have permission to rename this ${noun}.`);
       } else {
         setConflict(err.message);
       }
@@ -179,10 +171,13 @@ export function TenantSection() {
   return (
     <Card id="tenant" data-testid="settings-section-tenant">
       <CardHeader>
-        <CardTitle>Tenant</CardTitle>
+        <CardTitle data-testid="settings-tenant-title">
+          {multiTenant ? "Tenant" : "Organisation"}
+        </CardTitle>
         <CardDescription>
-          Rename your current tenant. The new name shows up immediately in the
-          tenant switcher for everyone on this tenant.
+          {multiTenant
+            ? "Rename your current tenant. The new name shows up immediately in the tenant switcher for everyone on this tenant."
+            : "Your organisation's name and the settings that apply to everyone in it."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -190,7 +185,7 @@ export function TenantSection() {
           <Skeleton className="h-10 w-full" />
         ) : tenantsQuery.error ? (
           <Alert variant="destructive">
-            <AlertTitle>Could not load tenant</AlertTitle>
+            <AlertTitle>Could not load {noun}</AlertTitle>
             <AlertDescription>
               {(tenantsQuery.error as Error).message}
             </AlertDescription>
@@ -206,13 +201,17 @@ export function TenantSection() {
         ) : (
           <>
             <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
-              <dt className="text-muted-foreground">Tenant ID</dt>
-              <dd
-                className="col-span-2 font-mono text-xs text-foreground"
-                data-testid="settings-tenant-id"
-              >
-                {currentTenant.id}
-              </dd>
+              {multiTenant ? (
+                <>
+                  <dt className="text-muted-foreground">Tenant ID</dt>
+                  <dd
+                    className="col-span-2 font-mono text-xs text-foreground"
+                    data-testid="settings-tenant-id"
+                  >
+                    {currentTenant.id}
+                  </dd>
+                </>
+              ) : null}
               <dt className="text-muted-foreground">Name</dt>
               <dd className="col-span-2">
                 <Input
@@ -223,7 +222,7 @@ export function TenantSection() {
                     setSuccess(null);
                   }}
                   maxLength={64}
-                  aria-label="Tenant name"
+                  aria-label={multiTenant ? "Tenant name" : "Organisation name"}
                   data-testid="settings-tenant-name-input"
                 />
               </dd>
@@ -256,7 +255,12 @@ export function TenantSection() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <GatePolicyControl tenantId={currentTenant.id} />
+            <GatePolicyControl tenantId={currentTenant.id} noun={noun} />
+            <RiskReviewCadenceControl tenantId={currentTenant.id} noun={noun} />
+            <VendorInitialReviewControl
+              tenantId={currentTenant.id}
+              noun={noun}
+            />
           </>
         )}
       </CardContent>
@@ -278,7 +282,13 @@ export function TenantSection() {
 // enforces for an unchanged tenant) and, after a successful PATCH, reflects
 // the authoritative value the PATCH response returns. The pending-vs-persisted
 // distinction is surfaced honestly to the operator.
-function GatePolicyControl({ tenantId }: { tenantId: string }) {
+function GatePolicyControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
   // The committed value is what the server last confirmed (PATCH response) or
   // the documented default before any change this session. `selected` is the
   // operator's in-flight choice; it can diverge from `committed` until Save.
@@ -309,8 +319,8 @@ function GatePolicyControl({ tenantId }: { tenantId: string }) {
         </div>
         <p className="text-xs text-muted-foreground">
           Decides how the platform handles a control bundle whose tests fail or
-          that ships no tests. Applies to every control-bundle upload on this
-          tenant. Until you change it, this tenant uses the default (
+          that ships no tests. Applies to every control-bundle upload in this{" "}
+          {noun}. Until you change it, this {noun} uses the default (
           <code>strict</code>).
         </p>
       </div>
@@ -363,6 +373,296 @@ function GatePolicyControl({ tenantId }: { tenantId: string }) {
         <Alert variant="destructive">
           <AlertDescription data-testid="settings-tenant-gate-policy-error">
             {(mut.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+// #2059: the organisation risk review cadence. A risk created without a
+// review date is due this many days after creation; changing it affects new
+// risks only. Reads the current value from `GET /api/risks/review-cadence`
+// and writes through the same `PATCH /api/tenants/[id]` route as the name
+// and gate policy (admin or super_admin upstream).
+async function fetchRiskReviewCadence(): Promise<number> {
+  const res = await fetch("/api/risks/review-cadence", { cache: "no-store" });
+  if (!res.ok) throw new Error(`read risk review cadence: ${res.status}`);
+  const body = (await res.json()) as { risk_review_cadence_days?: unknown };
+  if (typeof body.risk_review_cadence_days !== "number") {
+    throw new Error("read risk review cadence: malformed response");
+  }
+  return body.risk_review_cadence_days;
+}
+
+async function patchRiskReviewCadence(
+  id: string,
+  risk_review_cadence_days: number,
+): Promise<number> {
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ risk_review_cadence_days }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      await upstreamErrorMessage(res, `set risk review cadence: ${res.status}`),
+    );
+  }
+  const json = (await res.json()) as {
+    tenant?: { risk_review_cadence_days?: unknown };
+  };
+  const days = json.tenant?.risk_review_cadence_days;
+  return typeof days === "number" ? days : risk_review_cadence_days;
+}
+
+function RiskReviewCadenceControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
+  const qc = useQueryClient();
+  const current = useQuery({
+    queryKey: ["risks", "review-cadence"],
+    queryFn: fetchRiskReviewCadence,
+  });
+  // null: the operator has not edited the field, so it shows the stored
+  // cadence.
+  const [edited, setEdited] = useState<string | null>(null);
+  const draft =
+    edited ?? (current.data === undefined ? "" : String(current.data));
+  const [saved, setSaved] = useState(false);
+
+  const mut = useMutation({
+    mutationFn: (days: number) => patchRiskReviewCadence(tenantId, days),
+    onSuccess: (days) => {
+      qc.setQueryData(["risks", "review-cadence"], days);
+      setEdited(null);
+      setSaved(true);
+    },
+  });
+
+  const days = Number(draft);
+  const valid = Number.isInteger(days) && days >= 1 && days <= 3650;
+  const dirty = current.data !== undefined && days !== current.data;
+
+  return (
+    <div
+      className="space-y-3 border-t border-border pt-4"
+      data-testid="settings-tenant-risk-review-cadence"
+    >
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          Risk review cadence
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A new risk in this {noun} is due for review this many days after it is
+          created, unless its creator picks another date. Changing the cadence
+          does not move the review dates of existing risks.
+        </p>
+      </div>
+      {current.isLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : (
+        <div className="flex items-center gap-3">
+          <Input
+            type="number"
+            min={1}
+            max={3650}
+            className="w-28"
+            value={draft}
+            disabled={mut.isPending || current.isError}
+            onChange={(e) => {
+              setEdited(e.target.value);
+              setSaved(false);
+            }}
+            aria-label="Risk review cadence in days"
+            data-testid="settings-tenant-risk-review-cadence-input"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setSaved(false);
+              mut.mutate(days);
+            }}
+            disabled={!valid || !dirty || mut.isPending}
+            data-testid="settings-tenant-risk-review-cadence-save"
+          >
+            {mut.isPending ? "Saving…" : "Save cadence"}
+          </Button>
+          {saved && !dirty ? (
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="settings-tenant-risk-review-cadence-saved"
+            >
+              New risks are due {current.data} days after creation.
+            </span>
+          ) : null}
+        </div>
+      )}
+      {!valid && draft !== "" ? (
+        <p className="text-xs text-destructive">
+          Enter a whole number of days from 1 to 3650.
+        </p>
+      ) : null}
+      {current.error || mut.error ? (
+        <Alert variant="destructive">
+          <AlertDescription data-testid="settings-tenant-risk-review-cadence-error">
+            {((mut.error ?? current.error) as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+// #2201: the organisation vendor initial-review window. A vendor that has
+// never been reviewed is due for its first review this many days after it
+// was created. Reads the current value from
+// `GET /api/vendors/initial-review-window` and writes through the same
+// `PATCH /api/tenants/[id]` route as the risk review cadence (admin or
+// super_admin upstream; each change is audited).
+async function fetchVendorInitialReviewDays(): Promise<number> {
+  const res = await fetch("/api/vendors/initial-review-window", {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`read vendor initial review window: ${res.status}`);
+  }
+  const body = (await res.json()) as { vendor_initial_review_days?: unknown };
+  if (typeof body.vendor_initial_review_days !== "number") {
+    throw new Error("read vendor initial review window: malformed response");
+  }
+  return body.vendor_initial_review_days;
+}
+
+async function patchVendorInitialReviewDays(
+  id: string,
+  vendor_initial_review_days: number,
+): Promise<number> {
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vendor_initial_review_days }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      await upstreamErrorMessage(
+        res,
+        `set vendor initial review window: ${res.status}`,
+      ),
+    );
+  }
+  const json = (await res.json()) as {
+    tenant?: { vendor_initial_review_days?: unknown };
+  };
+  const days = json.tenant?.vendor_initial_review_days;
+  return typeof days === "number" ? days : vendor_initial_review_days;
+}
+
+function VendorInitialReviewControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
+  const qc = useQueryClient();
+  const current = useQuery({
+    queryKey: ["vendors", "initial-review-window"],
+    queryFn: fetchVendorInitialReviewDays,
+  });
+  // null: the operator has not edited the field, so it shows the stored
+  // window.
+  const [edited, setEdited] = useState<string | null>(null);
+  const draft =
+    edited ?? (current.data === undefined ? "" : String(current.data));
+  const [saved, setSaved] = useState(false);
+
+  const mut = useMutation({
+    mutationFn: (days: number) => patchVendorInitialReviewDays(tenantId, days),
+    onSuccess: (days) => {
+      qc.setQueryData(["vendors", "initial-review-window"], days);
+      setEdited(null);
+      setSaved(true);
+    },
+  });
+
+  const days = Number(draft);
+  const valid = Number.isInteger(days) && days >= 1 && days <= 365;
+  const dirty = current.data !== undefined && days !== current.data;
+
+  return (
+    <div
+      className="space-y-3 border-t border-border pt-4"
+      data-testid="settings-tenant-vendor-initial-review"
+    >
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          Vendor first review window
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A vendor in this {noun} that has never been reviewed is due for its
+          first review this many days after it is added, and is overdue only
+          after that day. Changing the window moves the first review date of
+          every vendor not yet reviewed.
+        </p>
+      </div>
+      {current.isLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : (
+        <div className="flex items-center gap-3">
+          <Input
+            type="number"
+            min={1}
+            max={365}
+            className="w-28"
+            value={draft}
+            disabled={mut.isPending || current.isError}
+            onChange={(e) => {
+              setEdited(e.target.value);
+              setSaved(false);
+            }}
+            aria-label="Vendor first review window in days"
+            data-testid="settings-tenant-vendor-initial-review-input"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setSaved(false);
+              mut.mutate(days);
+            }}
+            disabled={!valid || !dirty || mut.isPending}
+            data-testid="settings-tenant-vendor-initial-review-save"
+          >
+            {mut.isPending ? "Saving…" : "Save window"}
+          </Button>
+          {saved && !dirty ? (
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="settings-tenant-vendor-initial-review-saved"
+            >
+              Unreviewed vendors are due {current.data} days after they are
+              added.
+            </span>
+          ) : null}
+        </div>
+      )}
+      {!valid && draft !== "" ? (
+        <p className="text-xs text-destructive">
+          Enter a whole number of days from 1 to 365.
+        </p>
+      ) : null}
+      {current.error || mut.error ? (
+        <Alert variant="destructive">
+          <AlertDescription data-testid="settings-tenant-vendor-initial-review-error">
+            {((mut.error ?? current.error) as Error).message}
           </AlertDescription>
         </Alert>
       ) : null}

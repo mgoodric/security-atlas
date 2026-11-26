@@ -98,7 +98,8 @@ func Generate(w io.Writer, routes []RouteSpec) error {
 	if _, err := io.WriteString(w, componentsSection()); err != nil {
 		return err
 	}
-	return nil
+	// Schemas reflected from Go wire structs (#2394).
+	return writeSchemaComponents(w)
 }
 
 // header returns the top-of-file OpenAPI metadata block.
@@ -193,6 +194,12 @@ components:
         error:
           type: string
           description: Human-readable error message.
+        code:
+          type: string
+          description: |
+            Optional stable machine-readable code for a refusal a client
+            must tell apart from others with the same status (for example
+            ` + "`audit_period_not_found`" + `). Match on this, not on the message.
       description: |
         Generic error envelope. Specific operations may return richer
         error shapes (validation details, field-level messages); this
@@ -223,26 +230,104 @@ components:
         ` + "`POST /v1/policies/{id}/publish`" + `).
     SearchResponse:
       type: object
-      required: [hits, count, partial_types]
+      required: [hits, count, groups, partial_types]
       properties:
         hits:
           type: array
           items:
             $ref: "#/components/schemas/SearchHit"
+          description: Hits grouped by type in the order controls, risks, policies, evidence, anchors; best match first within a group. The limit is shared across groups.
         count:
           type: integer
           minimum: 0
-          description: Number of hits returned after relevance sorting and the global limit.
+          description: Number of hits returned after grouping and the global limit.
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchGroup"
+          description: One entry per admitted type, in group order, with that type's full match count.
         partial_types:
           type: array
           items:
             type: string
-            enum: [anchors, controls, risks, evidence]
+            enum: [controls, risks, policies, evidence, anchors]
           description: Requested types omitted because per-type authorization denied them.
       description: |
         Unified lexical search response for ` + "`GET /v1/search`" + `. Controls,
-        risks, and evidence are tenant-confined by database RLS. Anchors are
-        bundled tenant-agnostic catalog rows.
+        risks, policies, and evidence are tenant-confined by database RLS.
+        Anchors are bundled tenant-agnostic catalog rows.
+    SearchGroup:
+      type: object
+      required: [type, count]
+      properties:
+        type:
+          type: string
+          enum: [controls, risks, policies, evidence, anchors]
+          description: Result type.
+        count:
+          type: integer
+          minimum: 0
+          description: Every row of this type matching the query that the caller can see, which may exceed the hits returned.
+    ResetBootstrapRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          description: Allow the reset after a first sign-in has happened. Without it that case is refused with 409.
+        tenant_id:
+          type: string
+          format: uuid
+          description: Optional. When set, must be the caller's tenant; the key is always minted for the caller's tenant.
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 604800
+          description: Lifetime of the recovery key in seconds. 0 or absent means 86400 (24h); the cap is 604800 (7d). There is no non-expiring recovery key.
+      description: |
+        Body of ` + "`POST /v1/admin/install/reset-bootstrap`" + `. The platform mints
+        the recovery credential itself; a ` + "`token`" + ` field sent by an older
+        CLI is ignored.
+    ResetBootstrapResponse:
+      type: object
+      required:
+        - file_written
+        - status_reset
+        - credential_id
+        - tenant_id
+        - bearer_token
+        - expires_at
+        - revoked_credential_ids
+      properties:
+        file_written:
+          type: boolean
+          description: The bearer was written to the bootstrap-token file. False when the server has no file path configured.
+        status_reset:
+          type: boolean
+          description: platform_status first-sign-in and bootstrap-consumed markers were cleared.
+        credential_id:
+          type: string
+          description: Id of the minted recovery admin key. Revoke it with ` + "`atlas-cli credentials revoke`" + ` once you have signed in another way.
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant the key is minted for, always the caller's tenant.
+        bearer_token:
+          type: string
+          description: Plaintext of the recovery key. Returned once and never logged.
+        expires_at:
+          type: string
+          format: date-time
+          description: When the recovery key stops authenticating.
+        revoked_credential_ids:
+          type: array
+          items:
+            type: string
+          description: Recovery keys earlier resets minted that this reset revoked.
+      description: |
+        A fresh admin credential for the caller's tenant, marked
+        bootstrap-recovery. The first sign-in by a different credential
+        revokes it; a sign-in with the key itself keeps it until it expires.
     SearchHit:
       type: object
       required: [id, type, title, snippet, relevance_score]
@@ -252,7 +337,7 @@ components:
           description: Stable identifier for the matched row or bundled anchor.
         type:
           type: string
-          enum: [anchors, controls, risks, evidence]
+          enum: [controls, risks, policies, evidence, anchors]
           description: Result discriminator used by clients for grouping and routing.
         title:
           type: string
@@ -400,12 +485,30 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		}
 		return nil
 	}
+	if isResetBootstrapOperation(r) {
+		_, err := io.WriteString(w, resetBootstrapOperationDetails)
+		return err
+	}
+	if isSoAExportOperation(r) {
+		_, err := io.WriteString(w, soaExportOperationDetails)
+		return err
+	}
+	if details, ok := pdfExportOperationDetails(r); ok {
+		_, err := io.WriteString(w, details)
+		return err
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
 	// GETs) currently document with the Ack placeholder — the
 	// integration is path/method-stable, body shape is documented in
 	// the slice docs until the spec catches up.
+	// An operation in ResponseSchemas documents its 200 body from the Go
+	// wire struct (#2394) and keeps Error as the default.
+	if schema := responseSchemaFor(r); schema != "" {
+		return writeTypedResponses(w, schema)
+	}
+	schema := "Ack"
 	if _, err := io.WriteString(w, "      responses:\n"); err != nil {
 		return err
 	}
@@ -424,15 +527,235 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 	if _, err := io.WriteString(w, "              schema:\n"); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, "                $ref: \"#/components/schemas/Ack\"\n"); err != nil {
+	if _, err := fmt.Fprintf(w, "                $ref: \"#/components/schemas/%s\"\n", schema); err != nil {
 		return err
 	}
 	return nil
 }
 
+func writeTypedResponses(w io.Writer, schema string) error {
+	_, err := fmt.Fprintf(w, `      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/%s"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`, schema)
+	return err
+}
+
 func isSearchOperation(r RouteSpec) bool {
 	return r.Method == "GET" && r.Path == "/v1/search"
 }
+
+func isResetBootstrapOperation(r RouteSpec) bool {
+	return r.Method == "POST" && r.Path == "/v1/admin/install/reset-bootstrap"
+}
+
+// resetBootstrapOperationDetails documents the reset endpoint's body and
+// responses (#1892) in place of the generic Ack.
+const resetBootstrapOperationDetails = `      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetBootstrapRequest"
+      responses:
+        "200":
+          description: Status reset and recovery admin key minted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetBootstrapResponse"
+        "400":
+          description: Invalid body, tenant_id not the caller's, a caller with no tenant (or the all-zeros tenant), or ttl_seconds out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Not super_admin, and not an admin key on a single-tenant install.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A first sign-in has happened and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: The status reset, key mint or file write failed. A key whose bearer could not be written is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Platform resetter, credential store or write pool not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+func isSoAExportOperation(r RouteSpec) bool {
+	return r.Method == "GET" && r.Path == "/v1/framework-scopes/applicability/export"
+}
+
+// soaExportOperationDetails documents the Statement of Applicability export's
+// query parameters and file responses (#1791, #2048) in place of the generic
+// Ack.
+const soaExportOperationDetails = `      parameters:
+        - name: framework_version
+          in: query
+          required: true
+          description: Framework version id. Every requirement of this version is exported.
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: true
+          description: csv is the bare table, header first, and reads back through POST /v1/framework-scopes/{id}/applicability/import. xlsx adds a title block above the same table.
+          schema:
+            type: string
+            enum: [csv, xlsx]
+        - name: revision
+          in: query
+          required: false
+          description: Scope revision id to export instead of the activated revision. Mutually exclusive with as_of.
+          schema:
+            type: string
+            format: uuid
+        - name: as_of
+          in: query
+          required: false
+          description: RFC3339 time; exports the revision in force then, or every requirement undecided when none was. Mutually exclusive with revision.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: >-
+            The export file, as an attachment. Cells a spreadsheet would read as a formula
+            (leading = + - @, tab or carriage return) are prefixed with a single quote in CSV;
+            the import strips it. The contradiction column is always evaluated against current
+            control results, including for as_of and a non-activated revision; the xlsx states
+            this in its title block, the CSV carries no preamble.
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Bad framework_version, format, revision or as_of; revision and as_of together; or a revision of another framework version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown framework version or revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+// pdfExportOperationDetails documents the PDF export routes' refusals
+// (#2786): 409 feature_not_enabled when the deployment has no Chrome, and,
+// for the routes behind the shared render limiter, a retryable 503 with
+// Retry-After when the render times out or the queue is full. The policy PDF
+// does not go through the limiter, so it has no 503.
+func pdfExportOperationDetails(r RouteSpec) (string, bool) {
+	switch {
+	case r.Method == "GET" && r.Path == "/v1/policies/{id}/pdf":
+		return pdfOKResponse + pdfChromeAbsentResponse + pdfDefaultResponse, true
+	case r.Method == "GET" && r.Path == "/v1/board-briefs/{id}/pdf",
+		r.Method == "GET" && r.Path == "/v1/board-packs/{id}/pdf",
+		r.Method == "POST" && r.Path == "/v1/questionnaires/{id}/export-pdf":
+		return pdfOKResponse + pdfChromeAbsentResponse + pdfRenderBusyResponse + pdfDefaultResponse, true
+	case r.Method == "GET" && r.Path == "/v1/walkthroughs/{id}/export":
+		return walkthroughExportOKResponse + pdfChromeAbsentResponse + pdfRenderBusyResponse + pdfDefaultResponse, true
+	}
+	return "", false
+}
+
+const pdfOKResponse = `      responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+`
+
+const walkthroughExportOKResponse = `      responses:
+        "200":
+          description: The walkthrough as a PDF for format=pdf, or as JSON for format=json.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+`
+
+const pdfChromeAbsentResponse = `        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+const pdfDefaultResponse = `        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+const pdfRenderBusyResponse = `        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
 
 func isSchemaRegistryReadOperation(r RouteSpec) bool {
 	return r.Method == "GET" && (r.Path == "/v1/schemas" || r.Path == "/v1/schemas/{kind}/{semver}")
@@ -478,7 +801,7 @@ func writeSearchOperationDetails(w io.Writer) error {
           description: Comma-separated result types. Omit for all supported types.
           schema:
             type: string
-            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            pattern: "^(controls|risks|policies|evidence|anchors)(,(controls|risks|policies|evidence|anchors))*$"
             examples: ["controls,risks,evidence"]
         - name: limit
           in: query

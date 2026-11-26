@@ -65,16 +65,6 @@ CREATE TYPE control_lifecycle_state AS ENUM (
     'retired'
 );
 
-CREATE TYPE risk_category AS ENUM (
-    'confidentiality',
-    'integrity',
-    'availability',
-    'privacy',
-    'regulatory',
-    'operational',
-    'financial'
-);
-
 CREATE TYPE risk_methodology AS ENUM (
     'nist_800_30',
     'fair',
@@ -87,7 +77,22 @@ CREATE TYPE risk_treatment AS ENUM (
     'accept',
     'mitigate',
     'transfer',
-    'avoid'
+    'avoid',
+    'untreated'
+);
+
+CREATE TYPE risk_acceptance_status AS ENUM (
+    'proposed',
+    'approved'
+);
+
+-- #2107: the risk lifecycle.
+CREATE TYPE risk_status AS ENUM ('open', 'closed');
+
+CREATE TYPE risk_closure_reason AS ENUM (
+    'not_applicable',
+    'merged',
+    'realised_and_handled'
 );
 
 CREATE TYPE scope_environment AS ENUM (
@@ -108,7 +113,8 @@ CREATE TYPE evidence_result AS ENUM (
     'pass',
     'fail',
     'na',
-    'inconclusive'
+    'inconclusive',
+    'excepted'
 );
 
 CREATE TYPE evidence_freshness_class AS ENUM (

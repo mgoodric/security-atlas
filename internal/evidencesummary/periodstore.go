@@ -11,7 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -135,11 +137,30 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.ControlID = controlID
 		out.ControlTitle = ctrl.Title
 
+		// A period frozen before the routing cutover reads no control-free
+		// routed record (#2924).
+		kinds, err := routed.KindsForPeriod(ctx, q, period.FrozenAt)
+		if err != nil {
+			return err
+		}
+		// The period's latest freeze revision: the records an import
+		// amendment added join the frozen population (#1742).
+		amended, err := auditperiod.AmendedIDs(ctx, q, pgUUID(tenantID), pgUUID(auditPeriodID), auditperiod.LatestRevision)
+		if err != nil {
+			return fmt.Errorf("evidencesummary: %w", err)
+		}
+		amendedSet := make(map[uuid.UUID]bool, len(amended))
+		for _, id := range amended {
+			amendedSet[uuid.UUID(id.Bytes)] = true
+		}
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			FrozenAt:   period.FrozenAt,
+			UnboundKinds: kinds,
+			RoutedKinds:  routed.Within(kinds),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			FrozenAt:     period.FrozenAt,
+			AmendedIds:   amended,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: count frozen evidence: %w", err)
@@ -147,12 +168,15 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			FrozenAt:   period.FrozenAt,
-			Limit:      MaxCitedExcerpts,
-			Offset:     0,
+			UnboundKinds: kinds,
+			RoutedKinds:  routed.Within(kinds),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			FrozenAt:     period.FrozenAt,
+			AmendedIds:   amended,
+			Limit:        MaxCitedExcerpts,
+			Offset:       0,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: list frozen evidence: %w", err)
@@ -170,6 +194,9 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 				ef.ObservedAt = r.ObservedAt.Time.UTC()
 			}
 			out.Records = append(out.Records, ef)
+			if amendedSet[ef.EvidenceID] {
+				out.Amended = append(out.Amended, ef.EvidenceID)
+			}
 		}
 		return nil
 	})
@@ -220,16 +247,22 @@ func (s *PeriodStore) ResolveBeforeHorizon(ctx context.Context, id, controlID uu
 		// in-population id beyond the excerpt bound still resolves — the grounding
 		// gate already capped what the model could see, this gate only confirms
 		// tenant + frozen-population membership.
+		kinds, err := routed.KindsForPeriod(ctx, q, horizon)
+		if err != nil {
+			return err
+		}
 		const pageSize = 500
 		offset := int32(0)
 		for {
 			recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-				TenantID:   pgUUID(tenantID),
-				ControlID:  pgUUID(controlID),
-				ControlRef: controlID.String(),
-				FrozenAt:   horizon,
-				Limit:      pageSize,
-				Offset:     offset,
+				UnboundKinds: kinds,
+				RoutedKinds:  routed.Within(kinds),
+				TenantID:     pgUUID(tenantID),
+				ControlID:    pgUUID(controlID),
+				ControlRef:   controlID.String(),
+				FrozenAt:     horizon,
+				Limit:        pageSize,
+				Offset:       offset,
 			})
 			if err != nil {
 				return fmt.Errorf("evidencesummary: resolve frozen evidence: %w", err)

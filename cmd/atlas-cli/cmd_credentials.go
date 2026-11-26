@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -45,9 +49,6 @@ func newCredentialsIssueCmd() *cobra.Command {
 		Use:   "issue",
 		Short: "issue a new API key (bearer returned once)",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if f.tenant == "" {
-				return fmt.Errorf("--tenant is required")
-			}
 			return resolveCommon()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,14 +56,12 @@ func newCredentialsIssueCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Slice 073 — when --reset-bootstrap is set, we (1) call
-			// Issue normally to mint a fresh admin bearer, (2) parse
-			// the response to extract the bearer plaintext, (3) POST
-			// the bearer + --force to the admin reset-bootstrap endpoint
-			// so atlas resets platform_status AND writes the new token
-			// to the bootstrap-token file. The endpoint refuses without
-			// --force when a real user has already signed in (AC-8 /
-			// P0-A6 foot-gun gate).
+			// Slice 073 — when --reset-bootstrap is set, we POST --force
+			// to the admin reset-bootstrap endpoint, which resets
+			// platform_status, mints a fresh ADMIN credential for
+			// --tenant and writes it to the bootstrap-token file
+			// (#1885). The endpoint refuses without --force when a real
+			// user has already signed in (AC-8 / P0-A6 foot-gun gate).
 			if !f.resetBootstrap {
 				return runAdminRPC(func(ctx context.Context, c adminv1.AdminCredentialsServiceClient) (proto.Message, error) {
 					return c.Issue(ctx, &adminv1.IssueRequest{
@@ -73,13 +72,20 @@ func newCredentialsIssueCmd() *cobra.Command {
 					})
 				})
 			}
-			return runResetBootstrap(f.tenant, f.scope, splitKinds(f.kinds), ttl, f.force, f.httpEndpoint)
+			// The recovery key is a tenant admin key: --scope and --kinds
+			// do not apply, and are refused rather than silently dropped
+			// (#1892). --ttl sets its lifetime; the server defaults it to
+			// 24h and caps it at 7d.
+			if cmd.Flags().Changed("scope") || cmd.Flags().Changed("kinds") {
+				return fmt.Errorf("--scope and --kinds do not apply to --reset-bootstrap (it mints a tenant admin key)")
+			}
+			return runResetBootstrap(f.tenant, f.force, f.httpEndpoint, ttl)
 		},
 	}
-	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant id [required]")
+	cmd.Flags().StringVar(&f.tenant, "tenant", "", credentialTenantFlagHelp)
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope predicate (JSON string)")
 	cmd.Flags().StringVar(&f.kinds, "kinds", "", "comma-separated evidence_kind identifiers (empty = all)")
-	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry)")
+	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 or 0d = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
 	// Slice 073 — recovery flags. --reset-bootstrap is the discoverable
 	// flag; --force is the foot-gun gate. See docs/issues/073-*.md AC-8.
 	cmd.Flags().BoolVar(&f.resetBootstrap, "reset-bootstrap", false,
@@ -87,44 +93,69 @@ func newCredentialsIssueCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.force, "force", false,
 		"with --reset-bootstrap: allow the reset after first sign-in has occurred")
 	cmd.Flags().StringVar(&f.httpEndpoint, "http-endpoint", "",
-		"with --reset-bootstrap: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint")
+		"with --reset-bootstrap and a JWT --token: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint. With an API key (as --token), the reset goes over gRPC at --endpoint")
 	return cmd
 }
 
-// runResetBootstrap implements the slice-073 --reset-bootstrap flow:
-//  1. gRPC AdminCredentialsService.Issue to mint a fresh admin bearer.
-//  2. POST /v1/admin/install/reset-bootstrap with the new token + force
-//     flag. atlas resets platform_status (refuses without --force when
-//     first_signin_at is already set) AND writes the new token to the
-//     bootstrap-token file.
-//
-// Returns the printed response from step 1 (the credential metadata +
-// bearer plaintext, exactly as `credentials issue` would).
-func runResetBootstrap(tenant, scope string, kinds []string, ttl time.Duration, force bool, httpEndpoint string) error {
-	// Step 1 — issue.
-	ctx, cancel := newAdminContext(10 * time.Second)
-	defer cancel()
-	client, conn, err := newAdminClient()
+// jwtPrefix begins every JWS compact serialization (base64url of
+// `{"alg":`). The server's /v1 middleware uses the same shape check.
+const jwtPrefix = "eyJ"
+
+// runResetBootstrap routes --reset-bootstrap by the shape of --token
+// (#2121). /v1 accepts only JWTs, so a super_admin JWT goes over HTTP; an
+// API key, such as ATLAS_BOOTSTRAP_TOKEN, goes over gRPC, where API keys
+// authenticate. Both reach the same reset on the server.
+func runResetBootstrap(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
+	if strings.HasPrefix(common.token, jwtPrefix) {
+		return runResetBootstrapHTTP(tenant, force, httpEndpoint, ttl)
+	}
+	return runResetBootstrapGRPC(tenant, force, ttl)
+}
+
+// runResetBootstrapGRPC calls AdminCredentialsService.ResetBootstrap with
+// the operator's admin API key. The server admits it only on a
+// single-tenant install.
+func runResetBootstrapGRPC(tenant string, force bool, ttl time.Duration) error {
+	if ttl < 0 || (ttl > 0 && ttl < time.Second) {
+		return fmt.Errorf("--ttl %s: must be at least 1s with --reset-bootstrap", ttl)
+	}
+	req := &adminv1.ResetBootstrapRequest{Force: force, TenantId: tenant}
+	if ttl > 0 {
+		req.Ttl = durationpb.New(ttl)
+	}
+	err := runAdminRPC(func(ctx context.Context, c adminv1.AdminCredentialsServiceClient) (proto.Message, error) {
+		resp, err := c.ResetBootstrap(ctx, req)
+		if status.Code(err) == codes.FailedPrecondition {
+			return nil, fmt.Errorf("reset refused: a real user has already signed in; re-run with --force to override: %w", err)
+		}
+		return resp, err
+	})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	printResetBootstrapGuidance()
+	return nil
+}
 
-	resp, err := client.Issue(ctx, &adminv1.IssueRequest{
-		TenantId:       tenant,
-		ScopePredicate: scope,
-		Kinds:          kinds,
-		Ttl:            durationpb.New(ttl),
-	})
-	if err != nil {
-		return fmt.Errorf("issue: %w", err)
-	}
-	bearer := resp.GetBearerToken()
-	if bearer == "" {
-		return fmt.Errorf("issue: response missing bearer plaintext")
-	}
+func printResetBootstrapGuidance() {
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: platform_status cleared and bootstrap-token file rewritten with a new admin credential")
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: the key expires at expires_at; after you sign in another way, revoke it with `atlas-cli credentials revoke --id <credential_id>`")
+}
 
-	// Step 2 — reset platform_status + write file.
+// runResetBootstrapHTTP implements the slice-073 --reset-bootstrap flow: one
+// POST /v1/admin/install/reset-bootstrap carrying --force and --tenant,
+// authorized by the operator's --token. atlas resets platform_status
+// (refuses without --force when first_signin_at is already set), mints a
+// fresh admin credential for the tenant and writes it to the
+// bootstrap-token file (#1885). The CLI prints the returned credential
+// (id, tenant, bearer plaintext) once.
+//
+// Before #1885 the CLI minted the token itself over the admin gRPC Issue
+// RPC, which mints only non-admin keys, so signing in with the recovered
+// token gave a non-admin session.
+//
+// ttl is the recovery key's lifetime; 0 leaves the server default (#1892).
+func runResetBootstrapHTTP(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
 	endpoint := httpEndpoint
 	if endpoint == "" {
 		endpoint = deriveHTTPEndpoint(common.endpoint)
@@ -132,19 +163,50 @@ func runResetBootstrap(tenant, scope string, kinds []string, ttl time.Duration, 
 	if endpoint == "" {
 		return fmt.Errorf("--http-endpoint or derivable from --endpoint is required for --reset-bootstrap")
 	}
-	body, err := json.Marshal(map[string]any{
-		"token": bearer,
-		"force": force,
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	respBody, err := postResetBootstrap(ctx, endpoint, common.token, tenant, force, ttl)
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return err
+	}
+	// Print the server's response (credential_id, tenant_id, bearer_token,
+	// status flags) as indented JSON.
+	var out bytes.Buffer
+	if err := json.Indent(&out, respBody, "", "  "); err != nil {
+		return fmt.Errorf("decode reset-bootstrap response: %w", err)
+	}
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), out.String())
+	printResetBootstrapGuidance()
+	return nil
+}
+
+// postResetBootstrap sends the reset POST to endpoint with operatorToken as
+// the bearer and returns the 200 response body.
+func postResetBootstrap(ctx context.Context, endpoint, operatorToken, tenant string, force bool, ttl time.Duration) ([]byte, error) {
+	if ttl < 0 || (ttl > 0 && ttl < time.Second) {
+		return nil, fmt.Errorf("--ttl %s: must be at least 1s with --reset-bootstrap", ttl)
+	}
+	payload := map[string]any{"force": force}
+	if tenant != "" {
+		// Omitted, the server mints for the caller's own tenant.
+		payload["tenant_id"] = tenant
+	}
+	if ttl > 0 {
+		payload["ttl_seconds"] = int64(ttl / time.Second)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 	url := strings.TrimRight(endpoint, "/") + "/v1/admin/install/reset-bootstrap"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("new request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	// The reset is authorized by the operator's own credential: a
+	// super_admin JWT, or an admin API key on a single-tenant install
+	// (#1851, ADR 0003 amendment).
+	req.Header.Set("Authorization", "Bearer "+operatorToken)
 	req.Header.Set("Content-Type", "application/json")
 	// Slice 088: explicit per-call timeout via cmdhttp.Client.
 	// Credential bootstrap-reset may invoke cosign for issuance
@@ -154,24 +216,17 @@ func runResetBootstrap(tenant, scope string, kinds []string, ttl time.Duration, 
 	// stall the CLI indefinitely. See cmd/atlas-cli/cmdhttp/client.go.
 	httpResp, err := cmdhttp.Client(30 * time.Second).Do(req)
 	if err != nil {
-		return fmt.Errorf("reset-bootstrap POST: %w", err)
+		return nil, fmt.Errorf("reset-bootstrap POST: %w", err)
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 8192))
 	if httpResp.StatusCode == http.StatusConflict {
-		return fmt.Errorf("reset refused: a real user has already signed in; re-run with --force to override (status %d, body %s)", httpResp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("reset refused: a real user has already signed in; re-run with --force to override (status %d, body %s)", httpResp.StatusCode, string(respBody))
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("reset-bootstrap failed: status %d, body %s", httpResp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("reset-bootstrap failed: status %d, body %s", httpResp.StatusCode, string(respBody))
 	}
-
-	// Print the bearer like a normal `issue` would — same shape so
-	// scripts that piped from `credentials issue` keep working.
-	if err := printJSON(resp); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: platform_status cleared and bootstrap-token file rewritten")
-	return nil
+	return respBody, nil
 }
 
 // deriveHTTPEndpoint takes a gRPC endpoint like "localhost:50051" and
@@ -234,16 +289,21 @@ func newCredentialsListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "list active credentials for a tenant (metadata only)",
-		PreRunE: requireOneFlag(&tenant, "--tenant"),
+		PreRunE: func(*cobra.Command, []string) error { return resolveCommon() },
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdminRPC(func(ctx context.Context, c adminv1.AdminCredentialsServiceClient) (proto.Message, error) {
 				return c.List(ctx, &adminv1.ListRequest{TenantId: tenant})
 			})
 		},
 	}
-	cmd.Flags().StringVar(&tenant, "tenant", "", "tenant id [required]")
+	cmd.Flags().StringVar(&tenant, "tenant", "", credentialTenantFlagHelp)
 	return cmd
 }
+
+// credentialTenantFlagHelp is the --tenant help on the API-backed
+// credentials commands: the server fills an omitted tenant from the
+// caller's own credential (#1762).
+const credentialTenantFlagHelp = "tenant id; optional on a single-tenant install (default: the tenant of the --token credential)"
 
 // requireOneFlag returns a PreRunE that asserts *val != "" and resolves
 // the shared --endpoint / --token / --insecure flags.
@@ -270,9 +330,18 @@ func splitKinds(s string) []string {
 	return out
 }
 
+// parseDuration reads --ttl: a Go duration (24h, 90m) or a whole number
+// of days (30d), which time.ParseDuration does not accept (#2100).
 func parseDuration(s string) (time.Duration, error) {
 	if s == "" || s == "0" {
 		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseInt(days, 10, 64)
+		if err != nil || n < 0 || n > math.MaxInt64/int64(24*time.Hour) {
+			return 0, fmt.Errorf("--ttl %q: days must be a whole number, e.g. 30d", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {

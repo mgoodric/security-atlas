@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AttestForm } from "@/components/attest/AttestForm";
+import { PageShell } from "@/components/shell/page-shell";
 import {
   getAttestForm,
   type AttestForm as AttestFormShape,
@@ -31,7 +32,11 @@ export default async function AttestPage({
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return (
-      <div className="container mx-auto max-w-3xl py-8">
+      <PageShell
+        width="reading"
+        title="Attest control"
+        subtitle={<code className="font-mono">{id}</code>}
+      >
         <Card>
           <CardHeader>
             <CardTitle>Attestation unavailable</CardTitle>
@@ -44,12 +49,16 @@ export default async function AttestPage({
             </p>
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="container mx-auto max-w-3xl py-8 space-y-6">
+    <PageShell
+      width="reading"
+      title="Attest control"
+      subtitle={<code className="font-mono">{id}</code>}
+    >
       <Card>
         <CardHeader>
           <CardTitle>{form.title}</CardTitle>
@@ -87,6 +96,6 @@ export default async function AttestPage({
           <AttestForm form={form} />
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

@@ -9,7 +9,7 @@
 //	GET    /v1/metrics/{id}/observations        observations series
 //	POST   /v1/metrics/{id}/inputs              append a manual input (audit-trail)
 //	GET    /v1/metrics/{id}/target              read tenant's target
-//	PUT    /v1/metrics/{id}/target              upsert tenant's target
+//	PUT    /v1/metrics/{id}/target              upsert tenant's target (audited, #2572)
 //
 // All routes require an authenticated tenant context. The catalog +
 // cascade reads are platform-shared (visible to every tenant). The
@@ -40,7 +40,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -67,7 +69,8 @@ const DefaultObservationWindow = 90 * 24 * time.Hour
 
 // Handler bundles every slice-076 route over the platform pool.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
@@ -171,8 +174,16 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list catalog", err)
 		return
 	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "metrics module access", err)
+		return
+	}
 	out := make([]metricWire, 0, len(rows))
 	for _, row := range rows {
+		if !seesMetric(set, row.ID, row.Category) {
+			continue
+		}
 		out = append(out, metricWireFromRow(row))
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -203,6 +214,16 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get catalog", err)
 		return
 	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "metrics module access", err)
+		return
+	}
+	// #2173: a hidden module's metric reads as absent, not forbidden.
+	if !seesMetric(set, row.ID, row.Category) {
+		httpresp.WriteError(w, http.StatusNotFound, "metric not found")
+		return
+	}
 	parents, err := q.ListMetricCatalogParents(r.Context(), id)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list parents", err)
@@ -219,10 +240,14 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		Children: make([]metricWire, 0, len(children)),
 	}
 	for _, p := range parents {
-		out.Parents = append(out.Parents, metricWireFromRow(p))
+		if seesMetric(set, p.ID, p.Category) {
+			out.Parents = append(out.Parents, metricWireFromRow(p))
+		}
 	}
 	for _, c := range children {
-		out.Children = append(out.Children, metricWireFromRow(c))
+		if seesMetric(set, c.ID, c.Category) {
+			out.Children = append(out.Children, metricWireFromRow(c))
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, out)
 }
@@ -259,11 +284,33 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "cascade", err)
 		return
 	}
+	// #2173: a hidden module's metric is pruned with its subtree, so no
+	// node points at a parent the response leaves out. The cascade rows
+	// carry no category, so the catalog supplies it.
+	set, err := h.moduleSet(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "metrics module access", err)
+		return
+	}
+	catalog, err := dbx.New(h.pool).ListMetricsCatalog(r.Context(), dbx.ListMetricsCatalogParams{})
+	if err != nil {
+		httperr.WriteInternal(w, r, "cascade catalog", err)
+		return
+	}
+	categoryOf := make(map[string]string, len(catalog))
+	for _, m := range catalog {
+		categoryOf[m.ID] = m.Category
+	}
+	pruned := map[string]bool{}
 	out := make([]cascadeNodeWire, 0, len(rows))
 	for _, row := range rows {
 		parent := ""
 		if row.ParentID != nil {
 			parent = *row.ParentID
+		}
+		if pruned[parent] || !seesMetric(set, row.MetricID, categoryOf[row.MetricID]) {
+			pruned[row.MetricID] = true
+			continue
 		}
 		out = append(out, cascadeNodeWire{
 			MetricID: row.MetricID,
@@ -324,6 +371,9 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if h.hideMetric(w, r, id) {
+		return
+	}
 	var rows []dbx.MetricObservation
 	err := h.runInTx(ctx, func(q *dbx.Queries) error {
 		var inErr error
@@ -361,7 +411,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsAdmin {
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -385,15 +435,25 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "lookup", err)
 		return
 	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "metrics module access", err)
+		return
+	}
+	// #2477: a hidden module's metric takes no input; it reads as absent.
+	if !seesMetric(set, cat.ID, cat.Category) {
+		httpresp.WriteError(w, http.StatusNotFound, "metric not found")
+		return
+	}
 	if cat.ComputeStrategy != "manual_input" && cat.ComputeStrategy != "external_integration" {
 		httpresp.WriteError(w, http.StatusConflict,
 			fmt.Sprintf("metric %s has compute_strategy=%q; manual input not permitted", id, cat.ComputeStrategy))
 
 		return
 	}
-	enteredBy, err := uuid.Parse(cred.UserID)
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "credential user id is not a UUID")
+	enteredBy, ok := credstore.CallerUserID(cred)
+	if !ok {
+		httpresp.WriteError(w, http.StatusBadRequest, "manual input requires a user credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)
@@ -449,6 +509,9 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
+	if h.hideMetric(w, r, id) {
+		return
+	}
 	var row dbx.MetricTarget
 	err := h.runInTx(ctx, func(q *dbx.Queries) error {
 		var inErr error
@@ -473,8 +536,10 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
+	// #2572: admin or grc_engineer, over the live tenant roles, the same
+	// gate as a framework posture target (#2136).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -510,9 +575,26 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 		}
 		owner = pgtype.UUID{Bytes: u, Valid: true}
 	}
+	if h.hideMetric(w, r, id) {
+		return
+	}
+	// The audit row names the user; a caller that is not one (a bootstrap
+	// key) is recorded as uuid.Nil, and actor_principal names the
+	// credential either way (#2329).
+	actor, _ := credstore.CallerUserID(cred)
+	principal := credstore.PrincipalOf(cred)
 	var row dbx.MetricTarget
 	err = h.runInTx(ctx, func(q *dbx.Queries) error {
-		var inErr error
+		var before *targetAudit
+		prev, inErr := q.GetMetricTargetForUpdate(ctx, id)
+		switch {
+		case errors.Is(inErr, pgx.ErrNoRows):
+		case inErr != nil:
+			return fmt.Errorf("read current target: %w", inErr)
+		default:
+			cur := targetAudit(targetWireFromRow(prev))
+			before = &cur
+		}
 		row, inErr = q.UpsertMetricTarget(ctx, dbx.UpsertMetricTargetParams{
 			TenantID:          pgtype.UUID{Bytes: tenantUUID, Valid: true},
 			MetricID:          id,
@@ -523,13 +605,63 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 			OwnerUserID:       owner,
 			Notes:             req.Notes,
 		})
-		return inErr
+		if inErr != nil {
+			return inErr
+		}
+		return auditTargetSet(ctx, q, row.TenantID, actor, principal, before, targetAudit(targetWireFromRow(row)))
 	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "upsert target", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, targetWireFromRow(row))
+}
+
+// AuditActionTargetSet is the me_audit_log action a target upsert writes
+// (#2572). CHECK constraint extended in migration
+// 20261269000000_metric_target_audit.sql.
+const AuditActionTargetSet = "metric_target_set"
+
+// targetAudit is one side of a metric_target_set audit row: the target's
+// fields without omitempty, so a cleared threshold reads as null rather
+// than as absent.
+type targetAudit struct {
+	MetricID          string  `json:"metric_id"`
+	TargetValue       *string `json:"target_value"`
+	WarningThreshold  *string `json:"warning_threshold"`
+	CriticalThreshold *string `json:"critical_threshold"`
+	Direction         string  `json:"direction"`
+	OwnerUserID       string  `json:"owner_user_id"`
+	Notes             string  `json:"notes"`
+}
+
+// auditTargetSet writes one me_audit_log row in the upsert's transaction, so
+// the change cannot commit without it. before is nil the first time the
+// metric's target is set.
+func auditTargetSet(ctx context.Context, q *dbx.Queries, tenant pgtype.UUID, actor uuid.UUID, principal string, before *targetAudit, after targetAudit) error {
+	beforeBlob, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("audit before: %w", err)
+	}
+	afterBlob, err := json.Marshal(after)
+	if err != nil {
+		return fmt.Errorf("audit after: %w", err)
+	}
+	var p *string
+	if principal != "" {
+		p = &principal
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID:       tenant,
+		UserID:         pgtype.UUID{Bytes: actor, Valid: true},
+		Action:         AuditActionTargetSet,
+		Before:         beforeBlob,
+		After:          afterBlob,
+		ActorPrincipal: p,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", AuditActionTargetSet, err)
+	}
+	return nil
 }
 
 // ===== helpers =====

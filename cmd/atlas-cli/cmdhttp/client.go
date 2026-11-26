@@ -87,8 +87,10 @@ func Client(timeout time.Duration) *http.Client {
 	}
 
 	return &http.Client{
-		Timeout:   timeout,
-		Transport: transport,
+		Timeout: timeout,
+		// Guard refuses plain http:// to a non-loopback host, on the
+		// first request and on every redirect hop (#2257).
+		Transport: Guard(transport),
 		// CheckRedirect: leave nil to use net/http's default redirect
 		// policy (max 10 hops). Slice 088 explicitly preserves the
 		// default; future slices may tighten this for credential

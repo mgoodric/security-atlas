@@ -13,7 +13,6 @@
 //     stringPtr, datePtr, pgts, pgUUIDPtr)
 //   - Policy.IsOrphan
 //   - DeriveAckToken determinism + day-bucketing
-//   - rolesIntersect (admin wildcard, empty-required, empty-owner, hit/miss)
 //   - the AckStore pre-tx input guards (Record + PendingForUser reject
 //     missing/invalid identity BEFORE opening a transaction, so a nil pool
 //     is never dereferenced — this is the security-relevant deny branch the
@@ -361,32 +360,6 @@ func TestDeriveAckToken(t *testing.T) {
 	}
 }
 
-func TestRolesIntersect(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name     string
-		caller   AckCaller
-		required []string
-		want     bool
-	}{
-		{"admin wildcard", AckCaller{IsAdmin: true}, []string{"x"}, true},
-		{"admin with no required still true", AckCaller{IsAdmin: true}, nil, true},
-		{"empty required → no match", AckCaller{OwnerRoles: []string{"a"}}, nil, false},
-		{"empty owner → no match", AckCaller{}, []string{"a"}, false},
-		{"hit", AckCaller{OwnerRoles: []string{"b", "a"}}, []string{"a"}, true},
-		{"miss", AckCaller{OwnerRoles: []string{"c"}}, []string{"a", "b"}, false},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := rolesIntersect(tc.caller, tc.required); got != tc.want {
-				t.Fatalf("rolesIntersect(%+v, %v) = %v, want %v", tc.caller, tc.required, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestAckStore_PreTxGuards asserts the AckStore rejects malformed identity
 // BEFORE opening a transaction. A nil pool proves no DB call is made: if any
 // of these reached s.inTx → pool.Begin it would panic on the nil pool. This
@@ -478,5 +451,206 @@ func TestAcknowledgmentFreshness_PinnedToOneYear(t *testing.T) {
 	t.Parallel()
 	if AcknowledgmentFreshness != 365*24*time.Hour {
 		t.Fatalf("AcknowledgmentFreshness = %v, want 365d", AcknowledgmentFreshness)
+	}
+}
+
+// #1747 — validateImport and ImportReport.Failed.
+func TestValidateImport(t *testing.T) {
+	t.Parallel()
+	valid := ImportInput{
+		SourceFile: "p.md", Title: "T", Version: "1", BodyMd: "b",
+		OwnerRole: "o", ApproverRole: "a", HistoricalApproverName: "Jane",
+		HistoricalApprovedAt: time.Now(), EffectiveDate: time.Now(),
+	}
+	if err := validateImport(valid); err != nil {
+		t.Fatalf("valid input: %v", err)
+	}
+	long := strings.Repeat("x", MaxImportFieldLen+1)
+	cases := map[string]func(*ImportInput){
+		"title":            func(in *ImportInput) { in.Title = "" },
+		"version":          func(in *ImportInput) { in.Version = "" },
+		"body":             func(in *ImportInput) { in.BodyMd = "" },
+		"owner role":       func(in *ImportInput) { in.OwnerRole = "" },
+		"approver role":    func(in *ImportInput) { in.ApproverRole = "" },
+		"approver name":    func(in *ImportInput) { in.HistoricalApproverName = "" },
+		"approved at":      func(in *ImportInput) { in.HistoricalApprovedAt = time.Time{} },
+		"effective date":   func(in *ImportInput) { in.EffectiveDate = time.Time{} },
+		"long title":       func(in *ImportInput) { in.Title = long },
+		"long approver":    func(in *ImportInput) { in.HistoricalApproverName = long },
+		"long source file": func(in *ImportInput) { in.SourceFile = long },
+	}
+	for name, mutate := range cases {
+		in := valid
+		mutate(&in)
+		if err := validateImport(in); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	at := valid
+	at.Title = strings.Repeat("x", MaxImportFieldLen)
+	if err := validateImport(at); err != nil {
+		t.Errorf("title at the cap: %v", err)
+	}
+}
+
+func TestImportReport_Failed(t *testing.T) {
+	t.Parallel()
+	ok := ImportReport{Results: []ImportResult{{Status: ImportStatusImported}, {Status: ImportStatusSkipped}}}
+	if ok.Failed() {
+		t.Error("imported + skipped is not a failure")
+	}
+	bad := ImportReport{Results: []ImportResult{{Status: ImportStatusImported}, {Status: ImportStatusFailed}}}
+	if !bad.Failed() {
+		t.Error("a failed result should make the report failed")
+	}
+}
+
+// TestCheckApprover covers #1807: only a person approves, never the one who
+// submitted. A row with no recorded submitter (pre-dates the column) has
+// no one to collide with; a row submitted under a session id has no person
+// to compare and is refused until re-submitted. #2101: with Allow
+// self-approval on, the submitter may approve and the result says so; a
+// machine credential is still refused.
+func TestCheckApprover(t *testing.T) {
+	t.Parallel()
+	submitter := "user-1"
+	keySubmitter := "key_abc"
+	sessionSubmitter := "jwt:token-1"
+	empty := ""
+	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
+	machine := Approver{CredentialID: "key_machine"}
+	cases := []struct {
+		name        string
+		submittedBy *string
+		approver    Approver
+		allowSelf   bool
+		want        error
+		wantSelf    bool
+	}{
+		{"submitter approves own policy", &submitter, person("user-1"), false, ErrSelfApproval, false},
+		{"second person approves", &submitter, person("user-2"), false, nil, false},
+		{"no recorded submitter", nil, person("user-1"), false, nil, false},
+		{"empty recorded submitter", &empty, person("user-1"), false, nil, false},
+		{"no user behind the credential", &submitter, machine, false, ErrApproverNotPerson, false},
+		{"no user, no submitter", nil, machine, false, ErrApproverNotPerson, false},
+		{"submitted under a session id", &sessionSubmitter, person("user-2"), false, ErrSubmitterUnknown, false},
+		{"pre-1807 key submitter approves with that key", &keySubmitter, Approver{UserID: "user-1", CredentialID: "key_abc"}, false, ErrSelfApproval, false},
+		{"pre-1807 key submitter, other person with that key", &keySubmitter, Approver{UserID: "user-2", CredentialID: "key_abc"}, false, ErrSelfApproval, false},
+		{"pre-1807 key submitter, owner through a JWT", &keySubmitter, Approver{UserID: "user-1", CredentialID: "jwt:token-2"}, false, ErrSubmitterUnknown, false},
+		{"pre-1807 key submitter, a different key", &keySubmitter, person("user-2"), false, ErrSubmitterUnknown, false},
+		{"self-approval on: pre-1807 key submitter, other credential still unknown", &keySubmitter, person("user-1"), true, ErrSubmitterUnknown, false},
+		{"self-approval on: pre-1807 key submitter with that key, flagged", &keySubmitter, Approver{UserID: "user-1", CredentialID: "key_abc"}, true, nil, true},
+		{"self-approval on: submitter approves, flagged", &submitter, person("user-1"), true, nil, true},
+		{"self-approval on: second person is not flagged", &submitter, person("user-2"), true, nil, false},
+		{"self-approval on: machine still refused", &submitter, machine, true, ErrApproverNotPerson, false},
+		{"self-approval on: session submitter still unknown", &sessionSubmitter, person("user-1"), true, ErrSubmitterUnknown, false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := dbx.Policy{SubmittedBy: tc.submittedBy}
+			self, got := CheckApprover(row, tc.approver, tc.allowSelf)
+			if !errors.Is(got, tc.want) {
+				t.Fatalf("CheckApprover = %v, want %v", got, tc.want)
+			}
+			if self != tc.wantSelf {
+				t.Fatalf("selfApproved = %v, want %v", self, tc.wantSelf)
+			}
+		})
+	}
+}
+
+// TestCheckApprover_Editors covers #2446: whoever created or edited the
+// draft is an author, so they are refused as approver however the policy
+// was submitted, unless self-approval is on, and then flagged.
+func TestCheckApprover_Editors(t *testing.T) {
+	t.Parallel()
+	// Editors are recorded by credstore.PrincipalOf: a person is a bare
+	// users(id) uuid.
+	const (
+		user1 = "11111111-1111-4111-8111-111111111111"
+		user2 = "22222222-2222-4222-8222-222222222222"
+		user3 = "33333333-3333-4333-8333-333333333333"
+		user4 = "44444444-4444-4444-8444-444444444444"
+	)
+	submitter := user2
+	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
+	type editorCase struct {
+		name      string
+		editors   []string
+		approver  Approver
+		allowSelf bool
+		want      error
+		wantSelf  bool
+	}
+	cases := []editorCase{
+		{"author approves what another submitted", []string{user1}, person(user1), false, ErrEditorApproval, false},
+		{"later editor approves", []string{user1, user3}, person(user3), false, ErrEditorApproval, false},
+		{"a person who never edited", []string{user1, user3}, person(user4), false, nil, false},
+		{"no editors recorded", nil, person(user1), false, nil, false},
+		{"empty editor entry matches nobody", []string{""}, person(user1), false, nil, false},
+		{"self-approval on: author approves, flagged", []string{user1}, person(user1), true, nil, true},
+		{"self-approval on: a person who never edited is not flagged", []string{user1}, person(user4), true, nil, false},
+		{"submitter rule still applies", []string{user1}, person(user2), false, ErrSelfApproval, false},
+		{"machine refused before editors", []string{user1}, Approver{CredentialID: "key_m"}, true, ErrApproverNotPerson, false},
+	}
+	// #2459: an editor that names no person is an unknown author. Every
+	// approver is refused with the setting off, the key's own holder
+	// included; with it on, every approval is flagged.
+	for _, kind := range []struct{ name, principal string }{
+		{"unbound key", "key_abc"},
+		{"OAuth client", "oauth_client:ci-bot"},
+		{"bootstrap admin", "bootstrap-admin"},
+		// #2478: uuid.Parse accepts these, but only the canonical form
+		// names a person.
+		{"32-hex uuid", "44444444444444444444444444444444"},
+		{"braced uuid", "{" + user4 + "}"},
+		{"urn uuid", "urn:uuid:" + user4},
+		{"upper-case uuid", "AAAAAAAA-4444-4444-8444-444444444444"},
+	} {
+		cases = append(cases,
+			editorCase{kind.name + ": a person who never used it", []string{kind.principal}, person(user4), false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": its holder, through that credential", []string{kind.principal}, Approver{UserID: user4, CredentialID: kind.principal}, false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": alongside a person editor", []string{user1, kind.principal}, person(user4), false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": self-approval on, flagged", []string{kind.principal}, person(user4), true, nil, true},
+		)
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := dbx.Policy{SubmittedBy: &submitter, DraftEditors: tc.editors}
+			self, got := CheckApprover(row, tc.approver, tc.allowSelf)
+			if !errors.Is(got, tc.want) {
+				t.Fatalf("checkApprover = %v, want %v", got, tc.want)
+			}
+			if self != tc.wantSelf {
+				t.Fatalf("selfApproved = %v, want %v", self, tc.wantSelf)
+			}
+		})
+	}
+}
+
+// TestBodySHA256 pins the audit-log body hash: hex sha256, 64 characters,
+// matching the policy_audit_log.body_sha256 CHECK.
+func TestBodySHA256(t *testing.T) {
+	t.Parallel()
+	const emptySHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if got := bodySHA256(""); got != emptySHA {
+		t.Fatalf("bodySHA256 of the empty body = %s, want %s", got, emptySHA)
+	}
+	if a, b := bodySHA256("# A"), bodySHA256("# B"); a == b || len(a) != 64 {
+		t.Fatalf("bodySHA256 = %s / %s", a, b)
+	}
+}
+
+func TestEditorsOrEmpty(t *testing.T) {
+	t.Parallel()
+	if got := editorsOrEmpty(nil); got == nil || len(got) != 0 {
+		t.Fatalf("editorsOrEmpty(nil) = %#v, want empty non-nil", got)
+	}
+	if got := editorsOrEmpty([]string{"u"}); len(got) != 1 {
+		t.Fatalf("editorsOrEmpty = %#v", got)
 	}
 }

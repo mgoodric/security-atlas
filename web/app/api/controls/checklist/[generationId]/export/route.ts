@@ -11,17 +11,20 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ generationId: string }> },
 ): Promise<Response> {
+  const { generationId } = await params;
+  const bad = rejectNonUUID({ generationId });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { generationId } = await params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/controls/checklist/${encodeURIComponent(
       generationId,
@@ -33,7 +36,7 @@ export async function GET(
   // 422 "approve first" error.
   const contentType =
     upstream.headers.get("Content-Type") ?? "application/json";
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": contentType },
   });

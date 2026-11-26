@@ -70,6 +70,8 @@ The filter list lives inline in `.github/workflows/ci.yml` under the
 - Proto + generated: `proto/**`, `gen/**`, `buf.yaml`, `buf.gen.yaml`
 - Policies + schemas: `policies/**`, `schemas/**`
 - Source trees: `internal/**`, `cmd/**`, `pkg/**`, `connectors/**`
+- Go-embedded data: `controls/**` (stock control bundles),
+  `data/crosswalks/**` (#2676)
 - Containers + deploy: `Dockerfile*`, `**/Dockerfile`,
   `docker-compose*.yml`, `deploy/**`
 - Build / tool config: `.github/workflows/**`, `justfile`,
@@ -78,6 +80,115 @@ The filter list lives inline in `.github/workflows/ci.yml` under the
 Anything else is `code: false`. The big buckets are `*.md`,
 `Plans/**`, `docs/**`, `LICENSE`, `CHANGELOG.md`, `.gitignore`,
 `.editorconfig`.
+
+## Tiers: `go` and `web` (#2099)
+
+`code` answers "does this PR touch code at all". Two finer outputs answer
+"which half of the code": a Go-only PR should not pay for the web jobs,
+and a web-only PR should not pay for the Go integration shards. The cost
+being cut is concurrent jobs, not minutes: the repo is capped at 40
+concurrent jobs, and a full run is ~65 job instances.
+
+| Output | Gates                                                                                                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go`   | `build-go`, `tests-integration-shard`, `tests-integration`, `lint-go`, `fuzz`, `govulncheck`, `sqlc-drift`, `lint-python`, `oscal-bridge`, `assertion-density`                                                  |
+| `web`  | `build-atlas` (only the Playwright jobs download its binary), `build-frontend`, `frontend-vitest`, `frontend-lint`, `frontend-playwright`, `frontend-playwright-prod-build`, `frontend-ui-honesty`, `npm-audit` |
+| `code` | everything else that is path-filtered: `proto`, `test-self-host-bundle`, `helm-lint`, `phantom-deps`, `trivy-image`                                                                                             |
+
+Each stub twin gates on the complement of its real job's output, so the
+required check names, the twins and branch protection are unchanged.
+Only which twin fires changes.
+
+### The allowlists and the shared set
+
+- **Go tier allowlist:** `**/*.go`, `go.mod`, `go.sum`, `go.work`,
+  `go.work.sum`, `internal/**`, `cmd/**`, `pkg/**`, `connectors/**`,
+  `controls/**`, `data/crosswalks/**`, and
+  Python (`**/*.py`, `oscal-bridge/**`, `pyproject.toml`, `uv.lock`,
+  nested ones too), because integration legs B3/B5 use uv.
+- **Web tier allowlist:** `web/**`, `package.json`, `package-lock.json`
+  (root and nested), `pnpm-lock.yaml`.
+- **Shared set** (both tiers run): `migrations/**`, `sql/**`, `atlas.hcl`,
+  `sqlc.yaml`, `proto/**`, `gen/**`, `buf*.yaml`, `policies/**`,
+  `schemas/**`, `fixtures/**`, `deploy/**`, Dockerfiles, compose files,
+  `.github/**`, `justfile`, `scripts/**`, `.golangci.yml`,
+  `.pre-commit-config.yaml`, `.nvmrc`, `codecov.yml`, and
+  `web/lib/contracts/**`.
+- **A web file a Go test reads is shared.** The contract-tier goldens in
+  `web/lib/contracts/*.golden.json` are recorded by Go provider tests
+  under `internal/api/**` (e.g. `internal/api/version_contract_test.go`)
+  and asserted by web consumer tests. If a golden counted as web-only, a
+  golden-only PR would skip `Go · build + test` and break `main`. When a
+  Go test starts reading another file under `web/`, add that path to the
+  `shared` filter in the same PR (and the same for any Go-tier file a web
+  test reads).
+
+### The skip rule: every file, or nothing
+
+A tier is skipped only when **every** changed file sits in the **other**
+tier's allowlist and **no** file is in the shared set. One file outside
+that, whether shared or unclassified (a `tools/` script, a new top-level
+directory), runs both tiers. The rule fails toward running.
+
+The `changes` job implements it with two extra `dorny/paths-filter` steps,
+both `pull_request`-only:
+
+1. `tiers`, with `predicate-quantifier: every`. Under `every` a file
+   matches a filter only when it matches every pattern, so a filter of
+   `**` followed by `!<allowlist>` patterns matches exactly the files
+   outside that allowlist. `non_web` is true when some file is not
+   web-only; `non_go` when some file is not Go-only.
+2. `shared`, with the default `some` quantifier, listing the shared set.
+   It overrides the allowlists, so a `scripts/x.py` or a
+   `deploy/**/package.json` still runs both tiers.
+
+The `resolve` step then sets `go` and `web`:
+
+- `push` (to `main`) and `merge_group`: both tiers equal `code`, whatever
+  the diff. `main` runs everything, so it backstops a misclassification.
+- `pull_request` with `code=false`: both false (the docs-only path,
+  unchanged).
+- `pull_request` with `code=true`: `go=false` only if `non_web` is false
+  and `shared` is false; `web=false` only if `non_go` is false and
+  `shared` is false. An empty filter output reads as `true`. If both would
+  come out false (every file matched both allowlists, e.g. a
+  `package.json` under `connectors/`), both are forced true.
+
+The slice 415 fail-closed handling of `code` runs first and is unchanged.
+The job summary shows the raw filter values and the resolved tiers.
+
+### The merge-gate reads tiers from the workflow
+
+`CI · merge-gate` forgives a `skipped` leg only when that leg's own tier
+resolved false. It reads each leg's tier from the leg's `if:` in
+`.github/workflows/ci.yml` (sparse checkout of that one file), so there is
+no second job-to-tier list to drift. A leg it cannot classify falls back
+to `code`, the widest tier, so a parse failure can refuse a skip but
+never grant one.
+
+### The stub-twin guard
+
+`scripts/check-stub-twins.sh` (CI job `stub-twin-check`, `just
+check-stub-twins`, in merge-gate's `needs:`) parses `ci.yml` and fails
+when a gated real job and its twin disagree:
+
+| Finding          | Meaning                                                                       |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `MISSING-TWIN`   | a real job with no other job of the same `name:`                              |
+| `NOT-COMPLEMENT` | the twin's `if:` is not the complement on the same output (`code`/`go`/`web`) |
+| `ORPHAN-STUB`    | a stub with no matching real job                                              |
+| `DUPLICATE`      | more than two jobs share a gated `name:`                                      |
+| `UNRECOGNISED`   | a job `if:` reads a `changes` tier output in a shape the guard cannot pair    |
+
+The recognised shapes are `X == 'true'` / `X != 'true'`, the same with a
+leading `always() &&` on the real job, and the `pull_request`-only pair
+`github.event_name == 'pull_request' && X == 'true'` /
+`github.event_name != 'pull_request' || X != 'true'`. Real jobs that
+deliberately have no stub (`build-atlas`, `tests-integration-shard`) sit
+on the script's `NO_TWIN` list with a reason; a stale entry fails.
+
+When moving a job between tiers, change the real job's `if:` and its
+twin's together. The guard refuses one without the other.
 
 ## The filter on `merge_group` events (slice 415)
 
@@ -184,5 +295,9 @@ A docs-only PR (e.g. a `_STATUS.md` reconcile) should:
 - Have GitGuardian run as normal (~15 s).
 - Total billable runner minutes: ~2 (down from ~10 before slice 061).
 
-A code PR should be unchanged from the pre-slice-061 baseline — same
-jobs, same durations.
+A code PR touching a shared or unclassified path should be unchanged from
+the pre-slice-061 baseline — same jobs, same durations. A web-only PR
+should show the Go-tier stubs posting `Go · build + test`,
+`Go · integration (Postgres RLS)` and the other Go checks, with no
+`Go · integration (shard …)` legs; a Go-only PR the mirror image for the
+`Frontend · …` checks.

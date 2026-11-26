@@ -15,12 +15,13 @@
 //   * GET  /v1/metrics/{id}/observations   ListObservations (since/until/limit)
 //   * POST /v1/metrics/{id}/inputs         CreateInput  (admin-only)
 //   * GET  /v1/metrics/{id}/target         GetTarget
-//   * PUT  /v1/metrics/{id}/target         UpsertTarget (admin-only)
+//   * PUT  /v1/metrics/{id}/target         UpsertTarget (admin or grc_engineer)
 //
 // Browser-side calls go through the BFF under `/api/metrics/**` (slice
 // 040 pattern) so the bearer cookie never leaves the server.
 
 import { apiBaseURL, APIError } from "@/lib/api/base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ===== wire shapes =====
 
@@ -260,13 +261,7 @@ export async function upsertTarget(
 async function bffFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;
@@ -453,6 +448,156 @@ export function thresholdBadgeColor(
   return "red";
 }
 
+/**
+ * canSetMetricTarget mirrors the platform's guard on
+ * PUT /v1/metrics/{id}/target (`authz.IsTenantApprover`): an admin or a
+ * grc_engineer may set a metric target, as for a framework posture target
+ * (#2572). `/v1/me` reports exactly that check, over the live tenant
+ * roles, as `is_approver`. The JWT's `owner_roles` claim is not read: it
+ * goes stale after a role is revoked. Anything unknown is view-only.
+ */
+export function canSetMetricTarget(
+  me: { is_approver?: boolean } | undefined,
+): boolean {
+  return me?.is_approver === true;
+}
+
+// Rounds away float noise from the x100 / /100 conversion (0.7 * 100 is
+// 70.00000000000001); six places is well below any threshold's precision.
+const roundTiny = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * MetricTargetScale is how a metric target is stored:
+ *
+ *   fraction  a percent or ratio metric whose observations are fractions
+ *             (0.85 is 85%), the slice-076 evaluators' shape;
+ *   points    a percent or ratio metric whose observations are already
+ *             percentage points (85 is 85%), as a manual input may be;
+ *   raw       any other unit (count, days), stored as typed.
+ *
+ * Both percent scales are typed as a percentage. `thresholdBadgeColor`
+ * compares the target with the observation as raw numbers, so the target
+ * must be stored on the observations' scale (#2572).
+ */
+export type MetricTargetScale = "fraction" | "points" | "raw";
+
+/**
+ * metricTargetScale picks the scale from the unit, the metric's latest
+ * observation and its stored target value. `formatValue` shows a percent
+ * or ratio value above 1 as percentage points, so either one above 1 means
+ * the metric is on the points scale. The stored target counts as well as
+ * the observation: a points metric whose latest value happens to be at or
+ * below 1 would otherwise read as fractions, and re-saving a target of 90
+ * would silently store 0.9. With neither above 1, the evaluators' fraction
+ * is assumed.
+ */
+export function metricTargetScale(
+  unit: string,
+  latest?: number,
+  storedTarget?: number,
+): MetricTargetScale {
+  if (unit !== "percent" && unit !== "ratio") return "raw";
+  const above1 = (n?: number) => n !== undefined && Number.isFinite(n) && n > 1;
+  return above1(latest) || above1(storedTarget) ? "points" : "fraction";
+}
+
+/**
+ * metricTargetInputFromStored turns a stored target number into what the
+ * dialog shows. Percent and ratio metrics are shown as a percentage: an
+ * operator thinks in percentages, and typing 0.9 for 90% invites a 100x
+ * mistake. On the fraction scale, like `formatValue`, a stored value above
+ * 1 is already in percentage points and is shown as it is. Other units
+ * pass through. `storedTarget` is the saved target_value, which takes part
+ * in picking the scale (`metricTargetScale`) for every field.
+ */
+export function metricTargetInputFromStored(
+  stored: string | undefined,
+  unit: string,
+  latest?: number,
+  storedTarget?: number,
+): string {
+  if (stored === undefined || stored === "") return "";
+  const n = Number(stored);
+  if (
+    metricTargetScale(unit, latest, storedTarget) !== "fraction" ||
+    !Number.isFinite(n)
+  ) {
+    return stored;
+  }
+  return String(n <= 1 ? roundTiny(n * 100) : n);
+}
+
+/**
+ * metricTargetStoredFromInput is the reverse: a percentage is saved on
+ * the scale the metric uses (`metricTargetScale`), so the threshold badge
+ * compares like with like. Other units pass through.
+ */
+export function metricTargetStoredFromInput(
+  value: number,
+  unit: string,
+  latest?: number,
+  storedTarget?: number,
+): number {
+  return metricTargetScale(unit, latest, storedTarget) === "fraction"
+    ? roundTiny(value / 100)
+    : value;
+}
+
+/**
+ * metricTargetError checks a metric target before it is sent: three
+ * finite numbers, ordered the way the direction says, the same order the
+ * posture targets enforce and `thresholdBadgeColor` assumes:
+ *
+ *   higher_is_better   critical <= warning <= target
+ *   lower_is_better    target <= warning <= critical
+ *   target_is_better   |warning - target| <= |critical - target|
+ *
+ * The values are as the operator typed them. For a percent or ratio
+ * metric that is a percentage (see `metricTargetInputFromStored`), so each
+ * must be 0..100; other units (count, days) have no range. Returns the
+ * first problem, or null.
+ */
+export function metricTargetError(
+  input: {
+    target_value: number;
+    warning_threshold: number;
+    critical_threshold: number;
+    direction: string;
+  },
+  unit?: string,
+): string | null {
+  const values: [string, number][] = [
+    ["Target", input.target_value],
+    ["Warning", input.warning_threshold],
+    ["Critical", input.critical_threshold],
+  ];
+  for (const [name, v] of values) {
+    if (!Number.isFinite(v)) return `${name} must be a number.`;
+    if ((unit === "percent" || unit === "ratio") && (v < 0 || v > 100)) {
+      return `${name} must be between 0 and 100.`;
+    }
+  }
+  const t = input.target_value;
+  const w = input.warning_threshold;
+  const c = input.critical_threshold;
+  switch (input.direction) {
+    case "higher_is_better":
+      return c <= w && w <= t
+        ? null
+        : "Higher is better needs critical ≤ warning ≤ target.";
+    case "lower_is_better":
+      return t <= w && w <= c
+        ? null
+        : "Lower is better needs target ≤ warning ≤ critical.";
+    case "target_is_better":
+      return Math.abs(w - t) <= Math.abs(c - t)
+        ? null
+        : "Closer to target needs the warning band inside the critical band.";
+    default:
+      return "Choose a direction.";
+  }
+}
+
 // neutralBadgeLabel disambiguates the two `neutral` cases (slice 677 /
 // ATLAS-023) so the muted badge tells the operator WHY it is neutral:
 //
@@ -477,4 +622,30 @@ export function neutralBadgeLabel(
     target.target_value !== null &&
     target.target_value !== "";
   return hasTargetValue ? "no data" : "no target";
+}
+
+// noDataReason reads the evaluators' empty marker (#2064): an observation
+// whose `dimensions.sample` is "empty" was computed with no inputs, so its
+// numeric_value is a placeholder, not a measurement. Returns the one-line
+// reason to show in place of the value, or null for a real measurement.
+// Callers render "No data" with no percentage and no pass/fail colour.
+export const DEFAULT_NO_DATA_REASON = "No inputs recorded for this metric";
+
+export function noDataReason(
+  observation: Pick<Observation, "dimensions"> | undefined | null,
+): string | null {
+  const dims = observation?.dimensions;
+  if (!dims || dims.sample !== "empty") return null;
+  const reason = dims.no_data_reason;
+  return typeof reason === "string" && reason.trim() !== ""
+    ? reason
+    : DEFAULT_NO_DATA_REASON;
+}
+
+// measuredObservations drops empty-marked points so charts never plot a
+// placeholder value as if it were measured.
+export function measuredObservations<T extends Pick<Observation, "dimensions">>(
+  observations: T[],
+): T[] {
+  return observations.filter((o) => noDataReason(o) === null);
 }

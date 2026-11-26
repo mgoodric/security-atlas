@@ -150,7 +150,7 @@ describe("formatFrozenAsOf", () => {
 
   it("degrades to a neutral label when frozen_at is missing", () => {
     const resp = withSummary();
-    // @ts-expect-error — exercise the defensive empty-string branch.
+    // Exercise the defensive empty-string branch.
     resp.evidence.frozen_at = "";
     expect(formatFrozenAsOf(resp)).toContain("the freeze date");
   });

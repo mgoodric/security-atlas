@@ -3,11 +3,12 @@
 //
 // The package exposes:
 //
-//   - Seed (the 12 canonical capability flags shipped with v1 defaults).
+//   - Seed (the canonical capability flags and module switches, with defaults).
+//   - Modules (the module registry) and ModuleGate (its authz-chain step).
 //   - SpineForbiddenPrefixes (the namespaces that MUST NOT be toggleable).
 //   - Store (DB-backed CRUD + audit-log writes; tenant-scoped under RLS).
 //   - Enabled(ctx, key) (package-level helper with in-request memoization).
-//   - Gate(key) (chi middleware that 404s a route when the flag is off).
+//   - ModuleGate answers 404 for a route whose module or feature is off.
 //
 // Constitutional invariants honored:
 //
@@ -97,7 +98,7 @@ var Seed = []Default{
 	{
 		Key:         "exceptions.enabled",
 		Enabled:     true,
-		Description: "Exception / waiver workflow (slice 021).",
+		Description: "Exceptions module (slice 021). Switching it off hides /v1/exceptions/* and its page; its data is kept.",
 		Category:    "controls",
 	},
 	{
@@ -107,16 +108,37 @@ var Seed = []Default{
 		Category:    "audit",
 	},
 	{
-		Key:         "oscal.export",
+		// #2171: renamed from `oscal.export`, which gated vendor claims
+		// under a misleading name. Migration 20261130000000 moves each
+		// tenant's stored value to this key.
+		Key:         "vendor.claims",
 		Enabled:     false,
-		Description: "OSCAL SSP / AP / AR / POA&M export (future slice 030). Default off pending GA.",
-		Category:    "integrations",
+		Description: "Vendor claims (OSCAL component definitions), a feature of Third-party risk. Default off pending GA.",
+		Category:    "vendor",
+	},
+	{
+		Key:         "audit.oscal_export",
+		Enabled:     true,
+		Description: "OSCAL SSP and POA&M export for an audit period, a feature of Audit periods.",
+		Category:    "audit",
+	},
+	{
+		Key:         "personnel.enabled",
+		Enabled:     true,
+		Description: "Personnel security module. Switching it off hides /v1/personnel-security/* and its page; its data, and the evidence it wrote, are kept.",
+		Category:    "personnel",
 	},
 	{
 		Key:         "board.reporting",
 		Enabled:     false,
 		Description: "Board reporting module (future slices 031/032). Default off pending GA.",
 		Category:    "board",
+	},
+	{
+		Key:         "questionnaires.enabled",
+		Enabled:     true,
+		Description: "Questionnaires module (slice 155). Switching it off hides /v1/questionnaires/* and the Questionnaires page; its data is kept.",
+		Category:    "questionnaire",
 	},
 	{
 		Key:         "decisions.log",
@@ -192,31 +214,4 @@ func DefaultByKey(key string) (Default, bool) {
 		}
 	}
 	return Default{}, false
-}
-
-// GatingKeys is the slice 660 canonical set of capability flags that gate
-// a user-facing nav entry AND a route/handler when off. These are the
-// flags the non-admin enabled-modules read (GET /v1/features/enabled)
-// surfaces so the shell can hide nav for ALL users (not just admins), and
-// the route-guard middleware consults to make a flag-off module's API
-// unreachable.
-//
-// Both default OFF in Seed ("pending GA"); see seed.go. Keeping the set
-// here (not in the API package) lets the route-guard wiring + the
-// enabled-modules handler share one source of truth. Adding a module to
-// this set is a deliberate decision: it commits to BOTH a nav gate AND a
-// route gate for the key.
-var GatingKeys = []string{
-	"oscal.export",
-	"board.reporting",
-}
-
-// IsGatingKey reports whether key is in the slice 660 GatingKeys set.
-func IsGatingKey(key string) bool {
-	for _, k := range GatingKeys {
-		if k == key {
-			return true
-		}
-	}
-	return false
 }

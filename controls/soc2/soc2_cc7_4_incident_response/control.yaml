@@ -2,15 +2,33 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc7_4_incident_response
 title: "Incident response plan exists and incidents are logged"
 description: |
-  The entity responds to identified security incidents by executing a
-  defined incident response program (TSC CC7.4). The control owner
-  uploads quarterly evidence of: (a) the current IR plan version on
-  file, (b) a list of incidents declared in the period (zero is a
-  valid count, but the listing itself is required evidence), and (c)
-  for each declared incident, a link to the post-incident report or
-  ticket showing the IR playbook was followed.
+  Confirmed incidents are handled by following a written response plan
+  (TSC CC7.4). The control owner keeps on file (a) the current IR plan
+  version, (b) a list of incidents declared in the period (zero is a valid
+  count, but the listing itself is required evidence), and (c) for each
+  declared incident, a link to the post-incident report or ticket showing
+  the IR playbook was followed. The intended automated test is that
+  everyone on call has acknowledged the IR plan.
 
-scf_anchor_id: IRO-04
+  What runs today: a SQL query over the tenant's `policy.acknowledgment.v1`
+  records in the quarterly window of 120 days, which only the
+  acknowledgement handler writes (#2869, #2873). The control passes when
+  at least one record acknowledges the policy titled "Incident Response
+  Plan", read from the payload's `policy_title` (snapshotted at
+  acknowledgement time, #2832), with `result` pass and an `observed_at`
+  no more than an hour after the evaluation instant. Otherwise it is
+  inconclusive. That includes no record at all, and records recorded
+  before #2832, which carry no title.
+
+  The check never fails. Received acknowledgements can show that someone
+  acknowledged the plan, but not that someone who should have did not.
+  Every on-call person having acknowledged the plan needs an on-call
+  inventory (#2834). The title is matched exactly, so a renamed IR plan
+  is not seen. The incident listing and post-incident reports are not
+  evaluated.
+
+scf_anchor_id: IRO-08
+scf_release: test-2026.3
 control_family: IRO
 implementation_type: semi_automated
 owner_role: security-engineering
@@ -19,22 +37,20 @@ freshness_class: quarterly
 
 evidence_queries:
   - id: ir_plan_acknowledged_by_on_call
-    language: rego
+    language: sql
     evidence_kind: policy.acknowledgment.v1
-    description: "Every on-call rotation member has acknowledged the current IR plan version"
+    description: "At least one in-window acknowledgement is of the Incident Response Plan"
     expression: |
-      package atlas.controls.soc2.cc7_4
-
-      default allow := false
-
-      allow if {
-        every u in input.on_call_users {
-          some a in input.acknowledgments
-          a.user_id == u.id
-          a.policy_id == "policy_incident_response"
-          a.policy_version_id == input.current_ir_plan_version_id
-        }
-      }
+      SELECT CASE
+               WHEN bool_or(
+                      jsonb_typeof(payload->'policy_title') = 'string'
+                      AND payload->>'policy_title' = 'Incident Response Plan'
+                      AND result = 'pass'
+                      AND observed_at <= evaluated_at + interval '1 hour'
+                    ) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM evidence
 
 manual_evidence_schema:
   type: object

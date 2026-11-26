@@ -11,7 +11,8 @@ hand the bytes off to the same `manual.upload.v1` evidence kind:
 | `s3`    | one record per object       | standard AWS credential chain (env / profile / IRSA / IMDS); flag-passed access keys are never accepted                                 |
 | `sftp`  | one record per file matched | SSH key loaded from `--key-file` (never a flag value); `--known-hosts` mandatory; `InsecureIgnoreHostKey` rejected at config-build time |
 
-Reuses the bundled `manual.upload.v1` schema from slice 014 unchanged.
+Emits the bundled `manual.upload.v1` schema at version `1.1.0`, which
+adds the per-mode source fields to slice 014's `1.0.0` (#2940).
 
 ## Subcommands
 
@@ -29,7 +30,7 @@ atlas-manual local \
   --endpoint platform.example.com:443 \
   --token "$SECURITY_ATLAS_TOKEN" \
   --file ./audit-findings.csv \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod \
   --scope business_unit=corp
 
@@ -40,7 +41,7 @@ atlas-manual s3 \
   --bucket evidence-bucket \
   --prefix audits/2026/ \
   --region us-east-1 \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod
 
 # Pull files matching a glob from SFTP; emit one record per file.
@@ -52,7 +53,7 @@ atlas-manual sftp \
   --path '/inbox/*.pdf' \
   --key-file ~/.ssh/atlas_ed25519 \
   --known-hosts ~/.ssh/known_hosts \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod
 ```
 
@@ -95,15 +96,31 @@ Two-part contract: an SSH key loaded from `--key-file`, and a
 All three modes derive a `sha256(...)` hex key prefixed with `manual.upload`
 so keys never collide across transports:
 
-| Mode    | Key inputs                                                        |
-| ------- | ----------------------------------------------------------------- |
-| `local` | `"manual.upload\|" + file_path + "\|" + row_index + "\|" + hour`  |
-| `s3`    | `"manual.upload\|" + bucket    + "\|" + key       + "\|" + etag`  |
-| `sftp`  | `"manual.upload\|" + host      + "\|" + path      + "\|" + mtime` |
+| Mode    | Key inputs                                                                   |
+| ------- | ---------------------------------------------------------------------------- |
+| `local` | `"manual.upload\|" + file_path + "\|" + row_index + "\|" + sha256(row_json)` |
+| `s3`    | `"manual.upload\|" + bucket    + "\|" + key       + "\|" + etag`             |
+| `sftp`  | `"manual.upload\|" + host + "\|" + path + "\|" + mtime + "\|" + size`        |
 
-The S3 etag and SFTP mtime are the freshness discriminators: when the
-remote artifact changes, a new key is derived and the ledger emits a
-fresh record.
+The row content, S3 etag and SFTP mtime plus size are the freshness
+discriminators: when the source item changes, a new key is derived and
+the ledger gets a fresh record. Nothing about the run enters a key. An
+SFTP file rewritten to the same size within the server's mtime
+resolution, or copied with its mtime kept, still keeps its key.
+
+`observed_at` is the run's hour (UTC), so it is when the connector first
+pushed that version of the item. A re-run over an unchanged item reuses
+its key; ingest dedupes it within the same hour and answers
+`AlreadyExists` after that (its content hash covers `observed_at`). The
+connector counts either as already ingested and moves on, so the first
+push's `observed_at` stands. Each skipped item gets a warning on
+stderr naming it, and the run prints
+`pushed N records, M already ingested`.
+
+Each such skip after the first hour also writes an ingest audit row
+with decision `rejected_idempotency_mismatch`. That is ingest recording
+the reused key, not a failed push: a scheduled re-run over an unchanged
+bucket writes one such row per item per run.
 
 ## CSV parser caps (DoS guards)
 
@@ -129,6 +146,14 @@ Every emitted record carries the schema's three required fields:
 | `content_type` | `text/csv`                   | `application/octet-stream`       | inferred from extension     |
 | `size_bytes`   | JSON-encoded row size        | object size from `ListObjectsV2` | file size from `Stat`       |
 | `description`  | `row <i> of <filename>`      | `s3://<bucket>/<key>`            | `sftp://<host><path>`       |
+
+Each mode also records its source fields, declared in `1.1.0`:
+
+| Mode    | Fields                                                     |
+| ------- | ---------------------------------------------------------- |
+| `local` | `row_index`, `payload_b64` (the row as JSON, base64)       |
+| `s3`    | `bucket`, `etag`, `last_modified` (RFC 3339)               |
+| `sftp`  | `host`, `remote_path`, `mtime` (RFC 3339 with nanoseconds) |
 
 The `actor_type` is always `connector`, matching the convention shared
 with `connectors/aws/` and `connectors/github/`.
@@ -159,7 +184,7 @@ go test ./connectors/manual/...
 
 | Package               | What's covered                                                                                              |
 | --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `internal/idem`       | Deterministic keys, hour truncation, mode-prefix separation, table tests                                    |
+| `internal/idem`       | Deterministic keys, row-content discrimination, mode-prefix separation, table tests                         |
 | `internal/manualcsv`  | Cap-rows / cap-field reject paths, happy-path multi-row, header-only edge                                   |
 | `internal/manuals3`   | `httptest`-fake LIST round trip, ETag unquoting, error propagation                                          |
 | `internal/manualsftp` | Host-key callback loading, `InsecureIgnoreHostKey` rejection, key parse, key-bytes redaction                |

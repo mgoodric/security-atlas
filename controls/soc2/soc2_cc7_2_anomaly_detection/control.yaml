@@ -1,15 +1,51 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc7_2_anomaly_detection
-title: "Anomalous behavior detection is operational on production endpoints"
+title: "Endpoints reporting posture have a healthy EDR agent"
 description: |
-  The entity monitors system components and the operation of those
-  components for anomalies indicative of malicious acts, natural
-  disasters, and errors (TSC CC7.2). The osquery posture stream
-  surfaces the EDR / behavioral-detection engine state on each
-  endpoint; the query asserts every managed endpoint has the engine
+  Systems are watched for abnormal behaviour, whether it comes from an
+  attack, a mistake or an outside event (TSC CC7.2). The test is that
+  every endpoint has its EDR or behavioural detection agent installed,
   running and reporting healthy.
 
-scf_anchor_id: MON-08
+  What runs today: a SQL query over the payloads of osquery's
+  `osquery.host_posture.v1` records, one per host per connector run. It
+  takes each host's latest in-window record, keyed by `host_uuid` and
+  ordered by the host's own `last_seen_at`, then by the record's
+  `observed_at`. A host whose latest record has `edr_healthy` false
+  fails the control, whatever the other hosts report. Otherwise the
+  control passes only when every host's latest record has
+  `edr_healthy` true, and is inconclusive when any host's latest
+  record has no `edr_healthy`. No in-window record also leaves it
+  inconclusive. The connector's per-record verdict, which is disk
+  encryption plus screen lock, is not used. Records before schema 1.3.0
+  carry no `edr_healthy`, so their hosts read as unread.
+
+  Where the value comes from: Fleet's Get host API has no EDR field, so
+  the osquery connector writes `edr_healthy` only from a Fleet policy the
+  operator names with `--edr-policy`, and `edr_source` names it
+  (`fleet_policy:<name>`). The policy's query is what states "installed,
+  running and healthy" for the org's agent: a host passing it is healthy,
+  failing it is not. A host the policy does not target, or one with no
+  result for it yet, has no `edr_healthy`. With no policy named, every host is
+  unread and the control stays inconclusive.
+
+  A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant (`evaluated_at`), ranks as a
+  missing one does: below every readable value. It never errors the
+  query, so the other hosts still decide.
+
+  Records without a `host_uuid` are left out. When a host's latest
+  records tie on both times, the host counts as EDR-on only if every
+  tied record says true, and any tied false fails it.
+
+  Not checked: which agent runs, whether it is sending detections, or how
+  the policy's query decides; that the host is a production or managed
+  endpoint (every reporting host counts). Only the records the control
+  receives are checked: a managed endpoint that never reported is not
+  seen, which waits on an endpoint inventory (#2834).
+
+scf_anchor_id: MON-16
+scf_release: test-2026.3
 control_family: MON
 implementation_type: automated
 owner_role: security-engineering
@@ -18,18 +54,38 @@ freshness_class: daily
 
 evidence_queries:
   - id: edr_running_on_every_managed_endpoint
-    language: rego
+    language: sql
     evidence_kind: osquery.host_posture.v1
-    description: "Every managed endpoint has EDR / anomaly detection engine running"
+    description: "Every host's latest posture record reports EDR installed, running and healthy"
     expression: |
-      package atlas.controls.soc2.cc7_2
-
-      default allow := false
-
-      allow if {
-        every p in input.posture_records {
-          p.edr.installed == true
-          p.edr.running == true
-          p.edr.health_status == "healthy"
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_off) THEN 'fail'
+               WHEN bool_and(all_on) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT host,
+               bool_or(coalesce(v IS NOT NULL AND v <> 'true'::jsonb, false)) AS any_off,
+               bool_and(coalesce(v = 'true'::jsonb, false)) AS all_on
+        FROM (
+          SELECT payload->>'host_uuid' AS host,
+                 payload->'edr_healthy' AS v,
+                 rank() OVER (
+                   PARTITION BY payload->>'host_uuid'
+                   ORDER BY CASE
+                              WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                                   AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                                THEN CASE
+                                       WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+                                         THEN (payload->>'last_seen_at')::timestamptz
+                                     END
+                            END DESC NULLS LAST,
+                            observed_at DESC
+                 ) AS recency
+          FROM evidence
+          WHERE coalesce(payload->>'host_uuid', '') <> ''
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY host
+      ) AS per_host

@@ -30,8 +30,10 @@
 //
 //   - Invariant 6 (canvas §5.4, CLAUDE.md): tenant-scoped reads on the
 //     `controls` table run inside the request's `app.current_tenant`
-//     GUC set by tenancy.Middleware; no app-level `WHERE tenant_id = ?`
-//     clause is present anywhere in this package. Cross-tenant queries
+//     GUC set by tenancy.Middleware, and rely on RLS alone: this package
+//     passes no tenant parameter to its queries. (An explicit tenant_id
+//     predicate would be an allowed second leg, never the boundary; ADR
+//     0026.) Cross-tenant queries
 //     return empty controls lists, not 403 — RLS makes the foreign rows
 //     invisible at the database layer.
 //
@@ -39,17 +41,19 @@
 // `controls` array omits the field entirely rather than emitting null,
 // so slice 012 can add it without a breaking change.
 //
-// The `?as-of=<timestamp>` and `?scf_release=<version>` query parameters
-// are accepted and documented but no-op in v1; slice 012 (point-in-time
-// evidence filtering) and a future SCF-release-import feature will
-// activate them.
+// The `?as-of=<timestamp>` query parameter is accepted and documented but
+// no-op in v1; slice 012 (point-in-time evidence filtering) will activate
+// it. `?scf_release=<version>` is live since #1770: it picks the SCF
+// release an anchor code resolves in, defaulting to the current one.
 package ucfcoverage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -57,6 +61,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -255,6 +260,21 @@ type requirementWire struct {
 	Code  string `json:"code"`
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+	// PointsOfFocus is the requirement's rolled-up SOC 2 points of focus
+	// (#1731): [{code, scf_anchors[]}]. Omitted when there are none, so the
+	// requirement object keeps its all-string shape for every other
+	// framework. Metadata only; points of focus are never requirements.
+	PointsOfFocus json.RawMessage `json:"points_of_focus,omitempty"`
+}
+
+// pointsOfFocusWire passes the stored points_of_focus JSONB through, or nil
+// (omitted) when the requirement has none.
+func pointsOfFocusWire(stored []byte) json.RawMessage {
+	var pofs []json.RawMessage
+	if err := json.Unmarshal(stored, &pofs); err != nil || len(pofs) == 0 {
+		return nil
+	}
+	return json.RawMessage(stored)
 }
 
 // anchorWire is the shape of an SCF anchor in slice-008 responses.
@@ -273,9 +293,79 @@ type anchorWire struct {
 	SourceAttribution string  `json:"source_attribution,omitempty"`
 	// MappingTier is the slice-483 trust tier (draft | under_review |
 	// verified | rejected) — additive, orthogonal to source_attribution. No
-	// reviewer identity on this catalog payload (P0-483-6).
+	// reviewer identity on this catalog payload (P0-483-6). Omitted on an
+	// overlay row (#2240).
 	MappingTier string `json:"mapping_tier,omitempty"`
-	Rationale   string `json:"rationale,omitempty"`
+	// Origin is where the edge comes from: "catalog", or "overlay" for the
+	// caller tenant's own org mapping (#1798). Omitted on the bare anchor.
+	Origin    string `json:"origin,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
+}
+
+// overlayWire is the provenance of an overlay edge (#1800): the source
+// reference the organisation recorded, who created it and when. The
+// rationale stays on the edge row, where catalog edges carry theirs.
+type overlayWire struct {
+	SourceRef string `json:"source_ref"`
+	CreatedBy string `json:"created_by"`
+	// CreatedByName is the author's readable name (#2286), resolved on
+	// the server from the caller tenant's people: a user's name, "API key
+	// …<last4>", "System" or "Unknown".
+	CreatedByName string    `json:"created_by_name"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// nameOverlays sets each overlay's CreatedByName (#2286). The caller
+// tenant's people are read only when there is an overlay to name, under
+// its RLS tenant, so another tenant's actor reads "Unknown".
+func (h *Handler) nameOverlays(ctx context.Context, overlays []*overlayWire) error {
+	if len(overlays) == 0 {
+		return nil
+	}
+	var dir *people.Directory
+	if h.pool != nil {
+		d, err := people.Load(ctx, h.pool)
+		if err != nil {
+			return fmt.Errorf("ucfcoverage: name overlay authors: %w", err)
+		}
+		dir = d
+	}
+	for _, o := range overlays {
+		o.CreatedByName = dir.Name(o.CreatedBy)
+	}
+	return nil
+}
+
+// overlayFrom builds the overlay provenance for a traversal row. It returns
+// nil for a catalog row, and for an overlay row whose LEFT JOIN found
+// nothing (it cannot: the view's overlay arm reads the same table under
+// the same tenant setting).
+// tierFor is the mapping_tier a coverage row reports. ADR 0018's tiers do
+// not apply to an overlay edge (#1797), so an overlay row has none; the
+// view's 'verified' on the overlay arm (#1798 D3) only lets it pass the
+// rejected-tier filter and is not reported (#2240).
+func tierFor(origin, tier string) string {
+	if origin == "overlay" {
+		return ""
+	}
+	return tier
+}
+
+func overlayFrom(origin string, sourceRef, createdBy *string, createdAt pgtype.Timestamptz) *overlayWire {
+	if origin != "overlay" || sourceRef == nil {
+		return nil
+	}
+	w := &overlayWire{SourceRef: *sourceRef}
+	if createdBy != nil {
+		w.CreatedBy = *createdBy
+	}
+	if createdAt.Valid {
+		w.CreatedAt = createdAt.Time.UTC()
+	}
+	return w
 }
 
 // controlWire is the shape of a control in slice-008 responses.
@@ -294,6 +384,31 @@ type controlWire struct {
 	OwnerRole          string `json:"owner_role"`
 	LifecycleState     string `json:"lifecycle_state"`
 	FreshnessClass     string `json:"freshness_class,omitempty"`
+	// AnchorFit is exact|partial|none; AnchorFitNote explains a non-exact
+	// fit (issue #1736). Empty AnchorFit means the row did not carry one
+	// (an anchor-side view), so it is omitted.
+	AnchorFit     string `json:"anchor_fit,omitempty"`
+	AnchorFitNote string `json:"anchor_fit_note,omitempty"`
+	// ExternalRefs is the control.yaml external_refs[] list (#1737).
+	// Omitted when the control carries none.
+	ExternalRefs []externalRefWire `json:"external_refs,omitempty"`
+	// Demo is true when the in-place demo seed added this control to the
+	// organisation (#2043). Omitted otherwise, and on views that never set
+	// it.
+	Demo bool `json:"demo,omitempty"`
+	// OwnerUserID is the person "assign owner" made this control's owner
+	// (#2128); OwnerRole stays the manifest's default owner role. Omitted
+	// when nobody is assigned, and on views that never set it.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+}
+
+// externalRefWire is one controls.external_refs element. Kind is
+// "reference" or "tested_under" (see internal/control.ExternalRef).
+type externalRefWire struct {
+	System string `json:"system"`
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Note   string `json:"note,omitempty"`
 }
 
 // requirementForAnchorWire is the shape of one row in
@@ -328,9 +443,21 @@ type requirementForAnchorWire struct {
 	Coverage               *float64 `json:"coverage"`
 	SourceAttribution      string   `json:"source_attribution"`
 	// MappingTier is the slice-483 trust tier — additive, orthogonal to
-	// source_attribution; no reviewer identity (P0-483-6).
-	MappingTier string `json:"mapping_tier"`
-	Rationale   string `json:"rationale,omitempty"`
+	// source_attribution; no reviewer identity (P0-483-6). Omitted on an
+	// overlay row (#2240).
+	MappingTier string `json:"mapping_tier,omitempty"`
+	// Origin is "catalog", or "overlay" when the path runs through the
+	// caller tenant's own org mapping (#1798).
+	Origin    string `json:"origin"`
+	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
+	// Exclusion is the caller tenant's activated Statement of
+	// Applicability exclusion of this requirement (#2140), set on the
+	// control coverage read only. Omitted when the requirement is
+	// applicable, undecided, or no revision is activated.
+	Exclusion *exclusionWire `json:"exclusion,omitempty"`
 }
 
 // ===== shared write helpers =====

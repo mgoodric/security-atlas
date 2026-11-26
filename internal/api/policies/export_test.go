@@ -23,6 +23,9 @@ func TestSlice138_PoliciesExportHeader_StableOrder(t *testing.T) {
 		"id", "title", "version", "status", "effective_date",
 		"owner", "approver", "acknowledgment_required_role",
 		"next_review_at", "body_md", "created_at", "updated_at",
+		"source_attribution", "imported", "historical_approver_name",
+		"historical_approved_at", "source_url", "imported_by", "imported_at",
+		"self_approved",
 	}
 	got := policiesExportHeader()
 	if len(got) != len(want) {
@@ -42,7 +45,7 @@ func TestSlice138_PoliciesToRowIter(t *testing.T) {
 	row := policyExportRow{
 		ID:                          id,
 		Title:                       "Access Control Policy",
-		Version:                     3,
+		Version:                     "3",
 		Status:                      "approved",
 		EffectiveDate:               "2026-01-01",
 		Owner:                       "ciso@example.com",
@@ -126,8 +129,16 @@ func TestSlice138_PoliciesHasProgramRead(t *testing.T) {
 	if !policiesHasProgramRead(credstore.Credential{IsApprover: true}) {
 		t.Errorf("approver should be allowed")
 	}
-	if !policiesHasProgramRead(credstore.Credential{OwnerRoles: []string{"x"}}) {
-		t.Errorf("owner should be allowed")
+	if !policiesHasProgramRead(credstore.Credential{ID: "jwt:1", UserID: "u1", TenantRoles: []string{"grc_engineer"}}) {
+		t.Errorf("live grc_engineer should be allowed")
+	}
+	// #2507: OPA reads /v1/admin/* exports for admin and grc_engineer only,
+	// and a session's role claim does not count.
+	if policiesHasProgramRead(credstore.Credential{ID: "jwt:2", UserID: "u2", TenantRoles: []string{"control_owner"}}) {
+		t.Errorf("live control_owner should be denied")
+	}
+	if policiesHasProgramRead(credstore.Credential{ID: "jwt:3", UserID: "u3", OwnerRoles: []string{"grc_engineer"}}) {
+		t.Errorf("grc_engineer claim with no live role should be denied")
 	}
 }
 

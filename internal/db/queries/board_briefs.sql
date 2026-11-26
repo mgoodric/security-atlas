@@ -53,10 +53,34 @@ ORDER BY slug;
 -- extraction is done in Go, not a JSONB-path SQL expression that would trip
 -- pgx type inference). `created_at` lower bound is passed explicitly so pgx
 -- never has to infer a bare-placeholder type (SQLSTATE 42P08).
-SELECT * FROM risks
-WHERE tenant_id = $1
-  AND created_at <= $2
-ORDER BY updated_at ASC, id ASC;
+--
+-- Roll-up parents are left out (#2060): a parent summarises children that
+-- are already ranked here, so counting it too would show the same exposure
+-- twice. A risk is a roll-up when it had at least one child linked as of the
+-- brief's date.
+--
+-- Closed risks are left out (#2107), unless they were closed after the
+-- brief's date: as of that date they were still open. A roll-up counts
+-- only children open as of that date, so a parent whose children were all
+-- closed by then is ranked itself rather than hidden with them.
+--
+-- Closure is read from the risk's current state, so a risk closed before
+-- the brief's date and reopened since reads as open throughout. A brief
+-- generated at the time froze what it showed; this matters only for a
+-- brief generated later for an earlier date.
+SELECT r.* FROM risks r
+WHERE r.tenant_id = $1
+  AND r.created_at <= $2
+  AND (r.status = 'open' OR r.closed_at > $2)
+  AND NOT EXISTS (
+    SELECT 1 FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND ra.created_at <= $2
+      AND (c.status = 'open' OR c.closed_at > $2)
+  )
+ORDER BY r.updated_at ASC, r.id ASC;
 
 -- name: BoardBriefExceptionAggregate :one
 -- Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
@@ -69,7 +93,7 @@ ORDER BY updated_at ASC, id ASC;
 -- query set never silently changes what the board reports.
 --
 -- Three numbers, and only three (decisions log D1):
---   active_count             exceptions in force right now (status='active').
+--   active_count             exceptions whose status was 'active' at as_of.
 --   past_due_count           of those, the ones already past their own
 --                            expires_at — a waiver outliving its sunset date.
 --   oldest_active_started_at when the longest-standing active waiver began
@@ -86,14 +110,32 @@ ORDER BY updated_at ASC, id ASC;
 -- aggregate, so it can never inflate a board-facing count (invariant #6).
 -- The COALESCE start chain mirrors the lifecycle: effective_from is set at
 -- activation, approved_at at approval, requested_at always.
+--
+-- As-of (#3057): "status was 'active' at as_of" is rebuilt from the lifecycle
+-- stamps, not read from the current status column, so a past as_of does not
+-- get today's numbers. The way into 'active' stamps activated_at
+-- (ActivateException) and each way out stamps revoked_at (RevokeException)
+-- or expired_at (ExpireActiveExceptionsBefore). Activated by as_of, not
+-- revoked by as_of and not expired by as_of is therefore status = 'active'
+-- at as_of; at as_of = now it is today's status = 'active' set, which is
+-- what the only caller passes (generator.go, decisions log D2).
+--
+-- It deliberately does NOT apply the [effective_from, expires_at) window that
+-- the evaluator and oscal/excepted.go apply over ListExceptionsByControlAsOf.
+-- That window answers "did the waiver suppress evaluation at t"; this
+-- aggregate reports lifecycle status. Under the window past_due_count would
+-- always be 0, and a waiver activated with a future effective_from would
+-- leave active_count, changing today's brief.
 SELECT
-    COUNT(*) FILTER (WHERE status = 'active')::bigint AS active_count,
+    COUNT(*)::bigint AS active_count,
     COUNT(*) FILTER (
-        WHERE status = 'active' AND expires_at <= sqlc.arg(as_of)::timestamptz
+        WHERE expires_at <= sqlc.arg(as_of)::timestamptz
     )::bigint AS past_due_count,
     (
         MIN(COALESCE(effective_from, approved_at, requested_at))
-            FILTER (WHERE status = 'active')
     )::timestamptz AS oldest_active_started_at
 FROM exceptions
-WHERE tenant_id = sqlc.arg(tenant_id)::uuid;
+WHERE tenant_id = sqlc.arg(tenant_id)::uuid
+  AND activated_at <= sqlc.arg(as_of)::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > sqlc.arg(as_of)::timestamptz)
+  AND (expired_at IS NULL OR expired_at > sqlc.arg(as_of)::timestamptz);

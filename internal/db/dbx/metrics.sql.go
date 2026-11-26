@@ -137,6 +137,35 @@ func (q *Queries) GetMetricTarget(ctx context.Context, metricID string) (MetricT
 	return i, err
 }
 
+const getMetricTargetForUpdate = `-- name: GetMetricTargetForUpdate :one
+SELECT id, tenant_id, metric_id, target_value, warning_threshold, critical_threshold, direction, owner_user_id, notes, created_at, updated_at
+FROM metric_targets
+WHERE metric_id = $1
+FOR UPDATE
+`
+
+// The tenant's target row for one metric, locked until the transaction
+// ends, so the before value an audit row records is the one the upsert
+// replaces (#2572). ErrNoRows when unset.
+func (q *Queries) GetMetricTargetForUpdate(ctx context.Context, metricID string) (MetricTarget, error) {
+	row := q.db.QueryRow(ctx, getMetricTargetForUpdate, metricID)
+	var i MetricTarget
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.MetricID,
+		&i.TargetValue,
+		&i.WarningThreshold,
+		&i.CriticalThreshold,
+		&i.Direction,
+		&i.OwnerUserID,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertMetricInput = `-- name: InsertMetricInput :one
 INSERT INTO metric_inputs (
     tenant_id, metric_id, input_at, numeric_value, dimensions,

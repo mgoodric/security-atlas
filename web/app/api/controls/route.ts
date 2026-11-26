@@ -36,9 +36,48 @@ export async function GET(req: NextRequest): Promise<Response> {
   // it to the upstream `/v1/anchors?include=state&scope=...`. Empty
   // string is treated as no-filter (parity with the upstream handler).
   const scope = req.nextUrl.searchParams.get("scope") ?? "";
+  // Issue #1741 — forward `has_control=true|false` verbatim; any other
+  // value is refused here rather than silently widening the list.
+  const hasControlParam = req.nextUrl.searchParams.get("has_control") ?? "";
+  if (
+    hasControlParam &&
+    hasControlParam !== "true" &&
+    hasControlParam !== "false"
+  ) {
+    return NextResponse.json(
+      { error: "has_control must be true or false" },
+      { status: 400 },
+    );
+  }
+  const hasControl = hasControlParam ? hasControlParam === "true" : undefined;
+  // Issue #1832 — forward a positive integer `limit` so the page can read
+  // the catalog totals off a one-row page; anything else keeps the
+  // platform default.
+  const limitParam = req.nextUrl.searchParams.get("limit") ?? "";
+  const limit = /^[1-9]\d*$/.test(limitParam)
+    ? Number.parseInt(limitParam, 10)
+    : undefined;
+  // Issue #1740 — forward a non-negative integer `offset` so the page can
+  // walk the whole catalog; anything else starts at the first row.
+  const offsetParam = req.nextUrl.searchParams.get("offset") ?? "";
+  const offset = /^\d+$/.test(offsetParam)
+    ? Number.parseInt(offsetParam, 10)
+    : undefined;
   try {
-    const anchors = await listAnchorsWithState(bearer, scope || undefined);
-    return NextResponse.json({ anchors });
+    const { anchors, total, catalog_total, with_control_total } =
+      await listAnchorsWithState(
+        bearer,
+        scope || undefined,
+        hasControl,
+        limit,
+        offset,
+      );
+    return NextResponse.json({
+      anchors,
+      total,
+      catalog_total,
+      with_control_total,
+    });
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(

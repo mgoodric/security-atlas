@@ -1,10 +1,8 @@
 // Slice 060 — /admin overview (AC-1).
 //
-// Five sub-area tiles with current-state summaries. SSO + Users + Audit
-// surface the backend-gap state because the corresponding endpoints
-// don't exist on main as of slice 060 — see docs/audit-log/admin-ui-review.md
-// and the slice 060 PR description. API keys + Features pull live counts
-// from the BFF.
+// Five sub-area tiles. API keys + Features carry a live count from the
+// BFF; SSO, Users and Audit log carry no summary (#2092 dropped their
+// stale backend-status badges and the slice-status card).
 
 "use client";
 
@@ -13,12 +11,10 @@ import Link from "next/link";
 
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AdminCredential,
@@ -26,6 +22,9 @@ import {
   FeatureFlag,
   FeatureFlagListResponse,
 } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -41,8 +40,29 @@ async function fetchFeatures(): Promise<FeatureFlag[]> {
   return body.items ?? [];
 }
 
+// #2503: the layout admits a tenant admin too, who manages only the
+// tenant-scoped pages (SSO, Users, API keys, Features, Audit log); the
+// overview shows a super-admin (`is_admin`) the same tiles. Fail-closed: a failed
+// read shows the tenant-scoped tiles only.
+async function fetchIsPlatformAdmin(): Promise<boolean> {
+  const res = await fetch(`/api/admin/me`, { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_admin?: unknown };
+  return body.is_admin === true;
+}
+
 export default function AdminOverviewPage() {
-  const creds = useQuery({ queryKey: ["admin-creds"], queryFn: fetchCreds });
+  const platformQ = useQuery({
+    queryKey: ["admin-me", "is-admin"],
+    queryFn: fetchIsPlatformAdmin,
+  });
+  const platform = platformQ.data === true;
+  // #2503: API keys and features are tenant-scoped, so every admin the
+  // layout admits reads them.
+  const creds = useQuery({
+    queryKey: ["admin-creds"],
+    queryFn: fetchCreds,
+  });
   const flags = useQuery({
     queryKey: ["admin-features"],
     queryFn: fetchFeatures,
@@ -64,35 +84,69 @@ export default function AdminOverviewPage() {
           return `${on} of ${total} enabled`;
         })();
 
+  if (!platform) {
+    return (
+      <PageShell
+        title={pageTitle("/admin")}
+        subtitle="Manage your organisation's sign-in, members and their roles, API keys and modules, and read its audit log."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AdminTile
+            href="/admin/sso"
+            title="SSO"
+            description="OIDC identity-provider configuration · discovery preflight · test login."
+          />
+          <AdminTile
+            href="/admin/users"
+            title="Users"
+            description="List users, assign roles, manage local + SSO-provisioned accounts."
+          />
+          <AdminTile
+            href="/admin/api-keys"
+            title="API keys"
+            summary={
+              creds.isLoading ? <Skeleton className="h-4 w-24" /> : credsSummary
+            }
+            description="Issue, rotate, and revoke connector and CLI credentials. Bearer plaintext is shown once."
+          />
+          <AdminTile
+            href="/admin/features"
+            title="Features"
+            summary={
+              flags.isLoading ? <Skeleton className="h-4 w-24" /> : flagsSummary
+            }
+            description="Toggle feature flags per tenant. Disabling a module hides routes; data is preserved."
+          />
+          <AdminTile
+            href="/admin/audit"
+            title="Audit log"
+            description="Paginated read across the union of audit log tables. Filter by actor, event, time."
+          />
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <p className="text-sm text-muted-foreground">
-          Self-administer the platform — SSO, users, API keys, feature flags,
-          and the audit log live here. Day-to-day program work is outside this
-          section.
-        </p>
-      </div>
+    <PageShell
+      title={pageTitle("/admin")}
+      subtitle={
+        <>
+          Self-administer the platform — <Term id="sso">SSO</Term>, users,{" "}
+          <Term id="api-key">API keys</Term>, feature flags, and the audit log
+          live here. Day-to-day program work is outside this section.
+        </>
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <AdminTile
           href="/admin/sso"
           title="SSO"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="OIDC identity-provider configuration · discovery preflight · test login."
         />
         <AdminTile
           href="/admin/users"
           title="Users"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="List users, assign roles, manage local + SSO-provisioned accounts."
         />
         <AdminTile
@@ -114,32 +168,10 @@ export default function AdminOverviewPage() {
         <AdminTile
           href="/admin/audit"
           title="Audit log"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="Paginated read across the union of audit log tables. Filter by actor, event, time."
         />
-        <Card>
-          <CardHeader>
-            <CardTitle>Slice 060 status</CardTitle>
-            <CardDescription>
-              What ships in this UI vs. what depends on backend work.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm">
-            <p className="mb-2">
-              <Badge variant="secondary">live</Badge> API keys · Features
-            </p>
-            <p>
-              <Badge variant="outline">stub</Badge> SSO · Users · Audit log — UI
-              rendered, awaiting backend slice 060.5.
-            </p>
-          </CardContent>
-        </Card>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -151,7 +183,7 @@ function AdminTile({
 }: {
   href: string;
   title: string;
-  summary: React.ReactNode;
+  summary?: React.ReactNode;
   description: string;
 }) {
   return (

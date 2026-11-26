@@ -13,10 +13,10 @@
 # kinds — this Rego rule is the second leg of defense in depth, so a
 # bug in the platform layer doesn't open a "push any kind" hole.
 #
-# Schema admin (POST /v1/schemas) is a separate machine path gated by
-# the slice-034 IsAdmin flag. The legacy-flag bridge maps IsAdmin to
-# the admin role, so admin.rego covers it without this file needing a
-# dedicated rule.
+# Schema admin (POST /v1/schemas) is gated on the tenant admin: the
+# slice-034 IsAdmin flag, which the legacy-flag bridge maps to the admin
+# role, or the live admin role (#2674). admin.rego covers it without
+# this file needing a dedicated rule.
 
 package authz
 
@@ -58,4 +58,17 @@ allow if {
     input.action == "upload-bundle"
     input.resource.type == "controls"
     input.user.attrs.is_machine_actor == true
+}
+
+# #2850 — policy sync. The Confluence policy connector pushes its full set
+# of policy pages to POST /v1/policies:sync with a policy-sync API key
+# (#2849). Such a key holds no role (derivedRolesFor), so no role rule
+# admits it; this rule admits it to that one route. The HTTP gate
+# (internal/api refusePolicySyncKeys) already refuses the key everywhere
+# else and refuses every other caller on this route; this is the second
+# leg.
+allow if {
+    input.request.method == "POST"
+    input.request.path == "/v1/policies:sync"
+    input.user.attrs.is_policy_sync_key == true
 }

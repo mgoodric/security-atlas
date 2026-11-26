@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -101,12 +102,9 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
   });
   const [freshSecret, dispatch] = useReducer(reduce, initialState);
   const [issueOpen, setIssueOpen] = useState(false);
-  const [revokeConfirm, setRevokeConfirm] = useState<AdminCredential | null>(
-    null,
-  );
-  // Slice 163: a second confirm modal for Rotate. Same shape as
-  // revokeConfirm -- when set, the modal renders for that credential
-  // and the modal's onConfirm fires the rotateMut.
+  // Slice 163: a confirm modal for Rotate. When set, the modal renders
+  // for that credential and the modal's onConfirm fires the rotateMut.
+  // Revoke confirms inline in its row instead (#2090).
   const [rotateConfirm, setRotateConfirm] = useState<AdminCredential | null>(
     null,
   );
@@ -128,7 +126,6 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
   const revokeMut = useMutation({
     mutationFn: revokeCred,
     onSuccess: () => {
-      setRevokeConfirm(null);
       qc.invalidateQueries({ queryKey: ["settings-creds"] });
     },
   });
@@ -248,6 +245,17 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
           />
         ) : null}
 
+        {/* #2090: the inline revoke confirm closes on Confirm, so a
+            failed revoke surfaces here. */}
+        {revokeMut.error ? (
+          <Alert variant="destructive" aria-live="polite">
+            <AlertTitle>Revoke failed</AlertTitle>
+            <AlertDescription data-testid="settings-token-revoke-error">
+              {(revokeMut.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         {list.isLoading ? (
           <Skeleton
             className="h-32 w-full"
@@ -317,24 +325,30 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setRotateConfirm(c)}
-                          data-testid="settings-token-rotate-button"
-                        >
-                          Rotate
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => setRevokeConfirm(c)}
-                          data-testid="settings-token-revoke-button"
-                        >
-                          Revoke
-                        </Button>
-                      </div>
+                      {/* #2090: Rotate opens its own confirm (it mints a
+                          successor); Revoke is irreversible and confirms
+                          inline in the row. */}
+                      <RowActions
+                        label={`Actions for token ending ${c.last4}`}
+                        data-testid="settings-token-actions"
+                        items={[
+                          {
+                            id: "rotate",
+                            label: "Rotate",
+                            onSelect: () => setRotateConfirm(c),
+                            "data-testid": "settings-token-rotate-button",
+                          },
+                          {
+                            id: "revoke",
+                            label: "Revoke",
+                            destructive: true,
+                            confirmPrompt: `Revoke the token ending ${c.last4}? Revocation is immediate: the CLI or connector using it fails on its next call.`,
+                            confirmLabel: "Revoke now",
+                            onSelect: () => revokeMut.mutate(c.id),
+                            "data-testid": "settings-token-revoke-button",
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 );
@@ -348,15 +362,6 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
           </p>
         )}
       </CardContent>
-
-      {revokeConfirm ? (
-        <RevokeConfirmModal
-          cred={revokeConfirm}
-          submitting={revokeMut.isPending}
-          onCancel={() => setRevokeConfirm(null)}
-          onConfirm={() => revokeMut.mutate(revokeConfirm.id)}
-        />
-      ) : null}
 
       {rotateConfirm ? (
         <RotateConfirmModal
@@ -411,7 +416,7 @@ function FreshTokenCallout(props: FreshTokenCalloutProps) {
       ? "This is the only time you'll see this token. The platform does not store it in plaintext; if you lose it, issue a new one."
       : `This is the only time you'll see this token. The predecessor ending in ${props.predecessorLast4} keeps working until the timestamp below; rotate again or revoke it once your clients have switched over.`;
   return (
-    <Alert variant="destructive" data-testid="settings-fresh-token-callout">
+    <Alert variant="info" data-testid="settings-fresh-token-callout">
       <AlertTitle data-testid="settings-fresh-token-title">{title}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="font-medium">{helperParagraph}</p>
@@ -543,56 +548,7 @@ function IssueTokenForm({
   );
 }
 
-function RevokeConfirmModal({
-  cred,
-  submitting,
-  onCancel,
-  onConfirm,
-}: {
-  cred: AdminCredential;
-  submitting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      data-testid="settings-token-revoke-modal"
-    >
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Revoke token?</CardTitle>
-          <CardDescription>
-            Last 4 <code>{cred.last4}</code>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p>
-            Revocation is immediate. Any client using this bearer will start
-            failing on its next call. Last seen:{" "}
-            <code>{cred.last_used_at ?? "never"}</code>.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onCancel} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={onConfirm}
-              disabled={submitting}
-            >
-              {submitting ? "Revoking..." : "Revoke now"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// Slice 163: RotateConfirmModal is a parallel of RevokeConfirmModal
+// Slice 163: RotateConfirmModal is the token-rotate confirm modal,
 // with rotate-specific copy. Rotation produces a NEW plaintext bearer
 // for the successor row; the predecessor row stays visible with a
 // muted "rotated -> ...last4" badge until the user separately revokes

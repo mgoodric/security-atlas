@@ -70,19 +70,21 @@ For anything beyond a throwaway cluster, use a pre-created Secret — see
 Every key is documented inline in [`values.yaml`](./values.yaml). The
 high-traffic ones:
 
-| Key                                                  | Default                                                     | Purpose                                                              |
-| ---------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| `image.registry` / `image.repository` / `image.tag`  | `ghcr.io` / `mgoodric/security-atlas` / `""` (= appVersion) | First-party image coordinates.                                       |
-| `atlas.replicaCount` / `web.replicaCount`            | `1` / `1`                                                   | Stateless-tier scale-out.                                            |
-| `postgres.host` / `.port` / `.database` / `.sslmode` | `postgres` / `5432` / `security_atlas` / `disable`          | External Postgres connection. Use `sslmode: require`+ in production. |
-| `postgres.appUser` / `.migrateUser`                  | `atlas_app` / `atlas_migrate`                               | The two roles (slice 065 role model).                                |
-| `minio.enabled`                                      | `true`                                                      | Bundle MinIO (dev) or use external S3 (production → `false`).        |
-| `artifacts.s3Endpoint`                               | `""`                                                        | **Required** when `minio.enabled: false`.                            |
-| `oidc.issuer` / `.clientId` / `.redirectUrl`         | `""`                                                        | OIDC relying-party config. Empty issuer = local-user mode.           |
-| `secrets.existingSecret`                             | `""`                                                        | Name of a pre-created Secret. Set this for production.               |
-| `secrets.*` (inline)                                 | `changeme`                                                  | Placeholder credentials — used only when `existingSecret` is unset.  |
-| `ingress.enabled`                                    | `false`                                                     | Render an Ingress.                                                   |
-| `ingress.certManager.enabled`                        | `false`                                                     | Add the cert-manager cluster-issuer annotation + TLS block.          |
+| Key                                                  | Default                                                     | Purpose                                                                                    |
+| ---------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `image.registry` / `image.repository` / `image.tag`  | `ghcr.io` / `mgoodric/security-atlas` / `""` (= appVersion) | First-party image coordinates.                                                             |
+| `atlas.replicaCount` / `web.replicaCount`            | `1` / `1`                                                   | Stateless-tier scale-out.                                                                  |
+| `postgres.host` / `.port` / `.database` / `.sslmode` | `postgres` / `5432` / `security_atlas` / `disable`          | External Postgres connection. Use `sslmode: require`+ in production.                       |
+| `postgres.appUser` / `.migrateUser`                  | `atlas_app` / `atlas_migrate`                               | The two roles (slice 065 role model).                                                      |
+| `minio.enabled`                                      | `true`                                                      | Bundle MinIO (dev) or use external S3 (production → `false`).                              |
+| `artifacts.s3Endpoint`                               | `""`                                                        | **Required** when `minio.enabled: false`.                                                  |
+| `artifacts.s3PublicEndpoint`                         | `""`                                                        | Browser-reachable endpoint for download links. Set with bundled MinIO.                     |
+| `artifacts.forcePathStyle`                           | `""`                                                        | `true` / `false` / empty (= path-style, as an endpoint is always set). `false` for AWS S3. |
+| `oidc.issuer` / `.clientId` / `.redirectUrl`         | `""`                                                        | OIDC relying-party config. Empty issuer = local-user mode.                                 |
+| `secrets.existingSecret`                             | `""`                                                        | Name of a pre-created Secret. Set this for production.                                     |
+| `secrets.*` (inline)                                 | `changeme`                                                  | Placeholder credentials — used only when `existingSecret` is unset.                        |
+| `ingress.enabled`                                    | `false`                                                     | Render an Ingress.                                                                         |
+| `ingress.certManager.enabled`                        | `false`                                                     | Add the cert-manager cluster-issuer annotation + TLS block.                                |
 
 ## Secrets
 
@@ -108,6 +110,34 @@ The Secret must carry these keys:
 | `ATLAS_DEFAULT_USER_PASSWORD`                 | migrate Job        | Seeded local user password.                                                |
 | `ATLAS_OIDC_CLIENT_SECRET`                    | atlas              | Only when `oidc.issuer` is set.                                            |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | atlas              | S3 credentials. Omit if using IRSA / workload identity.                    |
+
+### The OIDC client-secret key
+
+The key that seals the OIDC client secret an admin saves on the SSO page
+(`ATLAS_OIDC_SECRET_KEY`, #2034) is set apart from the Secret above, so it
+can be mounted as a file rather than passed as an environment variable:
+
+```sh
+kubectl create secret generic atlas-oidc-secret-key \
+  --from-literal=oidc-secret-key="$(openssl rand -base64 32)"
+```
+
+```yaml
+oidc:
+  secretKey:
+    existingSecret: atlas-oidc-secret-key
+    secretKey: oidc-secret-key # the key inside that Secret
+```
+
+The chart mounts it read-only (mode 0440) at `/etc/security-atlas/oidc/`,
+gives the atlas pod `fsGroup: 65532` so the nonroot server can read it (an
+explicit `podSecurityContext.fsGroup` wins), and sets
+`ATLAS_OIDC_SECRET_KEY_FILE`. Keep the same key across upgrades and on every
+replica: changing it means re-entering the client secret on the SSO page.
+Unset, the SSO page cannot save a client secret; local login is unaffected.
+A malformed key stops the server at boot, in every mode (#2609). For a
+throwaway cluster, `secrets.oidcSecretKey` renders it into the inline Secret
+instead.
 
 ### Mode 2 — inline (dev convenience)
 
@@ -160,6 +190,23 @@ TLS is opt-in, two ways:
    you manage.
 
 With neither, the Ingress is plain HTTP (dev only).
+
+## Client IPs and login throttling
+
+`/auth/local/login` throttles per client IP. Browser logins reach it
+through the web pod's login BFF, so two settings make that bucket per
+browser rather than one bucket for the whole web Deployment (#2040):
+
+- `web.trustedProxyCIDRs` — where the Ingress controller pods connect
+  from. Web walks `X-Forwarded-For` through these to the browser's IP and
+  replaces the header with that one address before anything reaches
+  atlas, so a header a browser forges is never passed on.
+- `atlas.trustedProxyCIDRs` — where the web pods connect from. atlas
+  honours `X-Forwarded-For` only from these addresses.
+
+On most clusters both are the pod CIDR (for example `10.244.0.0/16`).
+Leaving them empty is safe but shares one bucket across all UI logins.
+Never use `0.0.0.0/0`: it lets any client choose its own IP.
 
 ## Production
 

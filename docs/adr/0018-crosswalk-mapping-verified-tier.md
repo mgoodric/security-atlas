@@ -27,16 +27,16 @@ The platform's confidence rollup (slice 482) and, downstream, board/audit narrat
 - `source_attribution` (provenance): _where did this mapping come from?_ — `scf_official` | `community_draft` (unchanged).
 - `mapping_tier` (trust): _how trusted is it now?_ — `draft` | `under_review` | `verified` | `rejected`.
 
-The tier ladder is the **three-state lifecycle plus a rejected terminal**:
+The tier ladder is the **three-state lifecycle plus a rejected terminal** (reopenable to draft, see the #1849 amendment):
 
 ```
 [draft] --claim--> [under_review] --verify--> [verified]
    |                     |
-   +---------------------+--reject--> [rejected]   (terminal)
+   +---------------------+--reject--> [rejected]   (terminal; reopenable to draft, see the #1849 amendment)
 ```
 
 - `under_review` is an explicit "a reviewer has claimed this mapping" state between `draft` and `verified`. We chose the three-state ladder over a bare `draft → verified` because the intermediate state makes "who is reviewing what" legible and produces a richer audit trail — worth the small extra ceremony for a trust signal that feeds audit-binding narratives.
-- `rejected` is a terminal state reachable from `draft` or `under_review` (a mapping judged wrong).
+- `rejected` is a terminal state reachable from `draft` or `under_review` (a mapping judged wrong) (reopenable to draft, see the #1849 amendment).
 - **No skip-to-verified** for a `community_draft` edge — it must pass through `under_review`. The state machine validates legal transitions server-side.
 
 ### 2. Seed policy
@@ -94,10 +94,74 @@ build-decision record is [`docs/audit-log/483-mapping-tier-governance-decisions.
 "<target>", "note": "<optional>" }`; `{id}` is the `fw_to_scf_edges.id`. The
   reviewer id is taken from the verified admin JWT subject, never the body.
   Status mapping: 200 success / 403 non-admin / 404 unknown edge / 422 illegal
-  transition (the `draft → verified` skip + moves out of a terminal tier) / 400
+  transition (the `draft → verified` skip + moves out of a terminal tier; `rejected` is
+  reopenable to draft, see the #1849 amendment) / 400
   malformed input. (Decisions log D2.)
 
 Migration: `migrations/sql/20260612080000_crosswalk_mapping_tier.sql`
 (+`.down.sql`). State machine + store: `internal/crosswalktier`. Admin surface:
 `internal/api/admincrosswalktier`. The `scf_official → verified` seed is an
 idempotent in-migration data `UPDATE` (decisions log D3).
+
+## Amendment (2026-11-13, #1757): super_admin gate
+
+The "any admin/maintainer role" choice above is narrowed to **`super_admin`**,
+the tighter gate this ADR said to revisit for multi-operator deployments.
+`fw_to_scf_edges` rows are global catalog data shared by every tenant, so a
+tenant-scoped admin, including a per-tenant admin API key, changing a tier is a
+cross-tenant write. `POST /v1/admin/crosswalk-edges/{id}/tier` now requires the
+verified JWT's `atlas:super_admin` claim (the slice-142 check). On a
+single-tenant install the bootstrap admin holds `super_admin` (#1759), so a
+single operator keeps the capability. The audit trail is unchanged.
+
+The tier route takes a JWT, not an API key: an API key's credential is
+tenant-scoped and never carries `atlas:super_admin`. An operator gets one by
+signing in through the browser (the `atlas_jwt` session cookie) or by running
+`atlas-cli login --issuer <url> --client-id <cli client>` and approving the
+device code from a signed-in browser session; the CLI then presents the JWT
+as its bearer. The claim is re-read from `super_admins` on every request, so
+a demoted operator loses the route on their next call (#1850).
+
+## Amendment (2026-11-13, #1849): reopening rejected edges, and tier on content change
+
+Two gaps surfaced in the #1843 review of provenance ranking (#1754).
+
+**Reopen.** `rejected` is no longer terminal. One operator move is added,
+`rejected -> draft`, through the same `POST /v1/admin/crosswalk-edges/{id}/tier`
+route, so it carries the `super_admin` gate and the audit row like every other
+move. A reopened edge climbs the ladder again: `rejected -> under_review` and
+`rejected -> verified` stay illegal. Before this, an official mapping that
+upgraded a rejected community edge stayed hidden behind the #1755 coverage
+filter, and only a manual DB edit recovered it. The importer still never
+un-rejects an edge on its own: a rejection is a human judgment, so an import
+onto a rejected edge is reported (`EdgesUpgradedOntoRejected`) and left for a
+reviewer.
+
+**Tier follows content (§2 applied on every content change).** A tier vouches
+for the mapping a reviewer saw. When an import changes an existing edge's
+content (relationship type, strength, rationale or provenance), the edge is
+re-seeded at the tier §2 gives its new source: `verified` for `scf_official`,
+`draft` for everything else. Concretely:
+
+| Existing tier             | Incoming source                  | Content changed | Result                                 |
+| ------------------------- | -------------------------------- | --------------- | -------------------------------------- |
+| any                       | any                              | no              | unchanged                              |
+| `draft` / `under_review`  | `scf_official`                   | yes             | `verified`                             |
+| `verified`                | `scf_official`                   | yes             | `verified` (no move)                   |
+| `under_review`/`verified` | `community_draft`/`org_internal` | yes             | `draft`                                |
+| `rejected`                | any                              | yes             | `rejected` (listed if provenance rose) |
+
+A new `scf_official` edge also seeds at `verified`, as the tier migration did
+for rows that existed when it ran; before this the insert left it at the
+column default `draft`. Seeding a new edge writes no audit row, matching the
+migration.
+
+Every import-driven move appends an audit row in the import's transaction, with
+`reviewer_id` set to the nil UUID (`soc2import.SystemReviewerID`, which no atlas
+user holds) and a note naming the framework, version and source. The import
+`Report` lists each move in `EdgesTierReseeded`.
+
+We chose reset over flag-for-review: a flag leaves a `verified` label on
+content nobody vetted until someone reads the report, and that label feeds
+coverage. The cost is that a community re-import which edits a verified edge
+sends it back through review, which is the intent.

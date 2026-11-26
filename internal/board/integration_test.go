@@ -115,11 +115,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualJ
 	updated := anchor.UTC().Add(-time.Duration(updatedDaysAgo) * 24 * time.Hour)
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, treatment,
+			id, tenant_id, title, description, category_id, treatment,
 			inherent_score, residual_score, updated_at, created_at
 		)
 		VALUES (
-			$1, $2, $3, 'slice 283 test risk', 'operational'::risk_category, 'mitigate'::risk_treatment,
+			$1, $2, $3, 'slice 283 test risk', risk_category_id($2, 'operational'), 'mitigate'::risk_treatment,
 			$4::jsonb, $5::jsonb, $6, $6
 		)
 	`, id, tenant, title, inherentJSON, residualJSON, updated); err != nil {
@@ -247,7 +247,7 @@ func TestBoardStore_InsertGetList_RoundTrip(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 	if fetched.Content.Frameworks[0].CoveragePct != 92 {
-		t.Errorf("Get.Content coverage = %d, want 92", fetched.Content.Frameworks[0].CoveragePct)
+		t.Errorf("Get.Content coverage = %v, want 92", fetched.Content.Frameworks[0].CoveragePct)
 	}
 	if fetched.NarrativeMd != narrative {
 		t.Errorf("Get narrative drift: got %q", fetched.NarrativeMd)
@@ -379,7 +379,7 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 	// Generator reads risks as-of it, so the risk must be seeded relative to it.
 	genClock := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
 
-	seedFramework(t, admin, tenant, "test-soc2-gen", "SOC 2 (gen)")
+	seedPostureFramework(t, admin, tenant, postureFramework{name: "SOC 2 (gen)", reqs: 4, coveredNow: 3, activate: true})
 	seedRisk(t, admin, tenant, "Critical CVE backlog",
 		`{"score": 20}`, `{"likelihood": 5, "impact": 4}`, genClock, 60)
 
@@ -405,9 +405,21 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 	if len(stored.Content.Frameworks) == 0 {
 		t.Fatal("Generate produced zero framework posture rows")
 	}
-	// Trend arrow up — delta 2 is positive.
-	if stored.Content.Frameworks[0].TrendArrow != board.TrendUp {
-		t.Errorf("framework trend = %q, want %q", stored.Content.Frameworks[0].TrendArrow, board.TrendUp)
+	// Posture is the dashboard query's (#2210): 3 of 4 requirements covered.
+	// Found by name, not index: global (tenant_id IS NULL) frameworks that
+	// another package's tests leave on a shared DB are listed too (#2525).
+	var got *board.FrameworkPosture
+	for i := range stored.Content.Frameworks {
+		if stored.Content.Frameworks[i].Name == "SOC 2 (gen)" {
+			got = &stored.Content.Frameworks[i]
+		}
+	}
+	if got == nil || got.CoveragePct != 75 {
+		t.Errorf("framework posture = %+v, want SOC 2 (gen) at 75%% (rows %+v)", got, stored.Content.Frameworks)
+	}
+	// The evidence freshness rate is the freshness read model's: 2 of 3 fresh.
+	if c := stored.Content.Coverage; c == nil || c.CoveragePct != 75 || c.ScopedFrameworkCount != 1 || c.EvidenceFreshnessRatePct != 67 {
+		t.Errorf("coverage = %+v, want 75%% over 1 scoped framework, freshness rate 67%%", c)
 	}
 	// Top risk surfaces in the brief.
 	if len(stored.Content.TopRisks) == 0 || !strings.Contains(stored.Content.TopRisks[0].Title, "Critical CVE backlog") {
@@ -752,15 +764,6 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 	store := board.NewPackStore(app)
 	gen := board.NewPackGenerator(
 		store,
-		fixedFreshness{rows: []freshness.ControlFreshness{
-			{IsStale: false, EvidenceCount: 5},
-			{IsStale: false, EvidenceCount: 1},
-		}},
-		fixedDrift{report: drift.DriftReport{
-			SinceDate:   time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC),
-			ThroughDate: time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC),
-			Delta:       1,
-		}},
 		fixedVendorBurndown{out: board.VendorBurndownReadout{Total: 4, OnTime: 3, PastDue: 1}},
 	).WithClock(func() time.Time { return genClock })
 
@@ -790,11 +793,8 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 	if vb.VendorBurndownOnTimePct != 75 {
 		t.Errorf("vendor on-time pct = %d, want 75 (3/4)", vb.VendorBurndownOnTimePct)
 	}
-	// Posture section populated from the framework + freshness fixture.
-	posture := stored.Content.Sections[board.SectionPosture].Data
-	if len(posture.Frameworks) == 0 {
-		t.Error("posture section has no frameworks")
-	}
+	// Posture rows come from the dashboard posture query; their per-framework
+	// numbers are asserted in pack_posture_integration_test.go (#2056).
 	// Operator-entered sections start with empty data + a placeholder.
 	op := stored.Content.Sections[board.SectionOperational]
 	if op.Data.PhishingPassRatePct != nil {
@@ -816,11 +816,7 @@ func TestPackGenerator_Generate_NilVendorReader(t *testing.T) {
 
 	seedFramework(t, admin, tenant, "test-fw-nilreader", "Test FW (nil reader)")
 	store := board.NewPackStore(app)
-	gen := board.NewPackGenerator(store,
-		fixedFreshness{},
-		fixedDrift{},
-		nil,
-	).WithClock(func() time.Time {
+	gen := board.NewPackGenerator(store, nil).WithClock(func() time.Time {
 		return time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	})
 
@@ -845,9 +841,83 @@ func TestPackGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
-	gen := board.NewPackGenerator(board.NewPackStore(app), fixedFreshness{}, fixedDrift{}, nil)
+	gen := board.NewPackGenerator(board.NewPackStore(app), nil)
 	if _, err := gen.Generate(ctx, "not-a-date"); !errors.Is(err, board.ErrPackBadPeriodEnd) {
 		t.Fatalf("Generate(bad date) err = %v, want ErrPackBadPeriodEnd", err)
+	}
+}
+
+// =========================================================================
+// #2060 — roll-up parents stay out of the board's top risks
+// =========================================================================
+
+// seedRollUpLink rolls child up into parent as of linkedAt.
+func seedRollUpLink(t *testing.T, admin *pgxpool.Pool, tenant string, parent, child uuid.UUID, linkedAt time.Time) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, tenant_id, created_at)
+		VALUES ($1, $2, $3, $4)
+	`, parent, child, tenant, linkedAt); err != nil {
+		t.Fatalf("seed roll-up link: %v", err)
+	}
+}
+
+func riskTitles(rs []board.RiskAging) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Title
+	}
+	return out
+}
+
+// AC: the board brief and the board pack rank only risks that are not
+// roll-ups, so a parent never takes a top-risk slot beside the children it
+// summarises, even when it outranks them. A risk counts as a roll-up from
+// the moment its first child was linked, so a read dated before the link
+// still shows it.
+func TestRollUps_BoardTopRisksExcludeRollUps(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := dbtest.SeedTenant(t, admin,
+		"board_packs", "board_briefs", "risk_aggregations", "risks", "frameworks")
+	ctx := ctxFor(t, tenant)
+
+	genClock := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	linkedAt := genClock.Add(-24 * time.Hour)
+	seedFramework(t, admin, tenant, "test-fw-rollups", "Test FW (roll-ups)")
+	parent := seedRisk(t, admin, tenant, "Roll-up parent",
+		`{"score": 25}`, `{"likelihood": 5, "impact": 5}`, genClock, 10)
+	child := seedRisk(t, admin, tenant, "Rolled-up child",
+		`{"score": 12}`, `{"likelihood": 3, "impact": 4}`, genClock, 10)
+	seedRollUpLink(t, admin, tenant, parent, child, linkedAt)
+
+	brief, err := board.NewGenerator(board.NewStore(app), fixedFreshness{}, fixedDrift{}).
+		WithClock(func() time.Time { return genClock }).
+		Generate(ctx, "2026-06-30")
+	if err != nil {
+		t.Fatalf("brief Generate: %v", err)
+	}
+	if got := riskTitles(brief.Content.TopRisks); len(got) != 1 || got[0] != "Rolled-up child" {
+		t.Errorf("brief top risks = %v, want only the child", got)
+	}
+
+	pack, err := board.NewPackGenerator(board.NewPackStore(app), nil).
+		WithClock(func() time.Time { return genClock }).
+		Generate(ctx, "2026-06-30")
+	if err != nil {
+		t.Fatalf("pack Generate: %v", err)
+	}
+	if got := riskTitles(pack.Content.Sections[board.SectionTopRisks].Data.TopRisks); len(got) != 1 || got[0] != "Rolled-up child" {
+		t.Errorf("pack top risks = %v, want only the child", got)
+	}
+
+	// Before the link existed the parent was a plain risk.
+	rows, err := board.NewStore(app).ListRisksAsOf(ctx, linkedAt.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListRisksAsOf: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("ListRisksAsOf before the link returned %d risks, want 2", len(rows))
 	}
 }
 

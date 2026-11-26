@@ -41,6 +41,12 @@ func resetISO(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	for _, stmt := range []string{
+		// An active overlay edge refuses its requirement's delete (#2240).
+		`DELETE FROM fw_to_scf_overlay_edges WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = 'iso27001')`,
 		`DELETE FROM fw_to_scf_edges WHERE framework_requirement_id IN (
 			SELECT fr.id FROM framework_requirements fr
 			JOIN framework_versions fv ON fv.id = fr.framework_version_id
@@ -175,17 +181,17 @@ func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
 	// was originally mapped to. If the extension silently re-anchored or
 	// dropped any of these, this fails.
 	subset := map[string]string{
-		"A.5.1":  "GOV-01",
+		"A.5.1":  "GOV-02",
 		"A.5.15": "IAC-01", // the invariant-#1 shared anchor
-		"A.5.18": "IAC-07",
-		"A.5.24": "IRO-04",
-		"A.6.3":  "HRS-04",
-		"A.7.2":  "PES-04",
-		"A.8.2":  "IAC-21",
+		"A.5.18": "IAC-04",
+		"A.5.24": "IRO-08",
+		"A.6.3":  "SAT-04",
+		"A.7.2":  "PES-08",
+		"A.8.2":  "IAC-10",
 		"A.8.8":  "VPM-01",
-		"A.8.13": "BCD-09",
-		"A.8.15": "AAA-01",
-		"A.8.25": "SEA-05",
+		"A.8.13": "BCD-24",
+		"A.8.15": "MON-04",
+		"A.8.25": "TDA-05",
 	}
 	for code, wantAnchor := range subset {
 		var found int

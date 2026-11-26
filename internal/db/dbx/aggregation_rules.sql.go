@@ -296,10 +296,11 @@ func (q *Queries) GetLastFiredEvaluation(ctx context.Context, arg GetLastFiredEv
 }
 
 const getRuleMetaRiskByKey = `-- name: GetRuleMetaRiskByKey :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
+ORDER BY created_at ASC, id ASC
 LIMIT 1
 `
 
@@ -308,11 +309,14 @@ type GetRuleMetaRiskByKeyParams struct {
 	Column2  string      `json:"column_2"`
 }
 
-// Idempotency lookup: find the meta-risk a rule already created for a
-// given (rule_id, window_start) window. The key is stored on the
+// Idempotency lookup: find the meta-risk a rule activation already created.
+// The key, sha256(rule_id|activated_at) since #1861, is stored on the
 // meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
 // pattern). If found, the engine UPDATEs it rather than creating a
-// duplicate (canvas §6.6: one meta-risk per rule per window).
+// duplicate (canvas §6.6: one meta-risk per rule activation). The ORDER BY
+// makes the pick deterministic on installs that already hold same-key
+// duplicates from before the #1861 advisory lock: every evaluation updates
+// the oldest one (#1867).
 func (q *Queries) GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error) {
 	row := q.db.QueryRow(ctx, getRuleMetaRiskByKey, arg.TenantID, arg.Column2)
 	var i Risk
@@ -321,7 +325,6 @@ func (q *Queries) GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskB
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -336,6 +339,21 @@ func (q *Queries) GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskB
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -521,12 +539,13 @@ func (q *Queries) ListAggregationRules(ctx context.Context, tenantID pgtype.UUID
 
 const listCandidateRisksForRule = `-- name: ListCandidateRisksForRule :many
 
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 FROM risks
 WHERE tenant_id = $1
   AND themes @> ARRAY[$2::text]
   AND created_at >= $3
   AND methodology IN ('nist_800_30', 'qualitative_5x5')
+  AND status = 'open'
 ORDER BY created_at ASC, id ASC
 `
 
@@ -548,6 +567,8 @@ type ListCandidateRisksForRuleParams struct {
 // Hits idx_risks_tenant_created_themes for the (tenant_id, created_at)
 // range scan, then the GIN-backed theme containment narrows the slice.
 // The methodology filter mirrors slice 053's IsAggregableMethodology.
+// Closed risks are not candidates (#2107): a closed child stops counting
+// toward the thresholds and the severity at the next evaluation.
 //
 // target_theme is a SCALAR text parameter — the explicit `::text` cast on
 // sqlc.arg keeps sqlc from inferring it as text[] just because it appears
@@ -566,7 +587,6 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -581,6 +601,21 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+			&i.ExternalRef,
 		); err != nil {
 			return nil, err
 		}
@@ -590,6 +625,24 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAggregationKey = `-- name: LockAggregationKey :exec
+SELECT pg_advisory_xact_lock(7, hashtext($1::text))
+`
+
+// #1861: serialize every evaluation of one rule's meta-risk key inside the
+// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
+// then an insert (CreateAggregateRisk); without this lock two concurrent
+// risk writes, or a risk write racing evaluate-now, can both miss the read
+// and both create. Transaction-scoped, so it releases on commit/rollback.
+// Under READ COMMITTED the reads issued after the lock see the winner's
+// committed meta-risk. Namespace 7 is advisorylock.AggregationKey (#2273);
+// hashtext maps the hex key into it, and a hash collision only
+// over-serializes, never under-.
+func (q *Queries) LockAggregationKey(ctx context.Context, aggregationKey string) error {
+	_, err := q.db.Exec(ctx, lockAggregationKey, aggregationKey)
+	return err
 }
 
 const updateAggregationRuleThresholds = `-- name: UpdateAggregationRuleThresholds :one
@@ -661,7 +714,7 @@ UPDATE risks
 SET inherent_score = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id, external_ref
 `
 
 type UpdateMetaRiskInherentScoreParams struct {
@@ -683,7 +736,6 @@ func (q *Queries) UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMet
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -698,6 +750,21 @@ func (q *Queries) UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMet
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+		&i.AcceptanceJustification,
+		&i.AcceptanceProposedUntil,
+		&i.AcceptanceProposedBy,
+		&i.AcceptanceProposedAt,
+		&i.AcceptanceApprovedAt,
+		&i.SelfApproved,
+		&i.Status,
+		&i.ClosureReason,
+		&i.ClosureNote,
+		&i.ClosedAt,
+		&i.ClosedBy,
+		&i.OwnerUserID,
+		&i.ExternalRef,
 	)
 	return i, err
 }
@@ -781,8 +848,9 @@ type WriteAggregationRuleEvaluationParams struct {
 // ===== aggregation_rule_evaluations (append-only) =====
 // Append-only. EVERY evaluation cycle writes exactly one row, including
 // 'no_match' (canvas §6.6 + AC-8: the audit trail proves the engine ran).
-// window_start + meta_risk_id are non-NULL only for outcome='fired' (the
-// fired-coherent CHECK enforces this).
+// window_start + meta_risk_id are set together: always for outcome='fired',
+// and for a near_miss / no_match that refreshed an existing meta-risk
+// (#1867). The fired-coherent CHECK enforces this.
 func (q *Queries) WriteAggregationRuleEvaluation(ctx context.Context, arg WriteAggregationRuleEvaluationParams) (AggregationRuleEvaluation, error) {
 	row := q.db.QueryRow(ctx, writeAggregationRuleEvaluation,
 		arg.ID,

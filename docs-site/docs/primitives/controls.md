@@ -22,7 +22,7 @@ framework.
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `scf_id`               | Canonical SCF code (e.g. `IAC-01`). The anchor that mappings hang off.                  |
 | `title`, `description` | Human-readable.                                                                         |
-| `control_family`       | SCF taxonomy: AAA, AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                               |
+| `control_family`       | SCF taxonomy: AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                                    |
 | `implementation_type`  | `automated` · `semi_automated` · `manual_attested` · `manual_periodic`                  |
 | `owner_role`           | Who owns it (RACI). Resolved to a real person via the org's role assignments.           |
 | `lifecycle_state`      | `draft` → `proposed` → `active` → `deprecated` → `retired`. Soft-versioned; reversible. |
@@ -170,7 +170,6 @@ catalogs:
 ```sh
 atlas-oscal import-catalog ./nist-800-53-rev5.oscal.json \
   --dsn "$DATABASE_URL_APP" \
-  --tenant-id <tenant uuid> \
   --source-label "NIST SP 800-53 rev5" \
   --imported-by "you@example.com"
 ```

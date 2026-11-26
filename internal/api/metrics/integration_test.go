@@ -49,7 +49,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -129,31 +129,31 @@ func seedCatalog(t *testing.T, admin *pgxpool.Pool, boardID, programID string) {
 	})
 }
 
-// testEnv bundles the running server with admin + owner bearers. The
-// admin bearer unlocks CreateInput + UpsertTarget; the owner bearer
-// pins the 403 admin-gate branches.
+// testEnv bundles the running server with admin, owner and viewer
+// bearers. The admin bearer unlocks CreateInput + UpsertTarget; the
+// owner and viewer bearers pin the 403 branches.
 type testEnv struct {
-	server      *httptest.Server
-	adminBearer string
-	ownerBearer string
+	server       *httptest.Server
+	adminBearer  string
+	adminUserID  string
+	ownerBearer  string
+	viewerBearer string
 }
 
+// testServer serves one tenant with the authz engine attached, so every
+// request is authorized as it is live (#3008). Each bearer is a seeded
+// person holding a live user_roles grant: the admin was a SuperAdmin
+// claim and the owner a role claim with no user behind it, and both
+// passed only while no engine ran.
 func testServer(t *testing.T, app *pgxpool.Pool, tenant uuid.UUID) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 
-	// CreateInput parses cred.UserID as a UUID (it lands in the
-	// EnteredByUserID column). The default testjwt.AdminFor sets
-	// Subject = "test-admin:<tenant>", which is NOT a UUID — so we
-	// override Subject with a real UUID for these tests.
-	adminClaims := testjwt.AdminFor(tenant)
-	adminClaims.Subject = uuid.NewString()
-	admin := srv.IssueTestJWT(t, adminClaims)
-
-	ownerClaims := testjwt.OwnerFor(tenant, []string{"control_owner"})
-	ownerClaims.Subject = uuid.NewString()
-	owner := srv.IssueTestJWT(t, ownerClaims)
+	adminID, admin := liveroletest.Person(t, srv, tenant.String(), "admin")
+	owner := liveroletest.Bearer(t, srv, tenant.String(), "control_owner")
+	viewer := liveroletest.Bearer(t, srv, tenant.String(), "viewer")
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -162,9 +162,11 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant uuid.UUID) testEnv {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	return testEnv{
-		server:      ts,
-		adminBearer: admin,
-		ownerBearer: owner,
+		server:       ts,
+		adminBearer:  admin,
+		adminUserID:  adminID.String(),
+		ownerBearer:  owner,
+		viewerBearer: viewer,
 	}
 }
 
@@ -545,6 +547,140 @@ func TestIntegration_Target_UpsertAndRead(t *testing.T) {
 		env.ownerBearer, "application/json", updateBody)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("UpsertTarget as owner: status %d; want 403", resp.StatusCode)
+	}
+}
+
+// TestIntegration_Target_UpsertIsAudited pins #2572: every target upsert
+// writes one me_audit_log row in its transaction, naming the actor and the
+// before and after value; a refused upsert writes none.
+func TestIntegration_Target_UpsertIsAudited(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+
+	boardID := "ms.2572.board." + uuid.NewString()[:8]
+	programID := "ms.2572.program." + uuid.NewString()[:8]
+	seedCatalog(t, admin, boardID, programID)
+
+	env := testServer(t, app, tenant)
+	url := env.server.URL + "/v1/metrics/" + boardID + "/target"
+
+	resp := do(t, http.MethodPut, url, env.adminBearer, "application/json",
+		`{"target_value":0.95,"warning_threshold":0.85,"critical_threshold":0.7,"direction":"higher_is_better","notes":"first"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("first upsert: status %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = do(t, http.MethodPut, url, env.adminBearer, "application/json",
+		`{"target_value":0.1,"direction":"lower_is_better","notes":"second"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second upsert: status %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = do(t, http.MethodPut, url, env.ownerBearer, "application/json", `{"direction":"higher_is_better"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("owner upsert: status %d; want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	type auditRow struct {
+		userID    string
+		principal *string
+		before    map[string]any
+		after     map[string]any
+	}
+	rows, err := admin.Query(context.Background(), `
+		SELECT user_id::text, actor_principal, before, after
+		FROM me_audit_log
+		WHERE tenant_id = $1 AND action = 'metric_target_set'
+		ORDER BY occurred_at, id`, tenant)
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	var got []auditRow
+	for rows.Next() {
+		var r auditRow
+		var before, after []byte
+		if err := rows.Scan(&r.userID, &r.principal, &before, &after); err != nil {
+			t.Fatalf("scan audit: %v", err)
+		}
+		if err := json.Unmarshal(before, &r.before); err != nil {
+			t.Fatalf("before %s: %v", before, err)
+		}
+		if err := json.Unmarshal(after, &r.after); err != nil {
+			t.Fatalf("after %s: %v", after, err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("audit rows: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("audit rows = %d; want 2 (one per accepted upsert, none for the 403)", len(got))
+	}
+	for i, r := range got {
+		if r.userID != env.adminUserID {
+			t.Errorf("row %d user_id = %s; want %s", i, r.userID, env.adminUserID)
+		}
+		if r.principal == nil || *r.principal == "" {
+			t.Errorf("row %d actor_principal is empty", i)
+		}
+		if r.after["metric_id"] != boardID {
+			t.Errorf("row %d after.metric_id = %v; want %s", i, r.after["metric_id"], boardID)
+		}
+	}
+	if got[0].before != nil {
+		t.Errorf("first set: before = %v; want null", got[0].before)
+	}
+	if got[0].after["direction"] != "higher_is_better" || got[0].after["notes"] != "first" {
+		t.Errorf("first set: after = %v", got[0].after)
+	}
+	if got[1].before["direction"] != "higher_is_better" || got[1].before["notes"] != "first" {
+		t.Errorf("second set: before = %v; want the first value", got[1].before)
+	}
+	if got[1].after["direction"] != "lower_is_better" || got[1].after["notes"] != "second" {
+		t.Errorf("second set: after = %v", got[1].after)
+	}
+	if got[1].after["warning_threshold"] != nil {
+		t.Errorf("second set: after.warning_threshold = %v; want cleared", got[1].after["warning_threshold"])
+	}
+}
+
+// TestIntegration_ViewerWritesRefusedByAuthz: a viewer's manual input and
+// target upsert are refused by the authz engine itself ({"error":
+// "forbidden"}), not by the handler's role gate, and nothing is written.
+// Drop liveroletest.Attach from testServer and this fails (#3008).
+func TestIntegration_ViewerWritesRefusedByAuthz(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+
+	boardID := "ms.3008.board." + uuid.NewString()[:8]
+	programID := "ms.3008.program." + uuid.NewString()[:8]
+	seedCatalog(t, admin, boardID, programID)
+
+	env := testServer(t, app, tenant)
+	base := env.server.URL + "/v1/metrics/" + boardID
+	for _, rt := range []struct{ method, url, body string }{
+		{http.MethodPost, base + "/inputs", `{"numeric_value": 0.5}`},
+		{http.MethodPut, base + "/target", `{"direction":"higher_is_better"}`},
+	} {
+		resp := do(t, rt.method, rt.url, env.viewerBearer, "application/json", rt.body)
+		body := decodeMap(t, resp)
+		if resp.StatusCode != http.StatusForbidden || body["error"] != "forbidden" {
+			t.Errorf("viewer %s %s = %d %v; want 403 forbidden", rt.method, rt.url, resp.StatusCode, body)
+		}
+	}
+
+	var inputs, targets int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT (SELECT count(*) FROM metric_inputs WHERE tenant_id = $1),
+		        (SELECT count(*) FROM metric_targets WHERE tenant_id = $1)`, tenant).
+		Scan(&inputs, &targets); err != nil {
+		t.Fatalf("count writes: %v", err)
+	}
+	if inputs != 0 || targets != 0 {
+		t.Fatalf("viewer writes landed: %d inputs, %d targets; want none", inputs, targets)
 	}
 }
 

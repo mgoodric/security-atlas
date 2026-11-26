@@ -35,7 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -78,10 +78,10 @@ func seedNistRisk(t *testing.T, admin *pgxpool.Pool, tenant string, likelihood, 
 	inherent, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score
 		)
-		VALUES ($1, $2, 'slice 020 api test risk', '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, 'slice 020 api test risk', '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        $3::jsonb, 'avoid', 'owner', '{}'::jsonb)
 	`, riskID, tenant, string(inherent)); err != nil {
 		t.Fatalf("seed nist risk: %v", err)
@@ -98,8 +98,9 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
+	// #2556: a grc_engineer by live role, through OPA (liveroletest).
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")

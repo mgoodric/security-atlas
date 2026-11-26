@@ -47,21 +47,15 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogPortal,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   fetchAuditPeriods,
   type AuditPeriodsListResponse,
 } from "@/lib/api/audit-periods";
 import {
+  ANCHORS_PAGE_LIMIT,
   fetchControlsList,
   fetchScopeCells,
   type ControlsListResponse,
@@ -77,6 +71,7 @@ import {
   ALL,
   NONE,
   SCOPE_CELL_CAP,
+  SCOPE_FILTER_HINT,
   SOURCE_DELIM,
   buildControlOptions,
   buildKindOptions,
@@ -95,17 +90,21 @@ import {
 import {
   hashPrefix,
   ledgerSubtitleSuffix,
-  observedAtLabel,
-  prettyJSON,
   recordCountMeta,
   scopeLabel,
-  sourceSummary,
 } from "./format";
+import { SourceAttribution } from "./source-attribution";
+import { usePeopleDirectory } from "@/components/ui/person";
+import { actorText } from "@/lib/person";
 import {
   PUSH_CTA_HREF,
   PUSH_CTA_LABEL,
   PUSH_CTA_SUBTITLE_PREFIX,
 } from "./push-cta";
+import { pageTitle } from "@/lib/page-titles";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
 
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
 // browser URL is a faithful echo of the request that the BFF will
@@ -174,8 +173,9 @@ function EvidencePageInner() {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
     const urlKey = URL_KEYS[key];
-    const sentinel = key === "controlId" ? NONE : ALL;
-    if (next[key] === sentinel) {
+    // The default value stays out of the URL. For Since that is "30d"
+    // (#2794), so "All time" is written as since_preset=all.
+    if (next[key] === DEFAULT_FILTERS[key]) {
       sp.delete(urlKey);
     } else {
       sp.set(urlKey, next[key]);
@@ -262,9 +262,11 @@ function EvidencePageInner() {
 
   // Anchor catalog — drives the Control pill option list. The fetch
   // reuses the slice 098 endpoint so we don't duplicate the wire.
+  // #2771: only anchors with a tenant control behind them, since the
+  // ledger filters on the tenant control id; one page at the platform cap.
   const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list"],
-    queryFn: () => fetchControlsList(),
+    queryKey: ["controls", "list", "has_control", ANCHORS_PAGE_LIMIT],
+    queryFn: () => fetchControlsList(undefined, true, ANCHORS_PAGE_LIMIT),
   });
   const anchors = useMemo(() => anchorsQ.data?.anchors ?? [], [anchorsQ.data]);
   const controlOptions = useMemo(() => buildControlOptions(anchors), [anchors]);
@@ -386,23 +388,27 @@ function EvidencePageInner() {
   );
   // Slice 234 — Source pill options derived from the observed
   // (actor_type, actor_id) tuples on the current page of evidence
-  // rows. Same provenance shape as the table cell renderer; no
+  // rows: `source_attribution`, the column the filter matches (#2771),
+  // same as the table cell renderer; no
   // invented values (P0 — "Options come from observed values only").
+  // #2385: a person or API key is labelled by name, never by ID.
+  const people = usePeopleDirectory();
   const sourceOptions = useMemo(
     () =>
       buildSourceOptions(
         records.map((r) => ({
           actor_type:
-            typeof r.source?.actor_type === "string"
-              ? r.source.actor_type
+            typeof r.source_attribution?.actor_type === "string"
+              ? r.source_attribution.actor_type
               : undefined,
           actor_id:
-            typeof r.source?.actor_id === "string"
-              ? r.source.actor_id
+            typeof r.source_attribution?.actor_id === "string"
+              ? r.source_attribution.actor_id
               : undefined,
         })),
+        (id) => actorText(id, people.data),
       ),
-    [records],
+    [records, people.data],
   );
   // Slice 234 — the Source pill's current value is the composite
   // `type|id` (or ALL when neither is narrowing). When the URL carries
@@ -415,13 +421,14 @@ function EvidencePageInner() {
       ? `${filters.sourceActorType}${SOURCE_DELIM}${filters.sourceActorId}`
       : ALL;
 
-  // Row drawer state — clicking a row opens an inline Dialog showing
-  // the full record JSON pretty-printed (slice 099 AC-7, decision D3).
-  const [drawerRecord, setDrawerRecord] = useState<EvidenceRecord | null>(null);
-  const openDrawer = useCallback((row: EvidenceRecord) => {
-    setDrawerRecord(row);
-  }, []);
-  const closeDrawer = useCallback(() => setDrawerRecord(null), []);
+  // #2137 — a row click opens the evidence detail page, which reads the
+  // full record (payload included) from GET /v1/evidence/{id}.
+  const openDetail = useCallback(
+    (row: EvidenceRecord) => {
+      router.push(`/evidence/${encodeURIComponent(row.evidence_id)}`);
+    },
+    [router],
+  );
 
   // Hash-copy feedback. Tracks the recently-copied content_hash so the
   // cell can show a brief "Copied!" affordance.
@@ -520,24 +527,26 @@ function EvidencePageInner() {
       id: "observed_at",
       header: "Observed",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="evidence-row-observed-at"
-        >
-          {observedAtLabel(row.observed_at)}
-        </span>
+        <Timestamp
+          value={row.observed_at}
+          className="text-xs text-muted-foreground"
+          testId="evidence-row-observed-at"
+        />
       ),
     },
     {
       id: "evidence_kind",
       header: "Evidence kind",
       cell: (row) => (
-        <span
-          className="font-mono text-xs"
-          data-testid="evidence-row-evidence-kind"
-        >
-          {row.evidence_kind ?? "—"}
-        </span>
+        <>
+          <span
+            className="font-mono text-xs"
+            data-testid="evidence-row-evidence-kind"
+          >
+            {row.evidence_kind ?? "—"}
+          </span>
+          {row.demo ? <DemoBadge testId="evidence-row-demo" /> : null}
+        </>
       ),
     },
     {
@@ -549,7 +558,7 @@ function EvidencePageInner() {
           data-testid="evidence-row-result"
           title={row.result}
         >
-          {row.result}
+          {enumLabel("EvidenceResult", row.result)}
         </span>
       ),
     },
@@ -558,7 +567,7 @@ function EvidencePageInner() {
       header: "Source",
       cell: (row) => (
         <span className="text-xs" data-testid="evidence-row-source">
-          {sourceSummary(row.source)}
+          <SourceAttribution source={row.source_attribution} />
         </span>
       ),
     },
@@ -659,8 +668,9 @@ function EvidencePageInner() {
     ledgerTotal === undefined ? "" : ledgerSubtitleSuffix(ledgerTotal);
   const subtitleNode = (
     <>
-      Append-only · ingestion separated from evaluation · point-in-time replay
-      always possible. {PUSH_CTA_SUBTITLE_PREFIX}
+      <Term id="evidence-ledger">Append-only</Term> · ingestion separated from{" "}
+      <Term id="evaluation">evaluation</Term> · point-in-time replay always
+      possible. {PUSH_CTA_SUBTITLE_PREFIX}
       <a
         href={PUSH_CTA_HREF}
         target="_blank"
@@ -731,7 +741,7 @@ function EvidencePageInner() {
   if (anchorsQ.isLoading) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -746,7 +756,7 @@ function EvidencePageInner() {
   if (anchorsQ.isError) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
       >
@@ -764,7 +774,7 @@ function EvidencePageInner() {
   if (evidenceQ.isLoading) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -779,7 +789,7 @@ function EvidencePageInner() {
   if (evidenceQ.isError) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -799,7 +809,7 @@ function EvidencePageInner() {
   return (
     <>
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -810,6 +820,17 @@ function EvidencePageInner() {
             224 banner above the controls table). The banner fires when
             the tenant has more cells than `SCOPE_CELL_CAP`; the
             dropdown still works for the first 50 cells. */}
+        {/* #2771 — the Scope filter matches the scope a record was
+            pushed with; older records carry none and drop out, so say
+            so while the filter is narrowing. */}
+        {filters.scopeCellId !== ALL ? (
+          <p
+            className="mb-3 text-xs text-muted-foreground"
+            data-testid="evidence-scope-hint"
+          >
+            {SCOPE_FILTER_HINT}
+          </p>
+        ) : null}
         {scopeCellsCapped ? (
           <Alert data-testid="evidence-scope-cells-capped" className="mb-3">
             <AlertTitle>
@@ -826,16 +847,16 @@ function EvidencePageInner() {
           columns={columns}
           rows={records}
           rowKey={(row) => row.evidence_id}
-          onRowClick={openDrawer}
+          onRowClick={openDetail}
           emptyFallback={noRecordsEmptyState}
           // Slice 281 — collapse to a card stack at `< md`. The
           // evidence ledger renders 6 columns (observed / kind /
           // result / source / scope / hash) which horizontal-scrolls
           // at 375px. The card variant stacks the provenance label/
           // value pairs vertically so the operator can scan the
-          // ledger one-handed on mobile. The row-click `openDrawer`
+          // ledger one-handed on mobile. The row-click `openDetail`
           // handler still fires (the card carries the same handler)
-          // so the full-record dialog continues to work. Desktop UX
+          // so the row still opens the evidence detail page. Desktop UX
           // is unchanged at `≥ md` (P0-281-1).
           mobileMode="cards"
         />
@@ -855,79 +876,6 @@ function EvidencePageInner() {
           />
         ) : null}
       </ListPage>
-
-      {/* Row-detail drawer — opens on row click, shows the full record
-          JSON pretty-printed. Per slice 099 AC-7 / decision D3: simpler
-          than a per-record page stub, no orphan route. */}
-      <Dialog
-        open={drawerRecord !== null}
-        onOpenChange={(open) => {
-          if (!open) closeDrawer();
-        }}
-      >
-        <DialogPortal>
-          <DialogContent
-            className="max-w-3xl"
-            data-testid="evidence-row-drawer"
-          >
-            <DialogHeader>
-              <DialogTitle>Evidence record</DialogTitle>
-              <DialogDescription>
-                {drawerRecord
-                  ? `${drawerRecord.evidence_kind ?? "(no kind)"} · observed ${
-                      drawerRecord.observed_at
-                    }`
-                  : ""}
-              </DialogDescription>
-            </DialogHeader>
-            {drawerRecord ? (
-              <div className="mt-2 space-y-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Full content hash
-                  </div>
-                  <div
-                    className="font-mono text-xs break-all"
-                    data-testid="evidence-drawer-full-hash"
-                  >
-                    {drawerRecord.content_hash}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Result
-                  </div>
-                  <div
-                    className="font-mono text-xs"
-                    data-testid="evidence-drawer-result"
-                  >
-                    {drawerRecord.result}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Scope cell
-                  </div>
-                  <div className="font-mono text-xs break-all">
-                    {drawerRecord.scope_cell ?? "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Source provenance
-                  </div>
-                  <pre
-                    className="font-mono text-xs bg-muted/40 rounded p-3 overflow-x-auto"
-                    data-testid="evidence-drawer-source-json"
-                  >
-                    {prettyJSON(drawerRecord.source)}
-                  </pre>
-                </div>
-              </div>
-            ) : null}
-          </DialogContent>
-        </DialogPortal>
-      </Dialog>
     </>
   );
 }

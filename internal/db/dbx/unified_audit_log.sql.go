@@ -169,6 +169,165 @@ WITH unified AS (
         (to_jsonb(w) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'walkthrough_id' - 'subject_module')::jsonb AS payload_json
     FROM walkthrough_audit_log w
+
+    UNION ALL
+
+    -- 10. framework_scope_workflow_log (issue #1786)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'framework_scope'::text AS kind,
+        'framework_scope'::text AS target_type,
+        framework_scope_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(fs) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'framework_scope_id' - 'subject_module')::jsonb AS payload_json
+    FROM framework_scope_workflow_log fs
+
+    UNION ALL
+
+    -- 11. taxonomy_audit_log (#1810)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'taxonomy'::text AS kind,
+        subject_kind   AS target_type,
+        subject_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(tx) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'subject_id' - 'subject_kind' - 'subject_module')::jsonb AS payload_json
+    FROM taxonomy_audit_log tx
+
+    UNION ALL
+
+    -- 12. fw_to_scf_overlay_edge_audit_log (#1797)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'mapping_overlay'::text AS kind,
+        'overlay_edge'::text AS target_type,
+        overlay_edge_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ov) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'overlay_edge_id' - 'subject_module')::jsonb AS payload_json
+    FROM fw_to_scf_overlay_edge_audit_log ov
+
+    UNION ALL
+
+    -- 13. control_import_audit_log (#1782): import approvals, rejections
+    -- and duplicates, one per staged row decided.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'control_import'::text AS kind,
+        'control_import_row'::text AS target_type,
+        row_id::text   AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ci) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'row_id' - 'subject_module')::jsonb AS payload_json
+    FROM control_import_audit_log ci
+
+    UNION ALL
+
+    -- 14. risk_audit_log (#1954): a risk moved between org units or
+    -- levels, moved onto another category, or its record fields edited.
+    -- The action is the row's action_type (placement_changed,
+    -- category_changed, fields_changed).
+    --
+    -- The payload names the changed fields and never carries their
+    -- values: auditors and control owners read this log but are denied
+    -- /v1/risks, and before_state / after_state hold titles,
+    -- descriptions, scores and the treatment owner. The values stay on
+    -- GET /v1/risks/{id}/audit-log, behind the risk read policy.
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'risk'::text   AS kind,
+        'risk'::text   AS target_type,
+        risk_id::text  AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        jsonb_build_object(
+            'id', ra.id,
+            -- The CASE keeps jsonb_object_keys off a non-object state,
+            -- which would fail the whole query.
+            'changed_fields', COALESCE(CASE WHEN jsonb_typeof(ra.after_state) = 'object' THEN (
+                SELECT jsonb_agg(k ORDER BY k)
+                FROM jsonb_object_keys(ra.after_state) AS k
+                WHERE ra.before_state -> k IS DISTINCT FROM ra.after_state -> k
+            ) END, '[]'::jsonb)
+        ) AS payload_json
+    FROM risk_audit_log ra
+
+    UNION ALL
+
+    -- 15. framework_posture_target_audit_log (#2136): a framework
+    -- version's posture target set, before -> after.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'posture_target'::text AS kind,
+        'framework_version'::text AS target_type,
+        framework_version_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(pt) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'framework_version_id' - 'subject_module')::jsonb AS payload_json
+    FROM framework_posture_target_audit_log pt
+
+    UNION ALL
+
+    -- 16. member_module_access_audit_log (#2172): a member's module
+    -- access set, before -> after (NULL = all modules).
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'module_access'::text AS kind,
+        'user'::text AS target_type,
+        user_id        AS target_id,
+        'module_access.set'::text AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ma) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'user_id' - 'subject_module')::jsonb AS payload_json
+    FROM member_module_access_audit_log ma
+
+    UNION ALL
+
+    -- 17. vendor_audit_log (#2450): a vendor's owner changed. The payload
+    -- holds the before and after owner (owner_user_id and the unlinked
+    -- text); the payload gate shows it only to a caller who can read
+    -- vendors.
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'vendor'::text AS kind,
+        'vendor'::text AS target_type,
+        vendor_id::text AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(va) - 'tenant_id' - 'created_at' - 'actor'
+            - 'action_type' - 'vendor_id' - 'subject_module')::jsonb AS payload_json
+    FROM vendor_audit_log va
 )
 SELECT
     unified.occurred_at,
@@ -215,6 +374,9 @@ WHERE unified.occurred_at >= $1::timestamptz
       $5::boolean = true
       OR (
           unified.kind <> 'feature_flag'
+          -- #2172: a member's module access, like a module switch, is
+          -- tenant administration.
+          AND unified.kind <> 'module_access'
           AND (unified.kind <> 'me' OR unified.actor_id = $6::text)
       )
   )
@@ -398,6 +560,257 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnifiedAuditMachineActors = `-- name: ListUnifiedAuditMachineActors :many
+WITH unified AS (
+    SELECT occurred_at, user_id AS actor_id, 'decision'::text AS kind,
+           action, resource_type AS target_type, request_path
+    FROM decision_audit_log
+    UNION ALL
+    SELECT received_at, credential_id, 'evidence', decision, '', ''
+    FROM evidence_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'exception', action, '', ''
+    FROM exception_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'sample', action, '', ''
+    FROM sample_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'audit_period', action, '', ''
+    FROM audit_period_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'aggregation_rule', event, '', ''
+    FROM aggregation_rule_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'feature_flag', '', '', ''
+    FROM feature_flag_audit_log
+    UNION ALL
+    SELECT occurred_at, user_id::text, 'me', action, '', ''
+    FROM me_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'walkthrough', action, '', ''
+    FROM walkthrough_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'framework_scope', action, '', ''
+    FROM framework_scope_workflow_log
+    UNION ALL
+    SELECT occurred_at, actor, 'taxonomy', action, '', ''
+    FROM taxonomy_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'mapping_overlay', action, '', ''
+    FROM fw_to_scf_overlay_edge_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'control_import', action, '', ''
+    FROM control_import_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'risk', action_type, '', ''
+    FROM risk_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'posture_target', action, '', ''
+    FROM framework_posture_target_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'module_access', '', '', ''
+    FROM member_module_access_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'vendor', action_type, '', ''
+    FROM vendor_audit_log
+),
+tuples AS (
+    SELECT DISTINCT
+        unified.actor_id::text     AS actor_id,
+        unified.kind::text         AS kind,
+        unified.target_type::text  AS target_type,
+        unified.request_path::text AS request_path
+    FROM unified
+    WHERE unified.occurred_at >= $1::timestamptz
+      AND unified.occurred_at <  $2::timestamptz
+      AND (unified.actor_id = 'system'
+           OR starts_with(unified.actor_id, 'system:')
+           OR starts_with(unified.actor_id, 'oauth_client:'))
+      AND (
+          $3::boolean = true
+          OR (
+              unified.kind <> 'feature_flag'
+              AND unified.kind <> 'module_access'
+              AND unified.kind <> 'me'
+          )
+      )
+      AND (
+          $4::boolean = false
+          OR NOT (unified.kind = 'decision' AND unified.action = 'read')
+      )
+      AND NOT (unified.kind = ANY($5::text[]))
+),
+patterns AS (
+    SELECT string_to_array(($6::text[])[n], '/') AS segs,
+           ($7::text[])[n]                         AS owner,
+           ($8::boolean[])[n]                     AS visible
+    FROM generate_subscripts($6::text[], 1) AS n
+),
+paths AS (
+    SELECT tuples.request_path AS path
+    FROM tuples
+    WHERE tuples.kind = 'decision' AND tuples.request_path <> ''
+    UNION
+    SELECT '/v1/' || tuples.target_type
+    FROM tuples
+    WHERE tuples.kind = 'decision' AND tuples.target_type <> ''
+),
+lits AS (
+    SELECT coalesce(array_agg(DISTINCT seg), '{}'::text[]) AS segs
+    FROM patterns, unnest(patterns.segs) AS seg
+    WHERE seg <> '*'
+),
+keyed AS (
+    SELECT paths.path,
+           array_to_string(ARRAY(
+               SELECT CASE
+                   WHEN u.seg = ANY(lits.segs)
+                     OR (strpos(u.seg, ':') > 0
+                         AND EXISTS (SELECT 1 FROM unnest(lits.segs) AS l(seg)
+                                     WHERE starts_with(u.seg, l.seg || ':')))
+                   THEN u.seg
+                   ELSE '*'
+               END
+               FROM unnest(string_to_array(paths.path, '/')) WITH ORDINALITY AS u(seg, ord)
+               ORDER BY u.ord
+           ), '/') AS route_key
+    FROM paths
+    CROSS JOIN lits
+),
+matches AS (
+    SELECT keys.route_key, patterns.owner, patterns.visible,
+           cardinality(patterns.segs) * 1000
+             + cardinality(array_remove(patterns.segs, '*')) AS score
+    FROM (SELECT DISTINCT keyed.route_key FROM keyed) AS keys
+    CROSS JOIN LATERAL string_to_array(keys.route_key, '/') AS s
+    CROSS JOIN patterns
+    WHERE cardinality(s) >= cardinality(patterns.segs)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM generate_subscripts(patterns.segs, 1) AS i
+          WHERE NOT CASE
+              WHEN patterns.segs[i] = '*' THEN s[i] <> ''
+              ELSE s[i] = patterns.segs[i]
+                   OR (i = cardinality(patterns.segs)
+                       AND starts_with(s[i], patterns.segs[i] || ':'))
+          END
+      )
+),
+resolved_keys AS (
+    SELECT best.route_key,
+           CASE WHEN count(DISTINCT best.owner) > 1 THEN 'ambiguous'
+                WHEN bool_and(best.visible) THEN 'visible'
+                ELSE 'hidden'
+           END AS status
+    FROM (
+        SELECT matches.route_key, matches.owner, matches.visible, matches.score, max(matches.score) OVER (PARTITION BY matches.route_key) AS top
+        FROM matches
+    ) AS best
+    WHERE best.score = best.top
+    GROUP BY best.route_key
+),
+resolved AS (
+    SELECT keyed.path, resolved_keys.status
+    FROM keyed
+    JOIN resolved_keys ON resolved_keys.route_key = keyed.route_key
+)
+SELECT DISTINCT tuples.actor_id::text AS actor_id
+FROM tuples
+LEFT JOIN resolved AS by_path
+       ON tuples.kind = 'decision' AND by_path.path = tuples.request_path
+LEFT JOIN resolved AS by_type
+       ON tuples.kind = 'decision' AND tuples.target_type <> ''
+      AND by_type.path = '/v1/' || tuples.target_type
+WHERE tuples.kind <> 'decision'
+   OR CASE
+          WHEN by_path.status IN ('visible', 'hidden') THEN by_path.status = 'visible'
+          ELSE coalesce(by_type.status, 'visible') = 'visible'
+      END
+ORDER BY 1
+LIMIT 1001
+`
+
+type ListUnifiedAuditMachineActorsParams struct {
+	FromTs               pgtype.Timestamptz `json:"from_ts"`
+	ToTs                 pgtype.Timestamptz `json:"to_ts"`
+	CallerIsPrivileged   bool               `json:"caller_is_privileged"`
+	ExcludeReadTelemetry bool               `json:"exclude_read_telemetry"`
+	HiddenKinds          []string           `json:"hidden_kinds"`
+	RoutePatterns        []string           `json:"route_patterns"`
+	RouteOwners          []string           `json:"route_owners"`
+	RouteVisible         []bool             `json:"route_visible"`
+}
+
+// #2414 — the machine and system actors (`system`, `system:<process>`,
+// `oauth_client:<id>`) that appear in the tenant's activity in a window,
+// for the Activity page's actor picker. A person or API key is listed
+// from /v1/people instead, so only these shapes are returned.
+//
+// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
+// what the visibility rules read: the same window, the slice 270
+// non-privileged predicate and the slice 669 read-telemetry predicate.
+// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
+// to one query and not the other.
+//
+// The #2173 module filter runs here as well, before the cap (#2718), so
+// rows from a hidden module neither use up the cap nor mark the list
+// truncated, and an actor seen only in rows the caller may not see is not
+// listed. The handler passes the filter as arguments (moduleRouteFilter):
+// `hidden_kinds`, the kinds owned by a module the caller may not see, and
+// the featureflag route registry as three parallel arrays, each pattern
+// with its owner and whether the caller sees that owner. `resolved`
+// places a path the way featureflag.Resolve does: a `*` segment matches
+// one non-empty segment, the last literal also matches `<literal>:<verb>`,
+// and the most specific match wins (most segments, then most literals).
+// A path no pattern matches is shown; a tie between two owners is
+// hidden, as ModuleSet.Sees hides it. A decision is placed by its request
+// path when that resolves, else by `/v1/<target_type>`, as decisionRoute
+// does. `TestActivityActors_ModuleFilterMatchesGo` checks this against
+// entrySeen for every registry route.
+//
+// Paths carry IDs, so a window holds thousands of distinct paths (#2789).
+// `keyed` collapses each path to a route key before matching: a segment
+// that equals no registry literal, and is no `<literal>:<verb>`, becomes
+// `*`. That segment matches a pattern's `*` and none of its literals, and
+// so does `*` itself (no literal is `*`), so a path and its key resolve
+// alike; only the distinct keys go through `matches`. Measurements:
+// docs/audit-log/2789-activity-actors-route-key-decisions.md.
+//
+// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
+// atlas_app and takes no tenant parameter.
+//
+// LIMIT 1001 is the handler's 1000-actor cap plus one (#2627): a 1001st
+// row is how the handler knows the window held more and sets `truncated`,
+// rather than dropping actors silently.
+func (q *Queries) ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listUnifiedAuditMachineActors,
+		arg.FromTs,
+		arg.ToTs,
+		arg.CallerIsPrivileged,
+		arg.ExcludeReadTelemetry,
+		arg.HiddenKinds,
+		arg.RoutePatterns,
+		arg.RouteOwners,
+		arg.RouteVisible,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var actor_id string
+		if err := rows.Scan(&actor_id); err != nil {
+			return nil, err
+		}
+		items = append(items, actor_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

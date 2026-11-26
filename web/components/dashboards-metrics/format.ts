@@ -37,19 +37,3 @@ export function formatValue(value: number | undefined, unit: string): string {
       return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
 }
-
-export function formatRelative(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return iso;
-  const ageMs = Date.now() - t;
-  const days = Math.floor(ageMs / (24 * 60 * 60 * 1000));
-  if (days <= 0) {
-    const hours = Math.max(0, Math.floor(ageMs / (60 * 60 * 1000)));
-    if (hours === 0) return "just now";
-    return `${hours}h ago`;
-  }
-  if (days === 1) return "1 day ago";
-  if (days < 30) return `${days} days ago`;
-  if (days < 365) return `${Math.floor(days / 30)} mo ago`;
-  return `${Math.floor(days / 365)} yr ago`;
-}

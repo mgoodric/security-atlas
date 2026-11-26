@@ -433,3 +433,66 @@ func TestIssueTestJWT_AvailableTenantsMalformed_400(t *testing.T) {
 		t.Fatalf("status = %d; want 400. body = %q", rec.Code, rec.Body.String())
 	}
 }
+
+// TestIssueTestJWT_DefaultSubjectIsDeterministicUUID — #1850: the
+// default subject is a UUIDv5 of the tenant (not "test-admin:<tenant>")
+// so a super_admin test token's subject can hold a super_admins row.
+func TestIssueTestJWT_DefaultSubjectIsDeterministicUUID(t *testing.T) {
+	t.Setenv("ATLAS_TEST_MODE", "1")
+	srv, signer := testServerWithJWT(t, "https://atlas.test")
+
+	tenant := uuid.New()
+	mint := func() string {
+		req := httptest.NewRequest(http.MethodPost, "/v1/test/issue-jwt",
+			bytes.NewReader([]byte(`{"tenant_id":"`+tenant.String()+`"}`)))
+		rec := httptest.NewRecorder()
+		srv.handleIssueTestJWT(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d; body = %q", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		claims, err := signer.Verify(context.Background(), resp.Token)
+		if err != nil {
+			t.Fatalf("signer.Verify: %v", err)
+		}
+		return claims.Subject
+	}
+
+	first, second := mint(), mint()
+	if _, err := uuid.Parse(first); err != nil {
+		t.Fatalf("default subject %q is not a UUID", first)
+	}
+	if first != second || first != testSubjectFor(tenant).String() {
+		t.Errorf("default subject = %q then %q, want %s both times", first, second, testSubjectFor(tenant))
+	}
+}
+
+// TestIssueTestJWT_SuperAdminNonUUIDSubject_500 — #1850: a super_admin
+// token for a subject that cannot hold a super_admins row is refused
+// rather than minted with a claim the middleware would drop.
+func TestIssueTestJWT_SuperAdminNonUUIDSubject_500(t *testing.T) {
+	t.Setenv("ATLAS_TEST_MODE", "1")
+	srv, _ := testServerWithJWT(t, "https://atlas.test")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/test/issue-jwt",
+		bytes.NewReader([]byte(`{"tenant_id":"`+uuid.NewString()+`","user_id":"not-a-uuid","super_admin":true}`)))
+	rec := httptest.NewRecorder()
+	srv.handleIssueTestJWT(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d; want 500. body = %q", rec.Code, rec.Body.String())
+	}
+}
+
+// TestGrantTestSuperAdmin_RefusesOutsideTestMode — #1850: the
+// super_admins write is reachable only in test mode, even if called
+// directly.
+func TestGrantTestSuperAdmin_RefusesOutsideTestMode(t *testing.T) {
+	t.Setenv("ATLAS_TEST_MODE", "")
+	srv := New(Config{})
+	if err := srv.grantTestSuperAdmin(context.Background(), uuid.NewString()); err == nil {
+		t.Fatal("grantTestSuperAdmin succeeded with ATLAS_TEST_MODE unset")
+	}
+}

@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "QW3RTY4UIOP5ASDF6GHJK7LZXC",
+      "email": "sam_lee@example.com",
+      "display_name": "Sam Lee",
+      "state": "ACTIVE",
+      "create_time": "2024-05-02T08:00:00Z",
+      "path": "accounts/M4E2SWNZAZFTRGQGDNS2E5A4MU/users/QW3RTY4UIOP5ASDF6GHJK7LZXC"
+    },
+    {
+      "id": "ZX9CVB8NML7KJH6GFD5SAQ4WER",
+      "email": "pending_invite@example.com",
+      "display_name": "Pending Invite",
+      "create_time": "2024-06-10T12:00:00Z",
+      "path": "accounts/M4E2SWNZAZFTRGQGDNS2E5A4MU/users/ZX9CVB8NML7KJH6GFD5SAQ4WER"
+    }
+  ]
+}

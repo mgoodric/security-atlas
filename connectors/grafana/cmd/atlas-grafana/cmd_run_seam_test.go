@@ -105,9 +105,9 @@ func okEnv(t *testing.T) {
 func okFlags() runFlags {
 	return runFlags{
 		environment:    "prod",
-		ruleControl:    "scf:MON-01",
-		accessControl:  "scf:IAC-06",
-		firingControl:  "scf:IRO-09",
+		ruleControl:    "scf:MON-02",
+		accessControl:  "scf:IAC-37",
+		firingControl:  "scf:IRO-06",
 		firingLookback: 24 * time.Hour,
 	}
 }

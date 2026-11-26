@@ -11,9 +11,172 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEvidenceForControlWindow = `-- name: CountEvidenceForControlWindow :one
+SELECT count(*)
+FROM evidence_records
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL($7::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($8::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND observed_at >= $4
+  AND observed_at <= $5
+`
+
+type CountEvidenceForControlWindowParams struct {
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
+	IDOnly       bool               `json:"id_only"`
+	RoutedKinds  []string           `json:"routed_kinds"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+}
+
+// #2470: the `total` of GET /v1/evidence?control_id=. Counts the rows
+// ListEvidenceForControlPaged pages through, before the cursor: the same
+// control resolution (id_only included) and [since, until] window. The
+// per-control list ignores scope_cell_id, so the count does too.
+func (q *Queries) CountEvidenceForControlWindow(ctx context.Context, arg CountEvidenceForControlWindowParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvidenceForControlWindow,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.ObservedAt,
+		arg.ObservedAt_2,
+		arg.IDOnly,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const getControlBundleForDetail = `-- name: GetControlBundleForDetail :one
+SELECT bundle_id
+FROM controls
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetControlBundleForDetailParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Issue #2392: the bundle a control row belongs to, for the anchor-history
+// read. No row (pgx.ErrNoRows) for an id that is not this tenant's control,
+// which the handler maps to 404; RLS and the explicit tenant id both bind.
+func (q *Queries) GetControlBundleForDetail(ctx context.Context, arg GetControlBundleForDetailParams) (string, error) {
+	row := q.db.QueryRow(ctx, getControlBundleForDetail, arg.TenantID, arg.ID)
+	var bundle_id string
+	err := row.Scan(&bundle_id)
+	return bundle_id, err
+}
+
+const listControlAnchorHistoryPaged = `-- name: ListControlAnchorHistoryPaged :many
+SELECT d.id, d.decision, d.bulk,
+       d.legacy_control_id, lc.version AS legacy_version,
+       d.legacy_scf_id, d.legacy_release,
+       d.new_control_id, nc.version AS new_version,
+       d.new_scf_id, d.new_release,
+       d.reason, d.decided_by, d.decided_at
+FROM scf_remap_decisions d
+JOIN controls lc
+  ON lc.tenant_id = d.tenant_id AND lc.id = d.legacy_control_id
+LEFT JOIN controls nc
+  ON nc.tenant_id = d.tenant_id AND nc.id = d.new_control_id
+WHERE d.tenant_id = $1
+  AND lc.bundle_id = $2
+  AND (
+        d.decided_at < $3
+        OR (d.decided_at = $3 AND d.id < $4)
+      )
+ORDER BY d.decided_at DESC, d.id DESC
+LIMIT $5
+`
+
+type ListControlAnchorHistoryPagedParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	BundleID string             `json:"bundle_id"`
+	CursorTs pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type ListControlAnchorHistoryPagedRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyVersion   int32              `json:"legacy_version"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewVersion      *int32             `json:"new_version"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
+// Issue #2392: GET /v1/controls/{id}/anchor-history. Every SCF remap
+// decision (#1776, scf_remap_decisions) on any revision of the control's
+// bundle, newest first, keyset paged on (decided_at, id) as the evaluation
+// history is. new_version is the version of the superseding revision an
+// approval created; NULL on a reject or keep-legacy. A pure read of an
+// append-only table.
+func (q *Queries) ListControlAnchorHistoryPaged(ctx context.Context, arg ListControlAnchorHistoryPagedParams) ([]ListControlAnchorHistoryPagedRow, error) {
+	rows, err := q.db.Query(ctx, listControlAnchorHistoryPaged,
+		arg.TenantID,
+		arg.BundleID,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListControlAnchorHistoryPagedRow
+	for rows.Next() {
+		var i ListControlAnchorHistoryPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Decision,
+			&i.Bulk,
+			&i.LegacyControlID,
+			&i.LegacyVersion,
+			&i.LegacyScfID,
+			&i.LegacyRelease,
+			&i.NewControlID,
+			&i.NewVersion,
+			&i.NewScfID,
+			&i.NewRelease,
+			&i.Reason,
+			&i.DecidedBy,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlEvaluationHistoryPaged = `-- name: ListControlEvaluationHistoryPaged :many
 SELECT id, evaluated_at, scope_cell_id, result,
-       freshness_status, evidence_count_in_window
+       freshness_status, evidence_count_in_window,
+       trigger, triggered_by
 FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2
@@ -40,6 +203,8 @@ type ListControlEvaluationHistoryPagedRow struct {
 	Result                EvidenceResult     `json:"result"`
 	FreshnessStatus       string             `json:"freshness_status"`
 	EvidenceCountInWindow int32              `json:"evidence_count_in_window"`
+	Trigger               string             `json:"trigger"`
+	TriggeredBy           *string            `json:"triggered_by"`
 }
 
 // AC-4: the control's evaluation history from slice 012's control_eval-
@@ -75,6 +240,8 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 			&i.Result,
 			&i.FreshnessStatus,
 			&i.EvidenceCountInWindow,
+			&i.Trigger,
+			&i.TriggeredBy,
 		); err != nil {
 			return nil, err
 		}
@@ -89,18 +256,26 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 const listEvidenceForControlPaged = `-- name: ListEvidenceForControlPaged :many
 
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
+       observed_at, evidence_kind, provenance, hash, result,
+       source_attribution
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL($7::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($8::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $4
   AND observed_at <= $5
   AND (
-        observed_at < $6
-        OR (observed_at = $6 AND id < $7)
+        observed_at < $9
+        OR (observed_at = $9 AND evidence_records.id < $10)
       )
 ORDER BY observed_at DESC, id DESC
-LIMIT $8
+LIMIT $11
 `
 
 type ListEvidenceForControlPagedParams struct {
@@ -109,22 +284,26 @@ type ListEvidenceForControlPagedParams struct {
 	ControlRef   string             `json:"control_ref"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
+	IDOnly       bool               `json:"id_only"`
+	RoutedKinds  []string           `json:"routed_kinds"`
+	UnboundKinds []string           `json:"unbound_kinds"`
 	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
 	CursorID     pgtype.UUID        `json:"cursor_id"`
 	RowLimit     int32              `json:"row_limit"`
 }
 
 type ListEvidenceForControlPagedRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	ControlID    pgtype.UUID        `json:"control_id"`
-	ControlRef   string             `json:"control_ref"`
-	ScopeID      pgtype.UUID        `json:"scope_id"`
-	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
-	EvidenceKind *string            `json:"evidence_kind"`
-	Provenance   []byte             `json:"provenance"`
-	Hash         string             `json:"hash"`
-	Result       EvidenceResult     `json:"result"`
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ControlRef        string             `json:"control_ref"`
+	ScopeID           pgtype.UUID        `json:"scope_id"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind      *string            `json:"evidence_kind"`
+	Provenance        []byte             `json:"provenance"`
+	Hash              string             `json:"hash"`
+	Result            EvidenceResult     `json:"result"`
+	SourceAttribution []byte             `json:"source_attribution"`
 }
 
 // Slice 064 — control-detail backend read endpoints.
@@ -164,6 +343,13 @@ type ListEvidenceForControlPagedRow struct {
 // Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
 // can surface it (the column has always been on evidence_records; the slice
 // 064 wire shape simply omitted it).
+//
+// #2470: id_only drops the control_ref leg, so the rows are exactly the
+// control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
+// the population draw resolve. The handler sets it for a period-scoped
+// caller; every other caller keeps the slice-012 OR resolution.
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlPaged,
 		arg.TenantID,
@@ -171,6 +357,9 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 		arg.ControlRef,
 		arg.ObservedAt,
 		arg.ObservedAt_2,
+		arg.IDOnly,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
 		arg.CursorTs,
 		arg.CursorID,
 		arg.RowLimit,
@@ -193,6 +382,7 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 			&i.Provenance,
 			&i.Hash,
 			&i.Result,
+			&i.SourceAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -205,27 +395,38 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 }
 
 const listEvidencePaged = `-- name: ListEvidencePaged :many
-SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
-FROM evidence_records
-WHERE tenant_id = $1
-  AND observed_at >= $2
-  AND observed_at <= $3
+SELECT er.id, er.tenant_id, er.control_id, er.control_ref, er.scope_id,
+       er.observed_at, er.evidence_kind, er.provenance, er.hash, er.result,
+       er.source_attribution
+FROM evidence_records er
+WHERE er.tenant_id = $1
+  AND er.observed_at >= $2
+  AND er.observed_at <= $3
   AND ($4::text IS NULL
-       OR evidence_kind = $4::text)
+       OR er.evidence_kind = $4::text)
   AND ($5::text IS NULL
-       OR result::text = $5::text)
+       OR er.result::text = $5::text)
   AND ($6::text IS NULL
-       OR source_attribution->>'actor_type' = $6::text)
+       OR er.source_attribution->>'actor_type' = $6::text)
   AND ($7::text IS NULL
-       OR source_attribution->>'actor_id' = $7::text)
+       OR er.source_attribution->>'actor_id' = $7::text)
   AND ($8::uuid IS NULL
-       OR scope_id = $8::uuid)
+       OR er.scope_canonical @> (
+            SELECT COALESCE(
+                     (SELECT jsonb_agg(jsonb_build_object(
+                                 'key', d.key,
+                                 'values', jsonb_build_array(d.value)))
+                      FROM jsonb_each(sc.dimensions) AS d),
+                     '[]'::jsonb)
+            FROM scope_cells sc
+            WHERE sc.id = $8::uuid
+              AND sc.tenant_id = $1
+          ))
   AND (
-        observed_at < $9
-        OR (observed_at = $9 AND id < $10)
+        er.observed_at < $9
+        OR (er.observed_at = $9 AND er.id < $10)
       )
-ORDER BY observed_at DESC, id DESC
+ORDER BY er.observed_at DESC, er.id DESC
 LIMIT $11
 `
 
@@ -244,16 +445,17 @@ type ListEvidencePagedParams struct {
 }
 
 type ListEvidencePagedRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	ControlID    pgtype.UUID        `json:"control_id"`
-	ControlRef   string             `json:"control_ref"`
-	ScopeID      pgtype.UUID        `json:"scope_id"`
-	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
-	EvidenceKind *string            `json:"evidence_kind"`
-	Provenance   []byte             `json:"provenance"`
-	Hash         string             `json:"hash"`
-	Result       EvidenceResult     `json:"result"`
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ControlRef        string             `json:"control_ref"`
+	ScopeID           pgtype.UUID        `json:"scope_id"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind      *string            `json:"evidence_kind"`
+	Provenance        []byte             `json:"provenance"`
+	Hash              string             `json:"hash"`
+	Result            EvidenceResult     `json:"result"`
+	SourceAttribution []byte             `json:"source_attribution"`
 }
 
 // Slice 106: tenant-wide evidence ledger window with optional filters. Used
@@ -272,10 +474,19 @@ type ListEvidencePagedRow struct {
 // {actor_type, actor_id, session_id} shape there).
 //
 // Slice 234: a fifth optional filter `scope_cell_id` narrows to one
-// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
-// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
-// zero rows naturally because the row's `scope_id` is itself tenant-
-// scoped — no 404 leak.
+// scope cell. #2771: a record is in the cell when the scope it was pushed
+// with (`scope_canonical`, [{key, values[]}]) covers every one of the
+// cell's dimensions: for each (k, v) in scope_cells.dimensions, the
+// record has key k with v among its values. That is the cartesian-cell
+// reading scope.MatchRecordScope applies to credentials. jsonb `@>` does
+// the per-element subset test against a pattern built once from the
+// cell (an uncorrelated subquery, so Postgres runs it as an InitPlan).
+// `scope_id` (FK to `scopes`) is NULL on every pushed record and is not
+// consulted. Rows with no scope_canonical (pushed before slice 474)
+// never match. The subquery requires the cell in the caller's tenant: an
+// out-of-tenant or unknown cell id yields NULL, and `@> NULL` matches
+// nothing, never the whole ledger. Cost notes in
+// docs/audit-log/2771-evidence-filter-pills-decisions.md.
 //
 // Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 // decomposed (observed_at, id) predicate, same +1 probe-row idiom.
@@ -313,6 +524,7 @@ func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedPa
 			&i.Provenance,
 			&i.Hash,
 			&i.Result,
+			&i.SourceAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -380,7 +592,7 @@ func (q *Queries) ListPoliciesLinkedToControl(ctx context.Context, arg ListPolic
 }
 
 const listRisksLinkedToControl = `-- name: ListRisksLinkedToControl :many
-SELECT r.id, r.title, r.inherent_score, r.residual_score,
+SELECT r.id, r.title, r.methodology, r.inherent_score, r.residual_score,
        l.design_score, l.created_at
 FROM risk_control_links l
 JOIN risks r
@@ -399,6 +611,7 @@ type ListRisksLinkedToControlParams struct {
 type ListRisksLinkedToControlRow struct {
 	ID            pgtype.UUID        `json:"id"`
 	Title         string             `json:"title"`
+	Methodology   RiskMethodology    `json:"methodology"`
 	InherentScore []byte             `json:"inherent_score"`
 	ResidualScore []byte             `json:"residual_score"`
 	DesignScore   pgtype.Numeric     `json:"design_score"`
@@ -424,6 +637,7 @@ func (q *Queries) ListRisksLinkedToControl(ctx context.Context, arg ListRisksLin
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
+			&i.Methodology,
 			&i.InherentScore,
 			&i.ResidualScore,
 			&i.DesignScore,

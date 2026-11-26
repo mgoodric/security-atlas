@@ -97,6 +97,24 @@ describe("contract: GET /api/controls/[id]/coverage <-> atlas GET /v1/controls/{
     }
   });
 
+  // #2140: a requirement the activated SoA excludes carries `exclusion`
+  // with a string justification; every other requirement omits it.
+  test("an excluded requirement carries its exclusion; the rest omit it", () => {
+    const reqs = golden.variants.anchored_unpinned.requirements as Record<
+      string,
+      unknown
+    >[];
+    const excluded = reqs.filter((r) => "exclusion" in r);
+    expect(excluded).toHaveLength(1);
+    const ex = excluded[0].exclusion as Record<string, unknown>;
+    expect(typeof ex.justification).toBe("string");
+    expect(typeof ex.framework_scope_id).toBe("string");
+    expect(typeof ex.decided_at).toBe("string");
+    for (const r of reqs.filter((r) => !("exclusion" in r))) {
+      expect(r.exclusion).toBeUndefined();
+    }
+  });
+
   test("the unanchored variant records anchor:null + empty requirements (not 404)", () => {
     const unanchored = golden.variants.unanchored;
     expect(unanchored, "unanchored variant present").toBeDefined();

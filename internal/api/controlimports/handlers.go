@@ -1,0 +1,299 @@
+// Package controlimports serves the control import upload API (#1779).
+//
+// Routes (appended onto the platform root router):
+//
+//	POST /v1/controls/imports        multipart upload -> staged import batch
+//	POST /v1/controls/imports/preview
+//	                                 the same upload -> its header mapping
+//	                                 and first rows, staging nothing (#2836)
+//	GET  /v1/controls/imports/{id}   the batch with its counts and rows
+//	GET  /v1/controls/imports/{id}/rows
+//	                                 staged rows with their ranked SCF anchor
+//	                                 candidates (#1780); ?status= and
+//	                                 ?no_candidate_reaches=true filter
+//	POST /v1/controls/imports/{id}/rows/{row}/approve
+//	                                 approve a staged row with a candidate
+//	                                 or any anchor of the batch's SCF
+//	                                 release; creates a control (#1782)
+//	POST /v1/controls/imports/{id}/rows/{row}/reject
+//	                                 reject a staged row with a reason
+//	POST /v1/controls/imports/{id}/approve-clear
+//	                                 approve every pending row whose top
+//	                                 candidate is crosswalk-derived and
+//	                                 reaches all its tested criteria (#1783)
+//	GET  /v1/controls/imports/{id}/export
+//	                                 the approved rows' controls as a
+//	                                 gzip-tar of <bundle_id>/control.yaml
+//	                                 bundles (#1784)
+//	GET  /v1/controls/imports/settings
+//	PUT  /v1/controls/imports/settings
+//	                                 the tenant's import settings: the
+//	                                 local-Ollama rerank opt-in (#2079);
+//	                                 tenant-admin only
+//
+// The upload's multipart fields:
+//
+//	file        the CSV or XLSX control sheet (required)
+//	framework   slug of the framework the tested-under codes belong to (required)
+//	column_map  optional, repeatable "field=Header" overrides of header detection
+//	ignore_column
+//	            optional, repeatable header kept unmapped whatever its alias (#2836)
+//
+// Every non-blank data row is returned either staged or rejected with a
+// reason. Tenant scoping is enforced by RLS via controlimport.Store.
+package controlimports
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
+)
+
+// multipartOverhead is the allowance for multipart framing and the small
+// form fields on top of the file's own size cap.
+const multipartOverhead = 64 * 1024
+
+// Handler serves the control import routes.
+type Handler struct {
+	stager    *controlimport.Stager
+	settings  SettingsStore
+	decisions controlimport.DecisionStore
+	exporter  BundleExporter
+}
+
+func New(stager *controlimport.Stager) *Handler { return &Handler{stager: stager} }
+
+// RegisterRoutes appends the routes onto the supplied router.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	if h.settings != nil {
+		// Literal segment, ahead of /v1/controls/imports/{id}.
+		r.Get("/v1/controls/imports/settings", h.GetSettings)
+		r.Put("/v1/controls/imports/settings", h.PutSettings)
+	}
+	r.Post("/v1/controls/imports", h.Create)
+	r.Post("/v1/controls/imports/preview", h.Preview)
+	r.Get("/v1/controls/imports/{id}", h.Get)
+	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)
+	if h.exporter != nil {
+		r.Get("/v1/controls/imports/{id}/export", h.Export)
+	}
+	if h.decisions != nil {
+		r.Post("/v1/controls/imports/{id}/rows/{row}/approve", h.Approve)
+		r.Post("/v1/controls/imports/{id}/rows/{row}/reject", h.Reject)
+		r.Post("/v1/controls/imports/{id}/approve-clear", h.ApproveClear)
+	}
+}
+
+// upload is a parsed multipart upload: the file and its mapping fields.
+type upload struct {
+	filename  string
+	raw       []byte
+	columnMap map[string]string
+	ignore    []string
+}
+
+// readUpload reads the multipart upload Create and Preview share, writing
+// the error response itself when it returns false.
+func readUpload(w http.ResponseWriter, r *http.Request) (upload, bool) {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return upload{}, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, controlimport.MaxUploadBytes+multipartOverhead)
+	if err := r.ParseMultipartForm(controlimport.MaxUploadBytes + multipartOverhead); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
+			return upload{}, false
+		}
+		httpresp.WriteError(w, http.StatusBadRequest, "request must be multipart/form-data with a file field")
+		return upload{}, false
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "missing file field")
+		return upload{}, false
+	}
+	defer func() { _ = file.Close() }()
+
+	raw, err := controlimport.ReadAllBounded(file)
+	if err != nil {
+		if errors.Is(err, controlimport.ErrUploadTooLarge) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
+			return upload{}, false
+		}
+		httpresp.WriteError(w, http.StatusBadRequest, "could not read upload")
+		return upload{}, false
+	}
+	columnMap, err := parseColumnMap(r.MultipartForm.Value["column_map"])
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return upload{}, false
+	}
+	return upload{
+		filename:  header.Filename,
+		raw:       raw,
+		columnMap: columnMap,
+		ignore:    r.MultipartForm.Value["ignore_column"],
+	}, true
+}
+
+// Create stages an uploaded control sheet as an import batch.
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
+		return
+	}
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	batch, err := h.stager.Stage(r.Context(), controlimport.StageInput{
+		Filename:      up.filename,
+		Raw:           up.raw,
+		FrameworkSlug: r.FormValue("framework"),
+		ColumnMap:     up.columnMap,
+		Ignore:        up.ignore,
+		UploadedBy:    cred.ID,
+	})
+	if err != nil {
+		writeStageError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusCreated, batch)
+}
+
+// Preview reads an upload with the same fields as Create (framework is not
+// needed) and returns its header row, the field each header maps to, the
+// fields a control row reads and the first rows (#2836). Nothing is staged.
+func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
+		return
+	}
+	p, err := controlimport.PreviewFile(up.filename, up.raw, controlimport.ParseOptions{
+		ColumnMap: up.columnMap,
+		Ignore:    up.ignore,
+	})
+	if err != nil {
+		writeStageError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, p)
+}
+
+// Get returns one import batch with its staged and rejected rows.
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	batch, err := h.stager.Get(ctx, chi.URLParam(r, "id"))
+	if err != nil {
+		if errors.Is(err, controlimport.ErrBatchNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "controlimports", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, batch)
+}
+
+// ListRows returns a batch's staged rows with their candidates, filtered by
+// ?status= and ?no_candidate_reaches=true.
+func (h *Handler) ListRows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	filter := controlimport.RowFilter{Status: r.URL.Query().Get("status")}
+	if v := r.URL.Query().Get("no_candidate_reaches"); v != "" {
+		flag, err := strconv.ParseBool(v)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "no_candidate_reaches must be true or false")
+			return
+		}
+		filter.NoCandidateReaches = flag
+	}
+	batch, rows, err := h.stager.ListRows(ctx, chi.URLParam(r, "id"), filter)
+	if err != nil {
+		switch {
+		case errors.Is(err, controlimport.ErrBatchNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
+		case errors.Is(err, controlimport.ErrInvalidRowStatus):
+			httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "controlimport: "))
+		default:
+			httperr.WriteInternal(w, r, "controlimports", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, controlimport.RowList{
+		BatchID:           batch.ID,
+		SCFRelease:        batch.SCFRelease,
+		SuggestionsStatus: batch.SuggestionsStatus,
+		Rows:              rows,
+	})
+}
+
+func writeStageError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, controlimport.ErrUploadTooLarge):
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
+	case errors.Is(err, controlimport.ErrWorkbookTooLarge):
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("workbook expands past the %d MiB uncompressed cap; split it into smaller files", controlimport.MaxUnzipBytes>>20))
+	case errors.Is(err, controlimport.ErrTooManyRows):
+		httpresp.WriteError(w, http.StatusBadRequest,
+			fmt.Sprintf("control file exceeds the %d-row cap; split it into smaller files", controlimport.MaxRows))
+	case errors.Is(err, controlimport.ErrTooManyColumns):
+		httpresp.WriteError(w, http.StatusBadRequest,
+			fmt.Sprintf("a row has a value past column %d; remove the stray cells or split the sheet", controlimport.MaxColumns))
+	case errors.Is(err, controlimport.ErrFrameworkRequired):
+		httpresp.WriteError(w, http.StatusBadRequest, "framework is required: the slug of the framework the tested-under codes belong to")
+	case errors.Is(err, controlimport.ErrUnknownFramework):
+		httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "controlimport: "))
+	case errors.Is(err, controlimport.ErrUnsupportedFormat),
+		errors.Is(err, controlimport.ErrEmptyFile),
+		errors.Is(err, controlimport.ErrNoHeaderRow),
+		errors.Is(err, controlimport.ErrInvalidColumnMap),
+		errors.Is(err, controlimport.ErrMappedColumnAbsent):
+		httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "controlimport: "))
+	default:
+		httperr.WriteInternal(w, r, "controlimports", err)
+	}
+}
+
+func sizeCapMessage() string {
+	return fmt.Sprintf("upload exceeds the %d MiB size cap; split it into smaller files", controlimport.MaxUploadBytes/(1024*1024))
+}
+
+// parseColumnMap turns repeated "field=Header" values into a column map.
+func parseColumnMap(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(values))
+	for _, v := range values {
+		field, header, ok := strings.Cut(v, "=")
+		field = strings.TrimSpace(field)
+		header = strings.TrimSpace(header)
+		if !ok || field == "" || header == "" {
+			return nil, fmt.Errorf("column_map entry %q must be field=Header", v)
+		}
+		if _, dup := out[field]; dup {
+			return nil, fmt.Errorf("column_map maps field %q more than once", field)
+		}
+		out[field] = header
+	}
+	return out, nil
+}

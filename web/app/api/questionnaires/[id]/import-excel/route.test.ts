@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
 import { TEST_BEARER_263 } from "../../../../../lib/test-utils/test-tokens";
+import { multipartRequest } from "../../../../../lib/test-utils/upload-requests";
 
 vi.mock("next/server", () => mockNextServer());
 
@@ -17,10 +18,10 @@ vi.mock("next/headers", () => ({
 
 import { POST } from "./route";
 
-function makeReq(form: FormData): {
-  formData: () => Promise<FormData>;
-} {
-  return { formData: async () => form };
+const QID = "00000000-0000-0000-0000-000025580001";
+
+function makeReq(form: FormData): Promise<Request> {
+  return multipartRequest(form);
 }
 
 function paramsFor(id: string): {
@@ -43,7 +44,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
     const form = new FormData();
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(401);
   });
 
@@ -65,15 +66,34 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       "test.xlsx",
     );
 
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(201);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/abc/import-excel");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/import-excel",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_263}`);
     expect(init?.body).toBeInstanceOf(FormData);
+  });
+
+  test("400 for a body that is not valid multipart, before calling the platform", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const body = "not multipart";
+    const req = new Request("http://t/", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=x",
+        "content-length": String(body.length),
+      },
+      body,
+    });
+    const res = await POST(req as never, paramsFor(QID));
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("propagates upstream 413 too-large", async () => {
@@ -84,7 +104,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       }),
     );
     const form = new FormData();
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(413);
   });
 });

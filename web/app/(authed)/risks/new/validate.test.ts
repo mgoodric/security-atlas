@@ -17,10 +17,28 @@ import {
 
 const baseValid = {
   title: "Vendor data breach exposure",
-  treatment_owner: "alice",
+  owner_user_id: "a1a1a1a1-0000-4000-8000-000000002129",
+  treatment_owner: "",
   treatment: "mitigate" as const,
   linked_control_ids: ["00000000-0000-0000-0000-000000000010"],
 };
+
+describe("validateRiskForm — category (#1817)", () => {
+  test("passes with a category slug", () => {
+    expect(validateRiskForm({ ...baseValid, category: "operational" })).toEqual(
+      {},
+    );
+  });
+
+  test("fails when no category is chosen", () => {
+    const e = validateRiskForm({ ...baseValid, category: "" });
+    expect(e.category).toMatch(/category is required/i);
+  });
+
+  test("skips the check when the caller has no category", () => {
+    expect(validateRiskForm(baseValid).category).toBeUndefined();
+  });
+});
 
 describe("validateRiskForm — mitigate + linked controls", () => {
   test("passes when mitigate + at least one linked control", () => {
@@ -88,20 +106,31 @@ describe("validateRiskForm — carry-over required fields", () => {
     expect(e.title).toMatch(/required/i);
   });
 
-  test("fails when treatment_owner is empty", () => {
-    const e = validateRiskForm({ ...baseValid, treatment_owner: "" });
-    expect(e.treatment_owner).toMatch(/required/i);
+  // #2129: the owner is a picked user.
+  test("fails when no owner is picked and there is no unlinked owner", () => {
+    const e = validateRiskForm({ ...baseValid, owner_user_id: "" });
+    expect(e.owner).toMatch(/required/i);
+  });
+
+  test("an unlinked free-text owner stands in until a user is picked", () => {
+    const e = validateRiskForm({
+      ...baseValid,
+      owner_user_id: "",
+      treatment_owner: "Someone in Finance",
+    });
+    expect(e.owner).toBeUndefined();
   });
 
   test("aggregates multiple errors", () => {
     const e = validateRiskForm({
       title: "",
+      owner_user_id: "",
       treatment_owner: "",
       treatment: "mitigate",
       linked_control_ids: [],
     });
     expect(e.title).toBeDefined();
-    expect(e.treatment_owner).toBeDefined();
+    expect(e.owner).toBeDefined();
     expect(e.linked_control_ids).toBeDefined();
     expect(hasErrors(e)).toBe(true);
   });
@@ -115,8 +144,11 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     expect(DEFAULT_TREATMENT).not.toBe("mitigate");
   });
 
-  test("the default treatment is avoid (status-only, zero required fields)", () => {
-    expect(DEFAULT_TREATMENT).toBe("avoid");
+  test("#1746: the default treatment is untreated, never a real decision", () => {
+    expect(DEFAULT_TREATMENT).toBe("untreated");
+    for (const decision of ["accept", "mitigate", "transfer", "avoid"]) {
+      expect(DEFAULT_TREATMENT).not.toBe(decision);
+    }
   });
 
   test("AC-1: an empty-tenant default-flow submit is valid with zero linked controls", () => {
@@ -125,6 +157,7 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     // must return no errors so the create flow does not dead-end.
     const e = validateRiskForm({
       title: "First program risk",
+      owner_user_id: "",
       treatment_owner: "security-lead",
       treatment: DEFAULT_TREATMENT,
       linked_control_ids: [],
@@ -138,6 +171,7 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     // canvas §6.1 invariant.
     const e = validateRiskForm({
       title: "First program risk",
+      owner_user_id: "",
       treatment_owner: "security-lead",
       treatment: "mitigate",
       linked_control_ids: [],
@@ -185,5 +219,54 @@ describe("hasErrors", () => {
 
   test("ignores empty-string error values", () => {
     expect(hasErrors({ title: "" })).toBe(false);
+  });
+});
+
+describe("validateRiskForm — proposed acceptance (#2391)", () => {
+  const accept = {
+    ...baseValid,
+    treatment: "accept" as const,
+    linked_control_ids: [],
+  };
+  const inDays = (n: number) =>
+    new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  test("passes with a justification and a future expiry", () => {
+    expect(
+      validateRiskForm({
+        ...accept,
+        justification: "Compensated by the edge filter.",
+        proposed_until: inDays(30),
+      }),
+    ).toEqual({});
+  });
+
+  test("requires a justification", () => {
+    const e = validateRiskForm({
+      ...accept,
+      justification: "  ",
+      proposed_until: inDays(30),
+    });
+    expect(e.justification).toMatch(/justification is required/i);
+  });
+
+  test("requires a proposed expiry after today", () => {
+    expect(
+      validateRiskForm({ ...accept, justification: "x", proposed_until: "" })
+        .proposed_until,
+    ).toMatch(/required/i);
+    expect(
+      validateRiskForm({
+        ...accept,
+        justification: "x",
+        proposed_until: inDays(0),
+      }).proposed_until,
+    ).toMatch(/after today/i);
+  });
+
+  test("does not apply to other treatments", () => {
+    expect(
+      validateRiskForm({ ...baseValid, justification: "", proposed_until: "" }),
+    ).toEqual({});
   });
 });

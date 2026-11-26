@@ -52,6 +52,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
@@ -83,7 +85,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 }
 
 // seedSCFAnchor mirrors slice 023's helper so the schema registry's
-// GOV-04 default_scf_anchors validation passes for policy.acknowledgment.v1.
+// GOV-05 default_scf_anchors validation passes for policy.acknowledgment.v1.
 func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) {
 	t.Helper()
 	ctx := context.Background()
@@ -140,9 +142,9 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 		t.Fatalf("acquire admin conn: %v", err)
 	}
 	defer conn.Release()
-	_, _ = conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781149)")
+	_ = advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAckRate)
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781149)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAckRate)
 	}()
 	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())
 	if err != nil {
@@ -229,23 +231,41 @@ func seedAPIKeyForUser(t *testing.T, admin *pgxpool.Pool, tenant string, userID 
 // ----- harness -----
 
 type setupResult struct {
-	server    *httptest.Server
-	app       *pgxpool.Pool
-	admin     *pgxpool.Pool
-	apiServer *api.Server
-	ingester  *ingest.Service
-	tenant    string
-	ctrlID    uuid.UUID
-	adminBear string
-	adminUser uuid.UUID
+	server       *httptest.Server
+	app          *pgxpool.Pool
+	admin        *pgxpool.Pool
+	apiServer    *api.Server
+	ingester     *ingest.Service
+	tenant       string
+	ctrlID       uuid.UUID
+	adminBear    string
+	approverBear string // a second person; approves what the admin submits
+	adminUser    uuid.UUID
 }
 
 func setup(t *testing.T) setupResult {
 	t.Helper()
+	return setupWith(t, false)
+}
+
+// setupWithLiveRoles is setup with OPA and authzmw mounted as in
+// production, so a session's roles are its user's live user_roles
+// (cred.TenantRoles), not its role claim. Policy acknowledgment matches on
+// those roles (#2505); the tests that acknowledge use it.
+func setupWithLiveRoles(t *testing.T) setupResult {
+	t.Helper()
+	return setupWith(t, true)
+}
+
+// setupWith builds the harness. Each attach runs on the server before its
+// router is built, for a test that needs another store wired in (the
+// policy sync tests attach the API-key store).
+func setupWith(t *testing.T, liveRoles bool, attach ...func(*api.Server)) setupResult {
+	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "GOV-04", "GOV")
+	seedSCFAnchor(t, admin, "GOV-05", "GOV")
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
@@ -256,6 +276,13 @@ func setup(t *testing.T) setupResult {
 		IngestService:  ingester,
 	})
 	apiServer.AttachDB(app)
+	if liveRoles {
+		engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+		if err != nil {
+			t.Fatalf("authz.NewEngine: %v", err)
+		}
+		apiServer.AttachAuthz(engine, authz.NewAuditWriter(app))
+	}
 
 	// Slice 197: JWT bearer via slice 190 path; Subject = admin user
 	// id so policy_acknowledgments FK targets resolve.
@@ -264,7 +291,15 @@ func setup(t *testing.T) setupResult {
 	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
 	adminClaims.Subject = adminUser.String()
 	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
+	// A second person approves what the admin submits (#1807). No users
+	// row is seeded, so acknowledgment-rate denominators are unchanged.
+	approverClaims := testjwt.AdminFor(uuid.MustParse(tenant))
+	approverClaims.Subject = uuid.NewString()
+	approverBearer := apiServer.IssueTestJWT(t, approverClaims)
 
+	for _, a := range attach {
+		a(apiServer)
+	}
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")
@@ -274,15 +309,16 @@ func setup(t *testing.T) setupResult {
 	// httptest server needs an explicit close here.
 	t.Cleanup(ts.Close)
 	return setupResult{
-		server:    ts,
-		app:       app,
-		admin:     admin,
-		apiServer: apiServer,
-		ingester:  ingester,
-		tenant:    tenant,
-		ctrlID:    ctrlID,
-		adminBear: adminBearer,
-		adminUser: adminUser,
+		server:       ts,
+		app:          app,
+		admin:        admin,
+		apiServer:    apiServer,
+		ingester:     ingester,
+		tenant:       tenant,
+		ctrlID:       ctrlID,
+		adminBear:    adminBearer,
+		approverBear: approverBearer,
+		adminUser:    adminUser,
 	}
 }
 
@@ -341,7 +377,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 	t.Helper()
 	id := createDraftPolicy(t, s, title, version, requiredRoles)
 	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	pubBody, _ := json.Marshal(map[string]any{"new_version": version})
 	raw := s.do(t, http.MethodPost, "/v1/policies/"+id+"/publish", pubBody, s.adminBear, http.StatusCreated)
 	var env struct {
@@ -364,7 +400,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 // key on the row). Additive guarantee — existing callers cannot break.
 func TestListPolicies_OmittedIncludeReturnsV1Shape(t *testing.T) {
 	s := setup(t)
-	_ = createAndPublishPolicy(t, s, "Pinned-Shape", "1", []string{"all_staff"})
+	_ = createAndPublishPolicy(t, s, "Pinned-Shape", "1", []string{"everyone"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies", nil, s.adminBear, http.StatusOK)
 	var got struct {
@@ -386,8 +422,8 @@ func TestListPolicies_OmittedIncludeReturnsV1Shape(t *testing.T) {
 // branch did not fire.
 func TestListPolicies_IncludeAckRate_DraftOnly_AllNull(t *testing.T) {
 	s := setup(t)
-	_ = createDraftPolicy(t, s, "Draft-1", "1", []string{"all_staff"})
-	_ = createDraftPolicy(t, s, "Draft-2", "2", []string{"engineering"})
+	_ = createDraftPolicy(t, s, "Draft-1", "1", []string{"everyone"})
+	_ = createDraftPolicy(t, s, "Draft-2", "2", []string{"grc_engineer"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, s.adminBear, http.StatusOK)
 	var got struct {
@@ -415,10 +451,12 @@ func TestListPolicies_IncludeAckRate_DraftOnly_AllNull(t *testing.T) {
 // numerator>=1, denominator>=1. The freshness window applies (cutoff
 // in the SQL); a fresh ack made just now counts.
 func TestListPolicies_IncludeAckRate_PublishedWithAck_PopulatedCell(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
-	// Publish a policy that requires the `employee` role.
+	// Publish a policy that requires the role.
 	policyID := createAndPublishPolicy(t, s, "Acked-Policy", "1", []string{requiredRole})
 
 	// Mint a user + api_key with the required role, then acknowledge.
@@ -471,8 +509,10 @@ func TestListPolicies_IncludeAckRate_PublishedWithAck_PopulatedCell(t *testing.T
 // B's bearer hits the SAME joined endpoint and MUST NOT see any of
 // Tenant A's rows.
 func TestListPolicies_IncludeAckRate_RLS_TenantIsolation(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
 	// Tenant A: publish a policy + ack it.
 	policyA := createAndPublishPolicy(t, s, "TenantA-Policy", "1", []string{requiredRole})
@@ -512,8 +552,10 @@ func TestListPolicies_IncludeAckRate_RLS_TenantIsolation(t *testing.T) {
 // is the canonical anti-criterion check: the same predicates, the same
 // math.
 func TestListPolicies_IncludeAckRate_MatchesPerPolicyHandler(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
 	policyID := createAndPublishPolicy(t, s, "Cross-Check", "1", []string{requiredRole})
 	_, bearer := s.issueRoledUserBearer(t, "bob@slice107.test", []string{requiredRole})
@@ -587,13 +629,13 @@ func TestListPolicies_IncludeAckRate_WireShape_PinsNullVsNumber(t *testing.T) {
 	s := setup(t)
 
 	// One draft policy: ack_rate columns MUST be JSON null.
-	draftID := createDraftPolicy(t, s, "Draft-Policy-WireShape", "1", []string{"employee"})
+	draftID := createDraftPolicy(t, s, "Draft-Policy-WireShape", "1", []string{"everyone"})
 
 	// One published-with-no-acks policy: ack_rate cell MUST be populated
 	// with denominator >= 0 (the API key the bootstrap-admin holds may
 	// or may not match the required role; either way, both columns
 	// MUST be JSON numbers, not null).
-	publishedID := createAndPublishPolicy(t, s, "Published-No-Ack-WireShape", "1", []string{"employee"})
+	publishedID := createAndPublishPolicy(t, s, "Published-No-Ack-WireShape", "1", []string{"everyone"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, s.adminBear, http.StatusOK)
 
@@ -669,6 +711,15 @@ func (s *setupResult) issueRoledUserBearer(t *testing.T, email string, roles []s
 	t.Helper()
 	userID := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, userID, false, roles)
+	// The roles are also the user's live user_roles, which a session's
+	// policy acknowledgment matches on (#2505).
+	for _, role := range roles {
+		if _, err := s.admin.Exec(context.Background(),
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2505')`,
+			s.tenant, userID.String(), role); err != nil {
+			t.Fatalf("seed user_roles %q: %v", role, err)
+		}
+	}
 	// Slice 197: JWT bearer with Subject = users row id (replaces
 	// the legacy RebindBearerUserIDForTests hook).
 	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), roles)

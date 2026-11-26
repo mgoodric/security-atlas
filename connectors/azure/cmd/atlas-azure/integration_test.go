@@ -118,7 +118,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entra.Pull: %v", err)
 	}
-	entraRec, err := buildEntraRecord(assignments[0], "prod", "scf:IAC-21")
+	entraRec, err := buildEntraRecord(assignments[0], "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildEntraRecord: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage.Inspect: %v", err)
 	}
-	storageRec, err := buildStorageRecord(accounts[0], "prod", "scf:CRY-04")
+	storageRec, err := buildStorageRecord(accounts[0], "prod", "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildStorageRecord: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aks.Inspect: %v", err)
 	}
-	aksRec, err := buildAKSRecord(clusters[0], "prod", "scf:CFG-02")
+	aksRec, err := buildAKSRecord(clusters[0], "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAKSRecord: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nsg.Inspect: %v", err)
 	}
-	nsgRec, err := buildNSGRecord(groups[0], "prod", "scf:NET-04")
+	nsgRec, err := buildNSGRecord(groups[0], "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNSGRecord: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keyvault.Inspect: %v", err)
 	}
-	kvRec, err := buildKeyVaultRecord(vaults[0], "prod", "scf:CRY-09")
+	kvRec, err := buildKeyVaultRecord(vaults[0], "prod", "scf:CRY-10")
 	if err != nil {
 		t.Fatalf("buildKeyVaultRecord: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("firewall.Inspect: %v", err)
 	}
-	fwRec, err := buildFirewallRecord(policies[0], "prod", "scf:NET-04")
+	fwRec, err := buildFirewallRecord(policies[0], "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildFirewallRecord: %v", err)
 	}
@@ -310,8 +310,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 		{ID: "/sub/acct", Name: "acct", EncryptionEnabled: true, EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true},
 	}}
 	accts, _ := storage.Inspect(context.Background(), api, "sub-1", fixed)
-	r1, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
-	r2, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
+	r1, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
+	r2, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -338,19 +338,19 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			RoleDefinitionID: "role", RoleDisplayName: "Reader"},
 	}}
 	assignments, _ := entra.Pull(context.Background(), entraAPI, "tenant-1", fixed)
-	entraRec, _ := buildEntraRecord(assignments[0], "prod", "scf:IAC-21")
+	entraRec, _ := buildEntraRecord(assignments[0], "prod", "scf:IAC-10")
 
 	armAPI := &fakeARMForIntegration{accounts: []storage.RawAccount{
 		{ID: "/sub/a", Name: "a", EncryptionEnabled: true, EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true},
 	}}
 	accts, _ := storage.Inspect(context.Background(), armAPI, "sub-1", fixed)
-	storageRec, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
+	storageRec, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
 
 	aksAPI := &fakeAKSForIntegration{clusters: []aks.RawCluster{
 		{ID: "/sub/clu", Name: "clu", RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, AuthorizedIPRanges: true},
 	}}
 	clusters, _ := aks.Inspect(context.Background(), aksAPI, "sub-1", fixed)
-	aksRec, _ := buildAKSRecord(clusters[0], "prod", "scf:CFG-02")
+	aksRec, _ := buildAKSRecord(clusters[0], "prod", "scf:CFG-04")
 
 	nsgAPI := &fakeNSGForIntegration{groups: []nsg.RawGroup{
 		{ID: "/sub/nsg", Name: "nsg", ResourceGroup: "rg", Location: "eastus", AssociatedSubnets: 1,
@@ -360,7 +360,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	nsgGroups, _ := nsg.Inspect(context.Background(), nsgAPI, "sub-1", fixed)
-	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-04")
+	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-03")
 
 	kvAPI := &fakeKeyVaultForIntegration{vaults: []keyvault.RawVault{
 		{ID: "/sub/kv", Name: "kv", ResourceGroup: "rg", Location: "eastus", RBACAuthorization: false,
@@ -370,7 +370,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	kvVaults, _ := keyvault.Inspect(context.Background(), kvAPI, "sub-1", fixed)
-	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-09")
+	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-10")
 
 	fwAPI := &fakeFirewallForIntegration{policies: []firewall.RawPolicy{
 		{ID: "/sub/fw", Name: "fw", ResourceGroup: "rg", Location: "eastus",
@@ -381,7 +381,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	fwPolicies, _ := firewall.Inspect(context.Background(), fwAPI, "sub-1", fixed)
-	fwRec, _ := buildFirewallRecord(fwPolicies[0], "prod", "scf:NET-04")
+	fwRec, _ := buildFirewallRecord(fwPolicies[0], "prod", "scf:NET-03")
 
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).

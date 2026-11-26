@@ -45,27 +45,41 @@ export function tenantOptions(rows: TenantRow[]): AssignTenantOption[] {
 //   - "pinned":     render a read-only display pinned to `tenantId`
 //                   (tenant-admin — P0-527-1 / P0-479-2: NO cross-tenant
 //                   chooser).
-//   - "unresolved": tenant-admin whose session tenant has not resolved
-//                   yet; the field shows a placeholder and submit is
-//                   disabled.
+//   - "sole":       #1764 — the install has one tenant. Render NO tenant
+//                   field; the assignment lands in `tenantId`.
+//   - "unresolved": the tenant has not resolved yet; the field shows a
+//                   placeholder and submit is disabled.
 export type TenantFieldMode =
   | { kind: "chooser" }
   | { kind: "pinned"; tenantId: string }
+  | { kind: "sole"; tenantId: string }
   | { kind: "unresolved" };
 
 // tenantFieldMode decides whether the assign dialog's tenant field is a
-// cross-tenant chooser or pinned to the actor's own tenant. It uses ONLY
-// the existing `cross_tenant` signal (derived from the user-list response
-// shape — NO second authority probe, P0-527-2) plus the already-fetched
-// session tenant id.
+// cross-tenant chooser, pinned to the actor's own tenant, or absent
+// because the install has a single tenant. It uses ONLY the existing
+// `cross_tenant` signal (derived from the user-list response shape — NO
+// second authority probe, P0-527-2), the already-fetched session tenant
+// id, and (#1764) the install's tenant-count signal. On a single-tenant
+// install the session tenant IS the sole tenant; `tenantIds` (the
+// super-admin tenant list, when loaded) is the fallback.
 export function tenantFieldMode(args: {
   crossTenant: boolean;
   sessionTenantId: string | undefined;
+  singleTenant?: boolean;
+  tenantIds?: string[];
 }): TenantFieldMode {
+  const t = (args.sessionTenantId ?? "").trim();
+  if (args.singleTenant) {
+    const sole =
+      t !== "" ? t : args.tenantIds?.length === 1 ? args.tenantIds[0] : "";
+    return sole === ""
+      ? { kind: "unresolved" }
+      : { kind: "sole", tenantId: sole };
+  }
   if (args.crossTenant) {
     return { kind: "chooser" };
   }
-  const t = (args.sessionTenantId ?? "").trim();
   if (t === "") {
     return { kind: "unresolved" };
   }

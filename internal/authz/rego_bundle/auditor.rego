@@ -66,9 +66,10 @@ allow if {
 
 # audit-notes write: gated by the period assignment match. The
 # request body's audit_period_id is surfaced on
-# input.resource.attrs.audit_period_id by the handler before calling
-# Decide (slice 025 wiring); the rule denies cross-period writes
-# (P0-3 / AC-4).
+# input.resource.attrs.audit_period_id by the authz middleware's
+# hydrator (auditnotes.PeriodResourceAttrs, #2193), only when the
+# period exists in the caller's tenant; the rule denies cross-period
+# and cross-tenant writes (P0-3 / AC-4).
 #
 # Slice 029 note: the auditor can write both 'auditor_only' (private)
 # and 'shared' (Audit Hub) notes. The period gate is the same for
@@ -82,18 +83,20 @@ allow if {
 
 # Slice 029: /v1/me/notifications -- self-info notification surface.
 # Any authenticated role (auditor included) can read their own
-# notifications. The query layer pins recipient_user_id = caller.UserID
-# so cross-recipient leakage is impossible. Mark-read (PATCH) is
+# notifications. The query layer pins recipient_user_id to the caller's
+# bare users(id), resolved by credstore.CallerUserID (#2183), so
+# cross-recipient leakage is impossible. Mark-read (PATCH) is
 # allowed by the same rule.
 allow if {
     has_role("auditor")
     input.resource.type == "notifications"
 }
 
-# One write action carried over from the slice-035 stub: annotating
-# a sample with audit findings (slice 026:
-# POST /v1/samples/{id}/annotations). Period-scoped via
-# audit_periods.rego's ABAC predicate.
+# Sample writes in an assigned period: annotating a sample with audit
+# findings (slice 026: POST /v1/samples/{id}/annotations) and drawing one
+# from a period's population (POST /v1/samples). The hydrator sets
+# input.resource.attrs.audit_period_id from the sample's, or the body
+# population_id's, population (#2157).
 allow if {
     has_role("auditor")
     input.action == "write"
@@ -114,9 +117,9 @@ auditor_period_matches if {
 # AC-4 ("auditor and the control's owner can read").
 #
 # Auditor write on walkthroughs is intentionally NOT granted at the
-# auditor-role layer; walkthroughs can be authored by control_owner or
-# grc_engineer (see control_owner.rego + grc_engineer.rego). An auditor
-# who needs to record a walkthrough does so via their assigned engineer
+# auditor-role layer; walkthroughs are authored by admin or grc_engineer
+# only (grc_engineer.rego; #2708 removed control_owner). An auditor who
+# needs to record a walkthrough does so via their assigned engineer
 # credential or has the grc_engineer role flag set on their credential.
 allow if {
     has_role("auditor")
@@ -141,22 +144,11 @@ auditor_readable_resources := {
     "artifacts",
     "scopes",
     "audit-periods",
-    # Slice 124: the unified audit-log aggregation endpoint (read-only
-    # UNION ALL across the nine per-domain audit-log tables). Auditors
-    # need this for the same reason they need 'audit-periods' — visibility
-    # into the test artifacts of the program. RLS keeps the read
-    # tenant-scoped; the canvas §9.5 ABAC layer is not needed because the
-    # log is already tenant-internal (every row already belongs to the
-    # caller's tenant after RLS filtering).
-    "audit-log-unified",
-    # Slice 135: the bulk-download (csv / json / xlsx) variant of the
-    # same unified audit-log read. Admit set MUST match audit-log-unified
-    # bit-for-bit (slice 135 P0-A9) — the export endpoint is the SAME
-    # underlying query with an encoder swap, so any role admitted to
-    # the read MUST be admitted to the export. The slice-135 OPA matrix
-    # test (TestSlice135_UnifiedAuditLogExportAdmitSetParity) pins this
-    # parity at the rego layer.
-    "audit-log-export",
+    # #2378: no unified audit-log entry. /v1/admin/audit-log/unified and
+    # /export resolve to resource type "admin", which auditors do not
+    # read; the "audit-log-unified" / "audit-log-export" entries slice
+    # 124 / 135 put here matched no path. Auditors read the same rows,
+    # payload-gated per kind, through /v1/activity/unified.
     # Slice 148: compliance calendar is cross-business by design
     # (slice 094 AC-9: "accessible to all signed-in users, no admin
     # gate"). The auditor needs visibility into the audit-period
@@ -182,7 +174,8 @@ auditor_readable_resources := {
     # these admits to reads. /v1/frameworks/posture admits via
     # defaults.rego.catalog_resources["frameworks"] (slice 035).
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
     # Slice 269: dashboard snapshot export
     # (`GET /v1/dashboard/export?format=json|csv|xlsx`). The
     # `BuildInput` path-to-resource resolver derives resource.type
@@ -199,8 +192,8 @@ auditor_readable_resources := {
     # the slice 269 cross-tenant isolation integration test is
     # the merge-blocking evidence. The handler-level
     # `hasDashboardExportAccess` predicate is the defense-in-
-    # depth twin (admin + approver only); the OPA rule here is
-    # the upstream production gate.
+    # depth twin (admin + grc_engineer + auditor, #2350); the OPA
+    # rule here is the upstream production gate.
     "dashboard",
 }
 
@@ -213,4 +206,15 @@ allow if {
     input.action == "write"
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
+}
+
+# #2381: the dashboard's Evidence freshness panel, the same narrow admit
+# as viewer.rego. Counts per freshness class only. /v1/evidence and
+# /v1/evidence/{id} are admitted only for an assigned period's evidence
+# (audit_periods.rego, #2157).
+allow if {
+    has_role("auditor")
+    is_read
+    input.resource.type == "evidence"
+    input.request.path == "/v1/evidence/freshness"
 }

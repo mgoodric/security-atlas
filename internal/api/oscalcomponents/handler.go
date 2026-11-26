@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -28,7 +29,7 @@ type componentStore interface {
 	ListDefinitions(ctx context.Context) ([]dbx.ImportedCatalog, error)
 	GetDefinitionWithClaims(ctx context.Context, defID uuid.UUID) (DefinitionWithClaims, error)
 	Disposition(ctx context.Context, claimID uuid.UUID, toStatus, actor, note string) (dbx.ImportedComponentClaim, error)
-	MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error)
+	MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID, scfRelease, actor string) (dbx.ImportedComponentClaim, error)
 }
 
 // Handler wires the OSCAL component-claim read + disposition routes over a
@@ -100,11 +101,13 @@ type dispositionReq struct {
 }
 
 // mapScfAnchorReq is the body for PATCH /component-claims/{id}/scf-anchor. The
-// scf_anchor_id is the SCF code (e.g. "IAC-06"), validated server-side against
-// the bundled scf_anchors catalog. Requirement -> SCF anchor only (invariant
+// scf_anchor_id is the SCF code (e.g. "IAC-37"), validated server-side against
+// the bundled scf_anchors catalog within scf_release, the SCF release the
+// code is from (required, #1774). Requirement -> SCF anchor only (invariant
 // #7): there is no claim id here, only a crosswalk target.
 type mapScfAnchorReq struct {
 	ScfAnchorID string `json:"scf_anchor_id"`
+	SCFRelease  string `json:"scf_release"`
 }
 
 // ListDefinitions handles GET /v1/oscal/component-definitions — a tenant's
@@ -216,7 +219,8 @@ func (h *Handler) NeedsInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // disposition is the shared accept/reject/needs-info body. It is gated on
-// IsApprover (grc_engineer) | IsAdmin — disposition is a write that credits or
+// a tenant admin (authz.IsTenantAdmin, the role set OPA admits on "oscal",
+// #2428) — disposition is a write that credits or
 // declines a vendor assertion, so a bare read role is not enough. Accepting a
 // claim does NOT auto-satisfy a control: the store writes only the claim's
 // disposition metadata + an append-only audit row (invariant #2 / P0-512-1).
@@ -226,8 +230,8 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer (approver) role required to disposition a vendor claim")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to disposition a vendor claim")
 		return
 	}
 	claimID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -262,10 +266,10 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 // MapScfAnchor handles PATCH /v1/oscal/component-claims/{id}/scf-anchor — an
 // operator maps an unmapped vendor claim to a canonical SCF anchor.
 //
-// It is gated on IsApprover (grc_engineer) | IsAdmin — mapping is a write that
+// It is gated on a tenant admin (authz.IsTenantAdmin, #2428) — mapping is a write that
 // records the human-approved crosswalk (the same write tier as disposition; a
 // bare read role is not enough). The body carries {scf_anchor_id} (the SCF
-// code, e.g. "IAC-06"), validated server-side against the bundled catalog.
+// code, e.g. "IAC-37"), validated server-side against the bundled catalog.
 //
 // THE LOAD-BEARING BOUNDARY: mapping sets the crosswalk only. The store writes
 // the claim's scf_anchor_id + an append-only mapping-audit row; it NEVER
@@ -277,8 +281,8 @@ func (h *Handler) MapScfAnchor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer (approver) role required to map a vendor claim to an SCF anchor")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to map a vendor claim to an SCF anchor")
 		return
 	}
 	claimID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -296,13 +300,15 @@ func (h *Handler) MapScfAnchor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.store.MapScfAnchor(ctx, claimID, strings.TrimSpace(req.ScfAnchorID), cred.ID)
+	updated, err := h.store.MapScfAnchor(ctx, claimID, strings.TrimSpace(req.ScfAnchorID), strings.TrimSpace(req.SCFRelease), cred.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrClaimNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "component claim not found")
+		case errors.Is(err, ErrSCFReleaseRequired):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "scf_release is required: send the SCF release scf_anchor_id is from (GET /v1/anchors reports the release its anchors are in)")
 		case errors.Is(err, ErrAnchorNotFound):
-			httpresp.WriteError(w, http.StatusUnprocessableEntity, "scf_anchor_id does not resolve to a bundled SCF anchor")
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "scf_anchor_id does not resolve to an SCF anchor in scf_release")
 		default:
 			httperr.WriteInternal(w, r, "oscalcomponents", err)
 		}
@@ -327,7 +333,7 @@ func (h *Handler) MapScfAnchor(w http.ResponseWriter, r *http.Request) {
 
 // requireOscalRead is the handler-level read gate, the defense-in-depth twin
 // of the OPA middleware (mirrors oscalprovenance.requireOscalRead). The read
-// set is admin + grc_engineer (IsApprover) + control_owner (OwnerRoles).
+// set is admin + grc_engineer by live role (hasOscalRead, #2507).
 func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || !hasOscalRead(cred) {
@@ -337,8 +343,13 @@ func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// hasOscalRead reports whether the credential may read OSCAL component
+// definitions: a tenant approver by its live roles (authz.IsTenantApprover),
+// as OPA reads it for admin and grc_engineer only. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted a session's
+// role claim (#2381) and admitted roles OPA refuses here.
 func hasOscalRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantApprover(c)
 }
 
 // ===== helpers =====

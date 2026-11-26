@@ -17,6 +17,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { forwardJSON, upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // FORWARD_PARAMS are the query keys the BFF is willing to forward to
@@ -53,8 +54,28 @@ export async function GET(req: Request): Promise<Response> {
     },
   );
   const body = await upstream.text();
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+// #2113 — POST /api/exceptions files an exception (the request form). The
+// body passes through as sent; the platform validates it, including
+// refusing a null scope predicate, and derives the requester from the
+// bearer. #2618: the Idempotency-Key header passes through too, so a retry
+// after a timeout replays the first request instead of filing a duplicate.
+export async function POST(req: Request): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  const key = req.headers.get("Idempotency-Key");
+  return forwardJSON("/v1/exceptions", {
+    method: "POST",
+    jsonBody: body,
+    headers: key ? { "Idempotency-Key": key } : undefined,
   });
 }

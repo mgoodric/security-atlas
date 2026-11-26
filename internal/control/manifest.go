@@ -20,6 +20,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/eval"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -38,11 +43,22 @@ type Manifest struct {
 	Title               string `yaml:"title"                  json:"title"`
 	Description         string `yaml:"description,omitempty"  json:"description,omitempty"`
 	SCFAnchorID         string `yaml:"scf_anchor_id"          json:"scf_anchor_id"`
-	ControlFamily       string `yaml:"control_family,omitempty" json:"control_family,omitempty"`
-	ImplementationType  string `yaml:"implementation_type"    json:"implementation_type"`
-	OwnerRole           string `yaml:"owner_role,omitempty"   json:"owner_role,omitempty"`
-	LifecycleState      string `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
-	FreshnessClass      string `yaml:"freshness_class,omitempty" json:"freshness_class,omitempty"`
+	// SCFRelease names the SCF release SCFAnchorID is a code in, e.g.
+	// "test-2026.3" (#1770). The SCF reuses codes between releases, so
+	// upload binds the anchor within this release. Required whenever
+	// SCFAnchorID is a code (MissingSCFRelease, #1774).
+	SCFRelease string `yaml:"scf_release,omitempty" json:"scf_release,omitempty"`
+	// AnchorFit states how well SCFAnchorID fits the control's intent:
+	// exact (the default when omitted), partial, or none (issue #1736).
+	// A non-exact fit needs AnchorFitNote; `none` also allows an empty
+	// SCFAnchorID, for a control with no SCF equivalent at all.
+	AnchorFit          string `yaml:"anchor_fit,omitempty"      json:"anchor_fit,omitempty"`
+	AnchorFitNote      string `yaml:"anchor_fit_note,omitempty" json:"anchor_fit_note,omitempty"`
+	ControlFamily      string `yaml:"control_family,omitempty" json:"control_family,omitempty"`
+	ImplementationType string `yaml:"implementation_type"    json:"implementation_type"`
+	OwnerRole          string `yaml:"owner_role,omitempty"   json:"owner_role,omitempty"`
+	LifecycleState     string `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
+	FreshnessClass     string `yaml:"freshness_class,omitempty" json:"freshness_class,omitempty"`
 
 	// ApplicabilityExpr is a JSON-AST scope predicate (slice 017 shape). The
 	// parser decodes the YAML mapping into a generic interface and re-marshals
@@ -53,7 +69,32 @@ type Manifest struct {
 	LinkedPolicyIDs      []string        `yaml:"linked_policy_ids,omitempty" json:"linked_policy_ids,omitempty"`
 	EvidenceQueries      []EvidenceQuery `yaml:"evidence_queries,omitempty"  json:"evidence_queries,omitempty"`
 	ManualEvidenceSchema map[string]any  `yaml:"manual_evidence_schema,omitempty" json:"manual_evidence_schema,omitempty"`
+
+	// ExternalRefs traces this control to identifiers outside the platform:
+	// the organisation's own control number, an auditor's reference, or the
+	// framework requirement it was tested under (#1737).
+	ExternalRefs []ExternalRef `yaml:"external_refs,omitempty" json:"external_refs,omitempty"`
 }
+
+// ExternalRef is one entry in `external_refs[]`.
+//
+// Kind is "reference" (the default when omitted) for a free-form identifier
+// such as an auditor's control number, or "tested_under" for a framework
+// requirement the control was audited against. For tested_under, System is
+// the framework slug (e.g. "soc2") and ID the requirement code (e.g.
+// "CC1.1"); the #1735 "audited under" report reads those pairs.
+type ExternalRef struct {
+	System string `yaml:"system"         json:"system"`
+	Kind   string `yaml:"kind,omitempty" json:"kind,omitempty"`
+	ID     string `yaml:"id"             json:"id"`
+	Note   string `yaml:"note,omitempty" json:"note,omitempty"`
+}
+
+// External reference kinds accepted in `external_refs[].kind`.
+const (
+	ExternalRefKindReference   = "reference"
+	ExternalRefKindTestedUnder = "tested_under"
+)
 
 // EvidenceQuery is one entry in `evidence_queries[]`. Slice 009 stores these
 // verbatim; slice 012 will dispatch on Language to invoke the appropriate
@@ -78,6 +119,19 @@ var allowedImplementationTypes = map[string]struct{}{
 	"manual_periodic": {},
 }
 
+// Anchor-fit values (issue #1736). AnchorFitExact is the default.
+const (
+	AnchorFitExact   = "exact"
+	AnchorFitPartial = "partial"
+	AnchorFitNone    = "none"
+)
+
+var allowedAnchorFits = map[string]struct{}{
+	AnchorFitExact:   {},
+	AnchorFitPartial: {},
+	AnchorFitNone:    {},
+}
+
 var allowedLifecycleStates = map[string]struct{}{
 	"draft":      {},
 	"proposed":   {},
@@ -86,14 +140,14 @@ var allowedLifecycleStates = map[string]struct{}{
 	"retired":    {},
 }
 
-var allowedFreshnessClasses = map[string]struct{}{
-	"realtime":  {},
-	"hourly":    {},
-	"daily":     {},
-	"weekly":    {},
-	"monthly":   {},
-	"quarterly": {},
-	"annual":    {},
+// isAllowedFreshnessClass reports whether a bundle may declare class: only
+// a class eval's freshness table maps, the single source. A class the engine
+// cannot map is refused at parse and upload instead of silently widening to
+// the 90-day fallback (#2896). The one exception, `hourly` on soc2_a1_1, was
+// removed when a1_1 moved to `realtime` (#2826).
+func isAllowedFreshnessClass(class string) bool {
+	_, known := eval.FreshnessMaxAge(class)
+	return known
 }
 
 var allowedQueryLanguages = map[string]struct{}{
@@ -105,6 +159,16 @@ var allowedQueryLanguages = map[string]struct{}{
 var (
 	bundleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{2,63}$`)
 	queryIDPattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
+	// refSystemPattern admits framework slugs ("soc2", "iso27001") and short
+	// organisation labels ("internal", "acme-audit").
+	refSystemPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
+)
+
+// Caps on external_refs. Lengths count characters (runes), not bytes.
+const (
+	maxExternalRefs       = 100
+	maxExternalRefIDLen   = 200
+	maxExternalRefNoteLen = 500
 )
 
 // ValidateStructural runs every check that does not require a database call:
@@ -128,6 +192,14 @@ func (m *Manifest) ValidateStructural() error {
 	if !bundleIDPattern.MatchString(m.BundleID) {
 		return fmt.Errorf("control bundle: bundle_id %q must match pattern %s", m.BundleID, bundleIDPattern.String())
 	}
+	// #2165: evidence push resolves --control as a control UUID first and
+	// only then as a bundle ID, so a bundle_id uuid.Parse accepts (e.g.
+	// "deadbeef-0000-4000-8000-000000000000" or its 32-hex form) could
+	// never be linked to by bundle ID. Refuse it here rather than let the
+	// evidence land unlinked.
+	if _, err := uuid.Parse(m.BundleID); err == nil {
+		return fmt.Errorf("control bundle: bundle_id %q is UUID-shaped; evidence push reads a UUID as a control id, so this bundle could never be referenced by bundle_id: choose a non-UUID bundle_id", m.BundleID)
+	}
 
 	if m.Title == "" {
 		return fmt.Errorf("control bundle: title is required")
@@ -136,10 +208,21 @@ func (m *Manifest) ValidateStructural() error {
 		return fmt.Errorf("control bundle: title exceeds 200 characters")
 	}
 
+	if m.AnchorFit != "" {
+		if _, ok := allowedAnchorFits[m.AnchorFit]; !ok {
+			return fmt.Errorf("control bundle: anchor_fit %q is not one of exact|partial|none", m.AnchorFit)
+		}
+	}
+	if m.AnchorFitOrDefault() != AnchorFitExact && strings.TrimSpace(m.AnchorFitNote) == "" {
+		return fmt.Errorf("control bundle: anchor_fit_note is required when anchor_fit is %q (say why the SCF anchor does not fully fit)", m.AnchorFit)
+	}
+
 	// AC-4: missing required metadata (scf_anchor_id is the canonical
-	// example) must reject with an error pointing at the field.
-	if m.SCFAnchorID == "" {
-		return fmt.Errorf("control bundle: scf_anchor_id is required (canvas invariant 7: every control must be anchored)")
+	// example) must reject with an error pointing at the field. The one
+	// exception is anchor_fit: none, ADR 0013's honest "unmapped": no SCF
+	// control fits, so the control may stand unanchored.
+	if m.SCFAnchorID == "" && m.AnchorFit != AnchorFitNone {
+		return fmt.Errorf("control bundle: scf_anchor_id is required (canvas invariant 7: every control must be anchored; if no SCF control fits, set anchor_fit: none with an anchor_fit_note)")
 	}
 
 	if m.ImplementationType == "" {
@@ -156,8 +239,8 @@ func (m *Manifest) ValidateStructural() error {
 	}
 
 	if m.FreshnessClass != "" {
-		if _, ok := allowedFreshnessClasses[m.FreshnessClass]; !ok {
-			return fmt.Errorf("control bundle: freshness_class %q is not a known class", m.FreshnessClass)
+		if !isAllowedFreshnessClass(m.FreshnessClass) {
+			return fmt.Errorf("control bundle: freshness_class %q is not one of %s", m.FreshnessClass, strings.Join(eval.FreshnessClasses(), "|"))
 		}
 	}
 
@@ -187,6 +270,46 @@ func (m *Manifest) ValidateStructural() error {
 		}
 	}
 
+	return m.validateExternalRefs()
+}
+
+// validateExternalRefs checks every external_refs entry and normalises an
+// omitted kind to "reference", so the stored JSON is the same whether the
+// author wrote the default or left it out.
+func (m *Manifest) validateExternalRefs() error {
+	if len(m.ExternalRefs) > maxExternalRefs {
+		return fmt.Errorf("control bundle: external_refs has %d entries; at most %d are allowed", len(m.ExternalRefs), maxExternalRefs)
+	}
+	seen := make(map[[3]string]struct{}, len(m.ExternalRefs))
+	for i := range m.ExternalRefs {
+		r := &m.ExternalRefs[i]
+		if r.System == "" {
+			return fmt.Errorf("control bundle: external_refs[%d].system is required", i)
+		}
+		if !refSystemPattern.MatchString(r.System) {
+			return fmt.Errorf("control bundle: external_refs[%d].system %q must match %s", i, r.System, refSystemPattern.String())
+		}
+		if r.Kind == "" {
+			r.Kind = ExternalRefKindReference
+		}
+		if r.Kind != ExternalRefKindReference && r.Kind != ExternalRefKindTestedUnder {
+			return fmt.Errorf("control bundle: external_refs[%d].kind %q is not one of reference|tested_under", i, r.Kind)
+		}
+		if strings.TrimSpace(r.ID) == "" {
+			return fmt.Errorf("control bundle: external_refs[%d].id is required and must be non-empty", i)
+		}
+		if utf8.RuneCountInString(r.ID) > maxExternalRefIDLen {
+			return fmt.Errorf("control bundle: external_refs[%d].id exceeds %d characters", i, maxExternalRefIDLen)
+		}
+		if utf8.RuneCountInString(r.Note) > maxExternalRefNoteLen {
+			return fmt.Errorf("control bundle: external_refs[%d].note exceeds %d characters", i, maxExternalRefNoteLen)
+		}
+		key := [3]string{r.System, r.Kind, r.ID}
+		if _, dup := seen[key]; dup {
+			return fmt.Errorf("control bundle: external_refs[%d] duplicates system %q kind %q id %q", i, r.System, r.Kind, r.ID)
+		}
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 
@@ -199,6 +322,38 @@ func (m *Manifest) LifecycleStateOrDefault() string {
 		return "draft"
 	}
 	return m.LifecycleState
+}
+
+// MissingSCFRelease reports whether the manifest names scf_anchor_id as an
+// SCF code without declaring scf_release (#1774), which upload refuses with
+// ErrSCFReleaseRequired. An unanchored bundle, and an scf_anchor_id written
+// as an anchor UUID, need no release.
+func (m *Manifest) MissingSCFRelease() bool {
+	ref := strings.TrimSpace(m.SCFAnchorID)
+	if ref == "" || strings.TrimSpace(m.SCFRelease) != "" {
+		return false
+	}
+	_, err := uuid.Parse(ref)
+	return err != nil
+}
+
+// AnchorFitOrDefault returns the manifest's anchor_fit, or "exact" when
+// unset, so a bundle that omits it is stored as an exact fit.
+func (m *Manifest) AnchorFitOrDefault() string {
+	if m.AnchorFit == "" {
+		return AnchorFitExact
+	}
+	return m.AnchorFit
+}
+
+// AnchorFitNotePtr returns the trimmed note for the nullable DB column,
+// or nil when there is none.
+func (m *Manifest) AnchorFitNotePtr() *string {
+	n := strings.TrimSpace(m.AnchorFitNote)
+	if n == "" {
+		return nil
+	}
+	return &n
 }
 
 // ApplicabilityExprJSON marshals m.ApplicabilityExpr to compact JSON bytes
@@ -232,4 +387,13 @@ func (m *Manifest) ManualEvidenceSchemaJSON() ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(m.ManualEvidenceSchema)
+}
+
+// ExternalRefsJSON returns the refs as a JSON array for the NOT NULL JSONB
+// column. An empty/absent list serialises as "[]".
+func (m *Manifest) ExternalRefsJSON() ([]byte, error) {
+	if len(m.ExternalRefs) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(m.ExternalRefs)
 }

@@ -62,6 +62,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
@@ -155,10 +156,10 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 
 	// Role gate (defense-in-depth) — same as slice 124's
 	// UnifiedList: admin OR auditor OR grc_engineer. The upstream
-	// slice-035 OPA middleware is the canonical gate; AC-10 of
-	// slice 135 + the rego matrix test ensure the admit set matches
-	// audit-log-unified exactly.
-	allowed, err := h.callerAllowedUnified(ctx, tenantID, cred.UserID, cred.IsAdmin)
+	// slice-035 OPA middleware is the canonical gate and admits admin
+	// and grc_engineer; the slice 135 parity test pins that the
+	// unified read and this export admit the same roles (#2378).
+	allowed, err := h.callerAllowedUnified(ctx, tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format), From: params.fromRaw, To: params.toRaw,
@@ -273,6 +274,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	)
 
 	rowCap := defaultExportRowCap
+	gate := h.newPayloadGate(r, userIdentifier)
 
 	err = h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		// AC-12: clamp the effective `to` if a frozen audit_period
@@ -320,6 +322,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			queryErr = err.Error()
 			return err
 		}
+		gate.apply(entries)
 
 		if len(entries) > rowCap {
 			statusToSend = http.StatusRequestEntityTooLarge
@@ -342,12 +345,11 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		// emits the empty string for the payload_json column. CSV +
 		// XLSX render that as an empty cell; JSON renders it as the
 		// literal `null` token via WriteOpts.NullForEmpty.
+		// A payload the gate withheld (#2375) is empty too, so the
+		// JSON encoder renders every empty payload as null.
 		rowIter := entriesToRowIter(entries, includePayload)
-		writeOpts := export.WriteOpts{}
-		if !includePayload {
-			writeOpts.NullForEmpty = map[string]bool{
-				"payload_json": true,
-			}
+		writeOpts := export.WriteOpts{
+			NullForEmpty: map[string]bool{"payload_json": true},
 		}
 
 		cw := &countingWriter{w: w}

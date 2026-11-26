@@ -4,14 +4,16 @@
 // and a frozen badge when `frozen_at` is set. The frozen badge is the
 // auditor's visual confirmation of invariant 10: the workspace they are
 // looking at is bounded to evidence with `observed_at <= frozen_at`.
+//
+// #2592 — the bar is the workspace's header, so it carries the **?** for
+// the audit-workspace help (inside AuditShell's HelpScope) and names the
+// evidence horizon as a <Term>.
 
+import { HelpButton } from "@/components/help/help-panel";
+import { Term } from "@/components/help/term";
 import { Badge } from "@/components/ui/badge";
+import { Timestamp } from "@/components/ui/timestamp";
 import type { AuditPeriod } from "@/lib/api/audit";
-
-function fmtDate(iso: string): string {
-  // period_start / period_end arrive as YYYY-MM-DD from slice 025.
-  return iso;
-}
 
 export function AuditPeriodBar({ period }: { period: AuditPeriod }) {
   const frozen = Boolean(period.frozen_at);
@@ -35,17 +37,23 @@ export function AuditPeriodBar({ period }: { period: AuditPeriod }) {
         )}
       </div>
       <span className="text-xs text-muted-foreground tabular-nums">
-        {fmtDate(period.period_start)} — {fmtDate(period.period_end)}
+        <Timestamp value={period.period_start} style="date" /> —{" "}
+        <Timestamp value={period.period_end} style="date" />
       </span>
       {frozen && period.frozen_at ? (
         <span className="text-xs text-muted-foreground">
-          evidence horizon: {period.frozen_at}
+          <Term id="evidence-horizon">evidence horizon</Term>:{" "}
+          <Timestamp value={period.frozen_at} style="datetime" />
         </span>
       ) : (
         <span className="text-xs text-muted-foreground">
-          live until frozen — sampling draws from current evidence
+          live — sampling draws from current evidence until freezing sets the{" "}
+          <Term id="evidence-horizon">evidence horizon</Term>
         </span>
       )}
+      <div className="ml-auto">
+        <HelpButton />
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admincrosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
@@ -17,16 +18,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
+	approvalsapi "github.com/mgoodric/security-atlas/internal/api/approvals"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
+	"github.com/mgoodric/security-atlas/internal/api/needsattention"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
+	"github.com/mgoodric/security-atlas/internal/crosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -38,7 +47,7 @@ import (
 // registered here is gated identically to how it was inline (slice 436
 // AC-6). Behavior is unchanged: routes, handlers, and declaration order are
 // preserved verbatim.
-func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Store) {
+func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Store, moduleAccessStore *moduleaccess.Store) {
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
@@ -70,7 +79,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 		root.Get("/v1/admin/scim-credentials", adminScimH.List)
 		root.Delete("/v1/admin/scim-credentials/{id}", adminScimH.Revoke)
 
-		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool))
+		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool).WithCredentialRevoker(s.credStore))
 		// Slice 733: the SCIM /Groups resource. Membership changes drive a
 		// re-derivation through the slice-509 grouprole resolver — the SOLE path
 		// to a role (P0-733-1 / P0-733-3). The resolver is REUSED via the
@@ -103,17 +112,34 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// non-admin callers see 403 even without the slice-035 OPA
 	// middleware wired. Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/").
-	featuresH := featuresapi.New(featureFlagStore)
+	featuresH := featuresapi.New(featureFlagStore).WithModuleAccess(moduleAccessStore)
 	root.Get("/v1/admin/features", featuresH.List)
 	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
-	// Slice 660: NON-admin, tenant-scoped enabled-modules read. The web
-	// shell calls this for EVERY authed user to gate nav (hide Vendor
-	// Claims / Board Packs when their flag is off) — the admin
-	// GET /v1/admin/features above stays admin-only (it carries the full
-	// inventory + toggle/audit surface). This route exposes ONLY the
-	// slice 660 gating booleans (featureflag.GatingKeys) for the caller's
-	// own tenant (RLS — invariant #6); no write path, no audit metadata.
-	root.Get("/v1/features/enabled", featuresH.Enabled)
+	// #2170: the caller's effective modules (featureflag.Modules), read
+	// by every signed-in role for its own tenant (RLS — invariant #6). The
+	// web app's sidebar and FeatureGate read it in place of a gating map
+	// of their own. It replaces slice 660's GET /v1/features/enabled.
+	// #2172: a module outside the caller's module access reads no_access.
+	root.Get("/v1/me/modules", featuresH.Modules)
+	// #2085: the caller's tenant's users and API keys, reduced to id,
+	// display name, status and key owner, so pages show a person in place
+	// of an ID. Every signed-in role reads it (defaults.rego). App pool
+	// under the caller's RLS tenant, never authPool: a super-admin sees
+	// only the tenant it is signed in to.
+	root.Get("/v1/people", people.New(s.dbPool).WithModules(s.moduleViews).List)
+	// #2119: what is waiting for the caller's approval across exceptions,
+	// risk acceptances, policies and framework scopes, under each type's
+	// own approve gate. Every signed-in role reads it (defaults.rego); a
+	// caller who cannot approve gets an empty list.
+	approvalsH := approvalsapi.New(s.dbPool, featureFlagStore).WithModules(s.moduleViews)
+	root.Get("/v1/approvals", approvalsH.List)
+	// #2134: the dashboard's ranked needs-attention list. Every signed-in
+	// role reads it (defaults.rego); for=all is refused in the handler to
+	// anyone but admins and GRC leads (authz.IsTenantApprover). Its
+	// approvals band is approvalsH's list, its due-based bands the
+	// calendar's events, under the calendar's OPA and module filters.
+	root.Get("/v1/needs-attention", needsattention.New(s.dbPool, calendarapi.NewStore(s.dbPool), approvalsH).
+		WithAuthz(s.authzEngine).WithModules(s.moduleViews).WithWarnRows(s.needsAttentionWarnRows).WithLogger(s.logger).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each
@@ -123,8 +149,21 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// SSO / Users / Audit-log UI pages so they can flip from PARTIAL to
 	// PASS.
 	ssoH := adminsso.New(s.dbPool)
+	// #2534: the preflight honours the same private-issuer opt-in as the
+	// sign-in path. New parsed it; on an invalid value the server refuses
+	// to serve (#2549), so this router is never built with one.
+	// #2609: PATCH validates the issuer with this same policy, the one
+	// cmd/atlas hands the sign-in resolver, so a config that saves signs in.
+	ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{IssuerPolicy: s.issuerPolicy})
+	// #2034: PATCH seals the client secret with the key the sign-in
+	// resolver opens it with. cmd/atlas refuses to boot on a malformed
+	// key, so an error here means none is set and PATCH refuses a secret.
+	if c, err := idpconfig.SecretCrypterFromEnv(); err == nil {
+		ssoH = ssoH.WithSecretCrypter(c)
+	}
 	root.Get("/v1/admin/sso", ssoH.Get)
 	root.Patch("/v1/admin/sso", ssoH.Patch)
+	root.Delete("/v1/admin/sso", ssoH.Delete)
 	root.Post("/v1/admin/sso/preflight", ssoH.Preflight)
 	// Slice 478: extend the slice-062 users surface with the cross-tenant
 	// super-admin list + the assign/revoke verbs (incl. super-admin
@@ -136,10 +175,14 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// ListDispatch routes super-admins to the cross-tenant view and
 	// everyone else to the slice-062 within-tenant List (P0-478-3: a
 	// tenant-admin's view is never widened).
-	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool)
+	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool).SetCredentialRevoker(s.credStore).SetModuleAccess(moduleAccessStore)
 	root.Get("/v1/admin/users", usersH.ListDispatch)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
+	// #2172: set a member's module access, next to their roles. Tenant
+	// admin only; every change writes an access audit-log row. It is read
+	// from module_access on the /v1/admin/users rows.
+	root.Put("/v1/admin/users/{id}/module-access", usersH.PutModuleAccess)
 	root.Post("/v1/admin/users/assign", usersH.Assign)
 	root.Post("/v1/admin/users/revoke", usersH.Revoke)
 
@@ -155,22 +198,32 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Delete("/v1/admin/group-role-mappings/{id}", groupMapH.Delete)
 
 	// Slice 483: crosswalk-mapping verified-tier governance (ADR 0018).
-	// Admin-gated (cred.IsAdmin; a non-admin transition is 403 — threat-model
-	// E) transition of a fw_to_scf_edges row's trust tier. The store flips the
-	// tier and appends an immutable audit row in the same transaction. The
-	// target table is a CATALOG table (no tenant RLS); the gate is this
-	// admin-role authz + the append-only audit trail. Route appended per the
-	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
+	// super_admin-gated (the verified JWT's atlas:super_admin claim; a tenant
+	// admin is 403 — threat-model E, #1757) transition of a fw_to_scf_edges
+	// row's trust tier. The store flips the tier and appends an immutable audit
+	// row in the same transaction. The target table is a global CATALOG table
+	// (no tenant RLS), so a tenant admin changing it would be a cross-tenant
+	// write; the gate is super_admin + the append-only audit trail. Route
+	// appended per the parallel-batch convention (chi.Mux rejects two Mounts
+	// at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
 
-	// Slice 484: framework-versioning capability (ADR 0019). Admin-gated
-	// (cred.IsAdmin; a non-admin promotion is 403 — threat-model E /
-	// P0-484-3) version lifecycle (promote a version to current + demote the
+	// #1777: crosswalk-edge remap proposals. After a new SCF release, every
+	// catalog edge left on an older release's anchor is queued; approving one
+	// copies the edge onto the successor anchor. Global catalog rows, so every
+	// route (the list included) is super_admin-gated in the handler and in
+	// internal/authz/rego_bundle (a tenant admin is 403, #1757).
+	admincrosswalkremap.New(crosswalkremap.NewStore(s.dbPool)).RegisterRoutes(root)
+
+	// Slice 484: framework-versioning capability (ADR 0019). The write routes
+	// are super_admin-gated (global catalog rows; a tenant admin is 403 —
+	// threat-model E / P0-484-3 / #1757); the read-only queue listing is
+	// admin-gated. Version lifecycle (promote a version to current + demote the
 	// prior to legacy, audited + reversible), the migration-suggest job
 	// (exact requirement-code 1:1 carryovers into a human-reviewed queue,
 	// NEVER auto-applied — P0-484-1), and the suggestion approve/reject path.
-	// Targets are CATALOG tables (no tenant RLS); the gate is admin-role
+	// Targets are global CATALOG tables (no tenant RLS); the gate is that
 	// authz + the append-only framework_version_audit. Routes appended per the
 	// parallel-batch convention.
 	frameworkVersionsH := adminframeworkversions.New(frameworkversion.NewStore(s.dbPool))
@@ -182,14 +235,16 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
-	// policy in policies/authz/super_admin.rego is the second leg.
-	superAdminsH := adminsuperadmins.New(s.dbPool)
+	// policy in internal/authz/rego_bundle/super_admin.rego is the second leg.
+	// #2385: the BYPASSRLS authPool names super admins whose users row
+	// is in another tenant (PK-bounded read). Nil in the test harness.
+	superAdminsH := adminsuperadmins.New(s.dbPool).SetAuthPool(s.authPool)
 	root.Get("/v1/admin/super-admins", superAdminsH.List)
 	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
 
 	// Slice 378: authz bundle hot-reload. super_admin-gated; reloads
-	// the embedded policies/authz/*.rego bundle without a process
+	// the embedded internal/authz/rego_bundle/*.rego bundle without a process
 	// restart. The atomic.Pointer-backed Engine swap (slice 378 AC-1
 	// + AC-2) means in-flight Decide calls during a reload see
 	// either the old query or the new one — never a partial state.
@@ -230,19 +285,22 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/demo/status", adminDemoH.Status)
 	root.Post("/v1/admin/demo/seed", adminDemoH.Seed)
 	root.Post("/v1/admin/demo/teardown", adminDemoH.Teardown)
-	auditLogH := adminauditlog.New(s.dbPool)
+	auditLogH := adminauditlog.New(s.dbPool).WithAuthz(s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine
 	// per-domain audit-log tables (decision/evidence/exception/sample/
 	// audit_period/aggregation_rule/feature_flag/me/walkthrough). The
-	// upstream slice 035 OPA middleware is the canonical role gate; the
-	// handler does defense-in-depth (admin OR auditor OR grc_engineer).
+	// upstream slice 035 OPA middleware is the canonical role gate and
+	// admits admin and grc_engineer (resource type "admin"; auditors read
+	// the same rows through /v1/activity/unified, #2378). The handler's
+	// defense-in-depth probe (admin OR auditor OR grc_engineer) is the
+	// wider layer, shared with the activity route.
 	// Route appended per the parallel-batch convention (chi.Mux rejects
 	// two Mounts at "/", so individual routes register onto the root).
 	root.Get("/v1/admin/audit-log/unified", auditLogH.UnifiedList)
 	// Slice 135: bulk data-export variant of the unified read.
-	// Same admit set (admin OR auditor OR grc_engineer — slice 124 D5;
-	// slice 135 P0-A9 admit-set parity test pins it at the OPA layer),
+	// Same admit set as the unified read (slice 135 P0-A9; the parity
+	// test pins it at the real paths in OPA),
 	// same 90-day window cap, same tenancy + RLS path. Reuses the
 	// slice-124 aggregator (internal/audit/unifiedlog.Query) with a
 	// format-encoder swap on the response body (CSV / JSON / XLSX).
@@ -260,6 +318,10 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// `surface="activity"` tagging (slice 270 D7) — no new action value,
 	// no migration.
 	root.Get("/v1/activity/unified", auditLogH.ActivityList)
+	// #2414: the machine and system actors in that feed, for the Activity
+	// page's actor picker. Same admit, privilege predicate and module
+	// filter as /v1/activity/unified.
+	root.Get("/v1/activity/actors", auditLogH.ActivityActors)
 	// Slice 139: per-entity data exports for audit_periods + vendors.
 	// Both reuse the slice-135 export library; both go through the
 	// slice-145 per-(tenant, user) concurrency cap; both emit a
@@ -288,6 +350,10 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/evidence/export", evidenceExportH.ExportEvidence)
 	policiesExportH := policiesapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/admin/policies/export", policiesExportH.ExportPolicies)
+	// #1747: import an existing policy library as published policies with
+	// their historical lifecycle. Admin-only (handler-gated).
+	policiesImportH := policiesapi.New(policy.NewStore(s.dbPool))
+	root.Post("/v1/admin/policies/import", policiesImportH.ImportPolicies)
 	exceptionsExportH := exceptionsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/admin/exceptions/export", exceptionsExportH.ExportExceptions)
 	samplesExportH := auditapi.NewSamplesExportHandler(s.dbPool)

@@ -11,7 +11,9 @@ package adminauditlog
 
 import (
 	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 )
 
 // TestParseUnifiedParams_IncludeReadsFlag pins the `?include_reads`
@@ -81,6 +83,26 @@ func TestActivityDefaultExcludesReadTelemetry(t *testing.T) {
 	}
 }
 
+// TestParseUnifiedParams_FutureToAccepted pins #2464: the Activity page's
+// default `to` is the browser's "now", which can sit slightly ahead of the
+// server's clock. A `to` in the future is a valid window bound; only the
+// span is capped.
+func TestParseUnifiedParams_FutureToAccepted(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	from := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
+	to := now.Add(2 * time.Minute).Format(time.RFC3339Nano)
+	req := httptest.NewRequest("GET",
+		"/v1/activity/unified?from="+url.QueryEscape(from)+"&to="+url.QueryEscape(to), nil)
+	got, err := parseUnifiedParams(req)
+	if err != nil {
+		t.Fatalf("parseUnifiedParams: unexpected error for a future to: %v", err)
+	}
+	if !got.queryParams.To.After(now) {
+		t.Errorf("To = %v; want the future instant sent", got.queryParams.To)
+	}
+}
+
 // TestToAuditShape_RecordsIncludeReads pins that the meta-audit blob
 // carries the include_reads opt-in (slice 669) so forensic review can
 // distinguish a default business-events query from a full-ledger query.
@@ -95,5 +117,40 @@ func TestToAuditShape_RecordsIncludeReads(t *testing.T) {
 	shape := p.toAuditShape()
 	if !shape.IncludeReads {
 		t.Errorf("toAuditShape.IncludeReads = false; want true (opt-in must be recorded)")
+	}
+}
+
+// TestParseUnifiedParams_Limit pins `?limit=` (#2135): absent is the
+// page cap, 1..cap narrows the page (the aggregator is asked for one
+// more), anything else is refused.
+func TestParseUnifiedParams_Limit(t *testing.T) {
+	t.Parallel()
+	const window = "from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z"
+	for _, tc := range []struct {
+		qs   string
+		want int
+		bad  bool
+	}{
+		{qs: window, want: unifiedPageSize},
+		{qs: window + "&limit=10", want: 10},
+		{qs: window + "&limit=1000", want: 1000},
+		{qs: window + "&limit=0", bad: true},
+		{qs: window + "&limit=1001", bad: true},
+		{qs: window + "&limit=ten", bad: true},
+	} {
+		req := httptest.NewRequest("GET", "/v1/activity/unified?"+tc.qs, nil)
+		got, err := parseUnifiedParams(req)
+		if tc.bad {
+			if err == nil {
+				t.Errorf("%s: want an error", tc.qs)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.qs, err)
+		}
+		if got.pageSize != tc.want || got.queryParams.Limit != tc.want+1 {
+			t.Errorf("%s: pageSize %d, Limit %d; want %d, %d", tc.qs, got.pageSize, got.queryParams.Limit, tc.want, tc.want+1)
+		}
 	}
 }

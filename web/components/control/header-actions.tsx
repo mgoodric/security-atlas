@@ -5,32 +5,22 @@
 // Mockup parity target: `Plans/_archive/mockups/control.html` lines 92-102. The
 // top-right header well carries:
 //
-//   1. A row of three action buttons (in mockup order):
-//        Run query · Edit YAML · Request exception
+//   1. Actions (#2110): Evaluate now (POST /v1/controls/{id}/evaluate,
+//      "Evaluating…" while pending), Download bundle (the control's
+//      control.yaml as a tarball), Upload new version (a form over the
+//      existing bundle upload) and the Request exception link. Run query
+//      and Edit YAML were disabled placeholders; #2082 removed them and
+//      Evaluate now / the bundle pair are what replaced them.
 //   2. A sub-line: "last evaluated <relative-time>" with a status icon.
 //
 // JUDGMENT decisions (see docs/audit-log/255-header-actions-decisions.md):
 //
-//   D1: Run query + Edit YAML render as DISABLED buttons (shadcn outline
-//       size=sm) with title/aria-label tooltips naming the canvas section
-//       and the v2 status. They are NOT `<a href="#">` (slice 178
-//       dead-link anti-pattern) and they are NOT links to "coming in v2"
-//       routes (slice 152 empty-state route would 2× the slice size).
-//       The slice 183/184 audit pattern (`title` + `aria-label` on a
-//       static element, same line of copy) is the chosen analog.
+//   D1: (retired by #2082) Run query + Edit YAML were disabled buttons
+//       with tooltips; they are no longer rendered.
 //
 //   D2: Request exception renders as a LINK (shadcn outline size=sm) to
-//       `/exceptions?control_id=<id>`. That route exists on main
-//       (`web/app/(authed)/exceptions/page.tsx`) and its `filters.ts`
-//       accepts `?control_id=…` as a URL-driven filter — so the
-//       destination is real, not a placeholder. This is the closest
-//       honest behavior we can ship without a new endpoint
-//       (anti-criterion P0-255-4). The button label still says
-//       "Request exception" — the navigation lands on the tenant-wide
-//       exception register filtered to this control, where the operator
-//       sees the existing exception requests for the control. The
-//       "create exception" affordance itself is a v2 surface (the
-//       exception-request workflow per canvas §4.6).
+//       the request form, `/exceptions/new?control_id=<id>` (#2113),
+//       which opens with this control pre-filled.
 //
 //   D3: relative-time formatter lives in `web/lib/relative-time.ts` (new
 //       — see that file's preamble). The freshness-clock's `humanizeSince`
@@ -47,30 +37,120 @@
 //   but has no `last_observed_at` we render "never".
 //
 // Anti-criteria honored:
-//   - P0-255-1: no Run query execution path. Disabled button + tooltip.
-//   - P0-255-2: no YAML editor. Disabled button + tooltip.
+//   - P0-255-1/2: no Run query execution path and no YAML editor; no
+//     entry point is rendered for either (#2082). Evaluate now runs the
+//     platform's evaluation; the YAML is edited offline and uploaded.
 //   - P0-255-3: no `<a href="#">` anywhere. Request exception links to a
-//     real, existing route; Run query + Edit YAML are <button disabled>.
-//   - P0-255-4: no new API endpoint. /exceptions?control_id is an
-//     existing URL-driven filter on a merged page.
+//     real, existing route.
+//
+// Evaluate now writes the returned state into the ["control", id,
+// "state"] query and invalidates the control's other reads, so the
+// header sub-line, freshness clock and KPIs move together. Who may
+// evaluate (owner or admin) and upload (admin) is the platform's check;
+// a refusal shows inline rather than hiding the button.
+//
+// #2140: the rolled-up result, "last evaluated" and the attestation wait
+// moved into ControlStateStrip below, the strip that leads the page. The
+// header keeps the buttons, which show per the live /v1/me (canWrite,
+// canEvaluate); Download bundle is a read and always shows.
+//
+// #2111: manually attested controls get an Attest link, and the header
+// shows the control's rolled-up result. Back from an attestation
+// (`?attested=<ingested_at>`), the result reads "Evaluating…" and the
+// state is re-read every second until an evaluation at or after that
+// instant lands. After 30 seconds it stops and says so instead; it never
+// spins forever.
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import type {
-  ControlStateResponse,
-  ControlStateEntry,
+import { Card, CardContent } from "@/components/ui/card";
+import { Timestamp } from "@/components/ui/timestamp";
+import {
+  bundleDownloadHref,
+  evaluateControl,
+  uploadControlBundle,
+} from "@/lib/api/control-actions";
+import {
+  fetchControlState,
+  type ControlStateResponse,
+  type ControlStateEntry,
 } from "@/lib/api/control-detail";
+import {
+  ATTEST_EVALUATION_POLL_MS,
+  ATTEST_EVALUATION_TIMEOUT_MS,
+  ATTESTED_PARAM,
+  evaluationLanded,
+  isManualImplementation,
+  inconclusiveSince,
+  rollupResult,
+} from "@/lib/attest-evaluation";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { relativeTimeOrNever } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 
-// Tooltip / aria-label copy for the two placeholder buttons. Both
-// inlined here as constants so the same string drives `title`,
-// `aria-label`, and the test assertion — the slice 183 / slice 184
-// pattern (visible copy + tooltip + aria-label all read the same line).
-const RUN_QUERY_TOOLTIP = "Rule-based control evaluation is not available yet";
-const EDIT_YAML_TOOLTIP = "In-app control-text editing is not available yet";
+// RESULT_VARIANT maps a rolled-up result to its badge tone.
+const RESULT_VARIANT: Record<
+  string,
+  "pass" | "destructive" | "info" | "warning" | "outline"
+> = {
+  pass: "pass",
+  fail: "destructive",
+  excepted: "info",
+  inconclusive: "warning",
+  na: "outline",
+};
+
+// useAttestationEvaluation waits for the evaluation an attestation
+// triggered. `attestedAt` is the record's ingested_at from the URL, or
+// null when the page was not reached from the attest form. While waiting
+// it re-reads the control state every ATTEST_EVALUATION_POLL_MS; once the
+// new state lands it drops the parameter from the URL, and after
+// ATTEST_EVALUATION_TIMEOUT_MS it stops polling and reports timedOut.
+function useAttestationEvaluation(
+  controlID: string,
+  attestedAt: string | null,
+  state: ControlStateResponse | undefined,
+): { waiting: boolean; timedOut: boolean } {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [timedOut, setTimedOut] = useState(false);
+
+  const landed =
+    attestedAt === null || evaluationLanded(state?.states, attestedAt);
+  const waiting = !landed && !timedOut;
+
+  useQuery({
+    queryKey: ["control", controlID, "state"],
+    queryFn: () => fetchControlState(controlID),
+    enabled: waiting,
+    refetchInterval: waiting ? ATTEST_EVALUATION_POLL_MS : false,
+  });
+
+  useEffect(() => {
+    if (attestedAt === null || landed) return;
+    const id = setTimeout(
+      () => setTimedOut(true),
+      ATTEST_EVALUATION_TIMEOUT_MS,
+    );
+    return () => clearTimeout(id);
+  }, [attestedAt, landed]);
+
+  useEffect(() => {
+    if (attestedAt === null || !landed) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete(ATTESTED_PARAM);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [attestedAt, landed, pathname, router, searchParams]);
+
+  return { waiting, timedOut: attestedAt !== null && !landed && timedOut };
+}
 
 // mostRecentObservedAt picks the freshest `last_observed_at` across all
 // scope-cell entries — the same reduce-to-newest rule the freshness
@@ -133,17 +213,199 @@ function useNow(intervalMs = 60_000): number | null {
 
 export interface ControlHeaderActionsProps {
   controlID: string;
-  // The state response may be undefined while the query is loading or if
-  // it errored. The header sub-line renders "—" in that case rather
-  // than a flash of "never".
-  state: ControlStateResponse | undefined;
+  // The control's implementation_type; manual controls get Attest (#2111).
+  implementationType?: string;
+  // #2140: write affordances follow the live /v1/me, and the page passes
+  // false until it answers. canWrite gates the controls and exceptions
+  // writes OPA admits to admin and grc_engineer (Upload new version,
+  // Request exception); canEvaluate also admits a control_owner, whom
+  // OPA lets run Evaluate now and Attest (the handler then checks the
+  // assignment).
+  canWrite: boolean;
+  canEvaluate: boolean;
 }
 
 export function ControlHeaderActions({
   controlID,
-  state,
+  implementationType,
+  canWrite,
+  canEvaluate,
 }: ControlHeaderActionsProps) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const fileInputID = useId();
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+
+  const evaluate = useMutation({
+    mutationFn: () => evaluateControl(controlID),
+    onSuccess: async (next) => {
+      queryClient.setQueryData(["control", controlID, "state"], next);
+      await queryClient.invalidateQueries({
+        queryKey: ["control", controlID],
+        predicate: (q) => q.queryKey[2] !== "state",
+      });
+    },
+  });
+
+  const upload = useMutation({
+    mutationFn: (f: File) => uploadControlBundle(f),
+    onSuccess: async (res) => {
+      setFile(null);
+      setUploadOpen(false);
+      if (res.control_id && res.control_id !== controlID) {
+        // The upload superseded this control: its new version has a new id.
+        router.push(`/controls/${encodeURIComponent(res.control_id)}`);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ["control", controlID] });
+    },
+  });
+
+  return (
+    <div
+      className="flex flex-col items-end gap-2"
+      data-testid="control-header-actions"
+    >
+      <div
+        className="flex flex-wrap items-center justify-end gap-2"
+        data-testid="control-header-action-buttons"
+      >
+        {canEvaluate && isManualImplementation(implementationType) && (
+          <Link
+            href={`/controls/${encodeURIComponent(controlID)}/attest`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            data-testid="control-action-attest"
+          >
+            Attest
+          </Link>
+        )}
+        {canEvaluate && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => evaluate.mutate()}
+            disabled={evaluate.isPending}
+            aria-busy={evaluate.isPending}
+            data-testid="control-action-evaluate"
+          >
+            {evaluate.isPending ? "Evaluating…" : "Evaluate now"}
+          </Button>
+        )}
+        <a
+          href={bundleDownloadHref(controlID)}
+          download
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          data-testid="control-action-download-bundle"
+        >
+          Download bundle
+        </a>
+        {canWrite && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUploadOpen((o) => !o)}
+            aria-expanded={uploadOpen}
+            data-testid="control-action-upload-toggle"
+          >
+            Upload new version
+          </Button>
+        )}
+        {canWrite && (
+          <Link
+            href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            data-testid="control-action-request-exception"
+          >
+            Request exception
+          </Link>
+        )}
+      </div>
+
+      {canWrite && uploadOpen && (
+        <form
+          className="flex items-center gap-2 text-xs"
+          data-testid="control-upload-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (file) upload.mutate(file);
+          }}
+        >
+          <label htmlFor={fileInputID} className="text-muted-foreground">
+            Bundle (.tar.gz)
+          </label>
+          <input
+            id={fileInputID}
+            type="file"
+            accept=".tar.gz,.tgz,application/gzip"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            data-testid="control-upload-file"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!file || upload.isPending}
+            data-testid="control-upload-submit"
+          >
+            {upload.isPending ? "Uploading…" : "Upload"}
+          </Button>
+        </form>
+      )}
+
+      {evaluate.isError && (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="control-evaluate-error"
+        >
+          {evaluate.error.message}
+        </p>
+      )}
+      {upload.isError && (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="control-upload-error"
+        >
+          {upload.error.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export interface ControlStateStripProps {
+  controlID: string;
+  // The state response may be undefined while the query is loading or if
+  // it errored. Last evaluated reads "—" in that case rather than a
+  // flash of "never".
+  state: ControlStateResponse | undefined;
+  stateError?: boolean;
+  /** The strip's further cells (freshness, owner, markers). */
+  children?: ReactNode;
+}
+
+// ControlStateStrip (#2140) leads the control page: the rolled-up result
+// and when the control was last evaluated, then the caller's cells. The
+// result and last evaluated moved here from the header actions; the
+// attestation wait (#2111) moved with them, so "Evaluating…" still shows
+// while an attestation's evaluation lands.
+export function ControlStateStrip({
+  controlID,
+  state,
+  stateError = false,
+  children,
+}: ControlStateStripProps) {
   const now = useNow();
+  const searchParams = useSearchParams();
+  const attestedAt = searchParams.get(ATTESTED_PARAM);
+  const attestation = useAttestationEvaluation(controlID, attestedAt, state);
+  const result = rollupResult(state?.states);
+  // #2915: an inconclusive control says how long it has had no signal.
+  const inconclusiveFrom =
+    result === "inconclusive" ? inconclusiveSince(state?.states) : null;
 
   // Resolve the freshest `last_observed_at` across cells. Three branches:
   //   1. state is undefined        → undefined  → "—"
@@ -154,74 +416,90 @@ export function ControlHeaderActions({
     : undefined;
 
   // Render "—" until the client clock has seeded (`now === null`).
-  // After the first 0ms timeout in `useNow` fires, `now` becomes a
-  // real ms value and the relative-time string renders honestly.
   const display = now === null ? "—" : relativeTimeOrNever(latestISO, now);
 
   return (
-    <div
-      className="flex flex-col items-end gap-2"
-      data-testid="control-header-actions"
-    >
-      <div
-        className="flex items-center gap-2"
-        data-testid="control-header-action-buttons"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          title={RUN_QUERY_TOOLTIP}
-          aria-label={RUN_QUERY_TOOLTIP}
-          data-testid="control-action-run-query"
-        >
-          Run query
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          title={EDIT_YAML_TOOLTIP}
-          aria-label={EDIT_YAML_TOOLTIP}
-          data-testid="control-action-edit-yaml"
-        >
-          Edit YAML
-        </Button>
-        <Link
-          href={`/exceptions?control_id=${encodeURIComponent(controlID)}`}
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-          data-testid="control-action-request-exception"
-        >
-          Request exception
-        </Link>
-      </div>
-
-      <div
-        className="flex items-center gap-1.5 text-xs text-muted-foreground"
-        data-testid="control-last-evaluated"
-      >
-        <svg
-          className="h-3.5 w-3.5"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm.93-12.518A1 1 0 0010 4a1 1 0 00-.93.518L5.4 11.482A1 1 0 006.291 13H8v3a1 1 0 102 0v-3h1.71a1 1 0 00.89-1.518L10.93 5.482z"
-            clipRule="evenodd"
-          />
-        </svg>
-        <span>
-          last evaluated{" "}
-          <span
-            className="font-mono text-foreground"
-            data-testid="control-last-evaluated-value"
+    <Card size="sm" data-testid="control-state-strip">
+      <CardContent className="space-y-3">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+          <StripCell label="State">
+            <div data-testid="control-state-result" aria-live="polite">
+              {attestation.waiting ? (
+                <Badge
+                  variant="outline"
+                  aria-busy="true"
+                  data-testid="control-state-result-value"
+                  data-result="evaluating"
+                >
+                  Evaluating…
+                </Badge>
+              ) : result ? (
+                <Badge
+                  variant={RESULT_VARIANT[result] ?? "outline"}
+                  data-testid="control-state-result-value"
+                  data-result={result}
+                >
+                  {enumLabel("EvaluationState", result)}
+                </Badge>
+              ) : (
+                <span
+                  className="text-muted-foreground"
+                  data-testid="control-state-result-value"
+                  data-result="none"
+                >
+                  {stateError ? "State unavailable" : "Not evaluated"}
+                </span>
+              )}
+              {!attestation.waiting && inconclusiveFrom ? (
+                <p
+                  className="mt-1 text-xs text-muted-foreground"
+                  data-testid="control-state-inconclusive-since"
+                >
+                  Inconclusive since{" "}
+                  <Timestamp value={inconclusiveFrom} style="date" />
+                </p>
+              ) : null}
+            </div>
+          </StripCell>
+          <StripCell label="Last evaluated">
+            <span data-testid="control-last-evaluated">
+              <span data-testid="control-last-evaluated-value">{display}</span>
+            </span>
+          </StripCell>
+          {children}
+        </dl>
+        {attestation.timedOut && (
+          <p
+            role="alert"
+            className="text-xs text-destructive"
+            data-testid="control-attest-evaluation-timeout"
           >
-            {display}
-          </span>
-        </span>
-      </div>
+            The attestation is recorded, but its evaluation has not landed after
+            30 seconds. Use Evaluate now, or check back after the next scheduled
+            run.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** One labelled value of the state strip. */
+export function StripCell({
+  label,
+  testId,
+  children,
+}: {
+  label: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm">{children}</dd>
     </div>
   );
 }

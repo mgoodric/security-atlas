@@ -1,3 +1,4 @@
+import { upstreamErrorMessage } from "./_shared";
 // Slice 042 — audit workspace API client.
 //
 // Typed client functions + TanStack Query hook helpers binding four
@@ -47,13 +48,7 @@ export class AuditAPIError extends Error {
 async function bffFetch(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new AuditAPIError(res.status, msg);
   }
   return res.json();
@@ -137,6 +132,12 @@ export type Sample = {
   created_by: string;
   created_at: string;
   evidence_record_ids: string[];
+  // #1742: the freeze revision of the period the population drew from
+  // (absent when it has no frozen period). Above 1, a historical import
+  // amended the period after its freeze; amend_reason is the admin's reason.
+  freeze_revision?: number;
+  amended_by_import?: boolean;
+  amend_reason?: string;
 };
 
 export type DrawSampleRequest = {
@@ -266,13 +267,7 @@ export async function uploadWalkthroughAttachment(
     { method: "POST", body: form },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new AuditAPIError(res.status, msg);
   }
   const body = (await res.json()) as { walkthrough: Walkthrough };

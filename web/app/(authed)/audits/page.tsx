@@ -98,6 +98,18 @@ import {
   statusPillClass,
   statusTallyLabel,
 } from "./format";
+import { pageTitle } from "@/lib/page-titles";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { Person } from "@/components/ui/person";
+import { Term } from "@/components/help/term";
+
+// #2152: the subtitle names the module's key terms.
+const SUBTITLE = (
+  <>
+    <Term id="audit-period">Period</Term>-level index — open a period for the
+    per-control walk-through of its <Term id="sample">samples</Term>
+  </>
+);
 
 const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 
@@ -107,11 +119,10 @@ const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 // when the backend lifts the constraint, with no page rework.
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
-  { value: "open", label: "open" },
-  { value: "in_progress", label: "in_progress" },
-  { value: "frozen", label: "frozen" },
-  { value: "closed", label: "closed" },
-  { value: "planned", label: "planned" },
+  ...["open", "in_progress", "frozen", "closed", "planned"].map((s) => ({
+    value: s,
+    label: enumLabel("AuditPeriodStatus", s),
+  })),
 ];
 
 // Framework pill is a no-op in v1 (periodWire has only the UUID — no
@@ -325,7 +336,7 @@ function AuditsPageInner() {
                   p.status,
                 )}`}
               />
-              {p.status}
+              {enumLabel("AuditPeriodStatus", p.status)}
             </span>
             {isFrozen(p) ? (
               <span
@@ -385,6 +396,9 @@ function AuditsPageInner() {
             <a
               href={oscalExportDownloadURL(p.id)}
               download={oscalExportDownloadFilename(p.id, p.frozen_at)}
+              // The row opens the detail page (#2117); the download
+              // must not also navigate.
+              onClick={(e) => e.stopPropagation()}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               data-testid={OSCAL_EXPORT_DOWNLOAD_TESTID}
             >
@@ -405,12 +419,11 @@ function AuditsPageInner() {
       header: "Created by",
       align: "right",
       cell: (p) => (
-        <span
+        <Person
+          id={p.created_by}
           className="text-xs text-muted-foreground"
-          data-testid="audits-row-created-by"
-        >
-          {p.created_by}
-        </span>
+          testId="audits-row-created-by"
+        />
       ),
     },
   ];
@@ -466,8 +479,8 @@ function AuditsPageInner() {
   if (periodsQ.isLoading) {
     return (
       <ListPage
-        title="Audit periods"
-        subtitle="Period-level index — open a period for the per-control walk-through"
+        title={pageTitle("/audits")}
+        subtitle={SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -483,8 +496,8 @@ function AuditsPageInner() {
   if (periodsQ.isError) {
     return (
       <ListPage
-        title="Audit periods"
-        subtitle="Period-level index — open a period for the per-control walk-through"
+        title={pageTitle("/audits")}
+        subtitle={SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="audits-load-error">
@@ -560,9 +573,9 @@ function AuditsPageInner() {
 
   return (
     <ListPage
-      title="Audit periods"
+      title={pageTitle("/audits")}
       titleAdornment={titleAdornment}
-      subtitle="Period-level index — open a period for the per-control walk-through"
+      subtitle={SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
@@ -572,47 +585,14 @@ function AuditsPageInner() {
         />
       }
     >
-      {/* Slice 184 — per-period detail honesty banner.
-          Surfaces the same disclosure that lives in code comments to
-          the user, since the user cannot read code comments. Closes
-          the slice-178 first-pass F-178-4 HONESTY-GAP finding by
-          replacing the 404-on-click row affordance (removed below)
-          with an explicit "future slice" notice above the table.
-          When the detail page lands, this banner is deleted and the
-          onRowClick is restored. */}
-      <Alert data-testid="audits-detail-coming-soon-banner" className="mb-3">
-        <AlertTitle>Per-period detail view is not available yet</AlertTitle>
-        <AlertDescription>
-          Rows in this table are not clickable yet. The per-audit-period detail
-          page (frozen-status meta, sample-population summary, OSCAL export
-          controls) is tracked separately. Today this page is the period-level
-          index; for the per-control walk-through inside an open period, use the
-          audit workspace.
-        </AlertDescription>
-      </Alert>
       <ListTable<AuditPeriod>
         columns={columns}
         rows={visible}
         rowKey={(p) => p.id}
-        // Slice 184 — onRowClick intentionally omitted.
-        //
-        // Previously: row click pushed `/audits/${id}` which 404'd with
-        // the standard Next.js not-found UI. The slice-178 first-pass
-        // UI-honesty audit categorized this as a HONESTY-GAP (F-178-4):
-        // the LIVE UI does not say "detail page coming soon" — it just
-        // presents clickable rows that 404. Filed as spillover slice
-        // #184 per slice-178 AC-17 one-slice-per-fix discipline.
-        //
-        // Resolution (Option A per slice 184): remove the click
-        // affordance entirely until the detail page ships. ListTable
-        // (web/components/list/list-table.tsx) drops `cursor-pointer`
-        // and the click handler when `onRowClick` is undefined — see
-        // lines 93-94 of that file. The banner above the table carries
-        // the disclosure to the user.
-        //
-        // When the per-period detail page ships, restore the prop:
-        //   onRowClick={(p) => router.push(`/audits/${encodeURIComponent(p.id)}`)}
-        // and delete the banner above.
+        // #2117 — rows open the per-period detail page. Slice 184 had
+        // removed the click (and shown a "not available yet" banner)
+        // while /audits/[id] 404'd.
+        onRowClick={(p) => router.push(`/audits/${encodeURIComponent(p.id)}`)}
         emptyFallback={emptyState}
       />
     </ListPage>

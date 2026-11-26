@@ -10,13 +10,27 @@
 
 import { NextRequest } from "next/server";
 
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, rejectNonUUID, rejectUnsafeSegment } from "@/lib/api/bff";
+
+const SECTION_KEYS: ReadonlySet<string> = new Set([
+  "posture",
+  "top_risks",
+  "coverage_trend",
+  "open_findings",
+  "vendor_burndown",
+  "operational_metrics",
+  "investment",
+  "asks",
+]);
 
 export async function PUT(
   req: NextRequest,
   ctx: { params: Promise<{ id: string; key: string }> },
 ) {
   const { id, key } = await ctx.params;
+  const bad =
+    rejectNonUUID({ id }) ?? rejectUnsafeSegment({ key }, SECTION_KEYS);
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();

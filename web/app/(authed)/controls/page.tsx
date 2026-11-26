@@ -39,10 +39,23 @@
 //   - P0-A4: real placeholder data — no Lorem Ipsum.
 //   - P0-A5: neutral test tokens only in tests.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   EmptyState,
@@ -51,19 +64,24 @@ import {
   ListPage,
   ListPagination,
   ListTable,
-  paginateRows,
+  SavedViewsBar,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { type AnchorWithState } from "@/lib/api/anchors";
+import { Person } from "@/components/ui/person";
 import {
+  fetchCatalogCounts,
   fetchControlsList,
+  fetchMyControlsPage,
+  fetchMyControlsTotal,
   fetchScopeCells,
   type ControlsListResponse,
+  type ControlsWithStateResponse,
   type ScopeCellsListResponse,
 } from "@/lib/api/controls-list";
 import {
@@ -73,7 +91,14 @@ import {
   type ServerSavedView,
 } from "@/lib/api/saved-views";
 import { bulkAssignOwner } from "@/lib/api/controls-bulk";
+import { evaluateControl } from "@/lib/api/control-actions";
+import {
+  fetchActionPlansList,
+  linkActionPlanControl,
+} from "@/lib/api/action-plans";
+import { useSeesPage } from "@/components/modules-context";
 import { getMe } from "@/lib/api/me";
+import { useDebounced } from "@/lib/use-debounced";
 import { APIError } from "@/lib/api/base";
 import {
   CONTROLS_EXPORT_FORMATS,
@@ -88,29 +113,55 @@ import {
 
 import {
   ALL,
-  applyFilters,
+  ANCHOR_FIT_OPTIONS,
+  anchorFitMarker,
   clearFilters,
   DEFAULT_FILTERS,
+  FILTER_KEYS,
   FRAMEWORKS_JOIN_SEPARATOR,
   isDefault,
   setFilter,
-  uniqueFamilies,
   type AnchorRow,
   type ControlFilters,
 } from "./filters";
 import { controlsCountLabel } from "./count-label";
 import {
-  NEW_CONTROL_FUTURE_REASON,
-  NEW_CONTROL_FUTURE_TESTID,
-} from "./new-control-future";
+  ariaSort,
+  clampedPage,
+  myControlsQuery,
+  nextSort,
+  normalizeFilters,
+  pageOffset,
+  SORT_KEY_BY_COLUMN,
+} from "./server-query";
 import {
-  BulkAssignMessage,
-  SavedViewsBar,
+  controlHref,
+  controlsViewSummary,
+  HAS_CONTROL_OPTIONS,
+  HAS_CONTROL_PARAM,
+  parseControlsView,
+  parseHasControl,
+  rowsFromAnchors,
+  rowsFromControls,
+  VIEW_OPTIONS,
+  VIEW_PARAM,
+} from "./view";
+import {
+  BulkResultMessage,
+  ExportMenu,
   SelectionBar,
 } from "./controls-toolbar";
 import {
+  anyBulkAction,
+  bulkActionGates,
+  perItemMessage,
+  runPerItem,
+  type BulkMessage,
+  type PerItemResult,
+  type Progress,
+} from "./bulk-actions";
+import {
   isOverCap,
-  pruneSelection,
   selectAllState,
   toggleSelectAll,
   toggleSelection,
@@ -121,16 +172,26 @@ import {
   sanitizeFilters,
   type SavedView,
 } from "./saved-views";
+import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
 
-const FILTER_KEYS: (keyof ControlFilters)[] = [
+// #2131 — the filter keys (`FILTER_KEYS`, from ./filters) are the URL keys
+// and the `GET /v1/controls?include=state` parameters, one for one; the
+// platform applies every one of them. Only "My controls" offers the
+// framework, family, state, freshness, anchor fit and owner filters and
+// the column sort; the SCF catalog view filters by scope and has-control.
+
+// #2131 — the filters "My controls" offers and the catalog does not.
+const MINE_ONLY_KEYS: (keyof ControlFilters)[] = [
   "framework",
   "family",
   "result",
   "freshness",
-  // Slice 224 — scope cell filter. URL key `scope`, value is a cell uuid
-  // or `ALL`. The BFF / upstream applies the actual intersection
-  // (P0-224-2 — applicability_expr never reaches the browser).
-  "scope",
+  "anchor_fit",
+  "owner",
+  "sort",
 ];
 
 // Slice 224 — cap the Scope pill at 50 entries per AC-5. Tenants with
@@ -163,6 +224,10 @@ const CONTROLS_PAGE_SIZE = 50;
 // scope per the slice-227 CONTROLS_PAGE_SIZE precedent.
 const BULK_ASSIGN_MESSAGE_TTL_MS = 6000;
 
+// #2618 — plans per page in the bulk link picker; "Load more" fetches the
+// next page from the same search.
+const PLAN_PICKER_PAGE = 25;
+
 // Slice 227 — URL query-string key for the 1-indexed page index. The
 // `page` key is sibling to the filter keys above; the filter-change
 // handlers below explicitly DROP it on every filter mutation (AC-8 —
@@ -172,10 +237,7 @@ const PAGE_PARAM = "page";
 
 const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All states" },
-  { value: "pass", label: "pass" },
-  { value: "fail", label: "fail" },
-  { value: "insufficient_evidence", label: "insufficient_evidence" },
-  { value: "not_applicable", label: "not_applicable" },
+  ...enumOptions("EvaluationState"),
 ];
 
 // Slice <NNN> — map the control evaluation `result` enum (the real wire
@@ -183,17 +245,22 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
 // onto the semantic Badge variants introduced with the PR-#1427 tokens.
 // The design canvas's table card (web/.claude-design/components/table/)
 // uses example labels (Compliant / In review / Gap); the REAL enum is
-// pass / fail / insufficient_evidence / not_applicable, so the mapping
-// is by semantic intent, not by the card's display strings:
+// pass / fail / inconclusive / excepted / na (#2131: this map used to
+// name `insufficient_evidence` and `not_applicable`, which the rollup
+// never produces), so the mapping is by semantic intent, not by the
+// card's display strings:
 //   pass                  -> pass     (green  — control passing)
 //   fail                  -> critical (red    — the card's "Gap")
-//   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
-//   not_applicable        -> secondary (neutral — out of scope, no signal hue)
-// `info` and `progress` from the badge family have no member in the
-// control-result enum, so they are intentionally unused here (they exist
-// for other surfaces and the design preview).
+//   inconclusive          -> warning  (amber  — needs attention, not a hard fail)
+//   na                    -> secondary (neutral — out of scope, no signal hue)
+//   excepted              -> info     (blue   — waived by an active exception;
+//                                      #2112: never the pass hue, never "pass")
+// `progress` from the badge family has no member in the control-result
+// enum, so it is intentionally unused here (it exists for other surfaces
+// and the design preview).
 type StatusBadgeVariant =
   | "pass"
+  | "info"
   | "critical"
   | "warning"
   | "secondary"
@@ -202,9 +269,17 @@ type StatusBadgeVariant =
 const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
   pass: "pass",
   fail: "critical",
-  insufficient_evidence: "warning",
-  not_applicable: "secondary",
+  inconclusive: "warning",
+  na: "secondary",
+  excepted: "info",
 };
+
+// #2112, #2083 — display text for a result. `excepted` reads "Excepted",
+// so a waived control can never be mistaken for a passing one; the raw
+// value stays on the data-result attribute.
+function resultLabel(result: string): string {
+  return enumLabel("EvaluationState", result);
+}
 
 function resultBadgeVariant(result: string): StatusBadgeVariant {
   // Unknown / future result values fall back to a neutral outline pill
@@ -214,9 +289,7 @@ function resultBadgeVariant(result: string): StatusBadgeVariant {
 
 const FRESHNESS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All" },
-  { value: "fresh", label: "fresh" },
-  { value: "stale", label: "stale" },
-  { value: "expired", label: "expired" },
+  ...enumOptions("FreshnessState"),
 ];
 
 const FRAMEWORK_OPTIONS: { value: string; label: string }[] = [
@@ -256,13 +329,16 @@ function ControlsPageInner() {
   // URL-driven filter state — mirrors the slice 094 calendar pattern so
   // the filter set is shareable / bookmarkable. Default = ALL on every
   // pill.
+  //
+  // #2131: each value is checked against what the platform accepts, so a
+  // hand-edited URL widens the list rather than failing it with a 400.
   const filters: ControlFilters = useMemo(() => {
     const out = { ...DEFAULT_FILTERS };
     for (const k of FILTER_KEYS) {
       const v = search.get(k);
       if (v) out[k] = v;
     }
-    return out;
+    return normalizeFilters(out);
   }, [search]);
 
   // Slice 227 — current page index. URL is the source of truth so the
@@ -279,7 +355,40 @@ function ControlsPageInner() {
     return parsed;
   }, [search]);
 
+  // Issue #1741 — which list the page shows. The default is the tenant's
+  // own controls; the SCF catalog is the opt-in `?view=catalog`, where the
+  // server-side `?has_control=` filter applies.
+  const view = parseControlsView(search.get(VIEW_PARAM));
+  const hasControlRaw = search.get(HAS_CONTROL_PARAM);
+  const hasControl =
+    view === "catalog" ? parseHasControl(hasControlRaw) : undefined;
+
+  // Switching view or the has-control filter changes the fetched set, so
+  // both reset the page index, like a filter change (slice 227 AC-8).
+  const updateParam = (key: string, value: string | null) => {
+    const sp = new URLSearchParams(search.toString());
+    if (value === null || value === ALL) {
+      sp.delete(key);
+    } else {
+      sp.set(key, value);
+    }
+    // Catalog anchors carry no fit, owner or per-control state, so the
+    // "My controls" filters and sort are dropped on a view switch (issue
+    // #1736, #2131).
+    if (key === VIEW_PARAM) {
+      sp.delete(HAS_CONTROL_PARAM);
+      for (const k of MINE_ONLY_KEYS) sp.delete(k);
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/controls?${sp.toString()}`);
+  };
+
+  // The saved view last applied, or "" when none is. Editing a filter by
+  // hand leaves it (#2550).
+  const [activeViewId, setActiveViewId] = useState<string>("");
+
   const updateFilter = (key: keyof ControlFilters, value: string) => {
+    setActiveViewId("");
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
     if (next[key] === ALL) {
@@ -295,6 +404,7 @@ function ControlsPageInner() {
   };
 
   const clearAll = () => {
+    setActiveViewId("");
     const cleared = clearFilters();
     const sp = new URLSearchParams(search.toString());
     for (const k of FILTER_KEYS) {
@@ -318,15 +428,56 @@ function ControlsPageInner() {
     router.replace(`/controls?${sp.toString()}`);
   };
 
-  // Slice 224 — refetch the controls list when the scope filter changes.
-  // The narrowing is server-side; the queryKey carries the scope so
-  // TanStack invalidates correctly. `ALL` is treated as no-filter
-  // (fetchControlsList drops the query param entirely).
+  // #2131 — both views ask the server for one page. "My controls" sends
+  // every filter and the sort to `GET /v1/controls?include=state`, which
+  // filters, sorts and pages in SQL; the SCF catalog view sends its scope
+  // and has-control filters to `GET /v1/anchors?include=state`. The
+  // queryKey carries the whole request, so a filter, sort or page change
+  // refetches. Only the active view's query runs.
   const scopeArg = filters.scope === ALL ? undefined : filters.scope;
-  const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list", scopeArg ?? "all"],
-    queryFn: () => fetchControlsList(scopeArg),
+  const myControlsParams = useMemo(
+    () => myControlsQuery(filters, currentPage, CONTROLS_PAGE_SIZE),
+    [filters, currentPage],
+  );
+  const myControlsQ = useQuery<Partial<ControlsWithStateResponse>>({
+    queryKey: ["controls", "mine", myControlsParams],
+    queryFn: () => fetchMyControlsPage(myControlsParams),
+    enabled: view === "mine",
+    placeholderData: keepPreviousData,
   });
+  const anchorsQ = useQuery<ControlsListResponse>({
+    queryKey: [
+      "controls",
+      "list",
+      scopeArg ?? "all",
+      String(hasControl),
+      currentPage,
+    ],
+    queryFn: () =>
+      fetchControlsList(
+        scopeArg,
+        hasControl,
+        CONTROLS_PAGE_SIZE,
+        pageOffset(currentPage, CONTROLS_PAGE_SIZE),
+      ),
+    enabled: view === "catalog",
+    placeholderData: keepPreviousData,
+  });
+  // The catalog size for the "My controls" header. Issue #1832: a
+  // one-row page; only the totals are read.
+  const catalogCountsQ = useQuery<ControlsListResponse>({
+    queryKey: ["controls", "catalog-counts"],
+    queryFn: fetchCatalogCounts,
+    enabled: view === "mine",
+  });
+  // The unfiltered control count for the "N of M controls" header. The
+  // sidebar badge reads the same count under the same key (#1832).
+  const myTotalQ = useQuery<number>({
+    queryKey: ["sidebar", "controls-count"],
+    queryFn: fetchMyControlsTotal,
+    enabled: view === "mine",
+  });
+  const listQ = view === "mine" ? myControlsQ : anchorsQ;
 
   // Slice 224 — the dropdown options for the Scope filter pill come
   // from the tenant's own scope cells (RLS-scoped to the caller's
@@ -337,148 +488,258 @@ function ControlsPageInner() {
     queryFn: fetchScopeCells,
   });
 
-  // Convert the anchor wire payload into the join-ready row shape used
-  // by the filter logic + table renderer. Slice 104 attaches a real
-  // state cell per anchor (or `null` when the tenant has no control
-  // instantiated for the anchor). Slice 226 additionally threads the
-  // per-anchor frameworks set (display abbreviations) through the row;
-  // empty array when the anchor has no satisfaction edges.
-  const rows: AnchorRow[] = useMemo(() => {
-    const anchors: AnchorWithState[] = anchorsQ.data?.anchors ?? [];
-    return anchors.map<AnchorRow>((a) => {
-      const { state, frameworks, ...anchor } = a;
-      return {
-        anchor,
-        state: state
-          ? {
-              result: state.result,
-              freshness_status: state.freshness_status,
-              last_observed_at: state.last_observed_at,
-            }
-          : null,
-        // Slice 226: defensive default so older fixtures (e.g.
-        // hand-rolled mocks in route.test.ts cases that predate the
-        // backend extension) round-trip cleanly. The live BFF always
-        // ships an array.
-        frameworks: frameworks ?? [],
-      };
-    });
-  }, [anchorsQ.data]);
-
-  const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
-
-  // Slice 227 — client-side page slice over the filtered set. Per slice
-  // 246 P0-246-1 (carried forward to /controls — see decisions log D1
-  // for slice 227) the v1 wire `GET /v1/anchors` ships the full list;
-  // the table consumes the per-page slice rather than the full `visible`
-  // array. The pagination footer below the table emits page-change
-  // events through `goToPage` which round-trip through the URL.
-  const pagedRows = useMemo(
-    () => paginateRows(visible, currentPage, CONTROLS_PAGE_SIZE),
-    [visible, currentPage],
+  // Convert the wire page into the row shape the table renders. Slice 104
+  // attaches a real state cell per row (or `null` when there is no
+  // evaluation); slice 226 threads the frameworks set through.
+  //
+  // Issue #1741 — the mapping per view lives in `./view`: control rows are
+  // keyed and linked by control id; catalog rows by anchor id, linking to
+  // the tenant control behind the anchor when there is one.
+  //
+  // #2131 — `rows` is the one page the server returned, already filtered
+  // and sorted; the page does not narrow or reorder it.
+  const rows: AnchorRow[] = useMemo(
+    () =>
+      view === "mine"
+        ? rowsFromControls(myControlsQ.data?.controls ?? [])
+        : rowsFromAnchors(anchorsQ.data?.anchors ?? []),
+    [view, myControlsQ.data, anchorsQ.data],
   );
+  // The filtered total the server counted, which the pagination footer
+  // pages over.
+  const filteredTotal =
+    view === "mine"
+      ? myControlsQ.data?.total ?? rows.length
+      : anchorsQ.data?.total ?? rows.length;
 
-  // Slice 448 — multi-select state. A Set of anchor ids (the row key).
-  // The pure set math lives in `./selection`; this holds the Set in
-  // React state and prunes ids that vanish from the fetched row set so
-  // a stale selection never references a row the operator can't see.
+  // A page past the end (a stale bookmark, or a filter that shrank the
+  // set) moves to the last page that has rows.
+  useEffect(() => {
+    if (!listQ.data || listQ.isPlaceholderData) return;
+    const last = clampedPage(currentPage, CONTROLS_PAGE_SIZE, filteredTotal);
+    if (last !== null) goToPage(last);
+    // goToPage is rebuilt each render from the current search params.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listQ.data, listQ.isPlaceholderData, currentPage, filteredTotal]);
+
+  // Slice 448 — multi-select state. A Set of control ids. The pure set
+  // math lives in `./selection`; this holds the Set in React state.
+  //
+  // #2131: the page holds one server page of rows, so the selection
+  // outlives a page change (select on page 1, then on page 2, then assign)
+  // and is not pruned against the rows on screen. Bulk-assign re-checks
+  // every id on the server (AC-11), so an id that has since gone is
+  // refused there, not trusted here.
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
 
-  // The ids visible after the active filters (NOT page-sliced — select-
-  // all-in-view operates on the full filtered set the operator narrowed
-  // to, which is the mental model; pagination is a display concern).
+  // The ids on this page. Select-all-in-view selects these.
+  //
+  // Issue #1741 — selection holds CONTROL ids, since bulk-assign posts
+  // them; a catalog anchor without a tenant control is not selectable.
   const visibleIds = useMemo(
-    () => visible.map((row) => row.anchor.id),
-    [visible],
+    () => rows.flatMap((row) => (row.controlId ? [row.controlId] : [])),
+    [rows],
   );
-
-  // Prune the selection whenever the fetched row set changes (e.g. a
-  // refetch removed an anchor). Keyed on the full row id list so a
-  // filter change (which only narrows `visible`) does NOT drop a
-  // selection the operator made under a broader filter.
-  const allRowIds = useMemo(() => rows.map((r) => r.anchor.id), [rows]);
-  useEffect(() => {
-    // Sync local selection state when the external row source (the
-    // fetched anchor set) changes — the canonical post-data-change
-    // cleanup case the react-hooks/set-state-in-effect rule is
-    // intentionally disabled for (same precedent as the slice 170
-    // AppearanceSelector hydration in settings/page.tsx). The functional
-    // updater is a no-op (returns the same reference) when no id was
-    // dropped, so this does not cause a cascading render in the steady
-    // state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected((prev) => {
-      const pruned = pruneSelection(prev, allRowIds);
-      return pruned.size === prev.size ? prev : pruned;
-    });
-  }, [allRowIds]);
 
   const headerSelectState = selectAllState(visibleIds, selected);
   const selectionOverCap = isOverCap(selected);
 
-  const onToggleRow = useCallback((id: string) => {
-    setSelected((prev) => toggleSelection(prev, id));
-  }, []);
+  // #2141 — a readable name per selected control, remembered when it is
+  // selected (the selection outlives the page it was made on), so a bulk
+  // result names each refused control rather than showing its id.
+  const [selectedLabels, setSelectedLabels] = useState<Record<string, string>>(
+    {},
+  );
+  const rememberLabels = useCallback(
+    (ids: readonly string[]) => {
+      setSelectedLabels((prev) => {
+        const next = { ...prev };
+        for (const row of rows) {
+          if (row.controlId && ids.includes(row.controlId)) {
+            next[row.controlId] = row.anchor.scf_id
+              ? `${row.anchor.scf_id} ${row.anchor.name}`
+              : row.anchor.name;
+          }
+        }
+        return next;
+      });
+    },
+    [rows],
+  );
+  const labelOf = useCallback(
+    (id: string) => selectedLabels[id] ?? "A selected control",
+    [selectedLabels],
+  );
+
+  const onToggleRow = useCallback(
+    (id: string) => {
+      rememberLabels([id]);
+      setSelected((prev) => toggleSelection(prev, id));
+    },
+    [rememberLabels],
+  );
 
   const onToggleSelectAll = useCallback(() => {
+    rememberLabels(visibleIds);
     setSelected((prev) => toggleSelectAll(visibleIds, prev));
-  }, [visibleIds]);
+  }, [rememberLabels, visibleIds]);
 
   const onClearSelection = useCallback(() => {
     setSelected(new Set<string>());
   }, []);
 
-  // Slice 468 — WORKING bulk-assign-owner action. v1 assigns the selected
-  // set to the CURRENT USER ("assign to me" — the dominant triage case the
-  // slice-448 narrative names; a richer assign-to-any-user picker is a
-  // follow-on, decisions log 468 D4). The owner id is resolved from
-  // `/v1/me`; the upstream re-checks role + tenant PER ITEM (AC-11) and
-  // caps the set server-side. On success the selection clears; the message
-  // surfaces inline.
-  const [assignMessage, setAssignMessage] = useState<{
-    kind: "ok" | "error";
-    text: string;
-  } | null>(null);
+  // #2141 — the bulk actions. Which ones show follows the live /v1/me and
+  // the caller's modules, failing closed (`bulkActionGates`). Each write
+  // is one the platform already gates:
+  //   - assign owner posts the whole set to the slice-468 bulk endpoint,
+  //     which re-checks role + tenant per id and applies all or none;
+  //   - evaluate now and link to a plan call the per-control write once
+  //     per id and report per item (n succeeded, m refused with reasons).
+  // A success clears the selection (a refused control stays selected for
+  // a retry); the result lives in the persistent region above the table
+  // (slice 745).
+  const meQ = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+    staleTime: 60_000,
+  });
+  const seesActionPlans = useSeesPage("/action-plans");
+  const seesExceptions = useSeesPage("/exceptions");
+  const gates = bulkActionGates(meQ.data, {
+    actionPlans: seesActionPlans,
+    exceptions: seesExceptions,
+  });
+  // A caller offered no bulk action gets no selection column at all.
+  const selectable = anyBulkAction(gates);
+
+  const [assignMessage, setAssignMessage] = useState<BulkMessage | null>(null);
+  const queryClient = useQueryClient();
+
   const bulkAssignMutation = useMutation({
-    mutationFn: async (controlIds: string[]) => {
-      const me = await getMe();
-      return bulkAssignOwner(controlIds, me.user_id);
-    },
+    mutationFn: (vars: { controlIds: string[]; ownerUserId: string }) =>
+      bulkAssignOwner(vars.controlIds, vars.ownerUserId),
     onSuccess: (res) => {
       setAssignMessage({
         kind: "ok",
         text: `Assigned ${res.assigned} control${
           res.assigned === 1 ? "" : "s"
-        } to you.`,
+        } to the new owner.`,
       });
       setSelected(new Set<string>());
+      // #2128: the Owner column reads the assignment back.
+      void queryClient.invalidateQueries({ queryKey: ["controls", "mine"] });
     },
     onError: (err) => {
-      const text =
-        err instanceof APIError
-          ? err.message
-          : "Could not assign the selected controls. Try again.";
-      setAssignMessage({ kind: "error", text });
+      // All or none: a refusal means no control changed owner.
+      setAssignMessage({
+        kind: "error",
+        text:
+          err instanceof APIError
+            ? `${err.message} No owner was changed.`
+            : "Could not assign the selected controls. No owner was changed.",
+      });
     },
   });
-  const onAssignToMe = useCallback(() => {
-    setAssignMessage(null);
-    bulkAssignMutation.mutate(Array.from(selected));
-  }, [bulkAssignMutation, selected]);
 
-  // Slice 745 — auto-dismiss the bulk-assign confirmation after a delay so
-  // a stale "Assigned N controls to you." does not linger across unrelated
-  // actions. The message lives in the persistent `BulkAssignMessage` region
-  // (above the table, independent of `selected.size`), so unlike the old
-  // inline span it survives the selection-clear and is actually observable;
-  // this timer is the natural counterpart that retires it. Re-armed each
-  // time a new message is set; cleared on unmount or before the next
-  // message. A null message (the initial / just-cleared state) schedules
-  // nothing.
+  const afterPerItem = useCallback(
+    (res: PerItemResult, msg: BulkMessage) => {
+      setAssignMessage(msg);
+      setSelected(new Set(res.refused.map((r) => r.id)));
+      void queryClient.invalidateQueries({ queryKey: ["controls"] });
+    },
+    [queryClient],
+  );
+  // #2618 — evaluation is rate-limited per principal, so a bulk evaluate
+  // waits out each 429's Retry-After and retries. It shows "n of N
+  // evaluated" while it runs and can be cancelled.
+  const [evalProgress, setEvalProgress] = useState<Progress | null>(null);
+  const evalAbort = useRef<AbortController | null>(null);
+  const bulkEvaluateMutation = useMutation({
+    mutationFn: (controlIds: string[]) => {
+      const ctl = new AbortController();
+      evalAbort.current = ctl;
+      setEvalProgress({ succeeded: 0, settled: 0, total: controlIds.length });
+      return runPerItem(controlIds, (id) => evaluateControl(id), {
+        signal: ctl.signal,
+        onProgress: setEvalProgress,
+      });
+    },
+    onSuccess: (res) =>
+      afterPerItem(res, perItemMessage(res, "evaluated", labelOf)),
+    onSettled: () => {
+      evalAbort.current = null;
+      setEvalProgress(null);
+    },
+  });
+  const onCancelEvaluate = useCallback(() => {
+    evalAbort.current?.abort();
+  }, []);
+  const bulkLinkMutation = useMutation({
+    mutationFn: (vars: { controlIds: string[]; planId: string }) =>
+      runPerItem(vars.controlIds, (id) =>
+        linkActionPlanControl(vars.planId, id),
+      ),
+    onSuccess: (res) =>
+      afterPerItem(res, perItemMessage(res, "linked to the plan", labelOf)),
+  });
+
+  // The link picker's plans load once it is first opened. #2618: a
+  // server-side title search and a page at a time, so a tenant with more
+  // plans than one page can still reach every plan.
+  const [wantPlans, setWantPlans] = useState(false);
+  const [planQuery, setPlanQuery] = useState("");
+  const settledPlanQuery = useDebounced(planQuery.trim(), 250);
+  const plansQ = useInfiniteQuery({
+    queryKey: ["action-plans", "bulk-link-picker", settledPlanQuery],
+    queryFn: ({ pageParam }) =>
+      fetchActionPlansList({
+        q: settledPlanQuery,
+        limit: PLAN_PICKER_PAGE,
+        cursor: pageParam,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    enabled: wantPlans && gates.linkPlan,
+  });
+  const pickerPlans = plansQ.data?.pages.flatMap((p) => p.action_plans);
+
+  const busy = bulkAssignMutation.isPending
+    ? "assign"
+    : bulkEvaluateMutation.isPending
+      ? "evaluate"
+      : bulkLinkMutation.isPending
+        ? "link"
+        : null;
+
+  const onAssignOwner = useCallback(
+    (ownerUserId: string) => {
+      setAssignMessage(null);
+      bulkAssignMutation.mutate({
+        controlIds: Array.from(selected),
+        ownerUserId,
+      });
+    },
+    [bulkAssignMutation, selected],
+  );
+  const onEvaluate = useCallback(() => {
+    setAssignMessage(null);
+    bulkEvaluateMutation.mutate(Array.from(selected));
+  }, [bulkEvaluateMutation, selected]);
+  const onLinkPlan = useCallback(
+    (planId: string) => {
+      setAssignMessage(null);
+      bulkLinkMutation.mutate({ controlIds: Array.from(selected), planId });
+    },
+    [bulkLinkMutation, selected],
+  );
+
+  // Slice 745 — auto-dismiss a confirmation after a delay so it does not
+  // linger across unrelated actions. A result naming refused controls
+  // stays until the next action: the operator needs the reasons.
   useEffect(() => {
-    if (!assignMessage) return;
+    if (!assignMessage || assignMessage.kind === "error") return;
     const handle = window.setTimeout(
       () => setAssignMessage(null),
       BULK_ASSIGN_MESSAGE_TTL_MS,
@@ -491,9 +752,8 @@ function ControlsPageInner() {
   // scoped `/v1/saved-views` store via the BFF; the SavedViewStore seam
   // slice 448 built made this a one-place swap. The server returns a flat
   // filter map; `toSavedView` narrows it back to the typed ControlFilters
-  // via the slice-448 `sanitizeFilters` (defense-in-depth on read).
-  const queryClient = useQueryClient();
-  const [activeViewId, setActiveViewId] = useState<string>("");
+  // via the slice-448 `sanitizeFilters` (defense-in-depth on read). The
+  // applied view's id is `activeViewId`, declared beside the filter edits.
 
   const savedViewsQ = useQuery<SavedView[]>({
     queryKey: ["saved-views", "controls"],
@@ -544,17 +804,24 @@ function ControlsPageInner() {
         clearAll();
         return;
       }
-      const view = findView(savedViews, id);
-      if (!view) return;
+      const saved = findView(savedViews, id);
+      if (!saved) return;
+      // #2131: the saved filters become the URL, which is the query the
+      // page sends to the server.
       const sp = new URLSearchParams();
       for (const k of FILTER_KEYS) {
-        if (view.filters[k] !== ALL) sp.set(k, view.filters[k]);
+        if (view === "catalog" && MINE_ONLY_KEYS.includes(k)) continue;
+        if (saved.filters[k] !== ALL) sp.set(k, saved.filters[k]);
       }
+      // Issue #1741 — a saved view restores filters within the view the
+      // operator is on; it does not switch between controls and catalog.
+      // The catalog applies only the scope.
+      if (view === "catalog") sp.set(VIEW_PARAM, view);
       router.replace(`/controls?${sp.toString()}`);
     },
     // clearAll + router are stable across renders for this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [savedViews, router],
+    [savedViews, router, view],
   );
 
   const onSaveView = useCallback(
@@ -589,13 +856,21 @@ function ControlsPageInner() {
     [deleteViewMutation],
   );
 
+  // #2131 — the family options are every family of the tenant's controls,
+  // which the server sends with each page; the page's own rows are only
+  // one page. A family in the URL that is not in the list (a typo, or a
+  // family since removed) stays selectable so the pill shows what applies.
+  const serverFamilies = myControlsQ.data?.families;
   const familyOptions: { value: string; label: string }[] = useMemo(() => {
-    const families = uniqueFamilies(rows);
+    const families = [...(serverFamilies ?? [])];
+    if (filters.family !== ALL && !families.includes(filters.family)) {
+      families.push(filters.family);
+    }
     return [
       { value: ALL, label: "All families" },
       ...families.map((f) => ({ value: f, label: f })),
     ];
-  }, [rows]);
+  }, [serverFamilies, filters.family]);
 
   // Slice 224 — render the Scope pill options from the tenant's cells.
   // Cap at 50 entries; surface a banner above the table when the
@@ -621,40 +896,98 @@ function ControlsPageInner() {
     return opts;
   }, [cappedScopeCells]);
 
+  // #2131 — the owner pill. A user id in the URL (a dashboard "mine"
+  // link, or a saved view) shows as "A person"; the pill itself offers the
+  // two cases a triage pass needs.
+  const ownerOptions: { value: string; label: string }[] = [
+    { value: ALL, label: "Anyone" },
+    { value: "none", label: "Unowned" },
+    ...(filters.owner !== ALL && filters.owner !== "none"
+      ? [{ value: filters.owner, label: "A person" }]
+      : []),
+  ];
+
+  // #2131 — "My controls" filters on every pill below in SQL. The SCF
+  // catalog view lists anchors, which carry no owner, fit or per-control
+  // state, so it keeps the view, has-control and scope pills only.
+  const minePills: FilterPill[] =
+    view === "mine"
+      ? [
+          {
+            id: "framework",
+            label: "Framework",
+            value: filters.framework,
+            options: FRAMEWORK_OPTIONS,
+          },
+          {
+            id: "family",
+            label: "Family",
+            value: filters.family,
+            options: familyOptions,
+          },
+          {
+            id: "result",
+            label: "State",
+            value: filters.result,
+            options: RESULT_OPTIONS,
+          },
+          {
+            id: "freshness",
+            label: "Freshness",
+            value: filters.freshness,
+            options: FRESHNESS_OPTIONS,
+          },
+          {
+            id: "owner",
+            label: "Owner",
+            value: filters.owner,
+            options: ownerOptions,
+          },
+        ]
+      : [];
+
   const pills: FilterPill[] = [
+    // Issue #1741 — view toggle: the tenant's controls (default) or the
+    // SCF catalog.
     {
-      id: "framework",
-      label: "Framework",
-      value: filters.framework,
-      options: FRAMEWORK_OPTIONS,
+      id: VIEW_PARAM,
+      label: "View",
+      value: view,
+      options: VIEW_OPTIONS,
     },
-    {
-      id: "family",
-      label: "Family",
-      value: filters.family,
-      options: familyOptions,
-    },
-    {
-      id: "result",
-      label: "State",
-      value: filters.result,
-      options: RESULT_OPTIONS,
-    },
-    {
-      id: "freshness",
-      label: "Freshness",
-      value: filters.freshness,
-      options: FRESHNESS_OPTIONS,
-    },
-    // Slice 224 — fifth pill, scope cell filter. Options enumerate
-    // the tenant's own cells (RLS-scoped). Selecting a cell sets
-    // ?scope=<id> and the BFF / upstream applies the intersection.
+    // Issue #1741 — catalog only: anchors with / without a tenant
+    // control, filtered server-side ahead of paging.
+    ...(view === "catalog"
+      ? [
+          {
+            id: HAS_CONTROL_PARAM,
+            label: "Has control",
+            value: hasControl === undefined ? ALL : String(hasControl),
+            options: HAS_CONTROL_OPTIONS,
+          },
+        ]
+      : []),
+    ...minePills,
+    // Slice 224 — scope cell filter. Options enumerate the tenant's own
+    // cells (RLS-scoped). Selecting a cell sets ?scope=<id> and the BFF /
+    // upstream applies the intersection.
     {
       id: "scope",
       label: "Scope",
       value: filters.scope,
       options: scopeOptions,
     },
+    // Issue #1736 — how well each control's SCF anchor fits it.
+    ...(view === "mine"
+      ? [
+          {
+            id: "anchor_fit",
+            label: "Anchor fit",
+            value: filters.anchor_fit,
+            options: ANCHOR_FIT_OPTIONS,
+          },
+        ]
+      : []),
   ];
 
   // Slice 666 — header count label. The header is a COUNT of the
@@ -667,28 +1000,63 @@ function ControlsPageInner() {
   // read consistently. Copy/semantics only — page size + counts are
   // unchanged (anti-criterion). See
   // `docs/audit-log/666-controls-count-semantics-decisions.md`.
-  const countLabel = controlsCountLabel(visible.length, rows.length);
+  //
+  // Issue #1741 — the noun follows the view, and a second line states the
+  // tenant's controls against the catalog size from the server's totals
+  // (the sidebar badge counts the same controls).
+  const rowNoun = view === "mine" ? "controls" : "SCF anchors";
+  //
+  // #2131 — both numbers are the server's: the filtered total the list
+  // pages over, and the unfiltered count (the tenant's controls, or the
+  // whole catalog).
+  const unfilteredTotal =
+    view === "mine"
+      ? myTotalQ.data ?? filteredTotal
+      : anchorsQ.data?.catalog_total ?? filteredTotal;
+  const countLabel = controlsCountLabel(
+    filteredTotal,
+    unfilteredTotal,
+    rowNoun,
+  );
+  const viewSummary = controlsViewSummary(view, {
+    controls: myTotalQ.data,
+    catalogTotal:
+      view === "mine"
+        ? catalogCountsQ.data?.catalog_total
+        : anchorsQ.data?.catalog_total,
+    withControlTotal: anchorsQ.data?.with_control_total,
+  });
   const meta = (
-    <span data-testid="controls-count-label">
-      {countLabel.isFiltered ? (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.filtered}
-          </span>{" "}
-          of <span className="font-mono">{countLabel.total}</span> SCF anchors
-        </>
-      ) : (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.total}
-          </span>{" "}
-          SCF anchors
-        </>
-      )}
+    <span className="inline-flex flex-wrap items-baseline gap-x-3">
+      <span data-testid="controls-count-label">
+        {countLabel.isFiltered ? (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.filtered}
+            </span>{" "}
+            of <span className="font-mono">{countLabel.total}</span> {rowNoun}
+          </>
+        ) : (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.total}
+            </span>{" "}
+            {rowNoun}
+          </>
+        )}
+      </span>
+      {viewSummary ? (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="controls-view-summary"
+        >
+          {viewSummary}
+        </span>
+      ) : null}
     </span>
   );
 
-  const columns: ListColumn<AnchorRow>[] = [
+  const allColumns: ListColumn<AnchorRow>[] = [
     // Slice 448 — multi-select column. Header is the select-all-in-view
     // tri-state checkbox; each row carries a per-row checkbox. The
     // checkbox click stops propagation so it never triggers the row's
@@ -711,44 +1079,99 @@ function ControlsPageInner() {
           />
         </span>
       ),
-      cell: (row) => (
-        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-          <Checkbox
-            aria-label={`Select control ${row.anchor.scf_id}`}
-            data-testid="controls-row-select"
-            checked={selected.has(row.anchor.id)}
-            onCheckedChange={() => onToggleRow(row.anchor.id)}
-          />
-        </span>
-      ),
+      cell: (row) => {
+        const controlId = row.controlId;
+        if (!controlId) return null;
+        return (
+          <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              aria-label={`Select control ${
+                row.anchor.scf_id || row.anchor.name
+              }`}
+              data-testid="controls-row-select"
+              checked={selected.has(controlId)}
+              onCheckedChange={() => onToggleRow(controlId)}
+            />
+          </span>
+        );
+      },
       className: "w-8",
     },
     {
       id: "scf_id",
       header: "SCF anchor",
-      cell: (row) => (
-        <Link
-          href={`/controls/${encodeURIComponent(row.anchor.id)}`}
-          className="font-mono text-xs font-semibold text-primary hover:underline"
-          data-testid="controls-row-scf-id"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.anchor.scf_id}
-        </Link>
-      ),
+      // Issue #1741 — links open the tenant control (by control id); a
+      // catalog anchor with no control renders as plain text.
+      cell: (row) => {
+        const href = controlHref(row);
+        return href ? (
+          <Link
+            href={href}
+            className="font-mono text-xs font-semibold text-primary hover:underline"
+            data-testid="controls-row-scf-id"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {row.anchor.scf_id || "—"}
+          </Link>
+        ) : (
+          <span
+            className="font-mono text-xs text-muted-foreground"
+            data-testid="controls-row-scf-id-unlinked"
+          >
+            {row.anchor.scf_id}
+          </span>
+        );
+      },
     },
     {
       id: "name",
       header: "Name",
-      cell: (row) => (
-        <Link
-          href={`/controls/${encodeURIComponent(row.anchor.id)}`}
-          className="text-foreground hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.anchor.name}
-        </Link>
-      ),
+      cell: (row) => {
+        const href = controlHref(row);
+        // Issue #1736 — a non-exact anchor fit carries a marker; its
+        // tooltip is the fit note.
+        const fit = anchorFitMarker(row);
+        const marker = fit ? (
+          <Badge
+            variant="outline"
+            className="ml-2"
+            title={fit.title}
+            data-testid="controls-row-anchor-fit"
+            data-anchor-fit={row.anchorFit}
+          >
+            {fit.label}
+          </Badge>
+        ) : null;
+        // #2392 — an undecided SCF remap proposal; the badge opens the
+        // review page, where a reviewer settles it.
+        const legacy = row.legacyAnchor ? (
+          <Link
+            href="/controls/remap"
+            className="ml-2"
+            title="An SCF remap proposal for this control is still undecided"
+            data-testid="controls-row-legacy-anchor"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Badge variant="outline">Legacy anchor</Badge>
+          </Link>
+        ) : null;
+        return href ? (
+          <>
+            <Link
+              href={href}
+              className="text-foreground hover:text-primary"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {row.anchor.name}
+            </Link>
+            {row.demo ? <DemoBadge testId="controls-row-demo" /> : null}
+            {marker}
+            {legacy}
+          </>
+        ) : (
+          <span className="text-muted-foreground">{row.anchor.name}</span>
+        );
+      },
     },
     {
       id: "family",
@@ -779,7 +1202,7 @@ function ControlsPageInner() {
               aria-hidden="true"
               className="size-1.5 shrink-0 rounded-full bg-current"
             />
-            {row.state.result}
+            {resultLabel(row.state.result)}
           </Badge>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -791,7 +1214,7 @@ function ControlsPageInner() {
       cell: (row) =>
         row.state ? (
           <span className="text-xs text-muted-foreground">
-            {row.state.freshness_status}
+            {enumLabel("FreshnessState", row.state.freshness_status)}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -802,13 +1225,31 @@ function ControlsPageInner() {
       header: "Last observed",
       cell: (row) =>
         row.state?.last_observed_at ? (
-          <span className="font-mono text-xs text-muted-foreground">
-            {row.state.last_observed_at}
-          </span>
+          <Timestamp
+            value={row.state.last_observed_at}
+            className="text-xs text-muted-foreground"
+          />
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
     },
+    // #2128 — the assigned owner (a person). Catalog anchor rows have no
+    // control, so the column is on the "My controls" view only.
+    ...(view === "mine"
+      ? [
+          {
+            id: "owner",
+            header: "Owner",
+            cell: (row: AnchorRow) => (
+              <Person
+                id={row.ownerUserId}
+                className="text-xs"
+                testId="controls-row-owner"
+              />
+            ),
+          },
+        ]
+      : []),
     // Slice 226 — Frameworks-per-row column. Right-aligned per the
     // mockup (`Plans/_archive/mockups/controls.html` line 197). Renders the
     // display abbreviations joined by `·`; empty set renders `—`
@@ -837,6 +1278,52 @@ function ControlsPageInner() {
         ),
     },
   ];
+  // #2141: a caller offered no bulk action gets no selection column.
+  const columns = selectable
+    ? allColumns
+    : allColumns.filter((col) => col.id !== "select");
+
+  // #2131 — on "My controls" every displayed column sorts on the server.
+  // A header click cycles ascending, descending, then the default order
+  // (failing first, then stalest evidence); the sort rides in the URL
+  // with the filters, so it is bookmarkable and saved with a view.
+  const tableColumns: ListColumn<AnchorRow>[] =
+    view === "mine"
+      ? columns.map((col) => {
+          const key = SORT_KEY_BY_COLUMN[col.id];
+          if (!key || typeof col.header !== "string") return col;
+          const state = ariaSort(filters.sort, key);
+          const label = col.header;
+          return {
+            ...col,
+            ariaSort: state,
+            // The cards show the plain label; the sort button is the
+            // table header's alone.
+            cardLabel: label,
+            header: (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground"
+                data-testid={`controls-sort-${key}`}
+                data-sort={state}
+                title={`Sort by ${label}`}
+                onClick={() =>
+                  updateFilter("sort", nextSort(filters.sort, key))
+                }
+              >
+                {label}
+                <span aria-hidden="true">
+                  {state === "ascending"
+                    ? "▲"
+                    : state === "descending"
+                      ? "▼"
+                      : ""}
+                </span>
+              </button>
+            ),
+          };
+        })
+      : columns;
 
   // Slice 137: Export buttons (CSV / JSON / XLSX) wire to the BFF
   // proxy at `/api/controls/export?format=...`, which forwards to the
@@ -851,62 +1338,54 @@ function ControlsPageInner() {
   // `controls-history-export-*` data-testid. The history export
   // returns 17 columns (slice 137's 15 + superseded_by + superseded_at)
   // covering every version of every bundle, active + superseded.
+  //
+  // #2141: the six links fold into one Export menu. Each keeps its URL,
+  // params and testid.
+  const exportLinks = [
+    ...CONTROLS_EXPORT_FORMATS.map((format) => ({
+      href: buildControlsExportURL(format),
+      label: `Controls (${CONTROLS_EXPORT_FORMAT_LABELS[format]})`,
+      testId: `controls-export-${format}`,
+    })),
+    ...CONTROLS_HISTORY_EXPORT_FORMATS.map((format) => ({
+      href: buildControlsHistoryExportURL(format),
+      label: `History (${CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]})`,
+      testId: `controls-history-export-${format}`,
+    })),
+  ];
   const actions = (
     <>
-      {CONTROLS_EXPORT_FORMATS.map((format) => (
-        <a
-          key={format}
-          href={buildControlsExportURL(format)}
-          download
-          rel="noopener"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          data-testid={`controls-export-${format}`}
-        >
-          Export {CONTROLS_EXPORT_FORMAT_LABELS[format]}
-        </a>
-      ))}
-      {CONTROLS_HISTORY_EXPORT_FORMATS.map((format) => (
-        <a
-          key={`history-${format}`}
-          href={buildControlsHistoryExportURL(format)}
-          download
-          rel="noopener"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          data-testid={`controls-history-export-${format}`}
-        >
-          Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
-        </a>
-      ))}
-      {/* Slice 225 — replaces the formerly-disabled "New control"
-          `<Button>`, which was a permanently-disabled action with no
-          signposting (UI-honesty gap per slice 178's heuristic). The
-          create-control flow is a non-trivial mutation surface (SCF
-          anchor pick + applicability_expr + framework satisfactions +
-          optional policy attach) deferred to a future slice; the
-          route `/controls/new` does not exist on `main`. Replaced
-          with a non-button `<span>` carrying `title` + `aria-label` +
-          a stable test-id, mirroring the slice 217 audits pattern
-          (see `../audits/oscal-export-future.ts`). Visible copy +
-          tooltip + aria-label all read the same line; the disclosure
-          IS the affordance. When the create-control flow ships, this
-          surface flips back to a routing `<Link>` per slice 247's
-          enable-pattern and `new-control-future.ts` deletes. */}
-      <span
-        title={NEW_CONTROL_FUTURE_REASON}
-        aria-label={NEW_CONTROL_FUTURE_REASON}
-        data-testid={NEW_CONTROL_FUTURE_TESTID}
-        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      <ExportMenu links={exportLinks} />
+      {/* #1785 — upload a control sheet; the upload opens the batch's
+          review page. */}
+      <Link
+        href="/controls/imports"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+        data-testid="controls-import"
       >
-        {NEW_CONTROL_FUTURE_REASON}
-      </span>
+        Import controls
+      </Link>
     </>
   );
 
-  if (anchorsQ.isLoading) {
+  const subtitle =
+    view === "mine" ? (
+      <>
+        Your tenant&apos;s controls <Term id="evaluation">evaluated</Term>{" "}
+        against live evidence
+      </>
+    ) : (
+      <>
+        The SCF <Term id="anchor">anchor</Term> catalog, with the controls your
+        tenant has on it
+      </>
+    );
+
+  if (listQ.isLoading) {
     return (
       <ListPage
-        title="Controls"
-        subtitle="SCF anchors evaluated against live evidence"
+        title={pageTitle("/controls")}
+        subtitle={subtitle}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -917,18 +1396,16 @@ function ControlsPageInner() {
     );
   }
 
-  if (anchorsQ.isError) {
+  if (listQ.isError) {
     return (
       <ListPage
-        title="Controls"
-        subtitle="SCF anchors evaluated against live evidence"
+        title={pageTitle("/controls")}
+        subtitle={subtitle}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="controls-load-error">
           <AlertTitle>Could not load controls</AlertTitle>
-          <AlertDescription>
-            {(anchorsQ.error as Error).message}
-          </AlertDescription>
+          <AlertDescription>{(listQ.error as Error).message}</AlertDescription>
         </Alert>
       </ListPage>
     );
@@ -942,14 +1419,34 @@ function ControlsPageInner() {
   // vapor "use the SOC 2 starter kit" CTA — there is no in-app button
   // for kit ingestion on main and slice 152 does not invent one
   // (decisions log D-152-1 + ADR-0004).
-  const isTrulyEmpty = rows.length === 0;
-  const trulyEmptyState = (
-    <EmptyState
-      icon={emptyStateIcon}
-      title="No controls in your tenant yet"
-      body="The global SCF anchor catalog is empty in this deployment. Import a framework via the atlas CLI, or run the SCF importer to populate the catalog. See the user guide for the bootstrap walkthrough."
-    />
-  );
+  //
+  // Issue #1741 — in the default view, "truly empty" means the tenant has
+  // no controls (the catalog may well be loaded), so the copy says so and
+  // offers the catalog view instead of blaming the importer.
+  //
+  // #2131 — "truly empty" is the server's unfiltered count reading zero;
+  // until that count loads, an empty filtered page is a filter result.
+  const isTrulyEmpty =
+    unfilteredTotal === 0 &&
+    (isDefault(filters) || view === "catalog" || myTotalQ.data === 0);
+  const trulyEmptyState =
+    view === "mine" ? (
+      <EmptyState
+        icon={emptyStateIcon}
+        title="No controls in your tenant yet"
+        body="Upload a control bundle with the atlas CLI to add your first control. The SCF catalog view lists every anchor a control can map to."
+        cta={{
+          label: "Browse the SCF catalog",
+          onClick: () => updateParam(VIEW_PARAM, "catalog"),
+        }}
+      />
+    ) : (
+      <EmptyState
+        icon={emptyStateIcon}
+        title="No SCF anchors to show"
+        body="The global SCF anchor catalog is empty in this deployment, or no anchor matches the Has control filter. Import a framework via the atlas CLI, or run the SCF importer to populate the catalog. See the user guide for the bootstrap walkthrough."
+      />
+    );
   const filterEmptyState = (
     <EmptyState
       icon={emptyStateIcon}
@@ -966,13 +1463,17 @@ function ControlsPageInner() {
 
   return (
     <ListPage
-      title="Controls"
-      subtitle="SCF anchors evaluated against live evidence"
+      title={pageTitle("/controls")}
+      subtitle={subtitle}
       actions={actions}
       filterRow={
         <FilterPills
           pills={pills}
-          onChange={(id, v) => updateFilter(id as keyof ControlFilters, v)}
+          onChange={(id, v) =>
+            id === VIEW_PARAM || id === HAS_CONTROL_PARAM
+              ? updateParam(id, v)
+              : updateFilter(id as keyof ControlFilters, v)
+          }
           meta={meta}
         />
       }
@@ -989,13 +1490,25 @@ function ControlsPageInner() {
         onSaveView={onSaveView}
         onDeleteView={onDeleteView}
       />
-      {selected.size > 0 ? (
+      {selectable && selected.size > 0 ? (
         <SelectionBar
-          selectedCount={selected.size}
+          selectedIds={Array.from(selected)}
           overCap={selectionOverCap}
+          gates={gates}
           onClear={onClearSelection}
-          onAssignToMe={onAssignToMe}
-          assigning={bulkAssignMutation.isPending}
+          onAssignOwner={onAssignOwner}
+          onEvaluate={onEvaluate}
+          evaluateProgress={evalProgress}
+          onCancelEvaluate={onCancelEvaluate}
+          plans={pickerPlans}
+          onWantPlans={() => setWantPlans(true)}
+          planQuery={planQuery}
+          onPlanQuery={setPlanQuery}
+          hasMorePlans={plansQ.hasNextPage}
+          loadingMorePlans={plansQ.isFetchingNextPage}
+          onMorePlans={() => void plansQ.fetchNextPage()}
+          onLinkPlan={onLinkPlan}
+          busy={busy}
         />
       ) : null}
       {/* Slice 745 — bulk-assign confirmation in a PERSISTENT region,
@@ -1007,7 +1520,7 @@ function ControlsPageInner() {
           gated bar, lets the confirmation survive the selection-clear and
           be observable (re-enables slice 743's quarantined message
           assertion). Auto-dismisses via BULK_ASSIGN_MESSAGE_TTL_MS. */}
-      <BulkAssignMessage message={assignMessage} />
+      <BulkResultMessage message={assignMessage} />
       {cellsCapped ? (
         <Alert data-testid="controls-scope-cells-capped" className="mb-3">
           <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>
@@ -1019,12 +1532,13 @@ function ControlsPageInner() {
         </Alert>
       ) : null}
       <ListTable<AnchorRow>
-        columns={columns}
-        rows={pagedRows}
-        rowKey={(row) => row.anchor.id}
-        onRowClick={(row) =>
-          router.push(`/controls/${encodeURIComponent(row.anchor.id)}`)
-        }
+        columns={tableColumns}
+        rows={rows}
+        rowKey={(row) => row.key}
+        onRowClick={(row) => {
+          const href = controlHref(row);
+          if (href) router.push(href);
+        }}
         emptyFallback={emptyState}
         // Slice 281 — collapse to a card stack at `< md`. Seven-column
         // anchor table horizontal-scrolls at 375px; the card variant
@@ -1041,11 +1555,11 @@ function ControlsPageInner() {
           so the user gets the truth-telling "Showing N of N" summary;
           both Previous and Next are disabled and clearly read as such.
           Matches the slice 246 /risks composition (decisions log D3). */}
-      {visible.length > 0 ? (
+      {filteredTotal > 0 ? (
         <ListPagination
           currentPage={currentPage}
           pageSize={CONTROLS_PAGE_SIZE}
-          totalCount={visible.length}
+          totalCount={filteredTotal}
           onPageChange={goToPage}
           testIdPrefix="controls-pagination"
         />

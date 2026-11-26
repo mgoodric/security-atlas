@@ -25,8 +25,9 @@
 // (AC-5).
 //
 // This is complementary to slices 340/341, which fixed chromedp CONNECTION
-// SETUP (the WSURLReadTimeout watchdog). This package governs RENDER-TIME
-// behavior and does not touch the connection-setup fix.
+// SETUP (the WSURLReadTimeout watchdog). chromedp v0.23's exec allocator talks
+// to Chrome over a pipe, so that websocket watchdog no longer exists. This
+// package governs RENDER-TIME behavior either way.
 package pdfrender
 
 import (
@@ -62,7 +63,24 @@ const (
 	envRenderTimeout  = "ATLAS_PDF_RENDER_TIMEOUT"
 	envMaxConcurrency = "ATLAS_PDF_RENDER_MAX_CONCURRENCY"
 	envQueueWait      = "ATLAS_PDF_RENDER_QUEUE_WAIT"
+	envRequirePDF     = "ATLAS_REQUIRE_PDF"
 )
+
+// RetryAfterSeconds is the Retry-After hint a handler sends with the 503 for
+// a transient degradation (ErrRenderDeadline, ErrQueueSaturated). It matches
+// DefaultQueueWait: by then a slot held by a render ahead in the queue has
+// usually freed. A missing chrome is not transient and gets no hint (#2786).
+const RetryAfterSeconds = int(DefaultQueueWait / time.Second)
+
+// RequireRealPDF reports whether ATLAS_REQUIRE_PDF is set to a true value.
+// The CI integration job sets it because its runner has Chrome: there, a
+// PDF handler test under the default limiter must get a 200 `%PDF-` body,
+// and a 503 is a failure rather than graceful degradation. Without it (a
+// developer machine with no Chrome) the tests accept 503 and log it.
+func RequireRealPDF() bool {
+	ok, _ := strconv.ParseBool(os.Getenv(envRequirePDF))
+	return ok
+}
 
 var (
 	// ErrRenderDeadline signals the bounded render deadline elapsed before the

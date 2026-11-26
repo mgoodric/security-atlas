@@ -25,7 +25,13 @@ export type AttestSubmitRequest = {
   artifact_id?: string;
   idempotency_key?: string;
   observed_at?: string;
+  // #2111: the attested outcome. Absent means pass; a fail needs
+  // fail_reason.
+  result?: AttestResult;
+  fail_reason?: string;
 };
+
+export type AttestResult = "pass" | "fail";
 
 export type AttestSubmitResponse = {
   record_id: string;
@@ -34,6 +40,10 @@ export type AttestSubmitResponse = {
   credential_id: string;
   deduplicated: boolean;
   payload_uri?: string;
+  // #2111: the outcome recorded, and whether the control was evaluated
+  // right after it.
+  result?: AttestResult;
+  evaluated?: boolean;
 };
 
 export async function getAttestForm(

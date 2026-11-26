@@ -1,0 +1,69 @@
+# The control has two rego queries, one over slack.retention_settings.v1
+# and one over manual.upload.v1. Each rolls up the per-record `result` of
+# its own kind only (#2818), and the control combines the two the same way:
+# any fail, then any pass, then any inconclusive, else na. A query with no
+# records is inconclusive. Every record names its evidence_kind, because a
+# fixture record without one would reach both queries (#2882).
+cases:
+  - name: both-kinds-pass
+    expected_state: pass
+    records:
+      - result: pass
+        evidence_kind: slack.retention_settings.v1
+      - result: pass
+        evidence_kind: manual.upload.v1
+        payload:
+          reviewed_at: 2026-10-01T12:00:00Z
+          reviewer: privacy-lead
+          data_stores:
+            - store_name: slack
+              retention_days: 365
+              disposal_method: workspace retention policy
+
+  - name: failing-retention-review-fails
+    expected_state: fail
+    records:
+      - result: pass
+        evidence_kind: slack.retention_settings.v1
+      - result: fail
+        evidence_kind: manual.upload.v1
+
+  - name: unlimited-slack-retention-fails
+    expected_state: fail
+    records:
+      - result: fail
+        evidence_kind: slack.retention_settings.v1
+      - result: pass
+        evidence_kind: manual.upload.v1
+
+  # Each query sees only its kind: the Slack records' na does not reach the
+  # review query, which has no records and is inconclusive, so the control
+  # is inconclusive, not na (decisions log 2818 D5).
+  - name: only-na-slack-records-is-inconclusive
+    expected_state: inconclusive
+    records:
+      - result: na
+        evidence_kind: slack.retention_settings.v1
+
+  - name: both-kinds-na-is-na
+    expected_state: na
+    records:
+      - result: na
+        evidence_kind: slack.retention_settings.v1
+      - result: na
+        evidence_kind: manual.upload.v1
+
+  # Each query sees only its kind: a failing record of a kind neither query
+  # declares reaches no query.
+  - name: record-of-another-kind-is-ignored
+    expected_state: pass
+    records:
+      - result: pass
+        evidence_kind: slack.retention_settings.v1
+      - result: pass
+        evidence_kind: manual.upload.v1
+      - result: fail
+        evidence_kind: okta.mfa_policy.v1
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive

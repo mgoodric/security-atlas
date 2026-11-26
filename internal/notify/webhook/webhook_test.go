@@ -168,6 +168,51 @@ func TestHTTPTransport_Post_HeadersAndScrub(t *testing.T) {
 	}
 }
 
+// An httptest.Server.Close() anywhere in the process calls
+// http.DefaultTransport.CloseIdleConnections(). When HTTPTransport shared the
+// default transport, that cut its in-flight connection (#2202). Hammer the
+// default transport's idle-close while posting; every post must succeed.
+func TestHTTPTransport_Post_IsolatedFromDefaultTransport(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr, err := NewHTTPTransport(Config{URL: srv.URL + "/hook", Timeout: DefaultTimeout},
+		notify.SSRFPolicy{AllowHTTP: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+			}
+		}
+	}()
+	for i := range 50 {
+		if err := tr.Post(context.Background(), []byte(`{}`)); err != nil {
+			close(stop)
+			<-done
+			t.Fatalf("post %d: %v", i, err)
+		}
+	}
+	close(stop)
+	<-done
+
+	if tr.client.Transport == nil || tr.client.Transport == http.DefaultTransport {
+		t.Fatal("HTTPTransport must own its *http.Transport, not share http.DefaultTransport")
+	}
+}
+
 func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +236,89 @@ func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "test-bearer-secret") {
 		t.Fatalf("error leaked bearer secret: %v", err)
+	}
+}
+
+// DNS rebinding (#2304): the host resolves public at validation, then to
+// loopback when the client dials. The dial-time check must refuse it, and
+// the loopback server must receive nothing.
+func TestHTTPTransport_Post_DNSRebindingRefusedAtDial(t *testing.T) {
+	t.Parallel()
+	hit := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+	}))
+	defer srv.Close()
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+
+	// Validation sees a public address; the real dial resolves "localhost"
+	// to 127.0.0.1 / ::1, which is what an attacker's rebinding DNS does.
+	policy := notify.SSRFPolicy{AllowHTTP: true}.WithResolver(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	tr, err := NewHTTPTransport(Config{URL: "http://localhost:" + port + "/hook", Timeout: DefaultTimeout}, policy)
+	if err != nil {
+		t.Fatalf("validation should pass on the public resolution: %v", err)
+	}
+	err = tr.Post(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("post to a host that rebinds to loopback must be refused at dial")
+	}
+	if !strings.Contains(err.Error(), "ssrf guard") || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected the dial-time SSRF refusal, got %v", err)
+	}
+	select {
+	case <-hit:
+		t.Fatal("loopback server received the POST")
+	default:
+	}
+}
+
+// Redirects are never followed (#2304): a 307 from a permitted endpoint
+// would otherwise re-send the body and its HMAC signature to an internal
+// address. The redirect target must receive nothing and Post must fail
+// with the 3xx status.
+func TestHTTPTransport_Post_RedirectNotFollowed(t *testing.T) {
+	t.Parallel()
+	hit := make(chan struct{}, 1)
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+	}))
+	defer internal.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL+"/steal", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	cfg := Config{URL: srv.URL + "/hook", HMACSecret: notify.Secret("test-hmac-secret"), Timeout: DefaultTimeout}
+	tr, err := NewHTTPTransport(cfg, notify.SSRFPolicy{AllowHTTP: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	err = tr.Post(context.Background(), []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "307") || !strings.Contains(err.Error(), "redirect not followed") {
+		t.Fatalf("expected a 307 redirect-not-followed failure, got %v", err)
+	}
+	select {
+	case <-hit:
+		t.Fatal("redirect target received the POST")
+	default:
+	}
+}
+
+// A directly built Config{Timeout: 0} still gets a backstop client timeout
+// so a stalled receiver cannot hang the caller (#2304).
+func TestNewHTTPTransport_BackstopTimeout(t *testing.T) {
+	t.Parallel()
+	tr, err := NewHTTPTransport(Config{URL: "https://93.184.216.34/hook"}, notify.SSRFPolicy{})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	if tr.client.Timeout != DefaultTimeout {
+		t.Fatalf("client.Timeout = %s, want %s", tr.client.Timeout, DefaultTimeout)
 	}
 }
 

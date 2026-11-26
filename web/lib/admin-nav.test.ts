@@ -46,9 +46,24 @@ describe("shouldShowAdminEntry", () => {
     );
   });
 
-  test("show: roles=['admin'] (AC-5 positive)", () => {
+  // #2503: a tenant admin by its live roles sees the entry through the
+  // server-computed is_tenant_admin flag.
+  test("show: is_tenant_admin true", () => {
+    expect(
+      shouldShowAdminEntry({ is_admin: false, is_tenant_admin: true }),
+    ).toBe(true);
+  });
+
+  test("hide: is_tenant_admin truthy but non-bool (strict equality only)", () => {
+    expect(shouldShowAdminEntry({ is_tenant_admin: "true" })).toBe(false);
+    expect(shouldShowAdminEntry({ is_tenant_admin: 1 })).toBe(false);
+  });
+
+  // #2216: the role string alone does not show it; a session's role claim
+  // is not a live grant. is_tenant_admin is the signal (#2503).
+  test("hide: roles=['admin'] without is_tenant_admin", () => {
     expect(shouldShowAdminEntry({ is_admin: false, roles: ["admin"] })).toBe(
-      true,
+      false,
     );
   });
 
@@ -58,17 +73,17 @@ describe("shouldShowAdminEntry", () => {
     ).toBe(true);
   });
 
-  test("show: roles=['tenant_admin']", () => {
+  test("hide: roles=['tenant_admin']", () => {
     expect(
       shouldShowAdminEntry({ is_admin: false, roles: ["tenant_admin"] }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  test("show: one admin role among many is enough", () => {
+  test("show: super_admin among many roles is enough", () => {
     expect(
       shouldShowAdminEntry({
         is_admin: false,
-        roles: ["viewer", "admin", "control_owner"],
+        roles: ["viewer", "super_admin", "control_owner"],
       }),
     ).toBe(true);
   });
@@ -143,7 +158,7 @@ describe("shouldShowAdminEntry", () => {
     expect(
       shouldShowAdminEntry({
         is_admin: false,
-        roles: [42, null, "admin"],
+        roles: [42, null, "super_admin"],
       }),
     ).toBe(true);
   });

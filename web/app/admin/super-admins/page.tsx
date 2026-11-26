@@ -5,11 +5,13 @@
 // proxies to the platform's /v1/admin/super-admins.
 //
 // The list table renders one row per super_admin with:
-//   - display_name + email (LEFT JOIN against users in the session
-//     tenant; null fields render as a truncated user_id)
+//   - the name, through <Person> against the list's own names (#2385):
+//     the platform names each super admin from their own tenant, so
+//     no user ID renders as visible text
 //   - granted_at + granted_via (the slice-198 'bootstrap_first_install'
 //     value or the slice-142 'manual_grant' value)
-//   - per-row Demote button → opens a confirmation dialog
+//   - per-row actions menu → Demote opens a confirmation dialog;
+//     withheld, with the reason, from the last super admin (#2090)
 //
 // LOAD-BEARING UX: the demote dialog includes a prominent warning that
 // the operation is irreversible without DB access. Mirrors the slice-
@@ -23,7 +25,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -45,7 +47,8 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { EntityPicker } from "@/components/ui/entity-picker";
+import type { EntityKind } from "@/lib/entity-picker";
 import {
   Table,
   TableBody,
@@ -54,28 +57,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { RowActions } from "@/components/ui/row-actions";
+import { lastSuperAdminReason } from "@/components/admin/last-holder";
+import { superAdminDirectory } from "@/components/admin/super-admin-directory";
+import { Person } from "@/components/ui/person";
+import { resolvePerson } from "@/lib/person";
 import type { SuperAdminRow } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
-type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
+type SuperAdminListResponse = { items: SuperAdminRow[] };
 
-function formatGrantedAt(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatUserID(s: SuperAdminRow): string {
-  if (s.display_name) {
-    return s.display_name;
-  }
-  if (s.email) {
-    return s.email;
-  }
-  // Truncate UUID to first 8 chars + ellipsis to keep cell narrow.
-  return s.user_id.length > 12 ? `${s.user_id.slice(0, 8)}…` : s.user_id;
-}
+const GRANT_KINDS: readonly EntityKind[] = ["user"];
 
 export default function SuperAdminsPage() {
   const queryClient = useQueryClient();
@@ -90,13 +85,16 @@ export default function SuperAdminsPage() {
       const res = await fetch("/api/admin/super-admins", {
         cache: "no-store",
       });
-      const body = (await res.json()) as SuperAdminListResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as SuperAdminListResponse;
       return body.items ?? [];
     },
   });
+  // #2385: names come from the list (cross-tenant), not /v1/people.
+  const directory = useMemo(() => superAdminDirectory(data ?? []), [data]);
+  const nameOf = (s: SuperAdminRow) => resolvePerson(s.user_id, directory).text;
 
   const grantMutation = useMutation({
     mutationFn: async (userID: string) => {
@@ -105,11 +103,10 @@ export default function SuperAdminsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userID }),
       });
-      const body = (await res.json()) as { error?: string } & SuperAdminRow;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as SuperAdminRow;
     },
     onSuccess: async () => {
       setGrantUserID("");
@@ -130,13 +127,7 @@ export default function SuperAdminsPage() {
         { method: "DELETE" },
       );
       if (!res.ok && res.status !== 204) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body?.error) msg = body.error;
-        } catch {
-          // ignore
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
     },
@@ -161,18 +152,22 @@ export default function SuperAdminsPage() {
   // error; the dialog has no input to point aria-describedby at, so
   // the id exists for the live-region linkage only.
   const grantErrorId = grantError ? "grant-super-admin-error" : undefined;
+  const demoteReason = lastSuperAdminReason(data ?? []);
 
   return (
-    <div className="space-y-6" data-testid="super-admins-page">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Super admins</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Super admins"
+      data-testid="super-admins-page"
+      subtitle={
+        <>
           Platform-global identities authorized to create tenants, rename
-          tenants, and grant or demote other super admins. Super admin is NOT a
-          per-tenant role; it does not confer tenant-write authority on its own.
-        </p>
-      </div>
-
+          tenants, and grant or demote other super admins.{" "}
+          <Term id="super-admin">Super admin</Term> is NOT a per-tenant{" "}
+          <Term id="role">role</Term>; it does not confer tenant-write authority
+          on its own.
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Last super admin safeguard</AlertTitle>
         <AlertDescription>
@@ -187,9 +182,10 @@ export default function SuperAdminsPage() {
         <CardHeader>
           <CardTitle>Grant super admin</CardTitle>
           <CardDescription>
-            Enter the target user&rsquo;s UUID. The user must already exist in
-            some tenant (provisioned via local create or SSO login). Granting is
-            idempotent — re-granting an existing super admin is a no-op.
+            Pick a person in this tenant, or paste the user ID of someone in
+            another tenant. The user must already exist (provisioned via local
+            create or SSO login). Granting is idempotent — re-granting an
+            existing super admin is a no-op.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -198,7 +194,7 @@ export default function SuperAdminsPage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (grantUserID.trim() === "") {
-                setGrantError("user_id is required");
+                setGrantError("Pick a user to grant super admin to.");
                 return;
               }
               setGrantError(null);
@@ -210,17 +206,19 @@ export default function SuperAdminsPage() {
                 htmlFor="grant-user-id"
                 className="text-xs font-medium text-muted-foreground"
               >
-                User UUID
+                User
               </label>
-              <Input
+              <EntityPicker
+                kinds={GRANT_KINDS}
                 id="grant-user-id"
-                data-testid="grant-user-id-input"
-                placeholder="00000000-0000-0000-0000-000000000000"
+                testId="grant-user-id-input"
+                placeholder="Search people, or paste a user ID"
                 value={grantUserID}
-                onChange={(e) => setGrantUserID(e.target.value)}
-                spellCheck={false}
-                autoComplete="off"
-                aria-describedby={grantErrorId}
+                onChange={(id) => {
+                  setGrantUserID(id);
+                  setGrantError(null);
+                }}
+                describedBy={grantErrorId}
               />
             </div>
             <Button
@@ -289,10 +287,12 @@ export default function SuperAdminsPage() {
                     data-testid={`super-admin-row-${s.user_id}`}
                   >
                     <TableCell>
-                      <div className="font-medium">{formatUserID(s)}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {s.user_id}
-                      </div>
+                      <Person
+                        id={s.user_id}
+                        directory={directory}
+                        className="font-medium"
+                        testId="super-admin-name"
+                      />
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -306,20 +306,28 @@ export default function SuperAdminsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatGrantedAt(s.granted_at)}
+                      <Timestamp value={s.granted_at} style="datetime" />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid={`demote-button-${s.user_id}`}
-                        onClick={() => {
-                          setDemoteError(null);
-                          setDemoteTarget(s);
-                        }}
-                      >
-                        Demote
-                      </Button>
+                      {/* #2090: Demote opens the confirm dialog below.
+                          It is withheld, with the reason, from the last
+                          super admin; the backend's 409 still stands. */}
+                      <RowActions
+                        label={`Actions for ${nameOf(s)}`}
+                        data-testid={`super-admin-actions-${s.user_id}`}
+                        items={[
+                          {
+                            id: "demote",
+                            label: "Demote",
+                            disabledReason: demoteReason,
+                            onSelect: () => {
+                              setDemoteError(null);
+                              setDemoteTarget(s);
+                            },
+                            "data-testid": `demote-button-${s.user_id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -352,10 +360,7 @@ export default function SuperAdminsPage() {
               <div className="space-y-2 text-sm">
                 <div>
                   <span className="font-medium">Identity:</span>{" "}
-                  {formatUserID(demoteTarget)}
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {demoteTarget.user_id}
+                  <Person id={demoteTarget.user_id} directory={directory} />
                 </div>
               </div>
             ) : null}
@@ -393,6 +398,6 @@ export default function SuperAdminsPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

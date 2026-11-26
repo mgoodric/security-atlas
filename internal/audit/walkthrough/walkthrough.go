@@ -295,6 +295,50 @@ func (s *Store) List(ctx context.Context) ([]Walkthrough, error) {
 	return out, err
 }
 
+// CheckAttachable reports whether AddAttachment would accept an
+// attachment for walkthrough id right now: ErrNotFound, ErrFinalized or
+// ErrPeriodFrozen, the same as AddAttachment, or nil. The upload handler
+// calls it before storing the blob, so a rejected attach does not leave
+// an artifact nothing references (security-atlas#1939). AddAttachment
+// repeats the checks under its own transaction; this is not a lock.
+func (s *Store) CheckAttachable(ctx context.Context, id uuid.UUID, actor string) error {
+	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		_, err := s.attachableRow(ctx, q, tenantID, id, actor)
+		return err
+	})
+}
+
+// attachableRow loads walkthrough id and rejects it unless it is a draft
+// in an unfrozen period. A frozen-period rejection is audit-logged.
+func (s *Store) attachableRow(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID, actor string) (dbx.Walkthrough, error) {
+	row, err := q.GetWalkthroughByID(ctx, dbx.GetWalkthroughByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(id),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.Walkthrough{}, ErrNotFound
+		}
+		return dbx.Walkthrough{}, fmt.Errorf("get walkthrough (attach): %w", err)
+	}
+	if row.Status != string(StatusDraft) {
+		return dbx.Walkthrough{}, ErrFinalized
+	}
+	var periodPtr *uuid.UUID
+	if row.AuditPeriodID.Valid {
+		pid := uuid.UUID(row.AuditPeriodID.Bytes)
+		periodPtr = &pid
+	}
+	if err := s.assertPeriodNotFrozen(ctx, q, tenantID, periodPtr); err != nil {
+		if errors.Is(err, ErrPeriodFrozen) {
+			_ = writeLog(ctx, q, tenantID, row.ID, "mutation_rejected_frozen", actor,
+				map[string]any{"attempted_action": "attachment_added"})
+		}
+		return dbx.Walkthrough{}, err
+	}
+	return row, nil
+}
+
 // AddAttachment appends one attachment to a walkthrough and recomputes
 // the canonical_hash to commit to the new attachment set. AC-2 + AC-3.
 //
@@ -320,29 +364,8 @@ func (s *Store) AddAttachment(ctx context.Context, in AttachInput) (Walkthrough,
 
 	var out Walkthrough
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		row, err := q.GetWalkthroughByID(ctx, dbx.GetWalkthroughByIDParams{
-			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(in.WalkthroughID),
-		})
+		row, err := s.attachableRow(ctx, q, tenantID, in.WalkthroughID, in.UploadedBy)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotFound
-			}
-			return fmt.Errorf("get walkthrough (attach): %w", err)
-		}
-		if row.Status != string(StatusDraft) {
-			return ErrFinalized
-		}
-		var periodPtr *uuid.UUID
-		if row.AuditPeriodID.Valid {
-			pid := uuid.UUID(row.AuditPeriodID.Bytes)
-			periodPtr = &pid
-		}
-		if err := s.assertPeriodNotFrozen(ctx, q, tenantID, periodPtr); err != nil {
-			if errors.Is(err, ErrPeriodFrozen) {
-				_ = writeLog(ctx, q, tenantID, row.ID, "mutation_rejected_frozen", in.UploadedBy,
-					map[string]any{"attempted_action": "attachment_added"})
-			}
 			return err
 		}
 		if _, err := q.CreateWalkthroughAttachment(ctx, dbx.CreateWalkthroughAttachmentParams{

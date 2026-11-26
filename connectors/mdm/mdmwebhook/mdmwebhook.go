@@ -82,7 +82,7 @@ type Config struct {
 	// Pusher emits the built record (push only — invariant #3). Required.
 	Pusher Pusher
 	// ControlID is attached to each emitted record (matches the pull profile's
-	// --device-control, default scf:END-04).
+	// --device-control, default scf:END-03).
 	ControlID string
 	// ActorID is the connector's source attribution
 	// (connector:<vendor>:devices@<version>). Required.
@@ -136,7 +136,7 @@ func NewReceiver(cfg Config) (*Receiver, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	if cfg.ControlID == "" {
-		cfg.ControlID = "scf:END-04"
+		cfg.ControlID = "scf:END-03"
 	}
 	if cfg.Service == "" {
 		cfg.Service = string(cfg.SourceMDM)

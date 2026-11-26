@@ -65,12 +65,8 @@ describe("policies scaffold future-state disclosure (slice 242)", () => {
     );
   });
 
-  it("disclosure copy names the platform API endpoint so the empty-state is a signpost, not a dead end", () => {
-    // The body text gives the operator a concrete next action —
-    // creating drafts via `POST /v1/policies` — so the empty-state
-    // converts dead chrome into useful signposting. Slice 217 D3
-    // precedent: "Action hint baked in. 'Open a period to export'
-    // tells the operator HOW to reach the working export."
-    expect(POLICIES_SCAFFOLD_FUTURE_BODY).toMatch(/POST \/v1\/policies/);
+  it("disclosure copy names who can help and no API path, so the empty-state is a signpost in the user's terms (#2082)", () => {
+    expect(POLICIES_SCAFFOLD_FUTURE_BODY).toMatch(/administrator/);
+    expect(POLICIES_SCAFFOLD_FUTURE_BODY).not.toMatch(/\/v1\//);
   });
 });

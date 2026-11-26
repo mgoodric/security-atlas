@@ -48,8 +48,8 @@ func TestRLS_ForgottenWhereClause_StillIsolates(t *testing.T) {
 	withTenantTx(t, tenantA, true, func(ctx context.Context, tx pgx.Tx) {
 		// Slice 019 introduced treatment-specific CHECKs; 'avoid' has none.
 		_, err := tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category, treatment)
-			VALUES ($1, $2, 'tenant-A secret', 'confidentiality', 'avoid')
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+			VALUES ($1, $2, 'tenant-A secret', risk_category_id($2, 'confidentiality'), 'avoid')
 		`, riskID, tenantA)
 		if err != nil {
 			t.Fatalf("seed risk: %v", err)
@@ -109,8 +109,8 @@ func TestRLS_CrossTenant_SweepPerTable(t *testing.T) {
 			table: "risks",
 			seed: func(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, id string) {
 				_, err := tx.Exec(ctx, `
-					INSERT INTO risks (id, tenant_id, title, category, treatment)
-					VALUES ($1, $2, 'sweep', 'operational', 'avoid')
+					INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+					VALUES ($1, $2, 'sweep', risk_category_id($2, 'operational'), 'avoid')
 				`, id, tenant)
 				if err != nil {
 					t.Fatalf("seed risks: %v", err)

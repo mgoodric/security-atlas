@@ -8,9 +8,11 @@
         "family": "IAC",
         "id": "22222222-2222-4222-8222-222222222222",
         "name": "Identity \u0026 Access Management",
-        "scf_id": "IAC-06"
+        "scf_id": "IAC-37"
       },
       "control": {
+        "anchor_fit": "partial",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -19,7 +21,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },
@@ -35,6 +37,7 @@
           "framework_version_id": "66666666-6666-4666-8666-666666666666",
           "framework_version_status": "current",
           "mapping_tier": "verified",
+          "origin": "catalog",
           "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
           "relationship_type": "subset",
           "requirement_id": "55555555-5555-4555-8555-555555555555",
@@ -50,9 +53,11 @@
         "family": "IAC",
         "id": "22222222-2222-4222-8222-222222222222",
         "name": "Identity \u0026 Access Management",
-        "scf_id": "IAC-06"
+        "scf_id": "IAC-37"
       },
       "control": {
+        "anchor_fit": "partial",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -61,7 +66,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },
@@ -77,6 +82,7 @@
           "framework_version_id": "66666666-6666-4666-8666-666666666666",
           "framework_version_status": "current",
           "mapping_tier": "verified",
+          "origin": "catalog",
           "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
           "relationship_type": "subset",
           "requirement_id": "55555555-5555-4555-8555-555555555555",
@@ -89,12 +95,18 @@
           "code": "CC6.1",
           "coverage": null,
           "edge_id": "44444444-4444-4444-8444-444444444444",
+          "exclusion": {
+            "decided_at": "2026-10-01T00:00:00Z",
+            "framework_scope_id": "66666666-6666-4666-8666-666666666666",
+            "justification": "No in-house software development"
+          },
           "framework_name": "SOC 2",
           "framework_slug": "soc2",
           "framework_version": "2017",
           "framework_version_id": "66666666-6666-4666-8666-666666666666",
           "framework_version_status": "current",
           "mapping_tier": "verified",
+          "origin": "catalog",
           "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
           "relationship_type": "subset",
           "requirement_id": "55555555-5555-4555-8555-555555555555",
@@ -107,6 +119,8 @@
     "unanchored": {
       "anchor": null,
       "control": {
+        "anchor_fit": "partial",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -115,7 +129,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },

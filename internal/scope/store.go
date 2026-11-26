@@ -60,6 +60,15 @@ var ErrCellExists = errors.New("scope: cell with these dimensions already exists
 // declared in scope_dimensions or its value is outside allowed_values.
 var ErrInvalidDimension = errors.New("scope: dimension not declared or value not allowed")
 
+// ErrControlNotFound is returned by ControlApplicability when the control is
+// not in the tenant.
+var ErrControlNotFound = errors.New("scope: control not found")
+
+// ErrBadApplicability is returned by ControlApplicability when the control's
+// stored applicability_expr does not parse or validate. It is a property of
+// the stored row: reading it again fails the same way (#3005).
+var ErrBadApplicability = errors.New("scope: control applicability_expr is invalid")
+
 // Store wraps the sqlc Queries with the tenancy plumbing required for RLS.
 // Every method opens a transaction, applies the tenant GUC, and runs queries
 // inside that transaction so RLS policies see the tenant id.
@@ -219,7 +228,7 @@ func (s *Store) ControlApplicability(ctx context.Context, controlID uuid.UUID) (
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("scope: control %s not found", controlID)
+				return fmt.Errorf("%w: %s", ErrControlNotFound, controlID)
 			}
 			return fmt.Errorf("get applicability_expr: %w", err)
 		}
@@ -236,7 +245,7 @@ func (s *Store) ControlApplicability(ctx context.Context, controlID uuid.UUID) (
 		}
 		out, err := Evaluate(expr, universe)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: control %s: %w", ErrBadApplicability, controlID, err)
 		}
 		matches = out
 		return nil
@@ -326,6 +335,11 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 // decoded (corruption) the cell is returned with a nil map rather than
 // panicking — callers must tolerate that, but in practice it never happens
 // because writes go through Canonicalize.
+// CellFromRow converts a scope_cells row into a Cell, decoding its
+// canonical dimensions. Readers outside this package that already hold the
+// rows (the OSCAL export, #2269) use it rather than re-reading the cells.
+func CellFromRow(r dbx.ScopeCell) Cell { return rowToCell(r) }
+
 func rowToCell(r dbx.ScopeCell) Cell {
 	c := Cell{
 		ID:       uuid.UUID(r.ID.Bytes),

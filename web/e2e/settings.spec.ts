@@ -47,7 +47,7 @@
 //
 // AC coverage targets:
 //   AC-1 Profile section renders (display name, email, role badge)
-//   AC-2 Theme picker persists across page reload
+//   AC-2 moved to settings-theme.spec.ts (#2142)
 //   AC-3 Notification toggle persists server-side via /v1/me/preferences
 //   AC-4 Token issuance shows plaintext exactly once, then never again
 //   AC-5 Active sessions section renders (slice-108 backed)
@@ -59,8 +59,7 @@
 //   AC-11 Rotate-twice-in-a-row chains predecessors + fresh secret per rotate (slice 163)
 //   AC-13 Page <title> is route-specific via per-route layout metadata (slice 248)
 //   AC-15 Slack + webhook master toggles render opted-out by default (slice 584)
-//   (AC-12 lives in the AppearanceSection block alongside AC-2; the slice
-//   203 author elected to keep the numbering inline rather than renumber.)
+//   (AC-12 moved to settings-theme.spec.ts with AC-2, #2142.)
 
 import { expect, test } from "./fixtures";
 
@@ -87,16 +86,9 @@ test.describe("/settings user-facing page", () => {
     ).toBeVisible();
   });
 
-  test("AC-2: theme picker persists choice across reload", async ({
-    authedPage: page,
-  }) => {
-    await page.goto("/settings");
-    await page.getByTestId("settings-theme-option-dark").click();
-    await page.reload();
-    await expect(
-      page.getByTestId("settings-theme-option-dark"),
-    ).toHaveAttribute("data-selected", "true");
-  });
+  // AC-2 (theme persists across reload) moved to settings-theme.spec.ts
+  // (#2142): the choice is stored per user now, and this spec's user is
+  // the shared demo user other specs force a theme on.
 
   test("AC-3: notification toggle persists server-side across reload (slice 164 D1)", async ({
     authedPage: page,
@@ -549,7 +541,8 @@ test.describe("/settings user-facing page", () => {
     // successor in the chain (the first rotation extends the seed's
     // existing chain by one).
     const rotateTarget = rows.filter({ hasText: "rt02" }).first();
-    await rotateTarget.getByTestId("settings-token-rotate-button").click();
+    await rotateTarget.getByTestId("settings-token-actions").click();
+    await page.getByTestId("settings-token-rotate-button").click();
     await page.getByTestId("settings-token-rotate-modal").waitFor();
     await page.getByRole("button", { name: /Rotate now/ }).click();
 
@@ -588,7 +581,8 @@ test.describe("/settings user-facing page", () => {
     const successorLast4 = bearer1!.slice(-4);
 
     const rotateTarget2 = rows.filter({ hasText: successorLast4 }).first();
-    await rotateTarget2.getByTestId("settings-token-rotate-button").click();
+    await rotateTarget2.getByTestId("settings-token-actions").click();
+    await page.getByTestId("settings-token-rotate-button").click();
     await page.getByTestId("settings-token-rotate-modal").waitFor();
     await page.getByRole("button", { name: /Rotate now/ }).click();
 
@@ -628,91 +622,8 @@ test.describe("/settings user-facing page", () => {
     );
   });
 
-  test("AC-12 (slice 203): selecting Dark applies CSS theming to the page", async ({
-    authedPage: page,
-  }) => {
-    // Slice 203: the bug this regression guards is "selecting Dark
-    // persists a choice + writes data-theme but the page never themes".
-    // We bind the contract by clicking the Dark swatch, navigating to a
-    // page that paints the canonical bg-background / text-foreground
-    // tokens (the dashboard), and asserting the body's computed
-    // background-color matches the dark-mode token (the .dark
-    // { --background: oklch(0.145 0 0); ... } block in
-    // web/app/globals.css:86+).
-    //
-    // The assertion shape: read window.getComputedStyle(body).
-    // backgroundColor. Browsers normalize oklch() to rgb() in the
-    // serialized CSS value, so we check for ANY of three shapes:
-    //   1. `rgb(37, 37, 37)` -- Chromium's serialized form of
-    //      oklch(0.145 0 0).
-    //   2. `oklch(0.145 0 0)` -- if Chromium ever switches to native
-    //      oklch serialization (currently only Firefox 113+ does this).
-    //   3. A regex that anchors on "the color is not white". Since the
-    //      light-mode token is oklch(1 0 0) -> rgb(255, 255, 255), and
-    //      we only need to assert "the page themed", a clean negation
-    //      against the light value is sufficient and avoids being
-    //      brittle to browser-version-specific oklch precision.
-    //
-    // We follow the third path (negate against light). The light->dark
-    // delta is the load-bearing observable; the exact rgb tuple matters
-    // less than the "the page is no longer white" property.
-    await page.goto("/settings");
-
-    // Capture the LIGHT-mode body color before clicking. The picker
-    // starts at "system"; in a CI Playwright run the headless Chromium
-    // defaults to prefers-color-scheme: light unless explicitly
-    // configured (web/playwright.config.ts does not override). The
-    // class on <html> at this moment should be absent and the body
-    // should compute to the light token.
-    const lightBg = await page.evaluate(
-      () => window.getComputedStyle(document.body).backgroundColor,
-    );
-
-    // Click "Dark" -- the picker's `choose("dark")` writes data-theme
-    // AND adds class="dark" to <html>. The MutationObserver in
-    // ThemeClassSync also fires; both code paths converge on the same
-    // class state.
-    await page.getByTestId("settings-theme-option-dark").click();
-
-    // Assert the class is present on <html>.
-    await expect(page.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
-
-    // Assert the body's computed background changed. This is the
-    // visible-to-operator contract: the page actually re-themed.
-    const darkBg = await page.evaluate(
-      () => window.getComputedStyle(document.body).backgroundColor,
-    );
-    expect(darkBg).not.toBe(lightBg);
-
-    // Navigate to the dashboard to prove the class persists across
-    // route transitions (the inline early-paint script in
-    // web/app/layout.tsx re-reads localStorage on the next page paint;
-    // ThemeClassSync also re-converges).
-    await page.goto("/");
-    await expect(page.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
-    const darkBgOnDashboard = await page.evaluate(
-      () => window.getComputedStyle(document.body).backgroundColor,
-    );
-    expect(darkBgOnDashboard).not.toBe(lightBg);
-
-    // Reload: AC-3 (early-paint script) prevents the flash. We can't
-    // directly assert "no flash" in Playwright (it would require a
-    // frame-precise screenshot diff against a known-good baseline,
-    // which is out of scope per P0-A5). What we CAN assert is that the
-    // dark class is on <html> on the very first frame of the reloaded
-    // page -- before any React effect has fired. Playwright's
-    // page.reload() awaits networkIdle, so by the time the next
-    // assertion runs, the inline script has already executed.
-    await page.reload();
-    await expect(page.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
-
-    // Restore light mode so the test does not leave dark-mode state
-    // sticking to localStorage for subsequent specs (each Playwright
-    // worker shares a browser context across tests in this file).
-    await page.goto("/settings");
-    await page.getByTestId("settings-theme-option-light").click();
-    await expect(page.locator("html")).not.toHaveClass(/(^|\s)dark(\s|$)/);
-  });
+  // AC-12 (selecting Dark themes the page) moved to settings-theme.spec.ts
+  // with AC-2 (#2142).
 
   test("AC-13: page <title> is route-specific (slice 248)", async ({
     authedPage: page,

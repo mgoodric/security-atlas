@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -203,6 +204,18 @@ func (s *Store) Read(ctx context.Context, tenantID uuid.UUID, id string) (Sessio
 		return Session{}, err
 	}
 	if row.RevokedAt.Valid {
+		return Session{}, ErrRevoked
+	}
+	// Defence in depth (#1915): deactivation revokes the user's sessions, but
+	// a session whose owner can no longer sign in is refused regardless.
+	owner, err := q.GetUserByID(ctx, dbx.GetUserByIDParams{TenantID: row.TenantID, ID: row.UserID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, ErrRevoked
+		}
+		return Session{}, err
+	}
+	if !users.SignInAllowed(owner.Status, owner.Active) {
 		return Session{}, ErrRevoked
 	}
 	now := s.clock()

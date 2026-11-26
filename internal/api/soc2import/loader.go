@@ -61,9 +61,34 @@ type Crosswalk struct {
 	// it. The canonical use is "community_draft" for the agent-authored
 	// initial mapping set; "scf_official" when an SCF-published crosswalk
 	// is ingested later.
-	SourceAttribution string        `yaml:"source_attribution"`
-	Requirements      []Requirement `yaml:"requirements"`
-	Mappings          []Mapping     `yaml:"mappings"`
+	SourceAttribution string `yaml:"source_attribution"`
+	// SCFRelease is the SCF release (the SCF framework version label, e.g.
+	// "2026.3") whose anchors the mappings' scf_anchor codes name (#1771).
+	// The SCF reuses codes between releases, so the importer binds each
+	// code within this release only. Workbook loaders fill it from the
+	// workbook's "SCF <release>" sheet. Required: an import without it is
+	// ErrSCFReleaseRequired, and nothing is written (#1774).
+	SCFRelease string `yaml:"scf_release"`
+	// SCFReleaseFromSheet marks a SCFRelease read from a workbook's
+	// "SCF <release>" sheet name with no --scf-release to confirm it. It
+	// binds as strictly as any other release (#1774); the flag only shapes
+	// the error when that release is not loaded, so it names the sheet.
+	// Never read from YAML.
+	SCFReleaseFromSheet bool `yaml:"-"`
+
+	Requirements []Requirement `yaml:"requirements"`
+	Mappings     []Mapping     `yaml:"mappings"`
+	// Source names where this crosswalk came from, and is stamped on every
+	// edge the import writes (fw_to_scf_edges.crosswalk_source, #1971). The
+	// importer retires only the edges its own source wrote, so a YAML
+	// crosswalk and a workbook import into the same framework version leave
+	// each other's edges alone. Set by the loaders, never read from the file:
+	// "yaml:<file name>", "scf-workbook:<columns>" or "scf-olir:<sheet>".
+	Source string `yaml:"-"`
+
+	// PointsOfFocusRollUp reports what the workbook loaders folded into
+	// parent criteria, for the import summary. Never read from YAML.
+	PointsOfFocusRollUp PointsOfFocusRollUp `yaml:"-"`
 }
 
 // Requirement is one framework requirement/clause inside the crosswalk
@@ -73,6 +98,10 @@ type Requirement struct {
 	Code  string `yaml:"code"`  // e.g., "CC6.1" or "A.5.15"
 	Title string `yaml:"title"` // short label
 	Body  string `yaml:"body"`  // requirement/control description (NOT verbatim copyrighted standard text)
+	// PointsOfFocus is SOC 2 point-of-focus metadata on a criterion (#1731).
+	// The workbook loaders fill it by rolling points of focus up; a YAML
+	// crosswalk may list it but need not.
+	PointsOfFocus []PointOfFocus `yaml:"points_of_focus,omitempty"`
 }
 
 // Mapping is one STRM-typed edge from a framework requirement to an SCF
@@ -146,8 +175,14 @@ func Load(path string) (*Crosswalk, error) {
 	if err := validate(&cw); err != nil {
 		return nil, err
 	}
+	cw.Source = yamlSourcePrefix + filepath.Base(path)
 	return &cw, nil
 }
+
+// yamlSourcePrefix marks a YAML crosswalk's Source. A YAML import also owns
+// edges with no recorded source (written before #1971), since the bundled
+// YAML crosswalks were the only importer before workbook imports existed.
+const yamlSourcePrefix = "yaml:"
 
 // validate rejects malformed crosswalks. The strict checks (no silent
 // defaults, every row explicit) are the in-loader half of the slice's
@@ -184,6 +219,9 @@ func validate(cw *Crosswalk) error {
 			return fmt.Errorf("crosswalk: duplicate requirement code %q", r.Code)
 		}
 		codes[r.Code] = struct{}{}
+		if err := validatePointsOfFocus(r); err != nil {
+			return err
+		}
 	}
 	if len(cw.Mappings) == 0 {
 		return errors.New("crosswalk: crosswalk has zero mappings")
@@ -215,6 +253,37 @@ func validate(cw *Crosswalk) error {
 		if !isValidSourceAttribution(attribution) {
 			return fmt.Errorf("crosswalk: mapping[%d] (%s -> %s) source_attribution %q is not one of {scf_official, community_draft, org_internal}",
 				i, m.RequirementCode, m.SCFAnchor, attribution)
+		}
+	}
+	return nil
+}
+
+// validatePointsOfFocus rejects a requirement whose YAML points_of_focus the
+// workbook roll-up could not have produced (#2026): each code must be a
+// point-of-focus code of this very requirement (`<code>-POF<n>`), listed
+// once, with at least one non-blank SCF anchor. Whether the anchors exist in
+// the SCF release is checked at import time, where the catalog is available.
+func validatePointsOfFocus(r Requirement) error {
+	seen := make(map[string]struct{}, len(r.PointsOfFocus))
+	for i, p := range r.PointsOfFocus {
+		parent, _, ok := parsePointOfFocus(p.Code)
+		if !ok {
+			return fmt.Errorf("crosswalk: requirement %s points_of_focus[%d] code %q is not a point-of-focus code (<criterion>-POF<n>)", r.Code, i, p.Code)
+		}
+		if parent != r.Code {
+			return fmt.Errorf("crosswalk: requirement %s points_of_focus[%d] code %q belongs to criterion %s", r.Code, i, p.Code, parent)
+		}
+		if _, dup := seen[p.Code]; dup {
+			return fmt.Errorf("crosswalk: requirement %s lists point of focus %q twice", r.Code, p.Code)
+		}
+		seen[p.Code] = struct{}{}
+		if len(p.SCFAnchors) == 0 {
+			return fmt.Errorf("crosswalk: requirement %s point of focus %s has no scf_anchors", r.Code, p.Code)
+		}
+		for j, a := range p.SCFAnchors {
+			if strings.TrimSpace(a) == "" {
+				return fmt.Errorf("crosswalk: requirement %s point of focus %s scf_anchors[%d] is blank", r.Code, p.Code, j)
+			}
 		}
 	}
 	return nil

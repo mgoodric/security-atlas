@@ -25,9 +25,9 @@
 // Anti-criteria honored (P0):
 // - P0-A6: NO calendar-library dependency (FullCalendar etc.). Both
 //   views are hand-rolled with Tailwind. See decision D6.
-// - P0-A1: a closed event-type set (audit/exception/policy/vendor/control).
-//   Slice 675 added `vendor` to align the agenda with the dashboard
-//   "Upcoming" widget; the set is still closed (no free-form types).
+// - P0-A1: a closed event-type set (audit/exception/policy/vendor/control/
+//   risk/action_plan/policy_ack). Slice 675 added `vendor`; #2130 added
+//   `risk`, `action_plan` and `policy_ack`. The set is still closed (no free-form types).
 // - P0-A5: per-event links fall back to placeholders for pages that
 //   have not shipped yet.
 
@@ -38,6 +38,7 @@ import { Suspense, useMemo, useState } from "react";
 import { AgendaView } from "@/components/calendar/agenda-view";
 import { MonthGridView } from "@/components/calendar/month-grid-view";
 import { TypeFilter } from "@/components/calendar/type-filter";
+import { PageShell } from "@/components/shell/page-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -46,6 +47,21 @@ import {
   createCalendarSubscription,
   fetchCalendarEvents,
 } from "@/lib/api/calendar";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2149 — the header names the page's key terms, so each definition is one
+// hover away. Shared by the Suspense fallback, so it shows while loading.
+const CALENDAR_SUBTITLE = (
+  <>
+    Upcoming <Term id="audit-period">audits</Term>,{" "}
+    <Term id="exception">exception</Term> expirations, policy reviews, vendor
+    reviews on their <Term id="review-cadence">cadence</Term>, periodic control
+    reviews, risk reviews, action-plan due dates and offboarding deadlines — one
+    place for the whole team. <Term id="calendar-subscription">Subscribe</Term>{" "}
+    to see them in your own calendar.
+  </>
+);
 
 const ALL_TYPES = [
   "audit",
@@ -53,6 +69,10 @@ const ALL_TYPES = [
   "policy",
   "vendor",
   "control",
+  "risk",
+  "action_plan",
+  "policy_ack",
+  "offboarding",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
@@ -154,16 +174,10 @@ function CalendarPageInner() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Compliance calendar</h1>
-          <p className="text-sm text-muted-foreground">
-            Upcoming audits, exception expirations, policy reviews, vendor
-            reviews, and periodic control reviews — one place for the whole
-            team.
-          </p>
-        </div>
+    <PageShell
+      title={pageTitle("/calendar")}
+      subtitle={CALENDAR_SUBTITLE}
+      actions={
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
             <Button
@@ -190,6 +204,12 @@ function CalendarPageInner() {
               {subscribeM.isPending ? "Generating…" : "Subscribe in calendar"}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground max-w-xs text-right">
+            Your feed shows what your role can see each time it refreshes. An
+            older feed URL leaves out risk, action-plan, vendor, exception and
+            offboarding events: if yours is missing them, re-subscribe to
+            include them.
+          </p>
           {subscribeMsg && (
             <p
               role="status"
@@ -199,8 +219,8 @@ function CalendarPageInner() {
             </p>
           )}
         </div>
-      </div>
-
+      }
+    >
       <div className="grid grid-cols-12 gap-6">
         <aside className="col-span-12 md:col-span-3">
           <TypeFilter selected={selectedTypes} onToggle={toggleType} />
@@ -247,7 +267,7 @@ function CalendarPageInner() {
           )}
         </section>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -256,7 +276,13 @@ export default function CalendarPage() {
   // strict-mode requirement). The fallback is a one-row skeleton so the
   // page still shows something during the brief client boot.
   return (
-    <Suspense fallback={<Skeleton className="h-32 w-full" />}>
+    <Suspense
+      fallback={
+        <PageShell title={pageTitle("/calendar")} subtitle={CALENDAR_SUBTITLE}>
+          <Skeleton className="h-32 w-full" />
+        </PageShell>
+      }
+    >
       <CalendarPageInner />
     </Suspense>
   );

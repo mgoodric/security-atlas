@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/posturetargets"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -30,8 +30,9 @@ const trendWindow = 90 * 24 * time.Hour
 // handler's public API is unchanged: New still takes a *Store).
 type reader interface {
 	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
+	PostureTargets(ctx context.Context) ([]dbx.FrameworkPostureTarget, error)
+	PriorFrameworkVersions(ctx context.Context) (map[uuid.UUID]uuid.UUID, error)
 	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
-	UpcomingItems(ctx context.Context, categoryFilter string, cursor keyset, pageRows int32) ([]dbx.ListUpcomingItemsRow, error)
 }
 
 // Handler bundles the slice-066 dashboard read routes over a single Store.
@@ -53,18 +54,60 @@ func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 
 // ===== wire shapes =====
 //
-// The three row shapes are the slice-066 acceptance-criteria contracts and
-// match slice 040's four placeholder contracts (the frontend re-pointing of
-// framework-posture-panel / activity-feed-panel / upcoming-panel is the
-// documented follow-up).
+// The row shapes are the slice-066 acceptance-criteria contracts. The
+// third, the AC-4 upcoming rollup, was retired by #2130: the compliance
+// calendar (GET /v1/calendar) is the one list of what is due.
 
 // postureWire is the AC-1 row shape: one framework version's posture.
+//
+// ScopeSet (#2114) is false when the tenant has no ACTIVATED framework
+// scope for the version. Nothing has been decided out of scope then, so a
+// percentage would be over the whole requirement set: every percentage is
+// null and callers show "Scope not set" instead of a number.
 type postureWire struct {
-	FrameworkID        string  `json:"framework_id"`
-	FrameworkVersion   string  `json:"framework_version"`
-	CoveragePct        float64 `json:"coverage_pct"`
-	FreshnessComposite float64 `json:"freshness_composite"`
-	TrendDelta90d      float64 `json:"trend_delta_90d"`
+	FrameworkID        string `json:"framework_id"`
+	FrameworkVersion   string `json:"framework_version"`
+	FrameworkVersionID string `json:"framework_version_id"`
+	// FrameworkName (#2083) lets callers label the version by name plus
+	// version instead of the version alone.
+	FrameworkName string   `json:"framework_name"`
+	ScopeSet      bool     `json:"scope_set"`
+	CoveragePct   *float64 `json:"coverage_pct"`
+	// CoveredByExceptionPct is the part of CoveragePct that rests only on
+	// active exceptions (#2112), 0-100.
+	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    *float64 `json:"freshness_composite"`
+	TrendDelta90d         *float64 `json:"trend_delta_90d"`
+	// Target (#2136) is the organisation's posture target for the version,
+	// or null when none is set. Tiles colour coverage against it and stay
+	// neutral without one.
+	Target *posturetargets.Target `json:"target"`
+	// PriorTarget (#2406) is the target on the version the
+	// version-migration queue leads into this one from, when this version
+	// has none and that one does; otherwise null. The Set target dialog
+	// prefills from it. Activation carries it forward, so this covers
+	// versions activated before the carry-over existed.
+	PriorTarget *posturetargets.Target `json:"prior_target"`
+}
+
+// postureWireFromRow projects one posture row onto the wire, leaving the
+// percentages null when the version has no activated scope (#2114).
+func postureWireFromRow(p dbx.FrameworkPostureRow) postureWire {
+	out := postureWire{
+		FrameworkID:        uuidString(p.FrameworkID),
+		FrameworkVersion:   p.FrameworkVersion,
+		FrameworkName:      p.FrameworkName,
+		FrameworkVersionID: uuidString(p.FrameworkVersionID),
+		ScopeSet:           p.ScopeActivated,
+	}
+	if !p.ScopeActivated {
+		return out
+	}
+	out.CoveragePct = &p.CoveragePct
+	out.CoveredByExceptionPct = &p.CoveredByExceptionPct
+	out.FreshnessComposite = &p.FreshnessComposite
+	out.TrendDelta90d = &p.TrendDelta90d
+	return out
 }
 
 // activityWire is the AC-2 row shape: one evidence-ingest activity event.
@@ -75,15 +118,6 @@ type activityWire struct {
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
 	Summary      json.RawMessage `json:"summary"`
-}
-
-// upcomingWire is the AC-4 row shape: one upcoming item.
-type upcomingWire struct {
-	DueDate      string `json:"due_date"`
-	Category     string `json:"category"`
-	Title        string `json:"title"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
 }
 
 // ===== AC-1: GET /v1/frameworks/posture =====
@@ -109,14 +143,33 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targets, err := h.store.PostureTargets(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "dashboard", err)
+		return
+	}
+	byVersion := make(map[string]posturetargets.Target, len(targets))
+	for _, t := range targets {
+		pt := posturetargets.FromRow(t)
+		byVersion[pt.FrameworkVersionID] = pt
+	}
+	prior, err := h.store.PriorFrameworkVersions(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "dashboard", err)
+		return
+	}
+
 	out := make([]postureWire, len(rows))
 	for i, p := range rows {
-		out[i] = postureWire{
-			FrameworkID:        uuidString(p.FrameworkID),
-			FrameworkVersion:   p.FrameworkVersion,
-			CoveragePct:        p.CoveragePct,
-			FreshnessComposite: p.FreshnessComposite,
-			TrendDelta90d:      p.TrendDelta90d,
+		out[i] = postureWireFromRow(p)
+		if t, ok := byVersion[out[i].FrameworkVersionID]; ok {
+			out[i].Target = &t
+			continue
+		}
+		if from, ok := prior[uuid.UUID(p.FrameworkVersionID.Bytes)]; ok {
+			if t, ok := byVersion[from.String()]; ok {
+				out[i].PriorTarget = &t
+			}
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -184,71 +237,6 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// ===== AC-4: GET /v1/upcoming =====
-
-// Upcoming handles GET /v1/upcoming — a unified rollup across expiring
-// exceptions, policy-ack expirations, vendor reviews, vendor renewals, and audit-period
-// milestones, merged into one date-sorted (ascending) paginated feed.
-//
-// Query params:
-//   - cursor   (optional) opaque keyset cursor. Omit for the first page.
-//   - limit    (optional) page size, default 50, max 200.
-//   - category (optional) one of exception / policy_ack / vendor_review /
-//     vendor_renewal /
-//     audit_period — narrows to one source. Omit for all.
-func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
-	if !requireProgramRead(w, r) {
-		return
-	}
-	ctx, ok := tenantContext(r)
-	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
-		return
-	}
-
-	category := r.URL.Query().Get("category")
-	if category != "" && !validUpcomingCategory(category) {
-		httpresp.WriteError(w, http.StatusBadRequest,
-			"category must be one of: exception, policy_ack, vendor_review, vendor_renewal, audit_period")
-
-		return
-	}
-	cursor, err := decodeCursor(r.URL.Query().Get("cursor"), firstPageUpcoming())
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	rows, err := h.store.UpcomingItems(ctx, category, cursor, pageRows)
-	if err != nil {
-		httperr.WriteInternal(w, r, "dashboard", err)
-		return
-	}
-
-	page, next := splitUpcomingPage(rows, pageRows)
-	out := make([]upcomingWire, len(page))
-	for i, it := range page {
-		out[i] = upcomingWire{
-			DueDate:      tsString(it.DueDate),
-			Category:     it.Category,
-			Title:        anyToString(it.Title),
-			ResourceType: it.ResourceType,
-			ResourceID:   it.ResourceID,
-		}
-	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
-		"upcoming":    out,
-		"count":       len(out),
-		"next_cursor": next,
-	})
-
-}
-
 // ===== page-splitting =====
 
 // splitActivityPage trims the +1 probe row off an activity result set and
@@ -264,29 +252,7 @@ func splitActivityPage(rows []dbx.ListEvidenceActivityRow, pageRows int32) ([]db
 	return page, encodeCursor(keyset{ts: last.Ts.Time.UTC(), id: last.ResourceID})
 }
 
-// splitUpcomingPage is splitActivityPage's twin for the upcoming rollup.
-func splitUpcomingPage(rows []dbx.ListUpcomingItemsRow, pageRows int32) ([]dbx.ListUpcomingItemsRow, string) {
-	if int32(len(rows)) <= pageRows {
-		return rows, ""
-	}
-	page := rows[:pageRows]
-	last := page[len(page)-1]
-	return page, encodeCursor(keyset{ts: last.DueDate.Time.UTC(), id: last.ResourceID})
-}
-
 // ===== helpers =====
-
-// validUpcomingCategory reports whether c is one of the rollup
-// category names. The empty string ("all") is handled before this is
-// called.
-func validUpcomingCategory(c string) bool {
-	switch c {
-	case "exception", "policy_ack", "vendor_review", "vendor_renewal", "audit_period":
-		return true
-	default:
-		return false
-	}
-}
 
 // tenantContext confirms the upstream slice-033 tenancy middleware lifted a
 // tenant id onto the request context. Absent it, the request is
@@ -337,22 +303,4 @@ func jsonOrNull(b []byte) json.RawMessage {
 		return json.RawMessage("null")
 	}
 	return json.RawMessage(b)
-}
-
-// anyToString renders the upcoming rollup's `title` column. sqlc types it
-// as interface{} because it is a `||` string concatenation it cannot
-// statically resolve; at runtime pgx scans it as a string. A nil value
-// (impossible for the rollup's non-null concatenations, but defensive)
-// renders "".
-func anyToString(v any) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	case []byte:
-		return string(s)
-	case nil:
-		return ""
-	default:
-		return fmt.Sprintf("%v", v)
-	}
 }

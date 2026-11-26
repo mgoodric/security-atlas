@@ -1,0 +1,181 @@
+package control
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// Issues #1908, #1958, #2023: only the top-level `description`,
+// `external_refs` and `anchor_fit_note` may differ for an upload to
+// update the active control in place.
+func TestManifestsEqualIgnoringMetadata(t *testing.T) {
+	t.Parallel()
+
+	const base = `bundle_schema_version: "1"
+bundle_id: c1
+title: "Test control"
+description: "Original prose."
+scf_anchor_id: IAC-37
+implementation_type: automated
+anchor_fit: partial
+anchor_fit_note: "Covers MFA only."
+evidence_queries:
+  - id: q1
+    language: rego
+    expression: "allow"
+    description: "query prose"
+external_refs:
+  - system: acme-audit
+    id: RA-03
+`
+	cases := []struct {
+		name string
+		next string
+		want bool
+	}{
+		{"identical", base, true},
+		{"description reworded", replace(base, `description: "Original prose."`, `description: "Rewritten prose."`), true},
+		{"description reflowed to block scalar", replace(base, `description: "Original prose."`, "description: >-\n  Original\n  prose."), true},
+		{"description removed", replace(base, "description: \"Original prose.\"\n", ""), true},
+		{"key order and comments", "# a comment\n" + replace(base, "title: \"Test control\"\n", "") + "title: \"Test control\"\n", true},
+		{"title changed", replace(base, `title: "Test control"`, `title: "Renamed"`), false},
+		{"implementation type changed", replace(base, "implementation_type: automated", "implementation_type: semi_automated"), false},
+		{"query description changed", replace(base, `description: "query prose"`, `description: "other prose"`), true},
+		{"query description removed", replace(base, "    description: \"query prose\"\n", ""), true},
+		{"query description and control description changed", replace(replace(base, `description: "query prose"`, `description: "other prose"`), `description: "Original prose."`, `description: "New."`), true},
+		{"query expression changed", replace(base, `expression: "allow"`, `expression: "deny"`), false},
+		{"query id renamed", replace(base, "id: q1", "id: q1_renamed"), false},
+		{"query language changed", replace(base, "language: rego", "language: sql"), false},
+		{"query evidence_kind added", replace(base, "    language: rego\n", "    language: rego\n    evidence_kind: manual.upload.v1\n"), false},
+		{"query added", replace(base, "external_refs:", "  - id: q2\n    language: rego\n    expression: \"allow\"\nexternal_refs:"), false},
+		{"query description changed alongside expression", replace(replace(base, `description: "query prose"`, `description: "other prose"`), `expression: "allow"`, `expression: "deny"`), false},
+		{"field added", base + "owner_role: ciso\n", false},
+		{"external ref id changed", replace(base, "id: RA-03", "id: RA-04"), true},
+		{"external ref added", base + "  - system: soc2\n    kind: tested_under\n    id: CC3.1\n", true},
+		{"external refs removed", replace(base, "external_refs:\n  - system: acme-audit\n    id: RA-03\n", ""), true},
+		{"refs and description both changed", replace(replace(base, "id: RA-03", "id: RA-09"), `description: "Original prose."`, `description: "New."`), true},
+		{"anchor fit note reworded", replace(base, `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "Covers MFA, not SSO."`), true},
+		{"anchor fit changed", replace(base, "anchor_fit: partial", "anchor_fit: none"), false},
+		{"anchor fit and note both changed", replace(replace(base, "anchor_fit: partial", "anchor_fit: none"), `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "No fit."`), false},
+		{"scf_release declared on a manifest that is not shipped stock", replace(base, "scf_anchor_id: IAC-37\n", "scf_anchor_id: IAC-37\nscf_release: test-2026.3\n"), false},
+		{"refs changed alongside a title change", replace(replace(base, "id: RA-03", "id: RA-09"), `title: "Test control"`, `title: "Renamed"`), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := manifestsEqualIgnoringMetadata([]byte(base), []byte(tc.next))
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Issue #2891: the stock-bundle CI tripwire prints these, so a reviewer
+// sees which field makes an upload supersede.
+func TestSupersedingFields_NamesTheFields(t *testing.T) {
+	t.Parallel()
+	const base = `bundle_id: c1
+title: "T"
+description: "prose"
+freshness_class: monthly
+evidence_queries:
+  - id: q1
+    language: rego
+    expression: "allow"
+    description: "query prose"
+  - id: q2
+    language: rego
+    expression: "allow"
+`
+	cases := []struct {
+		name string
+		next string
+		want []string
+	}{
+		{"prose only", replace(replace(base, `"query prose"`, `"new"`), `"prose"`, `"new"`), nil},
+		{"freshness and expression", replace(replace(base, "monthly", "annual"), "expression: \"allow\"\n    description", "expression: \"deny\"\n    description"), []string{"evidence_queries[q1].expression", "freshness_class"}},
+		{"query id renamed", replace(base, "id: q2", "id: q3"), []string{"evidence_queries[q2].id"}},
+		{"query removed", strings.TrimSuffix(base, "  - id: q2\n    language: rego\n    expression: \"allow\"\n"), []string{"evidence_queries"}},
+		{"queries reordered", "bundle_id: c1\ntitle: \"T\"\nfreshness_class: monthly\nevidence_queries:\n  - id: q2\n    language: rego\n    expression: \"allow\"\n  - id: q1\n    language: rego\n    expression: \"allow\"\n", []string{"evidence_queries[q1].id", "evidence_queries[q2].id"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := SupersedingFields([]byte(base), []byte(tc.next))
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Issue #1773: a shipped stock manifest that declares scf_release where the
+// stored one had none updates in place. Anything else that adds, changes or
+// removes scf_release supersedes: a tenant bundle declaring a release, and
+// a remap approval rewriting one (#1776), mean to re-bind.
+func TestSupersedingFields_SCFRelease(t *testing.T) {
+	t.Parallel()
+	shipped, err := os.ReadFile(filepath.Join("..", "..", "controls", "soc2", "soc2_cc8_1_change_management", "control.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stock := string(shipped)
+	stockBefore := strings.Replace(stock, "scf_release: test-2026.3\n", "", 1)
+	if stockBefore == stock {
+		t.Fatal("shipped soc2_cc8_1_change_management manifest declares no scf_release: test-2026.3")
+	}
+	const unpinned = "bundle_id: c1\nscf_anchor_id: IAC-37\n"
+	const pinned = unpinned + "scf_release: test-2026.3\n"
+	cases := []struct {
+		name        string
+		prior, next string
+		want        []string
+	}{
+		{"stock: declared on the shipped manifest", stockBefore, stock, nil},
+		{"stock: shipped bytes plus one byte", stockBefore, stock + "\n", []string{"scf_release"}},
+		{"stock: declared alongside an anchor change", stockBefore, strings.Replace(stock, "scf_anchor_id: CHG-02\n", "scf_anchor_id: CHG-04\n", 1), []string{"scf_anchor_id", "scf_release"}},
+		{"tenant: declared", unpinned, pinned, []string{"scf_release"}},
+		{"tenant: declared blank before", unpinned + "scf_release: \"\"\n", pinned, []string{"scf_release"}},
+		{"unchanged", pinned, pinned, nil},
+		{"changed", pinned, unpinned + "scf_release: \"2026.3\"\n", []string{"scf_release"}},
+		{"removed", pinned, unpinned, []string{"scf_release"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := SupersedingFields([]byte(tc.prior), []byte(tc.next))
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestManifestsEqualIgnoringMetadata_MalformedYAML(t *testing.T) {
+	t.Parallel()
+	if _, err := manifestsEqualIgnoringMetadata([]byte("a: [1"), []byte("a: 1")); err == nil {
+		t.Fatal("expected an error for malformed prior YAML")
+	}
+	if _, err := manifestsEqualIgnoringMetadata([]byte("a: 1"), []byte("a: [1")); err == nil {
+		t.Fatal("expected an error for malformed new YAML")
+	}
+}
+
+func replace(s, old, new string) string {
+	if !strings.Contains(s, old) {
+		panic("replace: substring not found: " + old)
+	}
+	return strings.Replace(s, old, new, 1)
+}

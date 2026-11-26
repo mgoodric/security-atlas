@@ -9,18 +9,22 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -65,6 +69,13 @@ func demoSeedRefusalMessage(err error) (string, bool) {
 	}
 }
 
+// multiTenantDisabledMessage is the 403 body for a seed click the missing
+// ATLAS_ALLOW_MULTI_TENANT opt-in refuses (#2043). It matches the tenant
+// create refusal in admintenants, and adds the CLI's in-place alternative.
+const multiTenantDisabledMessage = "multi-tenant is not enabled on this install: set " +
+	admintenants.AllowMultiTenantEnvVar + "=true to create a separate demo tenant, " +
+	"or load the demo into your organisation with `atlas-cli demo seed` (no --tenant-slug)"
+
 // isEnabledFunc returns true when the env-var gate is satisfied.
 // Injected at construction so tests can override without touching
 // the real process env.
@@ -92,14 +103,19 @@ func DefaultEnabledFunc() bool {
 //     it to the seeded tenant (invariant #6). May be nil in the unit-server
 //     harness — evaluation is then skipped (logged), not fatal.
 //   - isEnabled — test-injectable env-var gate.
-//   - limiter  — per-IP token bucket (1 token, 60s replenish).
+//   - allowMultiTenant — test-injectable ATLAS_ALLOW_MULTI_TENANT opt-in
+//     (#2043): without it, Seed never creates the demo tenant beside an
+//     existing one.
+//   - limiter  — per-IP token bucket (1 token, 60s replenish), shared by
+//     Seed and Teardown. It reads clock, so WithClock drives it too.
 //   - clock    — test-injectable clock.
 type Handler struct {
-	authPool  *pgxpool.Pool
-	appPool   *pgxpool.Pool
-	isEnabled isEnabledFunc
-	limiter   *ipBucketLimiter
-	clock     func() time.Time
+	authPool         *pgxpool.Pool
+	appPool          *pgxpool.Pool
+	isEnabled        isEnabledFunc
+	allowMultiTenant func() bool
+	limiter          *ratelimit.Limiter
+	clock            func() time.Time
 }
 
 // New constructs a Handler. authPool MUST be non-nil for the
@@ -110,12 +126,20 @@ func New(authPool *pgxpool.Pool, enabled isEnabledFunc) *Handler {
 	if enabled == nil {
 		enabled = DefaultEnabledFunc
 	}
-	return &Handler{
-		authPool:  authPool,
-		isEnabled: enabled,
-		limiter:   newIPBucketLimiter(rateLimitWindow),
-		clock:     time.Now,
+	h := &Handler{
+		authPool:         authPool,
+		isEnabled:        enabled,
+		allowMultiTenant: admintenants.DefaultAllowMultiTenant,
+		clock:            time.Now,
 	}
+	h.limiter = ratelimit.New(rateLimitWindow, 1, func() time.Time { return h.clock() })
+	return h
+}
+
+// WithAllowMultiTenant overrides the multi-tenant opt-in. Test-only.
+func (h *Handler) WithAllowMultiTenant(fn func() bool) *Handler {
+	h.allowMultiTenant = fn
+	return h
 }
 
 // SetAppPool attaches the RLS-enforced app-role pool used by slice 671 to
@@ -131,7 +155,6 @@ func (h *Handler) SetAppPool(appPool *pgxpool.Pool) *Handler {
 // WithClock overrides the clock. Test-only.
 func (h *Handler) WithClock(fn func() time.Time) *Handler {
 	h.clock = fn
-	h.limiter.clock = fn
 	return h
 }
 
@@ -159,6 +182,9 @@ type seedResponse struct {
 	AuditPeriods int    `json:"audit_periods"`
 	Samples      int    `json:"samples"`
 	Idempotent   bool   `json:"idempotent"`
+	// SwitchedOn lists the module and feature switches the seed turned
+	// on so the seeded data is shown (#2590).
+	SwitchedOn []string `json:"switched_on,omitempty"`
 }
 
 // teardownResponse is the JSON body for POST /v1/admin/demo/teardown.
@@ -189,11 +215,13 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 //
 // Wire shape:
 //
-//  1. Admin check (defense-in-depth; OPA already ran).
+//  1. super_admin check (OPA already ran its admin check; #1851).
 //  2. Env-var gate.
 //  3. Rate-limit gate (per-IP, 60s).
 //  4. Write me_audit_log + super_admin_audit_log rows BEFORE invoking.
-//  5. Invoke demoseed.Seeder.Apply with default slug + scale.
+//  5. Invoke demoseed.Seeder.Seed with default slug + scale. Without the
+//     ATLAS_ALLOW_MULTI_TENANT opt-in it refuses to create the demo tenant
+//     beside an existing tenant -> 403 (#2043).
 //  6. Return summary JSON.
 //
 // FAIL CLOSED: if the audit-log write fails, the seeder does NOT
@@ -204,16 +232,14 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 // 'demo_seed_apply' row separately (the run). Two-row forensic
 // separation distinguishes who-clicked from what-was-seeded.
 func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
+	if !h.requireSuperAdmin(w, r) {
 		return
 	}
 	if !h.isEnabled() {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	if !h.allowInvocation(w, r) {
 		return
 	}
 	if h.authPool == nil {
@@ -244,8 +270,9 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invoke the seeder. Slice 205's Apply is idempotent on slug, so
-	// a re-click on an already-seeded tenant returns Idempotent=true.
+	// Invoke the seeder through Seed, the multi-tenant-gated entry point
+	// (#2043). It re-runs idempotently against an existing demo tenant, and
+	// creates one beside another tenant only with ATLAS_ALLOW_MULTI_TENANT.
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
 		httperr.WriteInternal(w, r, "build seeder", err)
@@ -253,11 +280,16 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	res, err := seeder.Apply(ctx, demoseed.ApplyInput{
-		Slug:          demoTenantSlug,
-		ActorUserID:   actorID,
-		ActorTenantID: actorTenantID,
+	res, err := seeder.Seed(ctx, demoseed.SeedInput{
+		Slug:             demoTenantSlug,
+		AllowMultiTenant: h.allowMultiTenant(),
+		ActorUserID:      actorID,
+		ActorTenantID:    actorTenantID,
 	})
+	if errors.Is(err, demoseed.ErrMultiTenantNotEnabled) {
+		httpresp.WriteError(w, http.StatusForbidden, multiTenantDisabledMessage)
+		return
+	}
 	if err != nil {
 		// A populated/unmarked tenant is an operator precondition, not an
 		// internal fault — surface it as a clear 409 instead of a masked
@@ -289,6 +321,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		AuditPeriods: res.AuditPeriods,
 		Samples:      res.Samples,
 		Idempotent:   res.Idempotent,
+		SwitchedOn:   res.SwitchedOn,
 	})
 
 }
@@ -322,16 +355,14 @@ func (h *Handler) evaluateSeededTenant(ctx context.Context, tenantID uuid.UUID) 
 // Mirrors Seed exactly except: writes action='demo_teardown' instead
 // of 'demo_seed' and invokes Seeder.Teardown instead of Apply.
 func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
+	if !h.requireSuperAdmin(w, r) {
 		return
 	}
 	if !h.isEnabled() {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	if !h.allowInvocation(w, r) {
 		return
 	}
 	if h.authPool == nil {
@@ -363,7 +394,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	if err := seeder.Teardown(ctx, demoTenantSlug, actorID, actorTenantID); err != nil {
-		httperr.WriteInternal(w, r, "teardown failed", err)
+		writeTeardownError(w, r, err)
 		return
 	}
 
@@ -372,6 +403,47 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		Status:     "deleted",
 	})
 
+}
+
+// teardownBusyRetryAfter is the Retry-After, in seconds, on a teardown
+// refused because audit_periods was busy. The teardown waits 2s for its
+// lock, so a retry a few seconds later usually finds the writers gone.
+const teardownBusyRetryAfter = "5"
+
+// teardownBusyCode is the stable machine code on that 503.
+const teardownBusyCode = "teardown_busy"
+
+// writeTeardownError writes the response for a failed Seeder.Teardown. A
+// teardown that gave up waiting for the audit_periods lock
+// (demoseed.ErrTeardownBusy) rolled back and deleted nothing, so it is a 503
+// with Retry-After and the teardown_busy code, not a generic 500 (#3094).
+// Anything else is a 500.
+func writeTeardownError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, demoseed.ErrTeardownBusy) {
+		w.Header().Set("Retry-After", teardownBusyRetryAfter)
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, "teardown busy", err, teardownBusyCode)
+		return
+	}
+	httperr.WriteInternal(w, r, "teardown failed", err)
+}
+
+// requireSuperAdmin gates Seed and Teardown on the verified JWT's
+// `atlas:super_admin` claim (#1851). Both create or delete a whole tenant
+// through the BYPASSRLS auth pool, an install-wide effect, so a tenant-scoped
+// admin (including a per-tenant admin API key, which sets cred.IsAdmin and
+// never carries the claim) gets 403. It is the check #1757 put on the global
+// catalog write routes. On a single-tenant install the bootstrap admin holds
+// super_admin (#1759). A missing credential is 401.
+func (h *Handler) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := authctx.CredentialFromContext(r.Context()); !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
+		return false
+	}
+	if claims := jwtmw.FromContext(r.Context()); claims == nil || !claims.SuperAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
+		return false
+	}
+	return true
 }
 
 // requireAdmin enforces the admin role. Defense in depth: the OPA
@@ -383,9 +455,9 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 //
 //  1. cred.IsAdmin == true (slice 187+: claims.SuperAdmin set OR
 //     legacy bearer-token API key with IsAdmin flag).
-//  2. cred.OwnerRoles carries "admin" (slice 192+: per-tenant role
-//     grant — the JWT carries Roles[currentTenant] = ["admin"]
-//     which jwtmw maps into cred.OwnerRoles).
+//  2. authz.TenantRoleLabels counts "admin": the caller's live tenant
+//     admin role, or an unbound key's own label. A JWT session's role
+//     claim does not count; it outlives a revoke (#2505).
 //
 // On failure: 403 with a JSON error. On missing credential: 401.
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -397,7 +469,7 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if cred.IsAdmin {
 		return true
 	}
-	for _, role := range cred.OwnerRoles {
+	for _, role := range authz.TenantRoleLabels(cred) {
 		if role == "admin" {
 			return true
 		}
@@ -428,14 +500,11 @@ func (h *Handler) resolveActor(ctx context.Context) (uuid.UUID, uuid.UUID, error
 		}
 	}
 	if actorID == uuid.Nil {
-		// Legacy bearer path — try the credstore credential's UserID.
-		// jwtmw also populates this with the "user:<uuid>" Subject, so
-		// strip the prefix here too.
+		// Legacy bearer path — the credstore credential's user, which
+		// resolves a "user:<uuid>" JWT Subject and a user-bound key alike.
 		cred, _ := authctx.CredentialFromContext(ctx)
-		if cred.UserID != "" {
-			if u, err := uuid.Parse(subjectUserID(cred.UserID)); err == nil {
-				actorID = u
-			}
+		if u, ok := credstore.CallerUserID(cred); ok {
+			actorID = u
 		}
 	}
 	if actorID == uuid.Nil {
@@ -512,42 +581,15 @@ func clientIP(r *http.Request) string {
 	return authapi.ClientIP(r)
 }
 
-// --- in-memory per-IP token bucket ---
-//
-// One token per bucket, replenished after `window`. Memory grows
-// unbounded if attackers spam unique IPs, but the upstream OPA gate
-// requires admin role first — so only authenticated admins can
-// reach this limiter. v1 is fine; a future slice could swap this
-// for a TTL map.
-
-type ipBucketLimiter struct {
-	mu      sync.Mutex
-	window  time.Duration
-	clock   func() time.Time
-	buckets map[string]time.Time // ip -> next-allowed
-}
-
-func newIPBucketLimiter(window time.Duration) *ipBucketLimiter {
-	return &ipBucketLimiter{
-		window:  window,
-		clock:   time.Now,
-		buckets: map[string]time.Time{},
+// allowInvocation spends the caller's per-IP token for a seed or teardown.
+// When it is spent it writes the 429 and returns false.
+func (h *Handler) allowInvocation(w http.ResponseWriter, r *http.Request) bool {
+	if ok, _ := h.limiter.Allow(ratekey.IP(clientIP(r))); ok {
+		return true
 	}
-}
-
-// allow returns true when the IP may proceed and records the next
-// allowed timestamp. Returns false when the IP is still inside its
-// cooldown window.
-func (l *ipBucketLimiter) allow(ip string, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if next, ok := l.buckets[ip]; ok {
-		if now.Before(next) {
-			return false
-		}
-	}
-	l.buckets[ip] = now.Add(l.window)
-	return true
+	ratelimit.SetRetryAfter(w, int(rateLimitWindow.Seconds()))
+	httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	return false
 }
 
 // --- helpers ---

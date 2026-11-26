@@ -26,8 +26,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -38,7 +41,38 @@ import (
 type Handler struct {
 	store *vendor.Store
 	now   func() time.Time // injected for tests; defaults to time.Now in production
+	views *moduleaccess.Views
 }
+
+// WithModules wires the module views the owner_lacks_access flag reads
+// (#2174). Without them (a unit-test server) no owner is flagged.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// flagOwners sets owner_lacks_access on each vendor from its owner's live
+// module access. It fails closed: an error is returned, not a vendor list
+// that silently omits the flag.
+func (h *Handler) flagOwners(r *http.Request, out []vendorWire) error {
+	check, err := h.views.Owners(r, thirdPartyRisk)
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		if out[i].OwnerUserID == nil {
+			continue
+		}
+		if out[i].OwnerLacksAccess, err = check.Lacks(*out[i].OwnerUserID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// thirdPartyRisk is the module key vendors belong to
+// (featureflag.Modules).
+const thirdPartyRisk = "third_party_risk"
 
 // New constructs a Handler over a vendor.Store. now defaults to time.Now;
 // tests can override via NewWithClock.
@@ -55,32 +89,48 @@ func NewWithClock(store *vendor.Store, now func() time.Time) *Handler {
 // ----- wire types -----
 
 type vendorWire struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Domain         *string   `json:"domain,omitempty"`
-	Criticality    string    `json:"criticality"`
-	ContractStart  *string   `json:"contract_start,omitempty"`
-	ContractEnd    *string   `json:"contract_end,omitempty"`
-	DPASigned      bool      `json:"dpa_signed"`
-	DPASignedAt    *string   `json:"dpa_signed_at,omitempty"`
-	ReviewCadence  string    `json:"review_cadence"`
-	LastReviewDate *string   `json:"last_review_date,omitempty"`
-	Overdue        bool      `json:"overdue"`
-	OwnerUser      string    `json:"owner_user"`
-	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
-	Notes          string    `json:"notes"`
-	AnnualCost     *float64  `json:"annual_cost,omitempty"`
-	Currency       *string   `json:"currency,omitempty"`
-	RenewalDate    *string   `json:"renewal_date,omitempty"`
-	AutoRenew      bool      `json:"auto_renew"`
-	LicenseCount   *int32    `json:"license_count,omitempty"`
-	ToolCategory   *string   `json:"tool_category,omitempty"`
-	CostOwner      string    `json:"cost_owner"`
-	Status         string    `json:"status"`
-	BillingCadence *string   `json:"billing_cadence,omitempty"`
-	ScopeCellIDs   []string  `json:"scope_cell_ids"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Domain         *string `json:"domain,omitempty"`
+	Criticality    string  `json:"criticality"`
+	ContractStart  *string `json:"contract_start,omitempty"`
+	ContractEnd    *string `json:"contract_end,omitempty"`
+	DPASigned      bool    `json:"dpa_signed"`
+	DPASignedAt    *string `json:"dpa_signed_at,omitempty"`
+	ReviewCadence  string  `json:"review_cadence"`
+	LastReviewDate *string `json:"last_review_date,omitempty"`
+	// FirstReviewDue is set only while the vendor has never been reviewed:
+	// its creation date (UTC) plus the tenant's initial-review window
+	// (#2061). Overdue is false until that day has passed.
+	FirstReviewDue *string `json:"first_review_due,omitempty"`
+	Overdue        bool    `json:"overdue"`
+	// OwnerUserID is the owner, a user of the tenant, or null (#2129).
+	// OwnerUnlinked is the free-text owner no user matched, shown as
+	// "Owner (unlinked)"; it is empty whenever OwnerUserID is set.
+	// OwnerUser is the stored free text, kept for older clients.
+	OwnerUserID   *string `json:"owner_user_id"`
+	OwnerUnlinked string  `json:"owner_unlinked"`
+	OwnerUser     string  `json:"owner_user"`
+	// OwnerLacksAccess (#2174) is computed at read time: the owner can no
+	// longer work in Third-party risk, because an admin narrowed their
+	// module access to leave it out, or because they hold no live role in
+	// the tenant and are not a super-admin (#2501). The owner itself is
+	// kept.
+	OwnerLacksAccess bool      `json:"owner_lacks_access,omitempty"`
+	LinkedSOWURI     *string   `json:"linked_sow_uri,omitempty"`
+	Notes            string    `json:"notes"`
+	AnnualCost       *float64  `json:"annual_cost,omitempty"`
+	Currency         *string   `json:"currency,omitempty"`
+	RenewalDate      *string   `json:"renewal_date,omitempty"`
+	AutoRenew        bool      `json:"auto_renew"`
+	LicenseCount     *int32    `json:"license_count,omitempty"`
+	ToolCategory     *string   `json:"tool_category,omitempty"`
+	CostOwner        string    `json:"cost_owner"`
+	Status           string    `json:"status"`
+	BillingCadence   *string   `json:"billing_cadence,omitempty"`
+	ScopeCellIDs     []string  `json:"scope_cell_ids"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type writeReq struct {
@@ -94,6 +144,7 @@ type writeReq struct {
 	ReviewCadence  string   `json:"review_cadence"`
 	LastReviewDate *string  `json:"last_review_date"`
 	OwnerUser      string   `json:"owner_user"`
+	OwnerUserID    *string  `json:"owner_user_id"`
 	LinkedSOWURI   *string  `json:"linked_sow_uri"`
 	Notes          string   `json:"notes"`
 	AnnualCost     *float64 `json:"annual_cost"`
@@ -163,6 +214,7 @@ func (h *Handler) CreateVendor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
+	in.Actor = actor(r)
 	v, err := h.store.Create(ctx, in)
 	if err != nil {
 		h.writeStoreErr(w, r, "create vendor", err)
@@ -209,7 +261,7 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 			}
 			f.Cutoff = t
 		} else {
-			f.Cutoff = h.now()
+			f.Cutoff = h.now().UTC()
 		}
 	}
 	rows, err := h.store.List(ctx, f)
@@ -220,6 +272,10 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 	out := make([]vendorWire, 0, len(rows))
 	for _, v := range rows {
 		out = append(out, h.toWire(v))
+	}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "vendor owner access", err)
+		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendors": out})
 }
@@ -253,6 +309,24 @@ func (h *Handler) SpendRollup(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rollup": out})
 }
 
+// GetInitialReviewWindow handles GET /v1/vendors/initial-review-window
+// (#2201): the organisation's vendor initial-review window in days, so the
+// Settings page can show the current value. Set via
+// PATCH /v1/tenants/{id} vendor_initial_review_days.
+func (h *Handler) GetInitialReviewWindow(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	days, err := h.store.InitialReviewDays(ctx)
+	if err != nil {
+		h.writeStoreErr(w, r, "read vendor initial review window", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor_initial_review_days": days})
+}
+
 // GetVendor handles GET /v1/vendors/{id}.
 func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
@@ -270,7 +344,12 @@ func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get vendor", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
+	out := []vendorWire{h.toWire(v)}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "vendor owner access", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": out[0]})
 }
 
 // UpdateVendor handles PATCH /v1/vendors/{id}. Replace semantics; see package
@@ -291,6 +370,7 @@ func (h *Handler) UpdateVendor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
+	in.Actor = actor(r)
 	v, err := h.store.Update(ctx, id, in)
 	if err != nil {
 		h.writeStoreErr(w, r, "update vendor", err)
@@ -403,7 +483,7 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 		}
 		crit = &v
 	}
-	asOf := h.now()
+	asOf := h.now().UTC()
 	if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
 		t, err := time.Parse("2006-01-02", v)
 		if err != nil {
@@ -490,6 +570,13 @@ func decodeWrite(r *http.Request) (vendor.CreateVendorInput, *httpErr) {
 	if in.RenewalDate, err = parseOptDate(req.RenewalDate); err != nil {
 		return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "renewal_date: " + err.Error()}
 	}
+	if req.OwnerUserID != nil && strings.TrimSpace(*req.OwnerUserID) != "" {
+		ownerID, err := uuid.Parse(strings.TrimSpace(*req.OwnerUserID))
+		if err != nil {
+			return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "owner_user_id must be a UUID"}
+		}
+		in.OwnerUserID = &ownerID
+	}
 	for _, s := range req.ScopeCellIDs {
 		id, err := uuid.Parse(s)
 		if err != nil {
@@ -539,12 +626,13 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 		ScopeCellIDs:  cellIDs,
 		CreatedAt:     v.CreatedAt,
 		UpdatedAt:     v.UpdatedAt,
-		Overdue:       v.IsOverdueAsOf(h.now()),
+		Overdue:       v.IsOverdueAsOf(h.now().UTC()),
 	}
 	w.ContractStart = dateString(v.ContractStart)
 	w.ContractEnd = dateString(v.ContractEnd)
 	w.DPASignedAt = dateString(v.DPASignedAt)
 	w.LastReviewDate = dateString(v.LastReviewDate)
+	w.FirstReviewDue = dateString(v.FirstReviewDue)
 	w.RenewalDate = dateString(v.RenewalDate)
 	if v.ToolCategory != nil {
 		s := string(*v.ToolCategory)
@@ -553,6 +641,12 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 	if v.BillingCadence != nil {
 		s := string(*v.BillingCadence)
 		w.BillingCadence = &s
+	}
+	if v.OwnerUserID != nil {
+		s := v.OwnerUserID.String()
+		w.OwnerUserID = &s
+	} else {
+		w.OwnerUnlinked = strings.TrimSpace(v.OwnerUser)
 	}
 	return w
 }
@@ -577,6 +671,15 @@ func dateString(t *time.Time) *string {
 	return &s
 }
 
+// actor names the caller on the owner audit row (#2129): the user behind
+// the credential, or uuid.Nil for a caller that is not a user.
+// actor is the caller's principal for the owner audit row (#2450): a
+// machine caller is named by its key or client id, not recorded as nil.
+func actor(r *http.Request) string {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	return credstore.PrincipalOf(cred)
+}
+
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 	// Slice 033: tenancy.Middleware (httpserver.go) lifted cred.TenantID
 	// onto r.Context() via tenancy.WithTenant. Confirm the tenant is set
@@ -593,6 +696,8 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 		httpresp.WriteError(w, http.StatusNotFound, "vendor not found")
 	case errors.Is(err, vendor.ErrInvalidInput):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, vendor.ErrOwnerNotActiveUser):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
 	case errors.Is(err, vendor.ErrDuplicateDomain):
 		httpresp.WriteError(w, http.StatusConflict, "a vendor with this domain already exists")
 	default:

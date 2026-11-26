@@ -42,9 +42,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,15 +69,21 @@ const testModeEnvVar = "ATLAS_TEST_MODE"
 //
 // Defaults applied when fields are zero:
 //
-//   - UserID: empty → subject = "test-admin:<tenant>" synthetic.
-//     A caller wanting `/v1/me` to resolve to a real users row supplies
-//     the row's UUID here.
+//   - UserID: empty → subject = a deterministic UUIDv5 of the tenant
+//     (testSubjectFor). It was "test-admin:<tenant>" until #1850; it is
+//     a UUID now so a super_admin token's subject can hold a
+//     super_admins row. A caller wanting `/v1/me` to resolve to a real
+//     users row supplies the row's UUID here.
 //   - Roles: nil → ["admin"]. The jwtmw bridge stamps these onto the
 //     synthesized credential's OwnerRoles.
 //   - SuperAdmin: defaults true. The jwtmw bridge maps SuperAdmin into
 //     both IsAdmin AND IsApprover on the credential — the typical
 //     Playwright spec needs admin-gated routes (settings, dashboards,
-//     admin-bootstrap).
+//     admin-bootstrap). #1850: the JWT middleware re-reads super_admins
+//     and drops a claim the table does not back, so a super_admin mint
+//     also records the subject in super_admins (grantTestSuperAdmin).
+//     This is the test-mode analogue of the production mint, which sets
+//     the claim FROM that table.
 //
 // Slice 389 — multi-tenant extension (JUDGMENT, see
 // docs/audit-log/389-multi-tenant-jwt-rls-leak-spec-decisions.md):
@@ -154,7 +164,7 @@ func (s *Server) handleIssueTestJWT(w http.ResponseWriter, r *http.Request) {
 	// Apply defaults.
 	subject := body.UserID
 	if subject == "" {
-		subject = "test-admin:" + tenant.String()
+		subject = testSubjectFor(tenant).String()
 	}
 	roles := body.Roles
 	if roles == nil {
@@ -223,6 +233,13 @@ func (s *Server) handleIssueTestJWT(w http.ResponseWriter, r *http.Request) {
 		SuperAdmin:       superAdmin,
 	}
 
+	if superAdmin {
+		if err := s.grantTestSuperAdmin(r.Context(), subject); err != nil {
+			http.Error(w, `{"error":"super_admin grant failure"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
 	token, err := s.jwtSigner.Sign(r.Context(), claims)
 	if err != nil {
 		http.Error(w, `{"error":"sign failure"}`, http.StatusInternalServerError)
@@ -237,6 +254,46 @@ func (s *Server) handleIssueTestJWT(w http.ResponseWriter, r *http.Request) {
 // testModeEnabled reports whether the env-gate is set. Used by
 // httpserver.go to decide whether to mount the /v1/test/issue-jwt
 // route at boot time.
+// testSubjectNamespace scopes the UUIDv5 default subjects minted by
+// handleIssueTestJWT. Arbitrary but fixed, so a tenant always maps to
+// the same test subject across runs.
+var testSubjectNamespace = uuid.MustParse("6a1c1850-7e57-4a7d-9c0e-5e5ca1ab0001")
+
+// testSubjectFor is the default test-token subject for tenant: a
+// deterministic UUIDv5, so it can be recorded in super_admins.
+func testSubjectFor(tenant uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(testSubjectNamespace, tenant[:])
+}
+
+// grantTestSuperAdmin records subject in super_admins so the JWT
+// middleware's live re-check (#1850) backs the super_admin claim this
+// endpoint is about to mint. Reached only from handleIssueTestJWT,
+// after its ATLAS_TEST_MODE gate. A subject that is not a UUID cannot
+// hold a row and is refused; with no DB wired (unit servers) there is
+// nothing to re-check against, so the grant is skipped.
+func (s *Server) grantTestSuperAdmin(ctx context.Context, subject string) error {
+	if os.Getenv(testModeEnvVar) != "1" {
+		return errors.New("test mode is off")
+	}
+	userID, err := uuid.Parse(strings.TrimPrefix(subject, "user:"))
+	if err != nil {
+		return fmt.Errorf("super_admin test subject must be a UUID: %w", err)
+	}
+	pool := s.authPool
+	if pool == nil {
+		pool = s.dbPool
+	}
+	if pool == nil {
+		return nil
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO super_admins (user_id, granted_via) VALUES ($1, 'manual_grant')
+		 ON CONFLICT (user_id) DO NOTHING`,
+		userID,
+	)
+	return err
+}
+
 func testModeEnabled() bool {
 	return os.Getenv(testModeEnvVar) == "1"
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -67,6 +68,7 @@ type evaluationRow struct {
 	lastObservedAt        *time.Time
 	freshnessClass        string
 	trigger               string
+	triggeredBy           string // "" = none; set only on a manual run (#2479)
 }
 
 // loadControl returns the control's evaluation-relevant metadata. Resolves
@@ -101,13 +103,16 @@ func (s *Store) loadControl(ctx context.Context, q *dbx.Queries, tenantID, contr
 // point-in-time horizon `asOf`. Pure SELECT — the engine never mutates the
 // ledger. `controlRef` is the free-form string form (slice 013 control_ref)
 // so a control whose evidence was pushed under an SCF anchor string is also
-// found.
+// found, and so are the tenant's unbound records of the kinds the control's
+// queries declare (#2817, internal/evidence/unbound).
 func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, controlRef string, asOf time.Time) ([]allRecord, error) {
 	rows, err := q.ListEvidenceForControlAsOf(ctx, dbx.ListEvidenceForControlAsOfParams{
-		TenantID:   pgUUID(tenantID),
-		ControlID:  pgUUID(controlID),
-		ControlRef: controlRef,
-		ObservedAt: pgTimestamptz(asOf),
+		TenantID:     pgUUID(tenantID),
+		ControlID:    pgUUID(controlID),
+		ControlRef:   controlRef,
+		UnboundKinds: routed.ControlFreeKinds(),
+		RoutedKinds:  routed.Kinds(),
+		ObservedAt:   pgTimestamptz(asOf),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list evidence for control: %w", err)
@@ -118,15 +123,73 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 		if r.ObservedAt.Valid {
 			rec.observedAt = r.ObservedAt.Time
 		}
+		if r.EvidenceKind != nil {
+			rec.kind = *r.EvidenceKind
+		}
+		if r.IngestedAt.Valid {
+			rec.ingestedAt = r.IngestedAt.Time
+		}
+		if r.ID.Valid {
+			rec.id = uuid.UUID(r.ID.Bytes).String()
+		}
 		out = append(out, rec)
 	}
 	return out, nil
 }
 
+// loadActiveExceptions reads the control's exceptions in status 'active'
+// (#2112). Pure SELECT, run inside the caller's tenant-GUC transaction so RLS
+// on `exceptions` binds the read. The in-force window and the scope-cell
+// match are applied by exceptedIn.
+func (s *Store) loadActiveExceptions(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID) ([]activeException, error) {
+	rows, err := q.ListExceptionsByControl(ctx, dbx.ListExceptionsByControlParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: pgUUID(controlID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list active exceptions: %w", err)
+	}
+	return toActiveExceptions(rows), nil
+}
+
+// loadExceptionsAsOf reads the control's exceptions as they stood at asOf
+// (#3037): activated by then and not revoked by then, whatever their status
+// is now. A replay of asOf applies these instead of today's active set, so
+// an exception granted, revoked or expired after asOf does not change it.
+func (s *Store) loadExceptionsAsOf(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, asOf time.Time) ([]activeException, error) {
+	rows, err := q.ListExceptionsByControlAsOf(ctx, dbx.ListExceptionsByControlAsOfParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: pgUUID(controlID),
+		AsOf:      pgTimestamptz(asOf),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list exceptions as of %s: %w", asOf.Format(time.RFC3339Nano), err)
+	}
+	return toActiveExceptions(rows), nil
+}
+
+func toActiveExceptions(rows []dbx.Exception) []activeException {
+	out := make([]activeException, 0, len(rows))
+	for _, r := range rows {
+		x := activeException{predicate: r.ScopeCellPredicate, expiresAt: r.ExpiresAt.Time}
+		if r.EffectiveFrom.Valid {
+			from := r.EffectiveFrom.Time
+			x.effectiveFrom = &from
+		}
+		out = append(out, x)
+	}
+	return out
+}
+
 // appendEvaluation writes ONE row to control_evaluations. This is the
 // engine's ONLY write. There is no sibling method that touches
 // evidence_records — invariant #2 is enforced by the absence of that code.
-func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row evaluationRow, evaluatedAt time.Time) error {
+//
+// instant is the horizon the row was judged at. When it is earlier than
+// evaluatedAt (a replay) it is stored as evaluated_as_of, so a reader that
+// rebuilds the row's inputs (the OSCAL AR's waiving exception, #3056) reads
+// them at the instant the row judged, not at the clock that wrote it.
+func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row evaluationRow, evaluatedAt, instant time.Time) error {
 	var scopeCell pgtype.UUID
 	if row.scopeCellID != nil {
 		scopeCell = pgUUID(*row.scopeCellID)
@@ -139,6 +202,15 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 	if row.freshnessClass != "" {
 		fc := row.freshnessClass
 		freshnessClass = &fc
+	}
+	var triggeredBy *string
+	if row.triggeredBy != "" {
+		tb := row.triggeredBy
+		triggeredBy = &tb
+	}
+	var asOf pgtype.Timestamptz
+	if instant.Before(evaluatedAt) {
+		asOf = pgTimestamptz(instant)
 	}
 	_, err := q.InsertControlEvaluation(ctx, dbx.InsertControlEvaluationParams{
 		ID:                    pgUUID(uuid.New()),
@@ -153,6 +225,8 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 		LastObservedAt:        lastObserved,
 		FreshnessClass:        freshnessClass,
 		Trigger:               row.trigger,
+		TriggeredBy:           triggeredBy,
+		EvaluatedAsOf:         asOf,
 	})
 	if err != nil {
 		return fmt.Errorf("append control evaluation: %w", err)

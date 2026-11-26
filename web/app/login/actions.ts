@@ -5,6 +5,13 @@ import { redirect } from "next/navigation";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import {
+  devTokenFlagEnabled,
+  devTokenSignInAllowed,
+} from "@/lib/auth/dev-token-signin";
+import { localLoginBody } from "@/lib/auth/login-tenant";
+import { fetchInstallState } from "@/lib/auth/login.server";
+import { forwardedForHeaders } from "@/lib/client-ip";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
@@ -34,11 +41,29 @@ import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 //   2. Happy-path redirect — the post-sign-in destination.
 //
 // Both call sites fall back to `/dashboard` on any non-safe target.
+//
+// #2062 — the action is the server-side gate for the developer token card:
+// it re-checks devTokenSignInAllowed on every call (install-state is read
+// fresh, never cached), so hiding the card is not the only defence. An
+// unreadable install-state refuses unless ATLAS_WEB_DEV_TOKEN_SIGNIN=true.
 export async function signIn(formData: FormData): Promise<void> {
   const token = String(formData.get("token") ?? "").trim();
   const target = safeRedirectTarget(
     String(formData.get("from") ?? "/dashboard"),
   );
+
+  const flagEnabled = devTokenFlagEnabled(process.env);
+  if (
+    !devTokenSignInAllowed(
+      flagEnabled,
+      flagEnabled ? null : await fetchInstallState(),
+    )
+  ) {
+    redirect(
+      `/login?error=${encodeURIComponent("token sign-in is not enabled")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
 
   if (!token) {
     redirect(
@@ -82,10 +107,47 @@ export async function signIn(formData: FormData): Promise<void> {
   redirect(target);
 }
 
+// signOut ends the session server-side as well as in the browser (#2618).
+// Deleting the cookie alone left a copied session JWT valid until it
+// expired; revoking it first puts its jti on the slice-190 denylist, which
+// the request middleware checks on every call. The revoke is the RFC 7009
+// self-revocation path: the token revokes itself, presented as its own
+// bearer. It is best effort: a failure is logged and the cookie is still
+// deleted and the redirect still happens, so signing out never strands
+// the user. See docs/audit-log/2618-signout-revocation-decisions.md.
 export async function signOut(): Promise<void> {
   const jar = await cookies();
+  const token = jar.get(ATLAS_JWT_COOKIE)?.value;
+  if (token) await revokeSession(token, await headers());
   jar.delete(ATLAS_JWT_COOKIE);
   redirect("/login");
+}
+
+const REVOKE_TIMEOUT_MS = 3000;
+
+async function revokeSession(token: string, reqHeaders: Headers) {
+  try {
+    const res = await fetch(`${apiBaseURL()}/oauth/revoke`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        // The revoke endpoint throttles per client IP (#2041); name the
+        // user's, not the web container's.
+        ...forwardedForHeaders(reqHeaders),
+      },
+      body: new URLSearchParams({ token }).toString(),
+      cache: "no-store",
+      // A hung API must not hold sign-out open; past this the cookie is
+      // deleted anyway.
+      signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      console.error(`signOut: session revoke answered ${res.status}`);
+    }
+  } catch (err) {
+    console.error("signOut: session revoke failed", err);
+  }
 }
 
 // signInLocal — slice 209. POSTs (tenant_id, email, password) to
@@ -101,23 +163,29 @@ export async function signInLocal(formData: FormData): Promise<void> {
     String(formData.get("from") ?? "/dashboard"),
   );
 
-  if (!tenantID || !email || !password) {
+  // #1756 — tenant_id may be empty: on a single-tenant install the
+  // server resolves the only tenant, and on a multi-tenant one it
+  // answers 400, surfaced below as a tenant error.
+  if (!email || !password) {
     redirect(
       `/login?error=${encodeURIComponent("email and password are required")}` +
         `&from=${encodeURIComponent(target)}`,
     );
   }
 
+  // #2040 — forward the browser's IP, derived from this server's own
+  // trusted chain (lib/client-ip.ts), so the API's per-IP login bucket
+  // is per browser rather than one bucket for the whole BFF.
+  const reqHeaders = await headers();
   let response: Response;
   try {
     response = await fetch(`${apiBaseURL()}/auth/local/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tenant_id: tenantID,
-        email,
-        password,
-      }),
+      headers: {
+        "Content-Type": "application/json",
+        ...forwardedForHeaders(reqHeaders),
+      },
+      body: JSON.stringify(localLoginBody(tenantID, email, password)),
     });
   } catch {
     // Network error reaching the backend — surface as a non-credential
@@ -132,6 +200,13 @@ export async function signInLocal(formData: FormData): Promise<void> {
     // No oracle — same message regardless of email-exists vs. wrong-password.
     redirect(
       `/login?error=${encodeURIComponent("invalid credentials")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+  if (response.status === 400) {
+    // Missing or malformed tenant_id on a multi-tenant install (#1756).
+    redirect(
+      `/login?error=${encodeURIComponent("enter a valid tenant ID")}` +
         `&from=${encodeURIComponent(target)}`,
     );
   }
@@ -164,7 +239,6 @@ export async function signInLocal(formData: FormData): Promise<void> {
   }
 
   const jar = await cookies();
-  const reqHeaders = await headers();
   jar.set(ATLAS_JWT_COOKIE, body.token, {
     httpOnly: true,
     sameSite: "lax",

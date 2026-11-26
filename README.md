@@ -44,7 +44,7 @@ security-atlas spans the disciplines a security program runs day to day — not 
 | **Policy & exception management**            | A policy library with acknowledgment tracking, an exception workflow (request → approve → active → auto-expire, with compensating controls and a hard expiry cap), and **Action Plans** for tracking remediation commitments to closure.                                                                                        |
 | **Trust & questionnaires**                   | Answer inbound security questionnaires from one place, with AI-assist that drafts answers grounded in your actual evidence and policies (every suggestion cited; see the AI boundary below).                                                                                                                                    |
 | **Metrics & board reporting**                | KPI and metric dashboards for program health, plus first-class **board pack** generation — the quarterly security update for leadership, built from real program data rather than hand-assembled slides.                                                                                                                        |
-| **Identity, access & multi-tenancy**         | Sign-in through your existing IdP (Okta, Entra ID, Google) over OIDC, role-based and attribute-based access control, and multi-tenant isolation enforced in the database itself — not just in application code.                                                                                                                 |
+| **Identity, access & isolation**             | Sign-in through your existing IdP (Okta, Entra ID, Google) over OIDC, and role-based and attribute-based access control. Organisation data is isolated in the database itself — not just in application code — as defence in depth, and the same isolation backs the opt-in multi-tenant mode.                                  |
 
 ## What makes it different
 
@@ -82,6 +82,8 @@ security-atlas is the right fit when you want to **own your data and your contro
 ## Who it's for
 
 Built first for the **solo security leader at a 50–150-person company** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers scrutinize how they handle security. The goal is concrete: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap. It scales up from there to a small security team.
+
+security-atlas is **self-hosted by one organisation**: a fresh install holds one tenant, your organisation. Running several organisations from one install (consultancies, MSPs, or groups running several entities) is an advanced **multi-tenant** mode that an operator opts into deliberately ([ADR 0023](./docs/adr/0023-single-tenant-experience-by-default.md)).
 
 ## Project status
 
@@ -151,7 +153,9 @@ just migrate-up
 just build
 ```
 
-Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
+Bringing your organisation's program in? The [Getting started guide](./docs-site/docs/getting-started.md) is the one path from install to a working program.
+
+Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md). No container runtime? The [native install](./docs-site/docs/install-native.md) runs on Go, Postgres 16 and Node alone.
 
 ### Your first sign-in (self-host)
 
@@ -171,7 +175,7 @@ The bootstrap-token file is **deleted atomically on first successful sign-in**. 
 # 1. start the platform locally
 just db-up && just migrate-up
 export DATABASE_URL_APP="postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable"
-go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
+CGO_ENABLED=0 go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
 ./bin/atlas &
 
 # 2. push a hello-world evidence record (the CLI speaks gRPC on :50051)
@@ -195,6 +199,12 @@ curl -fsS http://localhost:8080/v1/evidence \
 `just build-go` runs `go build ./...` as a compile check — it does not write
 binaries. Use the explicit `go build -o ./bin/` above (or `go run ./cmd/atlas-cli`)
 when you want something to execute.
+
+The server, CLI and connectors build with `CGO_ENABLED=0`, the same setting the
+release and container builds use, so no system C toolchain is needed. Keep it set
+if `go build` fails to link (for example `unknown architecture arm64e...` on a
+macOS Command Line Tools / SDK mismatch). `go test -race` (used by
+`just test-integration`) is the one path that still needs cgo.
 
 For a connector-driven walkthrough (AWS S3 encryption posture, GitHub branch-protection, osquery host posture), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
 
@@ -220,6 +230,7 @@ The same version also renders in the bottom-right of every page in the web UI; c
 
 ## Documentation
 
+- **Getting started (adopters):** [`docs-site/docs/getting-started.md`](./docs-site/docs/getting-started.md) — bring an existing program in, in order: install, sign-in and credentials, SCF catalog, frameworks, controls, evidence, risks and policies, first audit period.
 - **User guide (docs site):** [`docs-site/docs/`](./docs-site/docs/) — install, configuration, first audit, framework setup, connector authoring, OAuth/OIDC setup, board reporting, metrics, backups, and upgrades.
 - **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) — vision, primitives, the control graph, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions.
 - **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) — the architecture invariants, anti-patterns we reject, the AI-assist boundary, and licensing constraints.
@@ -244,7 +255,7 @@ The Authorization Server layers on an OIDC relying party: the relying party auth
 security-atlas ships an **MCP (Model Context Protocol) server** — `atlas-mcp` — so your security team can query and update the program from an AI assistant (Claude Desktop, Claude Code, or any MCP client) instead of clicking through the UI. Ask _"what are my top risks in treatment?"_ or _"which controls have stale evidence?"_ and the assistant answers from your live data.
 
 - **Read tools** cover controls, risks, evidence, audit periods, policies, vendors, exceptions, and action plans — scoped to your tenant, with the same row-level isolation as the rest of the platform. A few ready-made [operator skills](./skills/) wrap them into one-command workflows (risk briefing, evidence-freshness sweep, audit-readiness snapshot).
-- **Write tools** (create a risk, update a control's state, push evidence, change a risk's treatment) **never mutate your data unattended.** Each files a _proposal_ that a human approver must confirm — in the assistant via `confirm_write`, or with the Approve button in the web UI — and that boundary is enforced at the database layer. An AI cannot publish an audit-binding change on its own.
+- **Write tools** (create a risk, update a control's state, push evidence, change a risk's treatment) **never mutate your data unattended.** Each files a _proposal_ that a tenant admin must confirm — in the assistant via `confirm_write`, or with the Approve button in the web UI — and that boundary is enforced at the database layer. An AI cannot publish an audit-binding change on its own.
 - The assistant authenticates with a normal atlas bearer token and sees only what that credential is allowed to see.
 
 **Status: experimental** — the tool surface is in soak and may change; pin your MCP client to a specific `atlas-mcp` version. Full setup (client config for Claude Desktop / Claude Code, token handling, the complete tool list, and the approval flow) is in the **[MCP server guide](./docs-site/docs/mcp.md)** and [`cmd/atlas-mcp/README.md`](./cmd/atlas-mcp/README.md).

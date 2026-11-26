@@ -28,10 +28,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AdminCredentialsService_Issue_FullMethodName  = "/admin.v1.AdminCredentialsService/Issue"
-	AdminCredentialsService_Rotate_FullMethodName = "/admin.v1.AdminCredentialsService/Rotate"
-	AdminCredentialsService_Revoke_FullMethodName = "/admin.v1.AdminCredentialsService/Revoke"
-	AdminCredentialsService_List_FullMethodName   = "/admin.v1.AdminCredentialsService/List"
+	AdminCredentialsService_Issue_FullMethodName          = "/admin.v1.AdminCredentialsService/Issue"
+	AdminCredentialsService_Rotate_FullMethodName         = "/admin.v1.AdminCredentialsService/Rotate"
+	AdminCredentialsService_Revoke_FullMethodName         = "/admin.v1.AdminCredentialsService/Revoke"
+	AdminCredentialsService_List_FullMethodName           = "/admin.v1.AdminCredentialsService/List"
+	AdminCredentialsService_ResetBootstrap_FullMethodName = "/admin.v1.AdminCredentialsService/ResetBootstrap"
 )
 
 // AdminCredentialsServiceClient is the client API for AdminCredentialsService service.
@@ -59,6 +60,14 @@ type AdminCredentialsServiceClient interface {
 	// List enumerates active keys for a tenant. Returns metadata only —
 	// bearer tokens are not retrievable after issue.
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	// ResetBootstrap is the first-login recovery path (#2121): it re-arms
+	// the platform_status marker, mints a short-lived bootstrap-recovery
+	// admin key for the caller's tenant, and writes its bearer to the
+	// install's bootstrap-token file. It is the gRPC twin of
+	// POST /v1/admin/install/reset-bootstrap, which accepts only JWTs: here
+	// an admin API key (such as ATLAS_BOOTSTRAP_TOKEN) authenticates, and it
+	// is admitted only while the install has exactly one tenant.
+	ResetBootstrap(ctx context.Context, in *ResetBootstrapRequest, opts ...grpc.CallOption) (*ResetBootstrapResponse, error)
 }
 
 type adminCredentialsServiceClient struct {
@@ -109,6 +118,16 @@ func (c *adminCredentialsServiceClient) List(ctx context.Context, in *ListReques
 	return out, nil
 }
 
+func (c *adminCredentialsServiceClient) ResetBootstrap(ctx context.Context, in *ResetBootstrapRequest, opts ...grpc.CallOption) (*ResetBootstrapResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetBootstrapResponse)
+	err := c.cc.Invoke(ctx, AdminCredentialsService_ResetBootstrap_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminCredentialsServiceServer is the server API for AdminCredentialsService service.
 // All implementations must embed UnimplementedAdminCredentialsServiceServer
 // for forward compatibility.
@@ -134,6 +153,14 @@ type AdminCredentialsServiceServer interface {
 	// List enumerates active keys for a tenant. Returns metadata only —
 	// bearer tokens are not retrievable after issue.
 	List(context.Context, *ListRequest) (*ListResponse, error)
+	// ResetBootstrap is the first-login recovery path (#2121): it re-arms
+	// the platform_status marker, mints a short-lived bootstrap-recovery
+	// admin key for the caller's tenant, and writes its bearer to the
+	// install's bootstrap-token file. It is the gRPC twin of
+	// POST /v1/admin/install/reset-bootstrap, which accepts only JWTs: here
+	// an admin API key (such as ATLAS_BOOTSTRAP_TOKEN) authenticates, and it
+	// is admitted only while the install has exactly one tenant.
+	ResetBootstrap(context.Context, *ResetBootstrapRequest) (*ResetBootstrapResponse, error)
 	mustEmbedUnimplementedAdminCredentialsServiceServer()
 }
 
@@ -155,6 +182,9 @@ func (UnimplementedAdminCredentialsServiceServer) Revoke(context.Context, *Revok
 }
 func (UnimplementedAdminCredentialsServiceServer) List(context.Context, *ListRequest) (*ListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method List not implemented")
+}
+func (UnimplementedAdminCredentialsServiceServer) ResetBootstrap(context.Context, *ResetBootstrapRequest) (*ResetBootstrapResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetBootstrap not implemented")
 }
 func (UnimplementedAdminCredentialsServiceServer) mustEmbedUnimplementedAdminCredentialsServiceServer() {
 }
@@ -250,6 +280,24 @@ func _AdminCredentialsService_List_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminCredentialsService_ResetBootstrap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetBootstrapRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminCredentialsServiceServer).ResetBootstrap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminCredentialsService_ResetBootstrap_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminCredentialsServiceServer).ResetBootstrap(ctx, req.(*ResetBootstrapRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminCredentialsService_ServiceDesc is the grpc.ServiceDesc for AdminCredentialsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -272,6 +320,10 @@ var AdminCredentialsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "List",
 			Handler:    _AdminCredentialsService_List_Handler,
+		},
+		{
+			MethodName: "ResetBootstrap",
+			Handler:    _AdminCredentialsService_ResetBootstrap_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -24,18 +24,33 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { listRisks } from "@/lib/api/risks";
+import { upstreamBody } from "@/lib/api/bff";
+import {
+  listRisks,
+  RISK_LIST_PARAMS,
+  type RiskListParam,
+} from "@/lib/api/risks";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    const risks = await listRisks(bearer);
-    return NextResponse.json({ risks });
+    // #2132: the filter, sort and page parameters on the allow-list pass
+    // through verbatim; the platform validates each value. Without any,
+    // the platform's default page (open risks, no roll-ups, #2060 #2107).
+    // Every value of a repeated key is kept (#2482): ?category= takes
+    // several.
+    const params = new URL(req.url).searchParams;
+    const passThrough: Partial<Record<RiskListParam, string[]>> = {};
+    for (const key of RISK_LIST_PARAMS) {
+      const vs = params.getAll(key).filter(Boolean);
+      if (vs.length) passThrough[key] = vs;
+    }
+    return NextResponse.json(await listRisks(bearer, passThrough));
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(
@@ -73,7 +88,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     cache: "no-store",
   });
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

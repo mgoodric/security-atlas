@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,8 +36,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 )
 
@@ -53,8 +57,18 @@ func setup(t *testing.T) *harness {
 	t.Helper()
 	app := dbtest.NewAppPool(t)
 	migrate := dbtest.NewMigratePool(t)
-	apiServer := api.New(api.Config{RotationGrace: time.Hour})
+	// #1830: complete-item writes its evidence through ingest, so the
+	// harness wires the production ingest service (DB-backed schema
+	// registry seeded with the bundled platform schemas).
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(migrate)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	apiServer := api.New(api.Config{RotationGrace: time.Hour, IngestService: ingest.New(app, reg)})
 	apiServer.AttachDB(app)
+	liveroletest.Attach(t, apiServer, app)
 	// Wire the slice-190 JWT validator BEFORE building the router — the
 	// jwtmw mount in buildRouter is gated on the signer being present
 	// at build time (IssueTestJWT lazy-wires it on first call).
@@ -77,7 +91,8 @@ func (h *harness) freshTenant(t *testing.T) (tenant string, bearer string) {
 		"personnel_security_checklists",
 		"controls",
 	)
-	return tenant, h.apiServer.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenant)))
+	// #3016: a seeded grc_engineer with a live grant, on the real engine.
+	return tenant, liveroletest.Bearer(t, h.apiServer, tenant, "grc_engineer")
 }
 
 func seedAccessControl(t *testing.T, migrate *pgxpool.Pool, tenant string) uuid.UUID {
@@ -388,13 +403,28 @@ func TestBareCredentialForbidden(t *testing.T) {
 	h := setup(t)
 	tenant, _ := h.freshTenant(t)
 
-	// A viewer bearer carries no program-read signal (no admin flag, no
-	// approver flag, no owner roles) — the handler-level guard 403s it
-	// before any person PII is read.
-	viewer := h.apiServer.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
-	h.do(t, http.MethodGet, "/v1/personnel-security/checklists", viewer, nil, http.StatusForbidden)
-	h.do(t, http.MethodPost, "/v1/personnel-security/checklists", viewer, map[string]any{
-		"kind":               "onboarding",
-		"person_external_id": "worker-x",
-	}, http.StatusForbidden)
+	// A live viewer has no personnel-security grant: the engine 403s it
+	// with its own "forbidden" before any person PII is read (#3016). The
+	// handler guard (IsTenantApprover, "role does not grant ...") sits
+	// behind it for a caller the engine admits.
+	viewer := liveroletest.Bearer(t, h.apiServer, tenant, "viewer")
+	for _, raw := range [][]byte{
+		h.do(t, http.MethodGet, "/v1/personnel-security/checklists", viewer, nil, http.StatusForbidden),
+		h.do(t, http.MethodPost, "/v1/personnel-security/checklists", viewer, map[string]any{
+			"kind":               "onboarding",
+			"person_external_id": "worker-x",
+		}, http.StatusForbidden),
+	} {
+		if !strings.Contains(string(raw), `"error":"forbidden"`) {
+			t.Errorf("viewer refusal body = %s; want the engine's forbidden", raw)
+		}
+	}
+	var n int
+	if err := h.migrate.QueryRow(context.Background(),
+		`SELECT count(*) FROM personnel_security_checklists WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("viewer create wrote %d checklists; want 0", n)
+	}
 }

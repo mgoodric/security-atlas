@@ -51,8 +51,8 @@ import (
 // ----- harness -----
 
 // enableFeatureFlag turns a gating feature flag ON for the test tenant.
-// Slice 660 wrapped the board (briefs + packs) routes in
-// featureflag.Gate("board.reporting"), which DEFAULTS OFF — so without an
+// The board (briefs + packs) routes belong to the Board reporting module,
+// switched by "board.reporting", which DEFAULTS OFF — so without an
 // explicit override every board route returns 404 for a fresh test tenant.
 // We upsert the override via the admin (BYPASSRLS) pool, the same effect as
 // an operator toggling the flag ON. Cleanup removes the row.
@@ -154,11 +154,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualS
 	residual := []byte(`{"score": ` + floatStr(residualScore) + `}`)
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepted_until, accepter, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, $3, '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        '{"likelihood": 3, "impact": 3}'::jsonb, 'mitigate', 'sec-lead', $4,
 		        NULL, '', $5, $5)
 	`, id, tenant, title, residual, updatedAt); err != nil {
@@ -180,6 +180,21 @@ func seedFramework(t *testing.T, admin *pgxpool.Pool, tenant, slug, name string)
 		VALUES ($1, $2, $3, $4, 'test-issuer')
 	`, id, tenant, name, slug); err != nil {
 		t.Fatalf("seed framework: %v", err)
+	}
+	// The brief lists framework versions with requirements, from the posture
+	// query (#2210).
+	fvID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		VALUES ($1, $2, $3, '2026', 'current')
+	`, fvID, tenant, id); err != nil {
+		t.Fatalf("seed framework version: %v", err)
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
+		VALUES ($1, $2, 'R-01', 'requirement', '')
+	`, uuid.New(), fvID); err != nil {
+		t.Fatalf("seed framework requirement: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = admin.Exec(context.Background(), `DELETE FROM frameworks WHERE id = $1`, id)
@@ -495,15 +510,27 @@ func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
 	briefID := body["id"].(string)
 
 	resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+	assertRealPDF(t, resp, raw)
+}
+
+// assertRealPDF is the happy-path check under the default limiter. It holds
+// the never-500 contract, logs which outcome the render produced, and when
+// pdfrender.RequireRealPDF() (set in CI, where Chrome is installed) treats a
+// 503 as a failure so CI proves the renderer produces a PDF (#1847).
+func assertRealPDF(t *testing.T, resp *http.Response, raw []byte) {
+	t.Helper()
 	assertPDFOrServiceUnavailable(t, resp, raw)
+	t.Logf("PDF render: status %d, %d bytes", resp.StatusCode, len(raw))
+	if resp.StatusCode != http.StatusOK && pdfrender.RequireRealPDF() {
+		t.Fatalf("ATLAS_REQUIRE_PDF is set but GET /pdf = %d, want 200 with a %%PDF- body; body=%q",
+			resp.StatusCode, raw)
+	}
 }
 
 // assertPDFOrServiceUnavailable enforces the slice-475 contract: the PDF
-// endpoint returns EITHER a real 200 %PDF- body OR a 503 graceful degradation
-// — and NEVER a 500 / hang / any other status. The 503 path is no longer
-// merely "acceptable when chrome is absent": it is the documented, exhaustive
-// non-200 outcome (chrome absent OR render deadline exceeded OR queue
-// saturated), so a third status here is a hard failure.
+// endpoint returns a real 200 %PDF- body, a 503 graceful degradation (render
+// deadline exceeded OR queue saturated), or a 409 feature_not_enabled when
+// chrome is absent (#2786) — and NEVER a 500 / hang / any other status.
 func assertPDFOrServiceUnavailable(t *testing.T, resp *http.Response, raw []byte) {
 	t.Helper()
 	switch resp.StatusCode {
@@ -517,8 +544,13 @@ func assertPDFOrServiceUnavailable(t *testing.T, resp *http.Response, raw []byte
 	case http.StatusServiceUnavailable:
 		// Graceful degradation — the handler 503s rather than 500ing or
 		// hanging (slice 475 AC-1).
+	case http.StatusConflict:
+		// Chrome absent: a refusal about the deployment (#2786).
+		if !bytes.Contains(raw, []byte(`"code":"feature_not_enabled"`)) {
+			t.Errorf("409 body lacks code feature_not_enabled; body=%q", raw)
+		}
 	default:
-		t.Fatalf("AC-1: GET /pdf = %d, want exactly 200 or 503; body=%q", resp.StatusCode, raw)
+		t.Fatalf("AC-1: GET /pdf = %d, want exactly 200, 409 or 503; body=%q", resp.StatusCode, raw)
 	}
 }
 
@@ -547,6 +579,9 @@ func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("AC-1: render-deadline path = %d, want 503 (never 500/hang); body=%q",
 			resp.StatusCode, raw)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("render-deadline 503 carries no Retry-After (#2786)")
 	}
 }
 
@@ -584,10 +619,7 @@ func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
 			defer wg.Done()
 			resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
 			statuses[idx] = resp.StatusCode
-			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
-				t.Errorf("AC-3: concurrent render %d = %d, want 200 or 503; body=%q",
-					idx, resp.StatusCode, raw)
-			}
+			assertPDFOrServiceUnavailable(t, resp, raw)
 		}(i)
 	}
 	wg.Wait()

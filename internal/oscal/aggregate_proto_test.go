@@ -117,7 +117,7 @@ func TestMetadata_StampsFrozenHorizonAndOSCALVersion(t *testing.T) {
 }
 
 func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
-	scfA := "IAC-06"
+	scfA := "IAC-37"
 	cellID := uuid.New()
 	ctrlIDWithSCF := uuid.New()
 	ctrlIDNoSCF := uuid.New()
@@ -199,8 +199,8 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 		t.Fatalf("ControlImplementations len = %d, want 2", len(out.ControlImplementations))
 	}
 	withSCF := out.ControlImplementations[0]
-	if withSCF.ScfId != "IAC-06" {
-		t.Errorf("control[0].ScfId = %q, want IAC-06", withSCF.ScfId)
+	if withSCF.ScfId != "IAC-37" {
+		t.Errorf("control[0].ScfId = %q, want IAC-37", withSCF.ScfId)
 	}
 	if withSCF.ControlId != ctrlIDWithSCF.String() {
 		t.Errorf("control[0].ControlId mismatch")
@@ -289,7 +289,7 @@ func TestSSPInput_EmptySlicesProduceEmptyOutput(t *testing.T) {
 func TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations(t *testing.T) {
 	claimID := uuid.New()
 	acceptedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
-	scf := "IAC-07"
+	scf := "IAC-04"
 	by := "operator@acme.com"
 
 	// One platform control (real coverage) + one accepted vendor claim.
@@ -350,8 +350,8 @@ func TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations
 	if v.ControlId != "AC-2" {
 		t.Errorf("ControlId = %q, want AC-2", v.ControlId)
 	}
-	if v.ScfId != "IAC-07" {
-		t.Errorf("ScfId = %q, want IAC-07", v.ScfId)
+	if v.ScfId != "IAC-04" {
+		t.Errorf("ScfId = %q, want IAC-04", v.ScfId)
 	}
 	if v.ComponentUuid != "vendor-uuid-1" || v.ComponentTitle != "AcmeVault" || v.ComponentType != "service" {
 		t.Errorf("vendor attribution mismatch: %+v", v)
@@ -785,6 +785,33 @@ func TestPOAMInput_FailingControlsBecomePOAMItems(t *testing.T) {
 	}
 	if missing.Severity != "moderate" {
 		t.Errorf("missing-control severity = %q, want moderate (freshness empty)", missing.Severity)
+	}
+}
+
+// TestPOAMInput_ReplayRowCountsFromJudgedInstant: a failing replay row
+// with no evidence carries evaluated_as_of, and its due date counts from
+// that instant, not from evaluated_at (#3087).
+func TestPOAMInput_ReplayRowCountsFromJudgedInstant(t *testing.T) {
+	judged := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	written := time.Date(2026, 4, 2, 10, 0, 0, 0, time.UTC)
+	failing := []dbx.ListFailingEvaluationsAsOfRow{{
+		ID:              pgUUID(uuid.New()),
+		ControlID:       pgUUID(uuid.New()),
+		Result:          "fail",
+		FreshnessStatus: "no_evidence",
+		EvaluatedAt:     pgtype.Timestamptz{Time: written, Valid: true},
+		EvaluatedAsOf:   pgtype.Timestamptz{Time: judged, Valid: true},
+	}}
+	out := makeAggregate(t, ExportInput{}, nil, nil, nil, nil, nil, nil, failing).poamInput()
+	if len(out.Items) != 1 {
+		t.Fatalf("Items len = %d, want 1", len(out.Items))
+	}
+	it := out.Items[0]
+	if want := judged.Format(time.RFC3339); it.EvaluatedAsOf != want {
+		t.Errorf("EvaluatedAsOf = %q, want %q", it.EvaluatedAsOf, want)
+	}
+	if want := judged.Add(defaultRemediationWindow).Format(time.RFC3339); it.DueDate != want {
+		t.Errorf("DueDate = %q, want %q (evaluated_as_of + 90d)", it.DueDate, want)
 	}
 }
 

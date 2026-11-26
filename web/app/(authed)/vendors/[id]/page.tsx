@@ -31,17 +31,21 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { Markdown } from "@/components/markdown";
+import { PageShell } from "@/components/shell/page-shell";
+import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
+import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { Vendor, VendorReview } from "@/lib/api/vendors";
 
 import {
   dpaStatusLabel,
-  formatDetailDate,
   ownerMailto,
   reviewOutcomeBadgeVariant,
   reviewOutcomeLabel,
@@ -112,23 +116,22 @@ export default function VendorDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="vendor-detail-loading">
+      <PageShell title="Vendor" data-testid="vendor-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Vendor" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="vendor-detail-error">
           <AlertTitle>Could not load vendor</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -138,63 +141,61 @@ export default function VendorDetailPage({
   }
 
   const vendor = data;
-  const mailto = ownerMailto(vendor.owner_user);
+  // #2129: the owner is a user; free text no user matched is shown as
+  // "unlinked" (as a mailto when it is an email address).
+  const unlinkedOwner = vendor.owner_user_id
+    ? ""
+    : (vendor.owner_unlinked ?? vendor.owner_user).trim();
+  const mailto = ownerMailto(unlinkedOwner);
 
   return (
-    <div className="space-y-6" data-testid="vendor-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header
-        className="flex flex-wrap items-start justify-between gap-4"
-        data-testid="vendor-detail-header"
-      >
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <CriticalityBadge value={vendor.criticality} />
-            {vendor.overdue ? (
-              <Badge variant="destructive" data-testid="vendor-detail-status">
-                overdue
-              </Badge>
-            ) : (
-              <Badge variant="secondary" data-testid="vendor-detail-status">
-                on time
-              </Badge>
-            )}
-          </div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="vendor-detail-name"
+    // #2102: the shared detail-page header. Record review is the vendor's
+    // lifecycle action; there are no overflow items yet.
+    <DetailHeader
+      data-testid="vendor-detail"
+      titleTestId="vendor-detail-name"
+      headerTestId="vendor-detail-header"
+      title={vendor.name}
+      status={
+        <>
+          <CriticalityBadge value={vendor.criticality} />
+          {vendor.overdue ? (
+            <Badge variant="destructive" data-testid="vendor-detail-status">
+              overdue
+            </Badge>
+          ) : vendor.first_review_due ? (
+            <Badge variant="outline" data-testid="vendor-detail-status">
+              First review due{" "}
+              <Timestamp value={vendor.first_review_due} style="date" />
+            </Badge>
+          ) : (
+            <Badge variant="secondary" data-testid="vendor-detail-status">
+              on time
+            </Badge>
+          )}
+        </>
+      }
+      subtitle={
+        vendor.domain ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="vendor-detail-domain"
           >
-            {vendor.name}
-          </h1>
-          {vendor.domain ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="vendor-detail-domain"
-            >
-              {vendor.domain}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/vendors/${id}/reviews/new`}
-            className={buttonVariants({ variant: "secondary" })}
-            data-testid="vendor-detail-record-review"
-          >
-            Record review
-          </Link>
-          <Link
-            href={`/vendors/${id}/edit`}
-            className={buttonVariants()}
-            data-testid="vendor-detail-edit"
-          >
-            Edit
-          </Link>
-        </div>
-      </header>
-
+            {vendor.domain}
+          </p>
+        ) : null
+      }
+      back={<BackLink />}
+      primaryAction={{
+        label: "Record review",
+        href: `/vendors/${id}/reviews/new`,
+        "data-testid": "vendor-detail-record-review",
+      }}
+      edit={{
+        href: `/vendors/${id}/edit`,
+        "data-testid": "vendor-detail-edit",
+      }}
+    >
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
         <CardHeader className="border-b">
@@ -203,17 +204,34 @@ export default function VendorDetailPage({
         <CardContent>
           <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
             <Field label="Owner" testid="vendor-detail-owner">
-              {mailto ? (
+              {vendor.owner_user_id ? (
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <Person id={vendor.owner_user_id} />
+                  <OwnerAccessFlag
+                    lacksAccess={vendor.owner_lacks_access}
+                    testId="vendor-detail-owner-no-access"
+                  />
+                </span>
+              ) : mailto ? (
                 <a
                   href={mailto}
                   className="text-primary hover:underline"
                   data-testid="vendor-detail-owner-mailto"
                 >
-                  {vendor.owner_user.trim()}
+                  {unlinkedOwner}
                 </a>
               ) : (
-                <span>{vendor.owner_user.trim() || "unassigned"}</span>
+                <span>{unlinkedOwner || "unassigned"}</span>
               )}
+              {unlinkedOwner ? (
+                <span
+                  className="ml-2 text-xs italic text-muted-foreground"
+                  title="No user matched this owner. Edit the vendor to pick one."
+                  data-testid="vendor-detail-owner-unlinked"
+                >
+                  (unlinked)
+                </span>
+              ) : null}
             </Field>
             <Field label="Criticality" testid="vendor-detail-criticality">
               <span className="capitalize">{vendor.criticality}</span>
@@ -223,24 +241,26 @@ export default function VendorDetailPage({
             </Field>
             <Field label="Last review" testid="vendor-detail-last-review">
               <span className="font-mono">
-                {vendor.last_review_date
-                  ? formatDetailDate(vendor.last_review_date)
-                  : "never"}
+                <Timestamp
+                  value={vendor.last_review_date}
+                  style="date"
+                  fallback="never"
+                />
               </span>
             </Field>
             <Field label="Contract start" testid="vendor-detail-contract-start">
               <span className="font-mono">
-                {formatDetailDate(vendor.contract_start)}
+                <Timestamp value={vendor.contract_start} style="date" />
               </span>
             </Field>
             <Field label="Contract end" testid="vendor-detail-contract-end">
               <span className="font-mono">
-                {formatDetailDate(vendor.contract_end)}
+                <Timestamp value={vendor.contract_end} style="date" />
               </span>
             </Field>
             <Field label="Renewal date" testid="vendor-detail-renewal-date">
               <span className="font-mono">
-                {formatDetailDate(vendor.renewal_date)}
+                <Timestamp value={vendor.renewal_date} style="date" />
               </span>
             </Field>
             <Field label="Auto-renew" testid="vendor-detail-auto-renew">
@@ -300,12 +320,7 @@ export default function VendorDetailPage({
         </CardHeader>
         <CardContent>
           {vendor.notes.trim() ? (
-            <p
-              className="whitespace-pre-wrap break-words text-sm text-foreground"
-              data-testid="vendor-detail-notes"
-            >
-              {vendor.notes}
-            </p>
+            <Markdown source={vendor.notes} data-testid="vendor-detail-notes" />
           ) : (
             <p
               className="text-sm text-muted-foreground"
@@ -347,7 +362,7 @@ export default function VendorDetailPage({
                   {" "}
                   (last review on file:{" "}
                   <span className="font-mono">
-                    {formatDetailDate(vendor.last_review_date)}
+                    <Timestamp value={vendor.last_review_date} style="date" />
                   </span>
                   ).
                 </>
@@ -359,7 +374,7 @@ export default function VendorDetailPage({
           )}
         </CardContent>
       </Card>
-    </div>
+    </DetailHeader>
   );
 }
 
@@ -375,7 +390,7 @@ function ReviewRow({ review }: { review: VendorReview }) {
           className="font-mono text-sm text-foreground"
           data-testid="vendor-detail-review-date"
         >
-          {formatDetailDate(review.reviewed_at)}
+          <Timestamp value={review.reviewed_at} style="date" />
         </span>
         <Badge
           variant={reviewOutcomeBadgeVariant(review.outcome)}
@@ -393,12 +408,11 @@ function ReviewRow({ review }: { review: VendorReview }) {
         ) : null}
       </div>
       {review.notes.trim() ? (
-        <p
-          className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground"
+        <Markdown
+          source={review.notes}
+          className="mt-1 text-muted-foreground"
           data-testid="vendor-detail-review-notes"
-        >
-          {review.notes}
-        </p>
+        />
       ) : null}
     </li>
   );
@@ -421,7 +435,7 @@ function BackLink() {
 function CriticalityBadge({ value }: { value: string }) {
   const variant =
     value === "high"
-      ? "destructive"
+      ? "critical"
       : value === "medium"
         ? "secondary"
         : "outline";

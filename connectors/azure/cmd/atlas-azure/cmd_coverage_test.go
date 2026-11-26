@@ -327,7 +327,7 @@ func TestBuildEntraRecord_Shape(t *testing.T) {
 		RoleDisplayName: "Reader", DirectoryScopeID: "/", IsPrivileged: false,
 		TenantID: "tenant-1", ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildEntraRecord(a, "prod", "scf:IAC-21")
+	rec, err := buildEntraRecord(a, "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildEntraRecord: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildEntraRecord_OmitsEmptyOptionals(t *testing.T) {
 		RoleDefinitionID: "role", TenantID: "t",
 		ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildEntraRecord(a, "prod", "scf:IAC-21")
+	rec, _ := buildEntraRecord(a, "prod", "scf:IAC-10")
 	pl := rec.GetPayload().AsMap()
 	if _, ok := pl["principal_display_name"]; ok {
 		t.Error("empty display name should be omitted")
@@ -378,7 +378,7 @@ func TestBuildStorageRecord_Shape(t *testing.T) {
 		MinimumTLSVersion: "TLS1_2", AllowBlobPublicAccess: false,
 		Result: storage.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildStorageRecord(c, "prod", "scf:CRY-04")
+	rec, err := buildStorageRecord(c, "prod", "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildStorageRecord: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestBuildStorageRecord_OmitsEmptyOptionals(t *testing.T) {
 		EncryptionEnabled: true, HTTPSTrafficOnly: true,
 		Result: storage.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildStorageRecord(c, "prod", "scf:CRY-04")
+	rec, _ := buildStorageRecord(c, "prod", "scf:CRY-07")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location", "encryption_key_source", "minimum_tls_version"} {
 		if _, ok := pl[k]; ok {
@@ -423,7 +423,7 @@ func TestBuildAKSRecord_Shape(t *testing.T) {
 		OIDCIssuerEnabled: true, NodePoolCount: 2,
 		Result: aks.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, err := buildAKSRecord(c, "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAKSRecord: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestBuildAKSRecord_OmitsEmptyOptionals(t *testing.T) {
 		RBACEnabled: true, PrivateCluster: true, AuthorizedIPRanges: true,
 		Result: aks.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-04")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location", "kubernetes_version", "network_policy"} {
 		if _, ok := pl[k]; ok {
@@ -504,7 +504,7 @@ func TestBuildNSGRecord_Shape(t *testing.T) {
 		},
 		Result: nsg.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildNSGRecord(g, "prod", "scf:NET-04")
+	rec, err := buildNSGRecord(g, "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNSGRecord: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestBuildNSGRecord_OmitsEmptyOptionals(t *testing.T) {
 		Rules:  []nsg.SecurityRule{{Name: "deny", Direction: "inbound", Access: "deny"}},
 		Result: nsg.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildNSGRecord(g, "prod", "scf:NET-04")
+	rec, _ := buildNSGRecord(g, "prod", "scf:NET-03")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location"} {
 		if _, ok := pl[k]; ok {
@@ -607,7 +607,7 @@ func TestBuildFirewallRecord_Shape(t *testing.T) {
 		},
 		Result: firewall.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildFirewallRecord(p, "prod", "scf:NET-04")
+	rec, err := buildFirewallRecord(p, "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildFirewallRecord: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestBuildFirewallRecord_OmitsEmptyOptionals(t *testing.T) {
 		},
 		Result: firewall.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildFirewallRecord(p, "prod", "scf:NET-04")
+	rec, _ := buildFirewallRecord(p, "prod", "scf:NET-03")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location"} {
 		if _, ok := pl[k]; ok {

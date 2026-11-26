@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -41,6 +42,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -52,8 +56,25 @@ const pgErrUniqueViolation = "23505"
 
 // MaxObservedAtSkew bounds how far the caller's observed_at may stray
 // from received_at. EVIDENCE_SDK §9 calls this out as the replay-protection
-// mitigation. Symmetric: past and future skew both rejected.
+// mitigation. Symmetric: past and future skew both rejected, on every path
+// except a historical import (ForHistoricalImport), which lifts the past
+// limit only.
 const MaxObservedAtSkew = 24 * time.Hour
+
+// ImportPath is the ingestion_path of a historical-import record (#1742).
+const ImportPath = "import"
+
+// ImportBatch identifies one historical evidence import (#1742): every
+// record it writes carries the batch in its provenance, and every accepted
+// and rejected attempt writes an evidence_audit_log row tied to it.
+type ImportBatch struct {
+	ID uuid.UUID
+	// Source is the operator's free-text origin of the batch, e.g.
+	// "FY25 SOC 2 Type II report".
+	Source string
+	// Importer is the admin credential that ran the import.
+	Importer string
+}
 
 // MaxPayloadBytes caps the inline payload size. EVIDENCE_SDK §4.6 and
 // AC-6 redirect payloads above this to S3 (slice 036). Until slice 036
@@ -123,6 +144,10 @@ const (
 	DecisionRejectedUnauthenticated
 	DecisionRejectedRateLimit
 	DecisionRejectedInternalError
+	// DecisionRejectedConcurrentFreeze is ErrConcurrentFreeze: an audit
+	// period froze while the write's transaction was open, and nothing was
+	// written (#3060). It is not a server fault; the caller retries.
+	DecisionRejectedConcurrentFreeze
 )
 
 // String returns the audit-log decision token for d. Must match the
@@ -149,6 +174,8 @@ func (d Decision) String() string {
 		return "rejected_unauthenticated"
 	case DecisionRejectedRateLimit:
 		return "rejected_rate_limit"
+	case DecisionRejectedConcurrentFreeze:
+		return "rejected_concurrent_freeze"
 	default:
 		return "rejected_internal_error"
 	}
@@ -165,7 +192,126 @@ var (
 	ErrScopeViolation      = errors.New("ingest: credential not authorized for this push")
 	ErrObservedAtSkew      = errors.New("ingest: observed_at outside permitted skew window")
 	ErrOversized           = errors.New("ingest: payload exceeds inline size limit; use payload_uri")
+	// ErrOwnedKind refuses an owner-only kind (OwnedKind) on a Service
+	// not built for it with WithOwnedKind (#2873). It wraps
+	// ErrScopeViolation, so both transports answer 403 / PermissionDenied.
+	ErrOwnedKind = fmt.Errorf("%w: evidence kind is written only by its platform handler", ErrScopeViolation)
+	// ErrUnavailable is returned by ProcessInTx on a nil *Service: the
+	// domain store was built without an ingest service (#1830).
+	ErrUnavailable = errors.New("ingest: no ingest service wired")
+	// ErrConcurrentFreeze is an audit period in the tenant frozen after the
+	// write's transaction began (#3038). The row would carry an ingested_at
+	// (the transaction start) before that frozen_at, so it would join a
+	// frozen population whose hash never covered it. Nothing was written.
+	// Process retries in a new transaction; ProcessInTx returns it, and the
+	// caller's whole transaction can be retried. A domain writer's handler
+	// answers 409 concurrent_freeze (httpresp.WriteConcurrentFreeze, #3060).
+	ErrConcurrentFreeze = errors.New("ingest: an audit period was frozen while this write's transaction was open; nothing was written, retry")
 )
+
+// MaxFreezeAttempts bounds the retries after ErrConcurrentFreeze, in Process
+// and in the historical import (RetryConcurrentFreeze). Each retry follows a
+// freeze that committed during the previous attempt, so a third in a row is
+// not expected.
+const MaxFreezeAttempts = 3
+
+// RetryConcurrentFreeze runs attempt, numbered from 1, until it returns
+// anything other than ErrConcurrentFreeze or MaxFreezeAttempts have run, and
+// returns the last error. Each attempt must open its own transaction: a new
+// transaction's start, and so its rows' ingested_at, is after the freeze
+// that refused the previous one.
+func RetryConcurrentFreeze(attempt func(n int) error) error {
+	for n := 1; ; n++ {
+		err := attempt(n)
+		if !errors.Is(err, ErrConcurrentFreeze) || n == MaxFreezeAttempts {
+			return err
+		}
+	}
+}
+
+// CheckNoFreezeSinceTxStart returns ErrConcurrentFreeze when a tenant audit
+// period was frozen at or after q's transaction began (#3038). Call it after
+// the tenant evidence-freeze lock is granted, as its own statement.
+//
+// It is sound only under READ COMMITTED: there the statement's snapshot is
+// taken after the lock, so it sees every freeze that committed before the
+// lock was granted. Under REPEATABLE READ or SERIALIZABLE the snapshot is
+// the transaction's first statement's and can miss such a freeze, so any
+// other level fails closed (#3060).
+func CheckNoFreezeSinceTxStart(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
+	row, err := q.CountPeriodsFrozenSinceTxStart(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("count periods frozen since start: %w", err)
+	}
+	if row.Isolation != "read committed" {
+		return fmt.Errorf("%w: the concurrent-freeze check needs READ COMMITTED, transaction is %s", ErrIsolationLevel, row.Isolation)
+	}
+	if row.FrozenSince > 0 {
+		return ErrConcurrentFreeze
+	}
+	return nil
+}
+
+// ErrIsolationLevel is a write attempted in a transaction above READ
+// COMMITTED, where CheckNoFreezeSinceTxStart cannot see a concurrent freeze
+// (#3060). It is a caller bug and answers 500.
+var ErrIsolationLevel = errors.New("ingest: transaction isolation level not supported")
+
+// DomainWriterPath is the ingestion_path a platform-internal domain writer
+// (change register, incident register, personnel security, access review)
+// records on its evidence: the evidence is produced by an operator action
+// inside the platform rather than pushed by a connector.
+const DomainWriterPath = "manual_upload"
+
+// ForDomainWriter returns svc tagged with DomainWriterPath, or nil for a
+// nil svc so the store fails closed with ErrUnavailable.
+func ForDomainWriter(svc *Service) *Service {
+	if svc == nil {
+		return nil
+	}
+	return svc.WithPath(DomainWriterPath)
+}
+
+// OwnedKind reports whether kind may be written only by its platform
+// handler, never by a generic push (#2873). The owner-only kinds are the
+// unbound kinds (internal/evidence/unbound): an unbound record counts for
+// every control that queries its kind, tenant-wide, so a push credential
+// that could send one would forge that evidence for all of them. Today that
+// is policy.acknowledgment.v1, written by internal/api/policyacks.
+func OwnedKind(kind string) bool {
+	return contains(unbound.Kinds(), kind)
+}
+
+// SystemCredential is the credential a domain writer ingests under: a
+// fixed system id, the tenant, and the only evidence kinds it may write,
+// so the credential kind-scope check bounds it like a connector key.
+func SystemCredential(id, tenantID string, kinds ...string) credstore.Credential {
+	return credstore.Credential{ID: id, TenantID: tenantID, Kinds: kinds, System: true}
+}
+
+// credentialType is the provenance credential_type for cred.
+func credentialType(cred credstore.Credential) string {
+	if cred.System {
+		return "system"
+	}
+	return "api_key" // OIDC/mTLS land in v2
+}
+
+// PayloadStruct converts a JSON-encodable value (typically a
+// map[string]any) into the protobuf Struct an EvidenceRecord carries, by
+// way of its JSON encoding, so json.RawMessage and integer fields convert
+// the same way they would on the REST push path.
+func PayloadStruct(v any) (*structpb.Struct, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: payload marshal: %w", err)
+	}
+	out := &structpb.Struct{}
+	if err := protojson.Unmarshal(raw, out); err != nil {
+		return nil, fmt.Errorf("ingest: payload to struct: %w", err)
+	}
+	return out, nil
+}
 
 // Receipt is the outcome of a successful (accepted or deduplicated)
 // push. The caller (HTTP/gRPC handler) returns it to the pusher; the
@@ -176,6 +322,11 @@ type Receipt struct {
 	IngestedAt   time.Time
 	CredentialID string
 	Deduplicated bool
+	// LinkedControlID is the UUID of the control the stored record links
+	// to, or "" when control_id stayed a free-form, unlinked reference
+	// (#2165). Read from the stored row, so a deduplicated push reports the
+	// original record's linkage.
+	LinkedControlID string
 }
 
 // ReceiptStatus is the pusher-visible terminal status for a publish receipt.
@@ -202,6 +353,14 @@ type Service struct {
 	// to "push" — connector / webhook callers can construct a Service
 	// with a different path tag via WithPath.
 	path string
+	// ownedKind is the one owner-only kind (OwnedKind) this copy may
+	// write; "" on every Service except the owning handler's (#2873).
+	ownedKind string
+	// importBatch is set only on the copy ForHistoricalImport returns. It
+	// lifts the past observed_at skew limit and stamps the batch on the
+	// record and its audit rows (#1742). No transport handler holds such a
+	// copy: only the admin import endpoint builds one, per request.
+	importBatch *ImportBatch
 	// marshalLedger is the protojson-marshal seam for the bytes that
 	// LAND in the ledger (and feed the canonjson hash). Slice 379
 	// (F-ING-1 closure) split the protojson marshal sites into two
@@ -223,6 +382,13 @@ type Service struct {
 	// resolution between AC-3 (slice-doc typo) and P0-4 (canonical
 	// slice 015 D2 order).
 	marshalLedger func(proto.Message) ([]byte, error)
+	// afterBegin and beforeCommit are test hooks around Process's write
+	// transaction (#3038): afterBegin runs once the transaction is open and
+	// before the freeze lock, beforeCommit once the row is written and the
+	// lock is held. ProcessInTx runs afterBegin(1) in the caller's
+	// transaction (#3060). Both are nil outside tests.
+	afterBegin   func(attempt int)
+	beforeCommit func(attempt int)
 }
 
 // New constructs a Service over the supplied pool and validator. Pass
@@ -313,7 +479,78 @@ func (s *Service) WithClock(clock func() time.Time) *Service {
 func (s *Service) WithPath(path string) *Service {
 	copy := *s
 	copy.path = path
+	// A path tag is never an import (#1742): drop any batch, so the past
+	// skew limit is lifted only on the copy ForHistoricalImport returns.
+	copy.importBatch = nil
 	return &copy
+}
+
+// ForHistoricalImport returns a copy of s for one historical evidence
+// import batch (#1742): ingestion_path "import", the batch in each record's
+// provenance and audit rows, and an observed_at that may lie any distance
+// in the past. The future skew limit still applies. Only the admin import
+// path calls it; connector, push, attest and upload paths never do, so they
+// keep the symmetric MaxObservedAtSkew check.
+func (s *Service) ForHistoricalImport(batch ImportBatch) *Service {
+	copy := *s
+	copy.path = ImportPath
+	b := batch
+	copy.importBatch = &b
+	return &copy
+}
+
+// importBatchID is the batch id for audit rows, or NULL off the import path.
+func (s *Service) importBatchID() pgtype.UUID {
+	if s == nil || s.importBatch == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: s.importBatch.ID, Valid: true}
+}
+
+// observedAtSkewAllowed reports whether skew (observed_at minus received_at)
+// is inside the window this Service accepts.
+func (s *Service) observedAtSkewAllowed(skew time.Duration) bool {
+	if skew > MaxObservedAtSkew {
+		return false
+	}
+	return s.importBatch != nil || skew >= -MaxObservedAtSkew
+}
+
+// WithOwnedKind returns a copy of s that may write the owner-only kind
+// (OwnedKind). Only that kind's platform handler builds one; every other
+// Service refuses the kind with ErrOwnedKind (#2873). It panics on a kind
+// that is not owner-only: granting an ordinary kind is a wiring mistake,
+// and a typo would otherwise leave the owner unable to write its kind.
+func (s *Service) WithOwnedKind(kind string) *Service {
+	if !OwnedKind(kind) {
+		panic(fmt.Sprintf("ingest: WithOwnedKind(%q): not an owner-only kind", kind))
+	}
+	copy := *s
+	copy.ownedKind = kind
+	return &copy
+}
+
+// RefuseOwnedKind refuses rec when its kind is owner-only and s was not
+// built for it, writing the rejected_scope_violation audit row (credential,
+// kind, idempotency key) the way Process does. It returns nil otherwise. A
+// push transport that answers before Process runs (the JetStream publisher)
+// calls it so the pusher is refused synchronously and the attempt is still
+// audited (#2873).
+func (s *Service) RefuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) error {
+	return s.refuseOwnedKind(ctx, rec, cred, pgtype.UUID{})
+}
+
+func (s *Service) refuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) error {
+	kind := rec.GetEvidenceKind()
+	if !OwnedKind(kind) || (s != nil && kind == s.ownedKind) {
+		return nil
+	}
+	// A nil Service still refuses; it has no pool to audit with.
+	if s != nil {
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), kind, DecisionRejectedScopeViolation,
+			fmt.Sprintf("kind %s is written only by its platform handler", kind), recordID)
+	}
+	return fmt.Errorf("%w: %s", ErrOwnedKind, kind)
 }
 
 // Process runs the ingestion stage for one EvidenceRecord:
@@ -342,32 +579,194 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 // it is valid. The stream-buffer consumer uses this to make the publish-time
 // receipt id the same id a pusher later polls for terminal status.
 func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) (Receipt, Decision, error) {
+	p, decision, err := s.prepare(ctx, rec, cred, recordID)
+	if err != nil {
+		return Receipt{}, decision, err
+	}
+
+	// The DB write runs inside a transaction with the tenant GUC set so
+	// RLS allows the INSERT (tenant_insert WITH CHECK). The idempotency
+	// dedup also happens inside that tx so a same-key concurrent push
+	// either observes the existing row OR trips the UNIQUE index.
+	tenantCtx, terr := tenancy.WithTenant(ctx, cred.TenantID)
+	if terr != nil {
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), recordID)
+		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: tenant context: %w", terr)
+	}
+
+	var newRecord dbx.EvidenceRecord
+	var deduped bool
+	// #3038: a freeze committed between an attempt's BEGIN and its lock, and
+	// nothing was written. A new transaction's ingested_at is after that
+	// freeze, so the row stays out of its population.
+	err = RetryConcurrentFreeze(func(attempt int) error {
+		return pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+			if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
+				return fmt.Errorf("apply tenant: %w", terr)
+			}
+			if s.afterBegin != nil {
+				s.afterBegin(attempt)
+			}
+			var perr error
+			newRecord, deduped, perr = s.persist(tenantCtx, tx, p, LedgerOptions{})
+			if perr == nil && s.beforeCommit != nil {
+				s.beforeCommit(attempt)
+			}
+			return perr
+		})
+	})
+	if err != nil {
+		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
+	}
+
+	decision = DecisionAccepted
+	if deduped {
+		decision = DecisionDeduplicated
+	}
+	s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	return receiptFor(cred, newRecord, deduped), decision, nil
+}
+
+// LedgerOptions overrides ledger columns a domain writer owns. The zero
+// value keeps the push-path defaults: monthly freshness, no valid_until.
+type LedgerOptions struct {
+	FreshnessClass dbx.EvidenceFreshnessClass
+	ValidUntil     time.Time
+}
+
+// ProcessInTx is the in-transaction variant of Process, for domain
+// writers whose evidence record must commit atomically with their own
+// rows: a change approval or verification, an incident postmortem, a
+// personnel-security item completion, an access-review completion
+// (#1830). It runs every check Process runs (required fields, observed_at
+// skew, payload size, registered kind, schema validation, redaction,
+// credential kind scope and scope predicate, canonical hash, idempotency)
+// and writes the record into the caller's transaction instead of its own.
+//
+// tx must already carry the tenant GUC for cred.TenantID, and ctx must
+// carry the same tenant. tx must be READ COMMITTED, the pgx default: the
+// concurrent-freeze check needs a snapshot taken after the freeze lock, and
+// any other level fails the call with ErrIsolationLevel (#3060).
+//
+// When an audit period froze after tx began, ProcessInTx returns
+// ErrConcurrentFreeze and audits rejected_concurrent_freeze. Nothing was
+// written: the caller rolls back, and its handler answers 409
+// concurrent_freeze so the client retries the whole operation.
+//
+// Audit rows land as follows:
+//
+//   - a refusal is audited in its own short transaction, so the
+//     rejected_* row survives the caller rolling back on the returned
+//     error (the #1751 contract: a backdated record is refused AND leaves
+//     an audit row);
+//   - an accepted or deduplicated record is audited inside tx, so the
+//     audit row and the ledger row commit or roll back together. A failed
+//     audit insert fails the call. Its external audit-sink event waits in
+//     the AuditOutbox ctx carries (WithAuditOutbox) until the caller
+//     flushes it after Commit; ctx without one fails with ErrNoAuditOutbox.
+//
+// Connections: the accepted path does all its database work on tx. The
+// domain-writer kinds are platform schemas, which the schema registry
+// serves from memory, so registration, validation and redaction lookups
+// take no second connection. A refusal does take one, for the audit row
+// that must outlive the caller's rollback; auditWriteTimeout bounds that
+// wait, so a pool exhausted by callers each holding a transaction delays
+// the refusal (and may drop its audit row) but cannot deadlock it.
+//
+// Domain stores must not call dbx.InsertEvidenceRecord or raw-insert into
+// evidence_records; TestNoDirectEvidenceLedgerWrites enforces that.
+func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.EvidenceRecord, cred credstore.Credential, opts LedgerOptions) (Receipt, Decision, error) {
+	if s == nil {
+		// A domain store built without an ingest service fails closed
+		// rather than writing the ledger some other way.
+		return Receipt{}, DecisionRejectedInternalError, ErrUnavailable
+	}
+	if tx == nil {
+		return Receipt{}, DecisionRejectedInternalError, errors.New("ingest: ProcessInTx needs a transaction")
+	}
+	outbox := auditOutboxFrom(ctx)
+	if outbox == nil {
+		return Receipt{}, DecisionRejectedInternalError, ErrNoAuditOutbox
+	}
+	if tenant, terr := tenancy.TenantFromContext(ctx); terr != nil || !strings.EqualFold(tenant, cred.TenantID) {
+		return Receipt{}, DecisionRejectedUnauthenticated, errors.New("ingest: context tenant does not match credential tenant")
+	}
+	p, decision, err := s.prepare(ctx, rec, cred, pgtype.UUID{})
+	if err != nil {
+		return Receipt{}, decision, err
+	}
+	if s.afterBegin != nil {
+		// The caller's transaction is open; this call is its only attempt.
+		s.afterBegin(1)
+	}
+	newRecord, deduped, err := s.persist(ctx, tx, p, opts)
+	if err != nil {
+		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
+	}
+	decision = DecisionAccepted
+	if deduped {
+		decision = DecisionDeduplicated
+	}
+	entry, err := insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID, s.importBatchID())
+	if err != nil {
+		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: audit row: %w", err)
+	}
+	outbox.add(entry)
+	return receiptFor(cred, newRecord, deduped), decision, nil
+}
+
+// prepared is a record that passed every pre-write check, with the
+// derived ledger columns computed once.
+type prepared struct {
+	rec               *evidencev1.EvidenceRecord
+	cred              credstore.Credential
+	recordID          pgtype.UUID
+	observed          time.Time
+	observedAtNanos   int64
+	payloadJSON       []byte
+	hash              string
+	scopeCanonical    []byte
+	provenance        []byte
+	sourceAttribution []byte
+	controlID         pgtype.UUID
+	result            dbx.EvidenceResult
+}
+
+// prepare runs the pre-write stage shared by Process and ProcessInTx
+// (steps 1-7 in Process's doc). Every refusal is audited in its own
+// transaction before it returns.
+func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) (*prepared, Decision, error) {
 	receivedAt := s.clock()
 
 	if rec == nil {
 		s.writeAudit(ctx, cred, "", "", DecisionRejectedValidation, "nil record", recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: record is nil", ErrMissingField)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: record is nil", ErrMissingField)
 	}
 
 	// Anonymous credential (no tenant) must never reach Process; the
 	// auth middleware rejects unauthenticated requests upstream. Defensive
 	// belt-and-braces check.
 	if cred.TenantID == "" {
-		return Receipt{}, DecisionRejectedUnauthenticated, fmt.Errorf("ingest: credential has no tenant")
+		return nil, DecisionRejectedUnauthenticated, fmt.Errorf("ingest: credential has no tenant")
 	}
 
 	if msg := missingField(rec); msg != "" {
 		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
+	}
+
+	// #2873: an owner-only kind comes only from its platform handler.
+	if err := s.refuseOwnedKind(ctx, rec, cred, recordID); err != nil {
+		return nil, DecisionRejectedScopeViolation, err
 	}
 
 	// AC-8: observed_at skew check (replay protection).
 	observed := rec.GetObservedAt().AsTime()
 	skew := observed.Sub(receivedAt)
-	if skew < -MaxObservedAtSkew || skew > MaxObservedAtSkew {
+	if !s.observedAtSkewAllowed(skew) {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedObservedAtSkew,
 			fmt.Sprintf("observed_at skew %s > %s", skew, MaxObservedAtSkew), recordID)
-		return Receipt{}, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
+		return nil, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
 	}
 
 	// AC-6 partial: oversize gate (slice 036 will redirect to S3).
@@ -392,12 +791,12 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	payloadJSON, err := protojson.Marshal(rec.GetPayload())
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, "payload marshal: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: payload marshal: %v", ErrValidation, err)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: payload marshal: %v", ErrValidation, err)
 	}
 	if len(payloadJSON) > MaxPayloadBytes && rec.PayloadUri == nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedOversized,
 			fmt.Sprintf("payload %d > %d bytes", len(payloadJSON), MaxPayloadBytes), recordID)
-		return Receipt{}, DecisionRejectedOversized, fmt.Errorf("%w: %d > %d bytes", ErrOversized, len(payloadJSON), MaxPayloadBytes)
+		return nil, DecisionRejectedOversized, fmt.Errorf("%w: %d > %d bytes", ErrOversized, len(payloadJSON), MaxPayloadBytes)
 	}
 
 	// AC-1 + anti-criterion: schemaless push rejected via slice-014 hook.
@@ -414,11 +813,11 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if !registered {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedUnknownKind,
 			fmt.Sprintf("kind=%s version=%s", rec.EvidenceKind, rec.SchemaVersion), recordID)
-		return Receipt{}, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
+		return nil, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
 	}
 	if err := s.valid.ValidatePayload(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion, payloadJSON); err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, err.Error(), recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	// AC-6 (slice 015): apply per-kind redaction rules BEFORE hashing so
@@ -445,14 +844,14 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 		if rerr != nil {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 				"redaction lookup: "+rerr.Error(), recordID)
-			return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
+			return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
 		}
 		if len(rules) > 0 {
 			redacted, aerr := redact.Apply(rec.Payload, rules)
 			if aerr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 					"redaction apply: "+aerr.Error(), recordID)
-				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
+				return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
 			}
 			rec.Payload = redacted
 			// The pre-redact `payloadJSON` is discarded here; the next
@@ -466,7 +865,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 			if merr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 					"payload re-marshal after redact", recordID)
-				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
+				return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
 			}
 			payloadJSON = redactedJSON
 		}
@@ -479,18 +878,24 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if len(cred.Kinds) > 0 && !contains(cred.Kinds, rec.EvidenceKind) {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
 			fmt.Sprintf("credential %s not authorized for kind %s", cred.ID, rec.EvidenceKind), recordID)
-		return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
+		return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
 	}
 
-	// Credential scope_predicate: a tiny key=value subset enforcement for
-	// v1. EVIDENCE_SDK §4.3 specifies that a credential can be scoped to
-	// e.g. `cloud_account=aws:111122223333`. Parse predicate and require
-	// the record's scope to contain those values.
-	if cred.ScopePredicate != "" {
-		if !scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate) {
+	// Credential scope_predicate (#2435): the internal/scope grammar,
+	// stored as JSONB. "{}" is unrestricted; every cell the record's
+	// scope spans must satisfy the predicate; a malformed predicate
+	// denies. See scope.MatchRecordScope.
+	if !scope.IsUnrestrictedPredicate(cred.ScopePredicate) {
+		ok, perr := scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate)
+		if !ok {
+			if perr != nil {
+				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
+					fmt.Sprintf("scope_predicate %q is invalid: %v", cred.ScopePredicate, perr), recordID)
+				return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: invalid predicate=%q: %v", ErrScopeViolation, cred.ScopePredicate, perr)
+			}
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
 				fmt.Sprintf("scope_predicate %q not satisfied", cred.ScopePredicate), recordID)
-			return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
+			return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
 		}
 	}
 
@@ -501,7 +906,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	hash, err := canonjson.HashRecord(rec)
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
+		return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
 	}
 
 	// Slice 474: persist the canonical (sorted) wire scope the hash was
@@ -514,7 +919,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	scopeCanonical, err := canonjson.MarshalCanonicalScope(rec.GetScope())
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson scope: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
+		return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
 	}
 
 	// Slice 633: persist the LOSSLESS wire observed_at as a nanosecond
@@ -534,10 +939,15 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	provenance := map[string]any{
 		"ingestion_path":   s.path,
 		"credential_id":    cred.ID,
-		"credential_type":  "api_key", // OIDC/mTLS land in v2
+		"credential_type":  credentialType(cred),
 		"received_at":      receivedAt.Format(time.RFC3339Nano),
 		"endpoint_version": "v1",
 		"schema_version":   rec.SchemaVersion,
+	}
+	if b := s.importBatch; b != nil {
+		provenance["import_batch_id"] = b.ID.String()
+		provenance["import_source"] = b.Source
+		provenance["importer"] = b.Importer
 	}
 	provenanceBytes, _ := json.Marshal(provenance)
 
@@ -548,10 +958,12 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	})
 
 	// Try parsing control_id as a UUID. If it parses, set both columns.
-	// If not (e.g., "scf:VPM-04"), leave control_id NULL and set
-	// control_ref only.
+	// If not (e.g., "scf:VPM-06"), leave control_id NULL and set
+	// control_ref only. A routed kind (#2924) is never bound: it reaches
+	// every control that queries its kind, and the wire control_id stays
+	// in control_ref as provenance only.
 	var controlID pgtype.UUID
-	if u, perr := uuid.Parse(rec.ControlId); perr == nil {
+	if u, perr := uuid.Parse(rec.ControlId); perr == nil && !routed.Kind(rec.EvidenceKind) {
 		controlID = pgtype.UUID{Bytes: u, Valid: true}
 	}
 
@@ -560,126 +972,185 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if !ok {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation,
 			"unrecognized result enum", recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: result=%s", ErrMissingField, rec.Result)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: result=%s", ErrMissingField, rec.Result)
 	}
 
-	// The DB write runs inside a transaction with the tenant GUC set so
-	// RLS allows the INSERT (tenant_insert WITH CHECK). The idempotency
-	// dedup also happens inside that tx so a same-key concurrent push
-	// either observes the existing row OR trips the UNIQUE index.
-	tenantCtx, terr := tenancy.WithTenant(ctx, cred.TenantID)
-	if terr != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: tenant context: %w", terr)
+	return &prepared{
+		rec:               rec,
+		cred:              cred,
+		recordID:          recordID,
+		observed:          observed,
+		observedAtNanos:   observedAtNanos,
+		payloadJSON:       payloadJSON,
+		hash:              hash,
+		scopeCanonical:    scopeCanonical,
+		provenance:        provenanceBytes,
+		sourceAttribution: sourceAttribJSON,
+		controlID:         controlID,
+		result:            resultEnum,
+	}, DecisionUnknown, nil
+}
+
+// persist runs the write stage shared by Process and ProcessInTx inside
+// tx, which already carries the tenant GUC: the idempotency lookup, then
+// the append-only INSERT. It returns the ledger row and whether it was a
+// deduplicated hit on an existing record.
+func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts LedgerOptions) (dbx.EvidenceRecord, bool, error) {
+	q := dbx.New(tx)
+
+	// AC-3 / AC-4: idempotency lookup.
+	idemKey := p.rec.IdempotencyKey
+	lookup := dbx.GetEvidenceRecordByIdempotencyParams{
+		TenantID:       pgUUID(p.cred.TenantID),
+		IdempotencyKey: &idemKey,
 	}
-
-	var newRecord dbx.EvidenceRecord
-	var deduped bool
-
-	err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
-			return fmt.Errorf("apply tenant: %w", terr)
+	existing, lerr := q.GetEvidenceRecordByIdempotency(ctx, lookup)
+	if lerr == nil {
+		// A row already exists for this idempotency_key. Either the
+		// hash matches (deduplicate, return original receipt) or it
+		// doesn't (reject with 409).
+		if existing.Hash != p.hash {
+			return dbx.EvidenceRecord{}, false, ErrIdempotencyMismatch
 		}
-		q := dbx.New(tx)
+		return existing, true, nil
+	} else if !errors.Is(lerr, pgx.ErrNoRows) {
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("idempotency lookup: %w", lerr)
+	}
 
-		// AC-3 / AC-4: idempotency lookup.
-		idemKey := rec.IdempotencyKey
-		existing, lerr := q.GetEvidenceRecordByIdempotency(tenantCtx, dbx.GetEvidenceRecordByIdempotencyParams{
-			TenantID:       pgUUID(cred.TenantID),
-			IdempotencyKey: &idemKey,
+	// AC-1: append the record.
+	insertRecordID := p.recordID
+	if !insertRecordID.Valid {
+		insertRecordID = pgUUID(uuid.New().String())
+	}
+	freshness := dbx.EvidenceFreshnessClassMonthly // default; tightened by control bundle in slice 016
+	if opts.FreshnessClass != "" {
+		freshness = opts.FreshnessClass
+	}
+	validUntil := pgtype.Timestamptz{}
+	if !opts.ValidUntil.IsZero() {
+		validUntil = pgtype.Timestamptz{Time: opts.ValidUntil, Valid: true}
+	}
+
+	// #2100: a control_id that is not a UUID may be a control bundle ID
+	// (what `atlas-cli controls upload` and the catalog show). Resolve it
+	// to the tenant's active control so the record links; before this the
+	// row kept only control_ref, which every reader matches against the
+	// control's UUID, so the evidence never reached the control. A value
+	// naming no bundle (e.g. "scf:VPM-06") stays a free-form control_ref.
+	// control_ref keeps the wire value either way: verify rebuilds the
+	// hashed record from it.
+	controlID := p.controlID
+	if !controlID.Valid && p.rec.ControlId != "" && !routed.Kind(p.rec.EvidenceKind) {
+		ctrl, cerr := q.GetActiveControlByBundleID(ctx, dbx.GetActiveControlByBundleIDParams{
+			TenantID: pgUUID(p.cred.TenantID),
+			BundleID: p.rec.ControlId,
 		})
-		if lerr == nil {
-			// A row already exists for this idempotency_key. Either the
-			// hash matches (deduplicate, return original receipt) or it
-			// doesn't (reject with 409).
-			if existing.Hash != hash {
-				return ErrIdempotencyMismatch
-			}
-			newRecord = existing
-			deduped = true
-			return nil
-		} else if !errors.Is(lerr, pgx.ErrNoRows) {
-			return fmt.Errorf("idempotency lookup: %w", lerr)
+		switch {
+		case cerr == nil:
+			controlID = ctrl.ID
+		case !errors.Is(cerr, pgx.ErrNoRows):
+			return dbx.EvidenceRecord{}, false, fmt.Errorf("resolve control bundle id: %w", cerr)
 		}
+	}
 
-		// AC-1: append the record.
-		insertRecordID := recordID
-		if !insertRecordID.Valid {
-			insertRecordID = pgUUID(uuid.New().String())
-		}
-		validUntil := pgtype.Timestamptz{}
+	// #3038: the row's ingested_at is this transaction's start (DEFAULT
+	// now(), the database clock), but it is visible only once the
+	// transaction commits. Hold the tenant's freeze lock in shared mode
+	// until then, so a freeze that has not hashed yet waits for this row.
+	// Then refuse if a freeze already committed after the start: its
+	// frozen_at is later than this row's ingested_at, so its frozen reads
+	// would admit a row its hash never covered. The count is its own
+	// statement so its snapshot is taken after the lock is granted, which
+	// holds under READ COMMITTED only (CheckNoFreezeSinceTxStart, #3060).
+	if err := q.LockTenantEvidenceFreezeShared(ctx, pgUUID(p.cred.TenantID)); err != nil {
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("lock tenant evidence freeze: %w", err)
+	}
+	if err := CheckNoFreezeSinceTxStart(ctx, q, pgUUID(p.cred.TenantID)); err != nil {
+		return dbx.EvidenceRecord{}, false, err
+	}
 
-		params := dbx.InsertEvidenceRecordParams{
-			ID:                insertRecordID,
-			TenantID:          pgUUID(cred.TenantID),
-			ControlID:         controlID,
-			ControlRef:        rec.ControlId,
-			ScopeID:           pgtype.UUID{},
-			ObservedAt:        pgtype.Timestamptz{Time: observed, Valid: true},
-			Provenance:        provenanceBytes,
-			Result:            resultEnum,
-			Payload:           payloadJSON,
-			PayloadUri:        rec.PayloadUri,
-			Hash:              hash,
-			FreshnessClass:    dbx.EvidenceFreshnessClassMonthly, // default; tightened by control bundle in slice 016
-			ValidUntil:        validUntil,
-			IdempotencyKey:    &idemKey,
-			EvidenceKind:      ptrStr(rec.EvidenceKind),
-			SchemaVersion:     ptrStr(rec.SchemaVersion),
-			CredentialID:      ptrStr(cred.ID),
-			IngestionPath:     s.path,
-			SourceAttribution: sourceAttribJSON,
-			ScopeCanonical:    scopeCanonical,
-			ObservedAtNanos:   &observedAtNanos,
-		}
-		inserted, ierr := q.InsertEvidenceRecord(tenantCtx, params)
-		if ierr != nil {
-			// Race: a concurrent push with the same idempotency_key won.
-			// Re-fetch and treat as dedup if the hash matches.
-			var pgErr *pgconn.PgError
-			if errors.As(ierr, &pgErr) && pgErr.Code == pgErrUniqueViolation {
-				existing, gerr := q.GetEvidenceRecordByIdempotency(tenantCtx, dbx.GetEvidenceRecordByIdempotencyParams{
-					TenantID:       pgUUID(cred.TenantID),
-					IdempotencyKey: &idemKey,
-				})
-				if gerr == nil {
-					if existing.Hash != hash {
-						return ErrIdempotencyMismatch
-					}
-					newRecord = existing
-					deduped = true
-					return nil
-				}
-			}
-			return fmt.Errorf("insert evidence: %w", ierr)
-		}
-		newRecord = inserted
-		return nil
+	observedAtNanos := p.observedAtNanos
+	params := dbx.InsertEvidenceRecordParams{
+		ID:                insertRecordID,
+		TenantID:          pgUUID(p.cred.TenantID),
+		ControlID:         controlID,
+		ControlRef:        p.rec.ControlId,
+		ScopeID:           pgtype.UUID{},
+		ObservedAt:        pgtype.Timestamptz{Time: p.observed, Valid: true},
+		Provenance:        p.provenance,
+		Result:            p.result,
+		Payload:           p.payloadJSON,
+		PayloadUri:        p.rec.PayloadUri,
+		Hash:              p.hash,
+		FreshnessClass:    freshness,
+		ValidUntil:        validUntil,
+		IdempotencyKey:    &idemKey,
+		EvidenceKind:      ptrStr(p.rec.EvidenceKind),
+		SchemaVersion:     ptrStr(p.rec.SchemaVersion),
+		CredentialID:      ptrStr(p.cred.ID),
+		IngestionPath:     s.path,
+		SourceAttribution: p.sourceAttribution,
+		ScopeCanonical:    p.scopeCanonical,
+		ObservedAtNanos:   &observedAtNanos,
+	}
+	// The INSERT runs under a savepoint: a lost idempotency race trips the
+	// UNIQUE index, and outside a savepoint Postgres would abort the whole
+	// transaction, the caller's included under ProcessInTx, before the
+	// re-fetch below could run.
+	var inserted dbx.EvidenceRecord
+	ierr := pgx.BeginFunc(ctx, tx, func(sp pgx.Tx) error {
+		var err error
+		inserted, err = dbx.New(sp).InsertEvidenceRecord(ctx, params)
+		return err
 	})
-
-	if err != nil {
-		if errors.Is(err, ErrIdempotencyMismatch) {
-			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
-				"hash mismatch for idempotency_key", recordID)
-			return Receipt{}, DecisionRejectedIdempotencyMismatch, ErrIdempotencyMismatch
+	if ierr != nil {
+		// Race: a concurrent push with the same idempotency_key won.
+		// Re-fetch and treat as dedup if the hash matches.
+		var pgErr *pgconn.PgError
+		if errors.As(ierr, &pgErr) && pgErr.Code == pgErrUniqueViolation {
+			existing, gerr := q.GetEvidenceRecordByIdempotency(ctx, lookup)
+			if gerr == nil {
+				if existing.Hash != p.hash {
+					return dbx.EvidenceRecord{}, false, ErrIdempotencyMismatch
+				}
+				return existing, true, nil
+			}
 		}
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, err
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("insert evidence: %w", ierr)
 	}
+	return inserted, false, nil
+}
 
-	decision := DecisionAccepted
-	if deduped {
-		decision = DecisionDeduplicated
+// auditPersistFailure audits a write-stage failure in its own transaction
+// and returns the decision it recorded.
+func (s *Service) auditPersistFailure(ctx context.Context, p *prepared, err error) Decision {
+	if errors.Is(err, ErrIdempotencyMismatch) {
+		s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
+			"hash mismatch for idempotency_key", p.recordID)
+		return DecisionRejectedIdempotencyMismatch
 	}
-	s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	if errors.Is(err, ErrConcurrentFreeze) {
+		// #3060: a refusal the caller retries, not a server fault.
+		s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedConcurrentFreeze,
+			"audit period frozen while the write's transaction was open", p.recordID)
+		return DecisionRejectedConcurrentFreeze
+	}
+	s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), p.recordID)
+	return DecisionRejectedInternalError
+}
 
-	return Receipt{
-		RecordID:     uuid.UUID(newRecord.ID.Bytes).String(),
-		Hash:         newRecord.Hash,
-		IngestedAt:   newRecord.IngestedAt.Time,
+func receiptFor(cred credstore.Credential, rec dbx.EvidenceRecord, deduped bool) Receipt {
+	r := Receipt{
+		RecordID:     uuid.UUID(rec.ID.Bytes).String(),
+		Hash:         rec.Hash,
+		IngestedAt:   rec.IngestedAt.Time,
 		CredentialID: cred.ID,
 		Deduplicated: deduped,
-	}, decision, nil
+	}
+	if rec.ControlID.Valid {
+		r.LinkedControlID = uuid.UUID(rec.ControlID.Bytes).String()
+	}
+	return r
 }
 
 // writeAudit lands one row in evidence_audit_log. Best-effort: a failure
@@ -713,58 +1184,77 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 	}
 	tenantCtx, cancel := context.WithTimeout(tenantCtx, auditWriteTimeout)
 	defer cancel()
-	_ = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	var entry unifiedlog.Entry
+	err := pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
 			return terr
 		}
-		q := dbx.New(tx)
-		var idemPtr, kindPtr *string
-		if idem != "" {
-			idemPtr = &idem
-		}
-		if kind != "" {
-			kindPtr = &kind
-		}
-		auditID := uuid.New()
-		_, _ = q.InsertEvidenceAuditEntry(tenantCtx, dbx.InsertEvidenceAuditEntryParams{
-			ID:             pgUUID(auditID.String()),
-			TenantID:       pgUUID(cred.TenantID),
-			CredentialID:   cred.ID,
-			Decision:       decision.String(),
-			ReasonCode:     truncate(reason, 1024),
-			IdempotencyKey: idemPtr,
-			EvidenceKind:   kindPtr,
-			RecordID:       recordID,
-		})
-		// Slice 126: fan out the audit row to the external sink. The
-		// canonical Entry shape mirrors slice 124's unifiedlog.Entry;
-		// payload fields not present on the per-domain table land in
-		// PayloadJSON. Non-blocking: this never fails the ingest path.
-		tenantUUID, _ := uuid.Parse(cred.TenantID)
-		recordIDStr := ""
-		if recordID.Valid {
-			recordIDStr = uuid.UUID(recordID.Bytes).String()
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"credential_id":   cred.ID,
-			"idempotency_key": idem,
-			"evidence_kind":   kind,
-			"reason_code":     truncate(reason, 1024),
-		})
-		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
-			OccurredAt:    time.Now().UTC(),
-			ActorID:       cred.ID,
-			TenantID:      tenantUUID,
-			Kind:          unifiedlog.KindEvidence,
-			TargetType:    "evidence_record",
-			TargetID:      recordIDStr,
-			Action:        decision.String(),
-			RowID:         auditID,
-			SubjectModule: unifiedlog.SubjectModuleCore,
-			PayloadJSON:   payload,
-		})
-		return nil
+		var ierr error
+		entry, ierr = insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID, s.importBatchID())
+		return ierr
 	})
+	if err == nil {
+		sink.EmitDefault(tenantCtx, entry)
+	}
+}
+
+// insertAudit inserts one evidence_audit_log row through q and returns
+// the external audit-sink event for it. The caller emits that event once
+// the row's transaction commits: writeAudit after its own transaction,
+// ProcessInTx through the caller's AuditOutbox (#1933).
+func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID, importBatchID pgtype.UUID) (unifiedlog.Entry, error) {
+	var idemPtr, kindPtr *string
+	if idem != "" {
+		idemPtr = &idem
+	}
+	if kind != "" {
+		kindPtr = &kind
+	}
+	auditID := uuid.New()
+	if _, err := q.InsertEvidenceAuditEntry(ctx, dbx.InsertEvidenceAuditEntryParams{
+		ID:             pgUUID(auditID.String()),
+		TenantID:       pgUUID(cred.TenantID),
+		CredentialID:   cred.ID,
+		Decision:       decision.String(),
+		ReasonCode:     truncate(reason, 1024),
+		IdempotencyKey: idemPtr,
+		EvidenceKind:   kindPtr,
+		RecordID:       recordID,
+		ImportBatchID:  importBatchID,
+	}); err != nil {
+		return unifiedlog.Entry{}, err
+	}
+	// Slice 126: the audit row's external-sink event. The canonical
+	// Entry shape mirrors slice 124's unifiedlog.Entry; payload fields
+	// not present on the per-domain table land in PayloadJSON. Emitting
+	// is non-blocking and never fails the ingest path.
+	tenantUUID, _ := uuid.Parse(cred.TenantID)
+	recordIDStr := ""
+	if recordID.Valid {
+		recordIDStr = uuid.UUID(recordID.Bytes).String()
+	}
+	fields := map[string]any{
+		"credential_id":   cred.ID,
+		"idempotency_key": idem,
+		"evidence_kind":   kind,
+		"reason_code":     truncate(reason, 1024),
+	}
+	if importBatchID.Valid {
+		fields["import_batch_id"] = uuid.UUID(importBatchID.Bytes).String()
+	}
+	payload, _ := json.Marshal(fields)
+	return unifiedlog.Entry{
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       cred.ID,
+		TenantID:      tenantUUID,
+		Kind:          unifiedlog.KindEvidence,
+		TargetType:    "evidence_record",
+		TargetID:      recordIDStr,
+		Action:        decision.String(),
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   payload,
+	}, nil
 }
 
 // missingField mirrors slice 003's check; duplicating it here keeps the
@@ -777,7 +1267,8 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 		return "evidence_kind is required"
 	case r.GetSchemaVersion() == "":
 		return "schema_version is required"
-	case r.GetControlId() == "":
+	case r.GetControlId() == "" && !routed.Kind(r.GetEvidenceKind()):
+		// #2924: a routed kind is bound to no control, so it may omit one.
 		return "control_id is required"
 	case len(r.GetScope()) == 0:
 		return "scope is required (at least one dimension)"
@@ -801,36 +1292,15 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 	return ""
 }
 
-// scopeSatisfiesPredicate is the v1 scope_predicate evaluator. The
-// predicate format is "key=value[,key=value...]" — every key/value pair
-// must appear in the record's scope. EVIDENCE_SDK §4.3 anticipates a
-// richer expression language in v2; v1 hard-codes simple equality so the
-// security boundary is auditable.
-func scopeSatisfiesPredicate(scope []*evidencev1.ScopeDimension, predicate string) bool {
-	have := map[string]map[string]bool{}
-	for _, d := range scope {
-		have[d.Key] = map[string]bool{}
-		for _, v := range d.Values {
-			have[d.Key][v] = true
-		}
+// scopeSatisfiesPredicate evaluates a credential's scope_predicate against
+// a record's scope with scope.MatchRecordScope. A malformed predicate
+// returns false with a non-nil error.
+func scopeSatisfiesPredicate(dims []*evidencev1.ScopeDimension, predicate string) (bool, error) {
+	have := make(map[string][]string, len(dims))
+	for _, d := range dims {
+		have[d.GetKey()] = append(have[d.GetKey()], d.GetValues()...)
 	}
-	for _, part := range strings.Split(predicate, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			return false
-		}
-		k := strings.TrimSpace(kv[0])
-		v := strings.TrimSpace(kv[1])
-		vals, ok := have[k]
-		if !ok || !vals[v] {
-			return false
-		}
-	}
-	return true
+	return scope.MatchRecordScope(predicate, have)
 }
 
 // protoResultToEnum maps the proto Result enum to the SQL evidence_result
@@ -853,10 +1323,11 @@ func protoResultToEnum(r evidencev1.Result) (dbx.EvidenceResult, bool) {
 // ReceiptToProto returns the proto-shaped receipt the API handler returns.
 func ReceiptToProto(r Receipt) *evidencev1.EvidenceReceipt {
 	return &evidencev1.EvidenceReceipt{
-		RecordId:     r.RecordID,
-		Hash:         r.Hash,
-		IngestedAt:   timestamppb.New(r.IngestedAt),
-		CredentialId: r.CredentialID,
+		RecordId:        r.RecordID,
+		Hash:            r.Hash,
+		IngestedAt:      timestamppb.New(r.IngestedAt),
+		CredentialId:    r.CredentialID,
+		LinkedControlId: r.LinkedControlID,
 	}
 }
 
@@ -891,4 +1362,15 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// AuditRefusedBatch writes a rejected_validation audit row for every record
+// of a historical-import batch refused as a whole before any record was
+// processed (#1742): a batch with records in a frozen audit period it did
+// not name, for one. Each row carries the batch and reason. Best-effort,
+// like every refusal audit.
+func (s *Service) AuditRefusedBatch(ctx context.Context, recs []*evidencev1.EvidenceRecord, cred credstore.Credential, reason string) {
+	for _, rec := range recs {
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, reason, pgtype.UUID{})
+	}
 }

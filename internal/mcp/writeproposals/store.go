@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -60,6 +61,9 @@ const (
 	ToolUpdateControlState  = "update_control_state"
 	ToolPushEvidence        = "push_evidence"
 	ToolUpdateRiskTreatment = "update_risk_treatment"
+	// #1748: hierarchy links between existing risks.
+	ToolLinkChildRisks  = "link_child_risks"
+	ToolUnlinkChildRisk = "unlink_child_risk"
 )
 
 // AllowedTools is the canonical set of MCP write tools allowed to file a
@@ -71,6 +75,8 @@ var AllowedTools = map[string]bool{
 	ToolUpdateControlState:  true,
 	ToolPushEvidence:        true,
 	ToolUpdateRiskTreatment: true,
+	ToolLinkChildRisks:      true,
+	ToolUnlinkChildRisk:     true,
 }
 
 // Anti-criterion P0-A5: per-(tenant, user) cap on pending proposals.
@@ -115,6 +121,30 @@ type Proposal struct {
 	CreatedBy      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// Confirmer is the person confirming the proposal, set only on the
+	// Proposal Confirm hands an Applier (not stored). An applier whose
+	// write is an approval applies the approval rule to it (#2105).
+	Confirmer Confirmer
+}
+
+// Confirmer names who confirms a proposal. Approver is what the approval
+// rule checks. Principal is who the confirmer is, recorded as the actor of
+// the write (and the proposer of a proposed acceptance): REST computes it
+// with credstore.PrincipalOf, and the confirm handler passes the same
+// value, so a write's actor does not depend on which surface made it
+// (#2371).
+type Confirmer struct {
+	approval.Approver
+	Principal string
+}
+
+// Actor is the confirmer's principal, falling back to the credential id
+// for a caller that named none (Store.Confirm).
+func (c Confirmer) Actor() string {
+	if c.Principal != "" {
+		return c.Principal
+	}
+	return c.CredentialID
 }
 
 // CreateInput captures the tool-handler-supplied fields. The store fills
@@ -152,6 +182,7 @@ type Store struct {
 	pool       *pgxpool.Pool
 	appliers   map[string]Applier
 	pendingCap int
+	switches   Switches
 }
 
 // NewStore constructs a Store wired against the given pool. Use
@@ -211,6 +242,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Proposal, error) {
 	// Reject malformed JSON early so the DB never sees it.
 	if !json.Valid(in.ToolInput) {
 		return Proposal{}, fmt.Errorf("%w: tool_input is not valid JSON", ErrInvalidInput)
+	}
+	if err := validateToolInput(in.ToolName, in.ToolInput); err != nil {
+		return Proposal{}, err
 	}
 
 	var out Proposal
@@ -353,8 +387,27 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]Proposal, error) {
 //   - ErrUnknownTool when no Applier is registered for the proposal's
 //     tool_name (caller mis-wired the store).
 func (s *Store) Confirm(ctx context.Context, id uuid.UUID, approver string) (Proposal, error) {
+	return s.ConfirmAs(ctx, id, approver, Confirmer{Approver: approval.Approver{CredentialID: approver}})
+}
+
+// ConfirmAs is Confirm with the confirming person named: by.UserID is the
+// users(id) behind the confirming credential, empty for a machine, and
+// by.Principal its credstore.PrincipalOf. The Applier sees it as
+// Proposal.Confirmer (#2105). approver is still what human_approver
+// records.
+func (s *Store) ConfirmAs(ctx context.Context, id uuid.UUID, approver string, by Confirmer) (Proposal, error) {
 	if approver == "" {
 		return Proposal{}, fmt.Errorf("%w: approver is required", ErrInvalidInput)
+	}
+	// A proposal into a switched-off module stays pending (#2175).
+	if s.switches != nil {
+		p, err := s.Get(ctx, id)
+		if err != nil {
+			return Proposal{}, err
+		}
+		if err := s.moduleOff(ctx, p); err != nil {
+			return Proposal{}, err
+		}
 	}
 	var out Proposal
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ uuid.UUID) error {
@@ -392,6 +445,7 @@ func (s *Store) Confirm(ctx context.Context, id uuid.UUID, approver string) (Pro
 		// so the apply step sees a fully-approved row. We re-fetch
 		// post-update for the return shape.
 		now := time.Now().UTC()
+		current.Confirmer = by
 		subject, applyErr := applier(ctx, tx, current)
 		if applyErr != nil {
 			return fmt.Errorf("apply: %w", applyErr)

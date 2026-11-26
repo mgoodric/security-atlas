@@ -16,7 +16,9 @@
 //   - Assign-to-tenant: a dialog (user_id + tenant_id + role checkboxes)
 //     posts to /api/admin/users; on success the list refetches and the
 //     inline result surfaces (AC-2).
-//   - Revoke: a per-row action behind a confirm dialog (AC-3).
+//   - Revoke: a per-row action behind a confirm dialog (AC-3), in the
+//     row menu; withheld, with the reason, from a tenant's only active
+//     admin (#2090).
 //   - Self-assign: "Add me to a tenant" for super_admins; on success the
 //     UI explains a re-auth (full re-login) is needed before the new
 //     tenant appears in the switcher, and links to the sign-in flow
@@ -72,22 +74,30 @@ import {
   ROLES,
   type Role,
 } from "@/components/admin/roles";
+import { lastAdminReason } from "@/components/admin/last-holder";
+import { MintedKeysWarning } from "@/components/admin/minted-keys-warning";
+import { ModuleAccessControl } from "@/components/admin/module-access-control";
+import { RowActions } from "@/components/ui/row-actions";
 import type {
   AdminUserRow,
   AdminUserListResult,
   AssignUserResponse,
+  FeatureFlag,
   TenantRow,
 } from "@/lib/api/admin";
+import { accessSummary, optionalModules } from "@/lib/admin/module-access";
 import {
   userOptions,
   tenantOptions,
   tenantFieldMode,
 } from "@/lib/admin/assign-options";
+import { showTenantChrome, useTenancy } from "@/lib/tenancy";
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type AdminUserListBody = AdminUserListResult & { error?: string };
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -111,13 +121,26 @@ export default function UsersPage() {
     queryKey: ["admin", "users"],
     queryFn: async (): Promise<AdminUserListResult> => {
       const res = await fetch("/api/admin/users", { cache: "no-store" });
-      const body = (await res.json()) as AdminUserListBody;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as AdminUserListResult;
     },
   });
+
+  // #2172: the optional modules a member's access can grant, from the
+  // server's registry via Admin › Features. Best-effort: on failure the
+  // dialog lists none and "All modules" still saves.
+  const { data: flags } = useQuery({
+    queryKey: ["admin", "features"],
+    queryFn: async (): Promise<FeatureFlag[]> => {
+      const res = await fetch("/api/admin/features", { cache: "no-store" });
+      if (!res.ok) return [];
+      const body = (await res.json()) as { items?: FeatureFlag[] };
+      return body.items ?? [];
+    },
+  });
+  const modules = optionalModules(flags ?? []);
 
   // The session tenant — used as the revoke tenant_id fallback for the
   // within-tenant (tenant-admin) list shape, whose rows carry no
@@ -134,6 +157,10 @@ export default function UsersPage() {
 
   const crossTenant = data?.cross_tenant ?? false;
   const items = data?.items ?? [];
+  // #1764: with one tenant on the install, tenant chrome is hidden — no
+  // Tenant column, no super-admin banner or self-assign, and the assign
+  // dialog has no tenant field (the user lands in the sole tenant).
+  const singleTenant = !showTenantChrome(useTenancy());
 
   // AC-2 / AC-4: the cross-tenant tenant list is super_admin-only. Gate the
   // fetch on `crossTenant` so a tenant-admin's browser never receives the
@@ -145,13 +172,10 @@ export default function UsersPage() {
     enabled: crossTenant,
     queryFn: async (): Promise<TenantRow[]> => {
       const res = await fetch("/api/admin/tenants", { cache: "no-store" });
-      const body = (await res.json()) as {
-        items?: TenantRow[];
-        error?: string;
-      };
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as { items?: TenantRow[] };
       return body.items ?? [];
     },
   });
@@ -165,7 +189,13 @@ export default function UsersPage() {
   const tenantMode = tenantFieldMode({
     crossTenant,
     sessionTenantId: me?.tenant_id,
+    singleTenant,
+    tenantIds: tenantOpts.map((o) => o.value),
   });
+  // The tenant the assignment posts: the sole tenant when there is one,
+  // otherwise the dialog's (chosen or pinned) field.
+  const assignTenant =
+    tenantMode.kind === "sole" ? tenantMode.tenantId : assignTenantID.trim();
 
   // resolveRevokeTenant picks the row's tenant_id (cross-tenant shape) or
   // falls back to the session tenant (within-tenant shape).
@@ -185,13 +215,10 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as {
-        error?: string;
-      } & AssignUserResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as AssignUserResponse;
     },
     onSuccess: async (out, vars) => {
       setAssignOpen(false);
@@ -219,11 +246,10 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as { error?: string; ok?: boolean };
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as { ok?: boolean };
     },
     onSuccess: async () => {
       setRevokeTarget(null);
@@ -257,8 +283,8 @@ export default function UsersPage() {
     if (tenantMode.kind === "unresolved") {
       return "your session tenant is still resolving — reload and retry";
     }
-    if (assignTenantID.trim() === "") return "select a tenant";
-    if (!UUID_PATTERN.test(assignTenantID.trim())) {
+    if (assignTenant === "") return "select a tenant";
+    if (!UUID_PATTERN.test(assignTenant)) {
       return "tenant_id must be a UUID";
     }
     if (assignRoles.length === 0) return "select at least one role";
@@ -274,23 +300,24 @@ export default function UsersPage() {
   const assignErrorId = assignError ? "assign-user-error" : undefined;
 
   return (
-    <div className="space-y-6" data-testid="admin-users-page">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground">
-            User accounts with their tenant memberships and RBAC roles. Roles
-            are the coarse authorization signal; ABAC predicates layer over them
-            per scope.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+    <PageShell
+      title="Users"
+      data-testid="admin-users-page"
+      subtitle={
+        <>
+          User accounts with their <Term id="tenant">tenant</Term> memberships
+          and RBAC <Term id="role">roles</Term>. Roles are the coarse
+          authorization signal; ABAC predicates layer over them per scope.
+        </>
+      }
+      actions={
+        <>
           <Button data-testid="open-assign-user" onClick={() => openAssign({})}>
-            Assign user to tenant
+            {singleTenant ? "Add user" : "Assign user to tenant"}
           </Button>
           {/* AC-4 / P0-479-2: self-assign is a cross-tenant action — only a
               super_admin (cross-tenant response shape) sees it. */}
-          {crossTenant ? (
+          {crossTenant && !singleTenant ? (
             <Button
               variant="secondary"
               data-testid="open-self-assign"
@@ -299,31 +326,33 @@ export default function UsersPage() {
               Add me to a tenant
             </Button>
           ) : null}
-        </div>
-      </div>
-
-      <Alert>
-        <AlertTitle>
-          {crossTenant
-            ? "Cross-tenant view (super admin)"
-            : "Tenant-scoped view"}
-        </AlertTitle>
-        <AlertDescription>
-          {crossTenant ? (
-            <>
-              You are a super admin: this list spans every tenant, and you can
-              assign any identity (including yourself) to any tenant. The server
-              is the authority — actions you are not permitted to take are
-              rejected with a clear error.
-            </>
-          ) : (
-            <>
-              This list is scoped to your tenant. Assignment is limited to your
-              own tenant. Cross-tenant management requires super admin.
-            </>
-          )}
-        </AlertDescription>
-      </Alert>
+        </>
+      }
+    >
+      {singleTenant ? null : (
+        <Alert data-testid="users-tenancy-banner">
+          <AlertTitle>
+            {crossTenant
+              ? "Cross-tenant view (super admin)"
+              : "Tenant-scoped view"}
+          </AlertTitle>
+          <AlertDescription>
+            {crossTenant ? (
+              <>
+                You are a super admin: this list spans every tenant, and you can
+                assign any identity (including yourself) to any tenant. The
+                server is the authority — actions you are not permitted to take
+                are rejected with a clear error.
+              </>
+            ) : (
+              <>
+                This list is scoped to your tenant. Assignment is limited to
+                your own tenant. Cross-tenant management requires super admin.
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>
@@ -331,8 +360,7 @@ export default function UsersPage() {
           <CardDescription>
             {crossTenant
               ? "One row per user-in-tenant membership across the platform."
-              : "Users in your tenant, with their roles."}{" "}
-            Bound to <code>GET /v1/admin/users</code> (slice 478).
+              : "Users in your tenant, with their roles."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -357,9 +385,12 @@ export default function UsersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>User</TableHead>
-                  {crossTenant ? <TableHead>Tenant</TableHead> : null}
+                  {crossTenant && !singleTenant ? (
+                    <TableHead>Tenant</TableHead>
+                  ) : null}
                   <TableHead>Status</TableHead>
                   <TableHead>Roles</TableHead>
+                  <TableHead>Module access</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -378,7 +409,7 @@ export default function UsersPage() {
                         {u.id}
                       </div>
                     </TableCell>
-                    {crossTenant ? (
+                    {crossTenant && !singleTenant ? (
                       <TableCell>
                         <code className="font-mono text-xs">{u.tenant_id}</code>
                       </TableCell>
@@ -415,18 +446,51 @@ export default function UsersPage() {
                         )}
                       </div>
                     </TableCell>
+                    {/* #2172: module access, next to the role. It is set
+                        from inside the member's tenant, so a super-admin's
+                        cross-tenant rows in another tenant show it only. */}
+                    <TableCell>
+                      {u.tenant_id && u.tenant_id !== me?.tenant_id ? (
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid={`module-access-${u.id}`}
+                        >
+                          {accessSummary(u.module_access, modules)}
+                        </span>
+                      ) : (
+                        <ModuleAccessControl
+                          userID={u.id}
+                          userLabel={u.display_name || u.email}
+                          roles={u.roles}
+                          access={u.module_access}
+                          modules={modules}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        data-testid={`revoke-user-${u.id}`}
-                        onClick={() => {
-                          setRevokeError(null);
-                          setRevokeTarget(u);
-                        }}
-                      >
-                        Revoke roles
-                      </Button>
+                      {/* #2090: Revoke roles opens the confirm dialog
+                          below. It is withheld, with the reason, from a
+                          tenant's only active admin. */}
+                      <RowActions
+                        label={`Actions for ${u.display_name || u.email}`}
+                        data-testid={`user-actions-${u.id}`}
+                        items={[
+                          {
+                            id: "revoke",
+                            label: "Revoke roles",
+                            disabledReason: lastAdminReason(
+                              u,
+                              items,
+                              !data?.next_cursor,
+                            ),
+                            onSelect: () => {
+                              setRevokeError(null);
+                              setRevokeTarget(u);
+                            },
+                            "data-testid": `revoke-user-${u.id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -442,9 +506,8 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>Role-permission matrix</CardTitle>
           <CardDescription>
-            Five canonical RBAC roles per{" "}
-            <code>Plans/canvas/09-tech-stack.md</code> §9.5. Permissions noted
-            at the coarse level; fine cuts layer on via ABAC predicates.
+            What each of the five roles can do. Finer rules can narrow a role
+            further.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -494,12 +557,18 @@ export default function UsersPage() {
           <DialogContent data-testid="assign-user-dialog">
             <DialogHeader>
               <DialogTitle>
-                {selfAssign ? "Add me to a tenant" : "Assign user to tenant"}
+                {selfAssign
+                  ? "Add me to a tenant"
+                  : singleTenant
+                    ? "Add user"
+                    : "Assign user to tenant"}
               </DialogTitle>
               <DialogDescription>
                 {selfAssign
                   ? "Grant your own identity a membership + role(s) in a tenant. A re-login is required afterward before the tenant appears in your switcher."
-                  : "Grant a user a membership + role(s) in a tenant. The server enforces authority — cross-tenant assignment requires super admin."}
+                  : singleTenant
+                    ? "Give a user role(s) in your organisation."
+                    : "Grant a user a membership + role(s) in a tenant. The server enforces authority — cross-tenant assignment requires super admin."}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -513,7 +582,7 @@ export default function UsersPage() {
                 }
                 setAssignError(null);
                 assignMutation.mutate({
-                  tenant_id: assignTenantID.trim(),
+                  tenant_id: assignTenant,
                   roles: assignRoles,
                   user_id: selfAssign ? undefined : assignUserID.trim(),
                   self_assign: selfAssign,
@@ -554,57 +623,61 @@ export default function UsersPage() {
                   cross-tenant dropdown; a tenant-admin's tenant is PINNED to
                   their session tenant (read-only, NOT a chooser — P0-527-1 /
                   P0-479-2). */}
-              <div className="space-y-1">
-                <label
-                  htmlFor="assign-tenant-id"
-                  className="text-xs font-medium text-muted-foreground"
-                >
-                  Tenant
-                </label>
-                {tenantMode.kind === "chooser" ? (
-                  <Select
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-select"
-                    value={assignTenantID}
-                    onChange={(e) => setAssignTenantID(e.target.value)}
-                    aria-describedby={assignErrorId}
+              {/* #1764: one tenant on the install — no tenant field; the
+                  user lands in the sole tenant. */}
+              {tenantMode.kind === "sole" ? null : (
+                <div className="space-y-1">
+                  <label
+                    htmlFor="assign-tenant-id"
+                    className="text-xs font-medium text-muted-foreground"
                   >
-                    <option value="" disabled>
-                      Select a tenant…
-                    </option>
-                    {tenantOpts.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
+                    Tenant
+                  </label>
+                  {tenantMode.kind === "chooser" ? (
+                    <Select
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-select"
+                      value={assignTenantID}
+                      onChange={(e) => setAssignTenantID(e.target.value)}
+                      aria-describedby={assignErrorId}
+                    >
+                      <option value="" disabled>
+                        Select a tenant…
                       </option>
-                    ))}
-                  </Select>
-                ) : tenantMode.kind === "pinned" ? (
-                  <Input
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-pinned"
-                    value={tenantMode.tenantId}
-                    readOnly
-                    aria-readonly="true"
-                    spellCheck={false}
-                    className="font-mono text-xs text-muted-foreground"
-                  />
-                ) : (
-                  <Input
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-unresolved"
-                    value=""
-                    readOnly
-                    aria-readonly="true"
-                    placeholder="resolving your session tenant…"
-                  />
-                )}
-                {tenantMode.kind === "pinned" ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Pinned to your tenant. Cross-tenant assignment requires
-                    super admin.
-                  </p>
-                ) : null}
-              </div>
+                      {tenantOpts.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : tenantMode.kind === "pinned" ? (
+                    <Input
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-pinned"
+                      value={tenantMode.tenantId}
+                      readOnly
+                      aria-readonly="true"
+                      spellCheck={false}
+                      className="font-mono text-xs text-muted-foreground"
+                    />
+                  ) : (
+                    <Input
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-unresolved"
+                      value=""
+                      readOnly
+                      aria-readonly="true"
+                      placeholder="resolving your session tenant…"
+                    />
+                  )}
+                  {tenantMode.kind === "pinned" ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Pinned to your tenant. Cross-tenant assignment requires
+                      super admin.
+                    </p>
+                  ) : null}
+                </div>
+              )}
               <fieldset className="space-y-2" aria-describedby={assignErrorId}>
                 <legend className="text-xs font-medium text-muted-foreground">
                   Roles (select one or more)
@@ -760,7 +833,7 @@ export default function UsersPage() {
                 <div className="font-mono text-xs text-muted-foreground">
                   {revokeTarget.id}
                 </div>
-                {revokeTarget.tenant_id ? (
+                {revokeTarget.tenant_id && !singleTenant ? (
                   <div>
                     <span className="font-medium">Tenant:</span>{" "}
                     <code className="font-mono text-xs">
@@ -768,6 +841,13 @@ export default function UsersPage() {
                     </code>
                   </div>
                 ) : null}
+                {/* #1953: the user's still-live minted keys. Informational;
+                    revoking roles never revokes them. */}
+                <MintedKeysWarning
+                  userId={revokeTarget.id}
+                  userTenantId={revokeTarget.tenant_id}
+                  sessionTenantId={me?.tenant_id}
+                />
               </div>
             ) : null}
             {revokeError ? (
@@ -821,6 +901,6 @@ export default function UsersPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

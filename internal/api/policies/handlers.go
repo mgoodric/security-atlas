@@ -3,20 +3,25 @@
 // internal/api/httpserver.go):
 //
 //	POST   /v1/policies                            create draft (AC-1)
-//	GET    /v1/policies                            list (optional ?status= filter)
+//	GET    /v1/policies                            list (optional ?status= and ?review= filters)
 //	GET    /v1/policies/{id}                       get one (optional ?versions=true for chain)
 //	PATCH  /v1/policies/{id}/submit                draft -> under_review
 //	PATCH  /v1/policies/{id}/approve               under_review -> approved (AC-4)
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
+//	PATCH  /v1/policies/{id}/review-date           change a published policy's next_review_at (#1806)
+//	DELETE /v1/policies/{id}                       discard a draft, audit-logged (#1987)
+//	PATCH  /v1/policies/{id}/controls              replace a synced policy's control links, audit-logged (#2852)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
+//	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
 // All handlers run with the tenant set by upstream auth middleware (slice
 // 033 tenancy.Middleware). The store opens its own transaction per call
 // and applies the tenant GUC.
 //
-// Approver-role gate: PATCH approve + POST publish both require
-// cred.IsApprover || cred.IsAdmin. Publish is gated because it creates an
-// audit-binding artifact; defense in depth.
+// Approver-role gate: PATCH approve, POST publish and PATCH review-date
+// require authz.IsTenantApprover (admin or grc_engineer, by flag or live
+// tenant role, #2428). Publish is gated because it
+// creates an audit-binding artifact; defense in depth.
 package policies
 
 import (
@@ -37,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
@@ -100,11 +106,24 @@ type createReq struct {
 	LinkedControlIDs            []string `json:"linked_control_ids"`
 	AcknowledgmentRequiredRoles []string `json:"acknowledgment_required_roles"`
 	SourceAttribution           string   `json:"source_attribution,omitempty"`
+	// PredecessorID makes this draft the next version of a published
+	// policy (#1747): it publishes through the normal workflow and
+	// supersedes the predecessor.
+	PredecessorID string `json:"predecessor_id,omitempty"`
 }
 
 type publishReq struct {
 	NewVersion    string  `json:"new_version"`
 	EffectiveDate *string `json:"effective_date,omitempty"` // YYYY-MM-DD
+	// NextReviewAt is the published version's review date (#1806):
+	// YYYY-MM-DD or RFC 3339. Omitted publishes with none.
+	NextReviewAt *string `json:"next_review_at,omitempty"`
+}
+
+// reviewDateReq is the PATCH /v1/policies/{id}/review-date body. The key
+// is required; null clears the review date.
+type reviewDateReq struct {
+	NextReviewAt json.RawMessage `json:"next_review_at"`
 }
 
 // policyAckRateCellWire is the per-policy ack-rate rollup the
@@ -144,12 +163,92 @@ type policyWire struct {
 	SubmittedBy                 *string    `json:"submitted_by,omitempty"`
 	ApprovedAt                  *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy                  *string    `json:"approved_by,omitempty"`
-	PublishedAt                 *time.Time `json:"published_at,omitempty"`
-	PublishedBy                 *string    `json:"published_by,omitempty"`
-	SupersededAt                *time.Time `json:"superseded_at,omitempty"`
-	CreatedAt                   time.Time  `json:"created_at"`
-	UpdatedAt                   time.Time  `json:"updated_at"`
-	Warnings                    []string   `json:"warnings,omitempty"`
+	// SelfApproved marks a policy its submitter approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved bool       `json:"self_approved"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
+	PublishedBy  *string    `json:"published_by,omitempty"`
+	SupersededAt *time.Time `json:"superseded_at,omitempty"`
+	NextReviewAt *time.Time `json:"next_review_at,omitempty"`
+	// ReviewStatus is overdue / due-soon / upcoming for a published
+	// policy with a review date, computed at response time (#1806).
+	ReviewStatus string `json:"review_status,omitempty"`
+	// Import fields (#1747): set only when source_attribution is
+	// "imported". historical_approver_name is free text, never a
+	// credential id; approved_by stays empty on imported rows.
+	Imported               bool       `json:"imported"`
+	HistoricalApproverName *string    `json:"historical_approver_name,omitempty"`
+	HistoricalApprovedAt   *string    `json:"historical_approved_at,omitempty"` // YYYY-MM-DD
+	SourceURL              *string    `json:"source_url,omitempty"`
+	ImportedBy             *string    `json:"imported_by,omitempty"`
+	ImportedAt             *time.Time `json:"imported_at,omitempty"`
+	// SyncDrift is set on a synced policy whose page body changed without
+	// a version bump (#2851); absent when the policy is in step.
+	SyncDrift *policySyncDriftWire `json:"sync_drift,omitempty"`
+	// SyncPropertyDrift is set on a synced policy whose page properties
+	// changed without a version bump (#2877); absent when they match.
+	// Independent of SyncDrift.
+	SyncPropertyDrift *policySyncPropertyDriftWire `json:"sync_property_drift,omitempty"`
+	// SyncMissingSince is set on a synced policy whose page a sync run
+	// found absent (#2853): it lost its label or was deleted. The policy
+	// stays in force.
+	SyncMissingSince *time.Time `json:"sync_missing_since,omitempty"`
+	// SyncUnreadable is set on a synced policy whose page the latest sync
+	// run carried as unreadable (#3000): still in its source, but its body
+	// could not be read. The policy is unchanged and stays in force.
+	SyncUnreadable *policySyncUnreadableWire `json:"sync_unreadable,omitempty"`
+	// SyncSource names the system a synced policy comes from
+	// ("Confluence", "SharePoint"), read from its sync site (#2837).
+	// Absent on any other policy.
+	SyncSource string    `json:"sync_source,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Warnings   []string  `json:"warnings,omitempty"`
+}
+
+// policySyncUnreadableWire is a synced policy's unreadable state (#3000):
+// when a sync run first carried its page unreadable, and the pusher's
+// reason from the latest run.
+type policySyncUnreadableWire struct {
+	Since  time.Time `json:"since"`
+	Reason string    `json:"reason"`
+}
+
+func syncUnreadableWire(at *time.Time, reason *string) *policySyncUnreadableWire {
+	if at == nil || reason == nil {
+		return nil
+	}
+	return &policySyncUnreadableWire{Since: *at, Reason: *reason}
+}
+
+// policySyncDriftWire is a synced policy's drift (#2851): when a sync run
+// first saw the page body differ from the published version, and the hex
+// sha256 of the body the page holds now.
+type policySyncDriftWire struct {
+	DetectedAt       time.Time `json:"detected_at"`
+	SourceBodySHA256 string    `json:"source_body_sha256"`
+}
+
+func syncDriftWire(at *time.Time, hash *string) *policySyncDriftWire {
+	if at == nil || hash == nil {
+		return nil
+	}
+	return &policySyncDriftWire{DetectedAt: *at, SourceBodySHA256: *hash}
+}
+
+// policySyncPropertyDriftWire is a synced policy's property drift
+// (#2877): when a sync run first saw a page property differ from the
+// published version, and the page property names that differ now.
+type policySyncPropertyDriftWire struct {
+	DetectedAt time.Time `json:"detected_at"`
+	Keys       []string  `json:"keys"`
+}
+
+func syncPropertyDriftWire(at *time.Time, keys []string) *policySyncPropertyDriftWire {
+	if at == nil || len(keys) == 0 {
+		return nil
+	}
+	return &policySyncPropertyDriftWire{DetectedAt: *at, Keys: keys}
 }
 
 // CreatePolicy handles POST /v1/policies (AC-1 part A).
@@ -159,9 +258,13 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
 	var req createReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodePolicyBody(w, r, &req) {
 		return
 	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
@@ -173,6 +276,19 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	if ackRoles == nil {
 		ackRoles = []string{}
 	}
+	if err := validateAudience(ackRoles, nil); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var predecessor *uuid.UUID
+	if s := strings.TrimSpace(req.PredecessorID); s != "" {
+		u, err := uuid.Parse(s)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "predecessor_id must be a UUID")
+			return
+		}
+		predecessor = &u
+	}
 	created, err := h.store.Create(ctx, policy.CreateInput{
 		Title:                       req.Title,
 		Version:                     req.Version,
@@ -183,6 +299,8 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		AcknowledgmentRequiredRoles: ackRoles,
 		SourceAttribution:           req.SourceAttribution,
 		CreatedBy:                   cred.ID,
+		Editor:                      actorOf(cred),
+		PredecessorID:               predecessor,
 	})
 	if err != nil {
 		h.writeCreateErr(w, r, err)
@@ -213,11 +331,22 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	reviewFilter := strings.TrimSpace(r.URL.Query().Get("review"))
+	if !validReviewFilter(reviewFilter) {
+		httpresp.WriteError(w, http.StatusBadRequest, "review must be one of overdue, due-soon, upcoming")
+		return
+	}
 	if includesAckRate(r) {
-		out, err := h.listPoliciesWithAckRate(ctx, statusFilter)
+		rows, err := h.listPoliciesWithAckRate(ctx, statusFilter)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list policies (with ack_rate)", err)
 			return
+		}
+		out := make([]policyWithAckRateWire, 0, len(rows))
+		for _, p := range rows {
+			if reviewFilter == "" || p.ReviewStatus == reviewFilter {
+				out = append(out, p)
+			}
 		}
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 		return
@@ -228,9 +357,12 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list policies", err)
 		return
 	}
-	out := make([]policyWire, len(rows))
-	for i, p := range rows {
-		out[i] = wireFromPolicy(p)
+	out := make([]policyWire, 0, len(rows))
+	for _, p := range rows {
+		wire := wireFromPolicy(p)
+		if reviewFilter == "" || wire.ReviewStatus == reviewFilter {
+			out = append(out, wire)
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 }
@@ -281,6 +413,31 @@ func (h *Handler) listPoliciesWithAckRate(ctx context.Context, statusFilter stri
 		out = append(out, wireFromAckRateRow(r))
 	}
 	return out, nil
+}
+
+// validReviewFilter reports whether v is an accepted ?review= value. Empty
+// means no filter. Unlike ?status=, an unknown value is refused: silently
+// returning every policy for a mistyped "overdue" would read as "none are
+// overdue".
+func validReviewFilter(v string) bool {
+	switch v {
+	case "", policy.ReviewOverdue, policy.ReviewDueSoon, policy.ReviewUpcoming:
+		return true
+	}
+	return false
+}
+
+// parseReviewDate accepts a review date as YYYY-MM-DD (midnight UTC) or
+// RFC 3339.
+func parseReviewDate(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, errors.New("next_review_at must be YYYY-MM-DD or RFC 3339")
+	}
+	return t.UTC(), nil
 }
 
 // includesAckRate returns true when the request asked for the joined
@@ -352,11 +509,27 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		SubmittedBy:                 r.SubmittedBy,
 		ApprovedAt:                  timestamptzPtr(r.ApprovedAt),
 		ApprovedBy:                  r.ApprovedBy,
+		SelfApproved:                r.SelfApproved,
 		PublishedAt:                 timestamptzPtr(r.PublishedAt),
 		PublishedBy:                 r.PublishedBy,
 		SupersededAt:                timestamptzPtr(r.SupersededAt),
+		NextReviewAt:                timestamptzPtr(r.NextReviewAt),
+		ReviewStatus:                policy.ReviewStatusOf(r.Status, timestamptzPtr(r.NextReviewAt), time.Now()),
+		Imported:                    r.SourceAttribution == policy.SourceImported,
+		HistoricalApproverName:      r.HistoricalApproverName,
+		SourceURL:                   r.SourceUrl,
+		ImportedBy:                  r.ImportedBy,
+		ImportedAt:                  timestamptzPtr(r.ImportedAt),
+		SyncDrift:                   syncDriftWire(timestamptzPtr(r.SyncDriftDetectedAt), r.SyncDriftBodySha256),
+		SyncPropertyDrift:           syncPropertyDriftWire(timestamptzPtr(r.SyncPropertyDriftDetectedAt), r.SyncPropertyDriftKeys),
+		SyncMissingSince:            timestamptzPtr(r.SyncMissingSince),
+		SyncUnreadable:              syncUnreadableWire(timestamptzPtr(r.SyncUnreadableSince), r.SyncUnreadableReason),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
+	}
+	if r.HistoricalApprovedAt.Valid {
+		s := r.HistoricalApprovedAt.Time.Format("2006-01-02")
+		out.HistoricalApprovedAt = &s
 	}
 	if r.PredecessorID.Valid {
 		s := uuid.UUID(r.PredecessorID.Bytes).String()
@@ -441,12 +614,19 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	updated, err := h.store.SubmitForReview(ctx, id, cred.ID)
+	// The submitter is recorded as the person, not the credential, so the
+	// approval check (#1807) sees the same person across sessions and keys.
+	updated, err := h.store.SubmitForReview(ctx, id, actorOf(cred))
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -461,7 +641,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
@@ -470,7 +650,13 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	approved, err := h.store.Approve(ctx, id, cred.ID)
+	// Only a person approves (#1807): Approver.UserID is empty for an
+	// unbound key, an OAuth client or the bootstrap admin, and the store
+	// refuses it.
+	approved, err := h.store.Approve(ctx, id, policy.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -479,15 +665,15 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 }
 
 // Publish handles POST /v1/policies/{id}/publish (AC-1 versioned row,
-// AC-7 orphan block). Gated by IsApprover (defense in depth — publish is
-// audit-binding).
+// AC-7 orphan block). Gated by authz.IsTenantApprover (defense in depth —
+// publish is audit-binding).
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required for publish")
 		return
 	}
@@ -516,16 +702,272 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		}
 		effective = &t
 	}
+	var nextReview *time.Time
+	if req.NextReviewAt != nil && *req.NextReviewAt != "" {
+		t, err := parseReviewDate(*req.NextReviewAt)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		nextReview = &t
+	}
 	published, err := h.store.Publish(ctx, id, policy.PublishInput{
 		NewVersion:    req.NewVersion,
 		EffectiveDate: effective,
 		PublishedBy:   cred.ID,
+		NextReviewAt:  nextReview,
 	})
 	if err != nil {
 		h.writePublishErr(w, r, err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(published)})
+}
+
+// SetReviewDate handles PATCH /v1/policies/{id}/review-date (#1806). It
+// changes a published policy's next_review_at in place, without a new
+// version, and the store appends a policy_audit_log row naming the caller
+// and the before and after dates. Body: {"next_review_at": "YYYY-MM-DD" |
+// RFC 3339 | null}; null clears the date. Approver or admin only.
+func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required to change a policy review date")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req reviewDateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(req.NextReviewAt) == 0 {
+		httpresp.WriteError(w, http.StatusBadRequest, "next_review_at is required (null clears it)")
+		return
+	}
+	var next *time.Time
+	if string(req.NextReviewAt) != "null" {
+		var raw string
+		if err := json.Unmarshal(req.NextReviewAt, &raw); err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "next_review_at must be a string or null")
+			return
+		}
+		t, err := parseReviewDate(raw)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		next = &t
+	}
+	updated, err := h.store.SetNextReviewAt(ctx, id, next, actorOf(cred))
+	if err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a published policy has a review date to change")
+		default:
+			httperr.WriteInternal(w, r, "set policy review date", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
+// DiscardDraft handles DELETE /v1/policies/{id} (#1987). It deletes a policy
+// only while it is a draft; the store appends a policy_audit_log row naming
+// the caller and the discarded title and version. Discarding a next-version
+// draft frees its predecessor for a new version. The role is the one that
+// edits a draft (create, submit): any credential in the tenant. Published,
+// superseded, approved and under-review policies answer 409 and are never
+// deleted. 204 on success.
+func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	if _, err := h.store.DiscardDraft(ctx, id, actorOf(cred)); err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be discarded; submitted, approved, published and superseded policies are kept")
+		default:
+			httperr.WriteInternal(w, r, "discard policy draft", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// updateDraftReq is the PATCH /v1/policies/{id} body: every editable field,
+// replaced whole. version and predecessor_id are fixed at create.
+type updateDraftReq struct {
+	Title                       string   `json:"title"`
+	BodyMd                      string   `json:"body_md"`
+	OwnerRole                   string   `json:"owner_role"`
+	ApproverRole                string   `json:"approver_role"`
+	LinkedControlIDs            []string `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string `json:"acknowledgment_required_roles"`
+}
+
+// UpdateDraft handles PATCH /v1/policies/{id} (#2116). It edits a policy
+// only while it is a draft, under the same `write` on `policies` as create
+// and discard, which OPA grants to admin and grc_engineer. A policy that
+// has left draft answers 409; a published policy changes through a new
+// version (predecessor_id). The caller is recorded as an editor of the
+// draft, and the approval rule counts every editor as an author (#2446).
+func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req updateDraftReq
+	if !decodePolicyBody(w, r, &req) {
+		return
+	}
+	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		return
+	}
+	// #2524: a free-text audience the draft already carries may stay; a
+	// new value must be a role or everyone.
+	current, err := h.store.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, policy.ErrNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "load policy draft", err)
+		return
+	}
+	if current.SourceAttribution == policy.SourceSynced {
+		httpresp.WriteError(w, http.StatusConflict, managedBySyncMsg(current.SyncSource))
+		return
+	}
+	if err := validateAudience(req.AcknowledgmentRequiredRoles, current.AcknowledgmentRequiredRoles); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, err := h.store.UpdateDraft(ctx, id, policy.UpdateDraftInput{
+		Title:                       req.Title,
+		BodyMd:                      req.BodyMd,
+		OwnerRole:                   req.OwnerRole,
+		ApproverRole:                req.ApproverRole,
+		LinkedControlIDs:            linkedIDs,
+		AcknowledgmentRequiredRoles: req.AcknowledgmentRequiredRoles,
+		Editor:                      actorOf(cred),
+	})
+	if err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, policy.ErrUnknownLinkedControl):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		case errors.Is(err, policy.ErrTitleRequired),
+			errors.Is(err, policy.ErrBodyRequired),
+			errors.Is(err, policy.ErrOwnerRoleRequired),
+			errors.Is(err, policy.ErrApproverRoleRequired),
+			errors.Is(err, policy.ErrCreatedByRequired):
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be edited; create a new version of a published policy")
+		default:
+			httperr.WriteInternal(w, r, "update policy draft", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
+// setControlsReq is the PATCH /v1/policies/{id}/controls body: the whole
+// link set, replaced.
+type setControlsReq struct {
+	LinkedControlIDs []string `json:"linked_control_ids"`
+}
+
+// SetControls handles PATCH /v1/policies/{id}/controls (#2852). It
+// replaces a published synced policy's control links in place: the page
+// carries the text, version and review date, and the links are kept in
+// security-atlas. It is the one in-tool change a synced policy accepts.
+// Any other policy answers 409 and changes its links in a draft or a new
+// version. The role is the draft-edit one (`write` on `policies`). A
+// change is audit-logged with the links before and after; the same set
+// again writes nothing.
+func (h *Handler) SetControls(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req setControlsReq
+	if !decodePolicyBody(w, r, &req) {
+		return
+	}
+	if req.LinkedControlIDs == nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids is required ([] removes every link)")
+		return
+	}
+	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		return
+	}
+	updated, err := h.store.SetSyncedLinks(ctx, id, linkedIDs, actorOf(cred))
+	if err != nil {
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrNotSyncedPolicy):
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, policy.ErrUnknownLinkedControl):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		default:
+			httperr.WriteInternal(w, r, "set policy controls", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
 }
 
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns
@@ -566,11 +1008,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	pdfBytes, err := h.renderPDF(renderCtx, doc)
 	if err != nil {
-		if errors.Is(err, policypdf.ErrChromeUnavailable) {
-			httpresp.WriteError(w, http.StatusServiceUnavailable, "pdf renderer unavailable: chrome not installed")
-			return
-		}
-		httperr.WriteInternal(w, r, "render pdf", err)
+		writePDFRenderErr(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -581,24 +1019,113 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
+// writePDFRenderErr answers a failed policy PDF render. A deployment with no
+// chrome installed gets 409 feature_not_enabled: retrying cannot install
+// chrome, so it is a refusal about the deployment, not a server failure
+// (#2786). Anything else is a 500.
+func writePDFRenderErr(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, policypdf.ErrChromeUnavailable) {
+		httpresp.WriteFeatureNotEnabled(w, "PDF export is not enabled on this deployment: chrome is not installed")
+		return
+	}
+	httperr.WriteInternal(w, r, "render pdf", err)
+}
+
+// managedBySyncMsg answers an in-tool edit of a synced policy (#2852),
+// naming the system it is synced from (#2837). Its page is the
+// authority, so the edit is made there.
+func managedBySyncMsg(source string) string {
+	if source == "" {
+		source = policy.SyncSourceConfluence
+	}
+	return "managed in " + source + ": this policy is synced from its source page; edit it there"
+}
+
+// writeManagedBySync answers 409 when err is policy.ErrManagedBySync and
+// reports whether it did.
+func writeManagedBySync(w http.ResponseWriter, err error) bool {
+	source, ok := policy.SyncSourceOf(err)
+	if !ok {
+		return false
+	}
+	httpresp.WriteError(w, http.StatusConflict, managedBySyncMsg(source))
+	return true
+}
+
 func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrTitleRequired),
 		errors.Is(err, policy.ErrVersionRequired),
 		errors.Is(err, policy.ErrBodyRequired),
 		errors.Is(err, policy.ErrOwnerRoleRequired),
 		errors.Is(err, policy.ErrApproverRoleRequired),
-		errors.Is(err, policy.ErrCreatedByRequired):
+		errors.Is(err, policy.ErrCreatedByRequired),
+		errors.Is(err, policy.ErrPredecessorNotFound),
+		errors.Is(err, policy.ErrInvalidSourceAttribution):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, policy.ErrUnknownLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, policy.ErrPredecessorNotPublished),
+		errors.Is(err, policy.ErrPredecessorTaken):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		httperr.WriteInternal(w, r, "create policy", err)
 	}
 }
 
+// maxPolicyBodyBytes caps a policy create or draft-edit request body
+// (#2446). body_md is the bulk of it; 1 MiB is far above any real policy
+// document and keeps one request from holding unbounded memory.
+const maxPolicyBodyBytes = 1 << 20
+
+// decodePolicyBody decodes a create or draft-edit request into dst under
+// maxPolicyBodyBytes. It writes 413 for an oversized body and 400 for any
+// other decode failure, and reports whether the caller should continue.
+func decodePolicyBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPolicyBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "request body exceeds 1 MiB")
+			return false
+		}
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
+}
+
+// actorOf names the person behind a credential: the bare users(id) uuid,
+// whether the caller is a JWT ("user:<uuid>") or a key bound to the user
+// ("<uuid>"), else the credential's principal (credstore.PrincipalOf). A
+// JWT credential's id is per token ("jwt:"+jti), and the two UserID shapes
+// differ, so comparing either raw would let one person submit through one
+// and approve through another (#1807). A machine JWT is recorded by its
+// principal, not its token id, which approval would read as a pre-#1807
+// session submitter (#2101).
+func actorOf(cred credstore.Credential) string {
+	return credstore.PrincipalOf(cred)
+}
+
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+	case errors.Is(err, policy.ErrSelfApproval),
+		errors.Is(err, policy.ErrEditorApproval),
+		errors.Is(err, policy.ErrEditorNotPerson),
+		errors.Is(err, policy.ErrApproverNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, policy.ErrSubmitterUnknown):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, policy.ErrUnknownLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, policy.ErrWrongState):
 		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
@@ -607,9 +1134,14 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 }
 
 func (h *Handler) writePublishErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrOrphanPublish):
 		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, policy.ErrNoLiveLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrWrongState):
@@ -649,11 +1181,28 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SubmittedBy:                 p.SubmittedBy,
 		ApprovedAt:                  p.ApprovedAt,
 		ApprovedBy:                  p.ApprovedBy,
+		SelfApproved:                p.SelfApproved,
 		PublishedAt:                 p.PublishedAt,
 		PublishedBy:                 p.PublishedBy,
 		SupersededAt:                p.SupersededAt,
+		NextReviewAt:                p.NextReviewAt,
+		ReviewStatus:                p.ReviewStatus(time.Now()),
+		Imported:                    p.IsImported(),
+		HistoricalApproverName:      p.HistoricalApproverName,
+		SourceURL:                   p.SourceURL,
+		ImportedBy:                  p.ImportedBy,
+		ImportedAt:                  p.ImportedAt,
+		SyncDrift:                   syncDriftWire(p.SyncDriftDetectedAt, p.SyncDriftBodySHA256),
+		SyncPropertyDrift:           syncPropertyDriftWire(p.SyncPropertyDriftDetectedAt, p.SyncPropertyDriftKeys),
+		SyncMissingSince:            p.SyncMissingSince,
+		SyncUnreadable:              syncUnreadableWire(p.SyncUnreadableSince, p.SyncUnreadableReason),
+		SyncSource:                  p.SyncSource,
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
+	}
+	if p.HistoricalApprovedAt != nil {
+		s := p.HistoricalApprovedAt.Format("2006-01-02")
+		out.HistoricalApprovedAt = &s
 	}
 	if p.PredecessorID != nil {
 		s := p.PredecessorID.String()

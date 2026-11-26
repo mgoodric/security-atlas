@@ -2,6 +2,7 @@ package frameworkscope
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -29,7 +31,36 @@ var (
 	// partial unique index (another row is already activated for the
 	// same (tenant, framework_version)). HTTP 409.
 	ErrAnotherActivated = errors.New("frameworkscope: another scope is already activated for this framework version")
+	// ErrEffectiveBeforeFreeze is returned when Activate is given an
+	// effective_from at or before the latest frozen audit period's
+	// frozen_at on the framework version. A frozen period is immutable
+	// evidence; a backdated activation would rewrite what was in force at
+	// its freeze (#2078). HTTP 409.
+	ErrEffectiveBeforeFreeze = errors.New("frameworkscope: effective_from is not after the freeze of an audit period on this framework version")
+	// ErrPredicateFrozen is returned when the predicate of an activated or
+	// superseded revision is edited. Create a new revision from it instead
+	// (CreateRequest.FromScopeID). HTTP 409.
+	ErrPredicateFrozen = errors.New("frameworkscope: the predicate of an activated or superseded scope is frozen; create a new revision from it")
+	// ErrRevisionVersionMismatch is returned when a new revision names a
+	// framework version other than its source revision's. HTTP 400.
+	ErrRevisionVersionMismatch = errors.New("frameworkscope: a new revision must be on its source revision's framework version")
+	// ErrSelfApproval is returned when the approver submitted the scope
+	// for review and the organisation does not allow self-approval
+	// (#2101). HTTP 403.
+	ErrSelfApproval = errors.New("frameworkscope: the submitter cannot approve their own scope; a second approver must approve it")
+	// ErrApproverNotPerson is returned when the approving credential
+	// belongs to no user. Only people approve (#2101). HTTP 403.
+	ErrApproverNotPerson = errors.New("frameworkscope: only a person can approve a scope; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
+	// ErrSubmitterUnknown is returned when the scope was submitted under a
+	// session id rather than a person, so no approver can be shown to
+	// differ from the submitter. Re-submitting records the person. HTTP 409.
+	ErrSubmitterUnknown = errors.New("frameworkscope: this scope was submitted before submitters were recorded by person, so a second approver cannot be verified; it must be re-submitted before it can be approved")
 )
+
+// constraintPredicateFrozen is the constraint name the
+// framework_scopes_predicate_frozen trigger raises for a predicate edit on
+// an activated or superseded revision.
+const constraintPredicateFrozen = "framework_scopes_predicate_frozen"
 
 // State constants mirror the CHECK enum on framework_scopes.state.
 const (
@@ -59,11 +90,17 @@ type FrameworkScope struct {
 	PredicateHashAtApproval  *string
 	ApprovalEvidenceFileURL  *string
 	ApprovalEvidenceFileHash *string
-	EffectiveFrom            *time.Time
-	SupersededBy             *uuid.UUID
-	SupersededAt             *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	// SubmittedBy is who submitted the scope for review: a users(id) uuid,
+	// or a credential id for a machine (#2101).
+	SubmittedBy *string
+	// SelfApproved marks a scope its submitter approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved  bool
+	EffectiveFrom *time.Time
+	SupersededBy  *uuid.UUID
+	SupersededAt  *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Store wraps the sqlc-generated Queries with the tenancy plumbing required
@@ -85,20 +122,56 @@ type CreateRequest struct {
 	FrameworkVersionID uuid.UUID
 	Name               string
 	Predicate          []byte // raw JSON from the caller
+	// Actor is the calling credential id, recorded on the workflow log.
+	Actor string
+	// FromScopeID, when set, makes the new draft a revision of that scope
+	// (#1965): activated and superseded revisions are immutable, so this is
+	// how their predicate or decisions change. The new draft is on the
+	// source's framework version (FrameworkVersionID may be zero; a
+	// different one is ErrRevisionVersionMismatch), takes the source's name
+	// and predicate when Name or Predicate is empty, and copies every
+	// decision recorded on the source. Each copied decision is logged as
+	// applicability.carry_over naming the source revision.
+	FromScopeID uuid.UUID
 }
 
 // Create inserts a new framework_scope row in `draft` state. AC-5.
 func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, error) {
-	canon, hash, err := Canonicalize(req.Predicate)
-	if err != nil {
-		return FrameworkScope{}, err
-	}
-	if err := Validate(canon); err != nil {
-		return FrameworkScope{}, err
-	}
-
 	var out FrameworkScope
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var source *dbx.FrameworkScope
+		if req.FromScopeID != uuid.Nil {
+			src, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(req.FromScopeID),
+			})
+			if gerr != nil {
+				if errors.Is(gerr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return fmt.Errorf("get source framework_scope: %w", gerr)
+			}
+			srcVersion := uuid.UUID(src.FrameworkVersionID.Bytes)
+			if req.FrameworkVersionID != uuid.Nil && req.FrameworkVersionID != srcVersion {
+				return ErrRevisionVersionMismatch
+			}
+			req.FrameworkVersionID = srcVersion
+			if req.Name == "" {
+				req.Name = src.Name
+			}
+			if len(req.Predicate) == 0 {
+				req.Predicate = src.Predicate
+			}
+			source = &src
+		}
+
+		canon, hash, err := Canonicalize(req.Predicate)
+		if err != nil {
+			return err
+		}
+		if err := Validate(canon); err != nil {
+			return err
+		}
 		row, err := q.CreateFrameworkScope(ctx, dbx.CreateFrameworkScopeParams{
 			ID:                 pgUUID(uuid.New()),
 			TenantID:           pgUUID(tenantID),
@@ -110,17 +183,58 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, 
 		if err != nil {
 			return fmt.Errorf("create framework_scope: %w", err)
 		}
+		if err := logChange(ctx, q, ActionCreate, req.Actor, nil, row); err != nil {
+			return err
+		}
+		if source != nil {
+			if row, err = copyDecisions(ctx, q, tenantID, *source, row, req.Actor); err != nil {
+				return err
+			}
+		}
 		out = rowToScope(row)
 		return nil
 	})
 	return out, err
 }
 
+// copyDecisions copies every decision recorded on source into the new draft
+// revision target, and returns target as it stands after the writes.
+func copyDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, source, target dbx.FrameworkScope, actor string) (dbx.FrameworkScope, error) {
+	src := rowToScope(source)
+	app, err := listApplicability(ctx, q, tenantID, src.FrameworkVersionID, &src)
+	if err != nil {
+		return target, err
+	}
+	var items []DecisionInput
+	for _, r := range app.Requirements {
+		if r.Decision == nil {
+			continue
+		}
+		items = append(items, DecisionInput{
+			RequirementID:     r.RequirementID,
+			Decision:          r.Decision.Decision,
+			Justification:     r.Decision.Justification,
+			ImplementationRef: r.Decision.ImplementationRef,
+			carriedFrom: &carrySource{
+				FrameworkVersionID:     src.FrameworkVersionID,
+				FrameworkScopeID:       src.ID,
+				FrameworkScopeState:    src.State,
+				FrameworkRequirementID: r.RequirementID,
+			},
+		})
+	}
+	if len(items) == 0 {
+		return target, nil
+	}
+	_, last, err := writeDecisions(ctx, q, tenantID, target, items, actor)
+	return last, err
+}
+
 // UpdatePredicate edits the predicate. The DB-level BEFORE UPDATE trigger
 // bounces the row back to `draft` and nulls approval columns if the row was
 // in `review` or `approved`. The handler reads `invalidated` to surface the
 // `approval_invalidated` banner per AC-9.
-func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []byte) (scope FrameworkScope, invalidated bool, err error) {
+func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []byte, actor string) (scope FrameworkScope, invalidated bool, err error) {
 	canon, hash, cerr := Canonicalize(predicate)
 	if cerr != nil {
 		return FrameworkScope{}, false, cerr
@@ -140,6 +254,9 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			}
 			return fmt.Errorf("get framework_scope: %w", gerr)
 		}
+		if before.State == StateActivated || before.State == StateSuperseded {
+			return ErrPredicateFrozen
+		}
 		row, uerr := q.UpdateFrameworkScopePredicate(ctx, dbx.UpdateFrameworkScopePredicateParams{
 			TenantID:      pgUUID(tenantID),
 			ID:            pgUUID(id),
@@ -147,7 +264,16 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			PredicateHash: hash,
 		})
 		if uerr != nil {
+			// The trigger re-checks the state on the locked row, so an
+			// activation that committed after the read above lands here.
+			var pgErr *pgconn.PgError
+			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintPredicateFrozen {
+				return ErrPredicateFrozen
+			}
 			return fmt.Errorf("update predicate: %w", uerr)
+		}
+		if lerr := logChange(ctx, q, ActionPredicateUpdate, actor, &before, row); lerr != nil {
+			return lerr
 		}
 		scope = rowToScope(row)
 		// The trigger flips state to draft + nulls approval cols only when
@@ -163,12 +289,17 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 	return scope, invalidated, err
 }
 
-// Submit transitions draft -> review. AC-6.
-func (s *Store) Submit(ctx context.Context, id uuid.UUID) (FrameworkScope, error) {
-	return s.guardedTransition(ctx, id, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
+// Submit transitions draft -> review. AC-6. actor is the calling
+// credential id, recorded on the workflow log; submitter is the person
+// behind it (a users(id) uuid), or the principal for a machine, which
+// approval compares against (#2101). It also re-submits a review row whose
+// submitter is unrecorded or a session id, which approval refuses.
+func (s *Store) Submit(ctx context.Context, id uuid.UUID, actor, submitter string) (FrameworkScope, error) {
+	return s.guardedTransition(ctx, id, ActionSubmit, actor, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
 		return q.SubmitFrameworkScope(ctx, dbx.SubmitFrameworkScopeParams{
-			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(id),
+			TenantID:    pgUUID(tenantID),
+			ID:          pgUUID(id),
+			SubmittedBy: &submitter,
 		})
 	})
 }
@@ -177,8 +308,14 @@ func (s *Store) Submit(ctx context.Context, id uuid.UUID) (FrameworkScope, error
 // are optional (ADR-0001: in-app attestation is primary, file upload is
 // optional). When empty, the columns stay NULL.
 type ApproveRequest struct {
-	ID               uuid.UUID
-	ApproverUserID   string // free-form id from the calling credential
+	ID uuid.UUID
+	// ApproverUserID is the person approving: the users(id) uuid behind
+	// the calling credential (credstore.CallerUserID), empty when the
+	// credential belongs to no user. Only people approve (#2101).
+	ApproverUserID string
+	// Actor is the calling credential id, recorded on the workflow log and
+	// compared against submitters recorded by credential id.
+	Actor            string
 	EvidenceFileURL  string
 	EvidenceFileHash string
 }
@@ -186,12 +323,29 @@ type ApproveRequest struct {
 // Approve transitions review -> approved. Records approver + approved_at +
 // predicate_hash_at_approval and optionally the evidence-file URL+hash. AC-7.
 //
-// ApproverUserID is the caller's free-form credential id ("key_…"). When it
-// happens to parse as a UUID the column is populated; otherwise it stays
-// NULL and the audit-log + credential id (set elsewhere) carries the
-// attribution. Slice 034 will graduate this to real user UUIDs.
+// The shared approval rule (internal/approval, #2101) runs in the same
+// transaction: only a person approves, and never the submitter unless the
+// organisation allows self-approval, in which case the row is flagged
+// self_approved and the workflow log's after-image carries the flag.
 func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope, error) {
-	return s.guardedTransition(ctx, req.ID, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
+	return s.guardedTransition(ctx, req.ID, ActionApprove, req.Actor, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
+		current, err := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(req.ID),
+		})
+		if err != nil {
+			return dbx.FrameworkScope{}, err
+		}
+		var self bool
+		if current.State == StateReview {
+			allowSelf, aerr := approval.AllowSelf(ctx, q, tenantID)
+			if aerr != nil {
+				return dbx.FrameworkScope{}, aerr
+			}
+			if self, err = CheckApprover(current, req, allowSelf); err != nil {
+				return dbx.FrameworkScope{}, err
+			}
+		}
 		var url, hash *string
 		if req.EvidenceFileURL != "" {
 			u := req.EvidenceFileURL
@@ -211,8 +365,35 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 			ApproverUserID:           approverPG,
 			ApprovalEvidenceFileUrl:  url,
 			ApprovalEvidenceFileHash: hash,
+			SelfApproved:             self,
 		})
 	})
+}
+
+// CheckApprover applies the shared approval rule to a scope and maps its
+// errors onto this package's. A machine credential never approves,
+// whatever the setting. GET /v1/approvals (#2119) calls it per row, so it
+// lists exactly what Approve accepts.
+func CheckApprover(row dbx.FrameworkScope, req ApproveRequest, allowSelf bool) (selfApproved bool, err error) {
+	if req.ApproverUserID == "" {
+		return false, ErrApproverNotPerson
+	}
+	// A scope in review with no recorded submitter (submitted before #2101
+	// and not backfilled) names nobody to compare against, so, unlike a
+	// policy, it must be re-submitted first.
+	if row.SubmittedBy == nil || *row.SubmittedBy == "" {
+		return false, ErrSubmitterUnknown
+	}
+	self, err := approval.Check(*row.SubmittedBy, approval.Approver{UserID: req.ApproverUserID, CredentialID: req.Actor}, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrApproverNotPerson
+	case errors.Is(err, approval.ErrRequesterUnknown):
+		return false, ErrSubmitterUnknown
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrSelfApproval
+	}
+	return self, err
 }
 
 // Activate transitions approved -> activated AND atomically supersedes the
@@ -220,7 +401,7 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 //
 // The two writes happen in one tx so the partial unique index never sees
 // two `activated` rows simultaneously.
-func (s *Store) Activate(ctx context.Context, id uuid.UUID, effectiveFrom time.Time) (FrameworkScope, error) {
+func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string, effectiveFrom time.Time) (FrameworkScope, error) {
 	var out FrameworkScope
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		before, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
@@ -236,6 +417,34 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, effectiveFrom time.T
 		if before.State != StateApproved {
 			return ErrWrongState
 		}
+		// #2078: refuse an effective_from at or before the latest freeze.
+		// The lock serialises this read against a concurrent Freeze.
+		if lerr := q.LockFrameworkScopeFreeze(ctx, dbx.LockFrameworkScopeFreezeParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: before.FrameworkVersionID,
+		}); lerr != nil {
+			return fmt.Errorf("lock framework scope freeze: %w", lerr)
+		}
+		frozenAt, ferr := q.GetLatestFrozenAtForFrameworkVersion(ctx, dbx.GetLatestFrozenAtForFrameworkVersionParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: before.FrameworkVersionID,
+		})
+		if ferr != nil {
+			return fmt.Errorf("get latest freeze: %w", ferr)
+		}
+		if frozenAt.Valid && !effectiveFrom.After(frozenAt.Time) {
+			return ErrEffectiveBeforeFreeze
+		}
+		// Read the prior activated row (if any) so its supersession can
+		// be logged with a before image.
+		prior, perr := q.GetActivatedFrameworkScope(ctx, dbx.GetActivatedFrameworkScopeParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: before.FrameworkVersionID,
+		})
+		hasPrior := perr == nil
+		if perr != nil && !errors.Is(perr, pgx.ErrNoRows) {
+			return fmt.Errorf("get prior activated: %w", perr)
+		}
 		// Supersede the prior activated row (if any) FIRST so the partial
 		// unique index doesn't fire when the activation lands.
 		if serr := q.SupersedePreviousActivated(ctx, dbx.SupersedePreviousActivatedParams{
@@ -244,6 +453,18 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, effectiveFrom time.T
 			SupersededBy:       pgUUID(id),
 		}); serr != nil {
 			return fmt.Errorf("supersede prior: %w", serr)
+		}
+		if hasPrior && prior.ID != before.ID {
+			superseded, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       prior.ID,
+			})
+			if gerr != nil {
+				return fmt.Errorf("get superseded: %w", gerr)
+			}
+			if lerr := logChange(ctx, q, ActionSupersede, actor, &prior, superseded); lerr != nil {
+				return lerr
+			}
 		}
 		row, aerr := q.ActivateFrameworkScope(ctx, dbx.ActivateFrameworkScopeParams{
 			TenantID:      pgUUID(tenantID),
@@ -256,6 +477,14 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, effectiveFrom time.T
 				return ErrAnotherActivated
 			}
 			return fmt.Errorf("activate: %w", aerr)
+		}
+		if lerr := logChange(ctx, q, ActionActivate, actor, &before, row); lerr != nil {
+			return lerr
+		}
+		// #2406: bring the prior version's posture target forward when
+		// this version has none.
+		if _, cerr := carryPostureTarget(ctx, q, tenantID, row, actor); cerr != nil {
+			return cerr
 		}
 		out = rowToScope(row)
 		return nil
@@ -361,29 +590,36 @@ func (s *Store) AsOf(ctx context.Context, frameworkVersionID uuid.UUID, t time.T
 	return out, err
 }
 
-// guardedTransition runs a single-row UPDATE that may return zero rows
-// because the state guard failed. On pgx.ErrNoRows, probe the row to
-// disambiguate ErrNotFound from ErrWrongState.
+// guardedTransition reads the row, runs a single-row UPDATE that returns
+// zero rows when the state guard fails (ErrWrongState), and logs the change.
+// A row that does not resolve under the tenant is ErrNotFound.
 func (s *Store) guardedTransition(
 	ctx context.Context,
 	id uuid.UUID,
+	action, actor string,
 	op func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error),
 ) (FrameworkScope, error) {
 	var out FrameworkScope
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		before, getErr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if getErr != nil {
+			if errors.Is(getErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get framework_scope: %w", getErr)
+		}
 		row, err := op(q, tenantID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				_, getErr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
-					TenantID: pgUUID(tenantID),
-					ID:       pgUUID(id),
-				})
-				if errors.Is(getErr, pgx.ErrNoRows) {
-					return ErrNotFound
-				}
 				return ErrWrongState
 			}
 			return fmt.Errorf("transition: %w", err)
+		}
+		if lerr := logChange(ctx, q, action, actor, &before, row); lerr != nil {
+			return lerr
 		}
 		out = rowToScope(row)
 		return nil
@@ -422,6 +658,77 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	return nil
 }
 
+// Workflow-log actions, mirroring the CHECK on
+// framework_scope_workflow_log.action.
+const (
+	ActionCreate          = "create"
+	ActionPredicateUpdate = "predicate.update"
+	ActionSubmit          = "submit"
+	ActionApprove         = "approve"
+	ActionActivate        = "activate"
+	ActionSupersede       = "supersede"
+)
+
+// logChange appends one framework_scope_workflow_log row for a change from
+// before (nil on create) to after. It runs on the caller's tx, so the log
+// row commits or rolls back with the change it records.
+func logChange(ctx context.Context, q *dbx.Queries, action, actor string, before *dbx.FrameworkScope, after dbx.FrameworkScope) error {
+	afterJSON, err := snapshot(after)
+	if err != nil {
+		return err
+	}
+	var fromState *string
+	var beforeJSON []byte
+	if before != nil {
+		st := before.State
+		fromState = &st
+		if beforeJSON, err = snapshot(*before); err != nil {
+			return err
+		}
+	}
+	if err := q.InsertFrameworkScopeWorkflowLog(ctx, dbx.InsertFrameworkScopeWorkflowLogParams{
+		TenantID:         after.TenantID,
+		FrameworkScopeID: after.ID,
+		Action:           action,
+		FromState:        fromState,
+		ToState:          after.State,
+		Before:           beforeJSON,
+		After:            afterJSON,
+		Actor:            actor,
+	}); err != nil {
+		return fmt.Errorf("frameworkscope: write workflow log: %w", err)
+	}
+	return nil
+}
+
+// snapshot renders a framework_scopes row as the JSON stored in the log's
+// before/after columns. The predicate is embedded as JSON, not base64.
+func snapshot(r dbx.FrameworkScope) ([]byte, error) {
+	sc := rowToScope(r)
+	b, err := json.Marshal(map[string]any{
+		"id":                          sc.ID,
+		"framework_version_id":        sc.FrameworkVersionID,
+		"name":                        sc.Name,
+		"state":                       sc.State,
+		"predicate":                   json.RawMessage(sc.Predicate),
+		"predicate_hash":              sc.PredicateHash,
+		"approver_user_id":            sc.ApproverUserID,
+		"approved_at":                 sc.ApprovedAt,
+		"predicate_hash_at_approval":  sc.PredicateHashAtApproval,
+		"approval_evidence_file_url":  sc.ApprovalEvidenceFileURL,
+		"approval_evidence_file_hash": sc.ApprovalEvidenceFileHash,
+		"submitted_by":                sc.SubmittedBy,
+		"self_approved":               sc.SelfApproved,
+		"effective_from":              sc.EffectiveFrom,
+		"superseded_by":               sc.SupersededBy,
+		"superseded_at":               sc.SupersededAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("frameworkscope: snapshot: %w", err)
+	}
+	return b, nil
+}
+
 // rowToScope converts the sqlc-generated FrameworkScope row to the public
 // type. Nullable pgtype columns are reflected as Go pointers.
 func rowToScope(r dbx.FrameworkScope) FrameworkScope {
@@ -451,6 +758,8 @@ func rowToScope(r dbx.FrameworkScope) FrameworkScope {
 	out.PredicateHashAtApproval = r.PredicateHashAtApproval
 	out.ApprovalEvidenceFileURL = r.ApprovalEvidenceFileUrl
 	out.ApprovalEvidenceFileHash = r.ApprovalEvidenceFileHash
+	out.SubmittedBy = r.SubmittedBy
+	out.SelfApproved = r.SelfApproved
 	if r.EffectiveFrom.Valid {
 		t := r.EffectiveFrom.Time
 		out.EffectiveFrom = &t

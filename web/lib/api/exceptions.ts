@@ -3,6 +3,7 @@
 // the pre-existing `lib/api/exceptions-export.ts` (data-export client).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 177: /exceptions list view -----
 //
@@ -15,7 +16,7 @@ import { APIError } from "./base";
 // pattern). Mirrors the slice 098 controls / slice 099 evidence shape.
 //
 // Filter parameters whitelisted on the BFF + this fetcher:
-//   - status (requested / approved / denied / active / expired)
+//   - status (requested / approved / denied / active / expired / revoked)
 //   - control_id (UUID — narrows to one anchor's exceptions)
 //
 // All other params (`tenant_id`, debug flags, etc.) are dropped at the
@@ -24,16 +25,17 @@ import { APIError } from "./base";
 /**
  * Status enum for exception rows. Mirrors the constants in
  * `internal/exception/store.go` (StateRequested / StateApproved /
- * StateDenied / StateActive / StateExpired). Lifecycle:
+ * StateDenied / StateActive / StateExpired / StateRevoked). Lifecycle:
  *   requested → approved → active → expired
- *                       ↘ denied
+ *           ↘ denied               ↘ revoked (#2113)
  */
 export type ExceptionStatus =
   | "requested"
   | "approved"
   | "denied"
   | "active"
-  | "expired";
+  | "expired"
+  | "revoked";
 
 /**
  * Exception is the canonical wire shape for an exception/waiver row.
@@ -54,6 +56,11 @@ export type Exception = {
   requested_at: string;
   approved_by?: string;
   approved_at?: string;
+  /**
+   * #2101 — true when the requester approved the exception under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   denied_by?: string;
   denied_at?: string;
   activated_by?: string;
@@ -61,6 +68,9 @@ export type Exception = {
   effective_from?: string;
   expires_at: string;
   expired_at?: string;
+  /** #2113 — set when an approver revoked the active exception. */
+  revoked_by?: string;
+  revoked_at?: string;
   status: ExceptionStatus;
   created_at: string;
   updated_at: string;
@@ -97,14 +107,123 @@ export async function fetchExceptionsList(
     : `/api/exceptions`;
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ExceptionsListResponse;
+}
+
+// ----- #2113: one exception, its audit log, and its lifecycle actions -----
+//
+// Each call goes through a BFF under `/api/exceptions/...`, which forwards
+// the bearer cookie. The platform owns every refusal (403 for a role or
+// the approval rule, 409 for a wrong state); these fetchers surface the
+// platform's message as an APIError.
+
+export type ExceptionResponse = { exception: Exception };
+
+export type ExceptionAuditEntry = {
+  id: string;
+  action: string;
+  actor: string;
+  from_state?: string;
+  to_state: string;
+  reason: string;
+  occurred_at: string;
+  exception_id: string;
+};
+
+export type ExceptionAuditLogResponse = {
+  entries: ExceptionAuditEntry[];
+  count: number;
+};
+
+/** The request body for POST /v1/exceptions. */
+export type CreateExceptionInput = {
+  control_id: string;
+  /**
+   * A scope predicate object. Never null: the scope picker emits null for
+   * an incomplete choice, and the platform reads a stored null as every
+   * cell. The whole control is `{"op":"true"}`.
+   */
+  scope_cell_predicate: object;
+  justification: string;
+  compensating_controls: string[];
+  /** RFC 3339. At most 365 days after the request. */
+  expires_at: string;
+};
+
+/** The lifecycle actions a person takes on an exception. */
+export type ExceptionTransition = "approve" | "deny" | "activate" | "revoke";
+
+async function throwAPIError(res: Response): Promise<never> {
+  const msg = await upstreamErrorMessage(res);
+  throw new APIError(res.status, msg);
+}
+
+function exceptionPath(id: string): string {
+  return `/api/exceptions/${encodeURIComponent(id)}`;
+}
+
+export async function fetchException(id: string): Promise<ExceptionResponse> {
+  const res = await fetch(exceptionPath(id));
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as ExceptionResponse;
+}
+
+export async function fetchExceptionAuditLog(
+  id: string,
+): Promise<ExceptionAuditLogResponse> {
+  const res = await fetch(`${exceptionPath(id)}/audit-log`);
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as ExceptionAuditLogResponse;
+}
+
+/**
+ * Files an exception. Refuses, before any request, a predicate that is
+ * null or not an object, so an incomplete scope choice is never sent.
+ *
+ * #2618: `idempotencyKey` goes out as the Idempotency-Key header. Send the
+ * same key when retrying the same request, and the platform returns the
+ * exception the first send filed instead of filing a duplicate.
+ */
+export async function createException(
+  input: CreateExceptionInput,
+  idempotencyKey?: string,
+): Promise<ExceptionResponse> {
+  const p: unknown = input.scope_cell_predicate;
+  if (p === null || typeof p !== "object" || Array.isArray(p)) {
+    throw new Error(
+      "Choose the scope this exception covers before requesting it.",
+    );
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  const res = await fetch("/api/exceptions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as ExceptionResponse;
+}
+
+/**
+ * Runs one lifecycle action. `body` carries the deny or revoke `reason`,
+ * or the activate `effective_from`; approve takes none.
+ */
+export async function transitionException(
+  id: string,
+  transition: ExceptionTransition,
+  body: { reason?: string; effective_from?: string } = {},
+): Promise<ExceptionResponse> {
+  const res = await fetch(`${exceptionPath(id)}/${transition}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as ExceptionResponse;
 }

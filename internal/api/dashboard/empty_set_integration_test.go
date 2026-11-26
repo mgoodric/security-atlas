@@ -3,7 +3,7 @@
 // Slice 150 — empty-set robustness integration test for the dashboard
 // HTTP API. The slice-040 dashboard panel ("Could not load board
 // metrics · 500 Internal Server Error") consumes /v1/frameworks/posture,
-// /v1/activity, /v1/upcoming — every one of those must return 200 with
+// /v1/activity — every one of those must return 200 with
 // an empty envelope on a fresh-install zero-row DB.
 //
 // See docs/issues/150-empty-set-robustness-audit-across-list-endpoints.md.
@@ -23,7 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 )
 
 func empAppDSN(t *testing.T) string {
@@ -82,8 +82,9 @@ func TestDashboard_EmptyTenant_AllPanelsReturn200(t *testing.T) {
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
+	// A control_owner by live role, through OPA (liveroletest, #2507).
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "control_owner")
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 
@@ -106,7 +107,6 @@ func TestDashboard_EmptyTenant_AllPanelsReturn200(t *testing.T) {
 	}{
 		{"/v1/frameworks/posture", "frameworks", false},
 		{"/v1/activity", "activity", true},
-		{"/v1/upcoming", "upcoming", true},
 	}
 
 	for _, tc := range cases {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -29,6 +31,10 @@ const (
 	ActionDeprovision = "user.deprovision"
 	ActionReprovision = "user.reprovision"
 	ActionDelete      = "user.delete"
+	// ActionLastAdminDeprovisioned records that a deprovision left the
+	// tenant with no active admin (#2273). It is written in addition to the
+	// deprovision's own row.
+	ActionLastAdminDeprovisioned = "tenant_last_admin_deprovisioned"
 )
 
 // ErrUserNotFound is returned when no user matches under the tenant.
@@ -56,11 +62,28 @@ type DomainUser struct {
 // app.current_tenant RLS (invariant #6 / P0-508-4) — the tenant comes from the
 // authenticated SCIM credential, never from the request body.
 type Store struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	creds CredentialRevoker
+	// notify replaces the super-admin notifier when set; nil calls the SQL
+	// function. Only tests set it, to inject a notify failure (#2504).
+	notify func(context.Context, dbx.DBTX, dbx.NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error)
+}
+
+// CredentialRevoker drops a user's API keys from the in-memory credstore.
+// Deprovisioning revokes the keys durably in its transaction and calls this
+// after commit (#1915). *credstore.Store satisfies it.
+type CredentialRevoker interface {
+	RevokeUserInMemory(tenantID, userID string) int
 }
 
 // NewStore constructs a Store bound to the RLS app pool.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithCredentialRevoker wires the after-commit in-memory key revocation.
+func (s *Store) WithCredentialRevoker(c CredentialRevoker) *Store {
+	s.creds = c
+	return s
+}
 
 // ProvisionInput is the attribute allow-list for a SCIM Create. NOTE there is
 // no Roles field by design (P0-508-3): SCIM provisions identity + active only.
@@ -236,7 +259,8 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		return DomainUser{}, err
 	}
 	var out DomainUser
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	deprovisioned := false
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -245,6 +269,10 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 				return ErrUserNotFound
 			}
 			return gErr
+		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active && !in.Active)
+		if wErr != nil {
+			return wErr
 		}
 		row, rErr := q.ReplaceSCIMUser(ctx, dbx.ReplaceSCIMUserParams{
 			TenantID:    tIDU,
@@ -259,19 +287,26 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		out = domainUserFromRow(row)
 		action := ActionReplace
 		if prev.Active && !in.Active {
-			if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+			if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 				return rErr
 			}
+			deprovisioned = true
 			action = ActionDeprovision
 		} else if !prev.Active && in.Active {
 			action = ActionReprovision
 		}
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
 			"active": in.Active,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
+	}
+	if deprovisioned {
+		s.forgetCredentials(tenantID, id)
 	}
 	return out, nil
 }
@@ -291,7 +326,8 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 		return DomainUser{}, perr
 	}
 	var out DomainUser
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	deprovisioned := false
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -300,6 +336,10 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 				return ErrUserNotFound
 			}
 			return gErr
+		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active && intent.setActive && !intent.active)
+		if wErr != nil {
+			return wErr
 		}
 		row := prev
 		if intent.setDisplayName {
@@ -319,23 +359,30 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 				return fmt.Errorf("scim: patch active: %w", gErr)
 			}
 			if prev.Active && !intent.active {
-				if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+				if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 					return rErr
 				}
+				deprovisioned = true
 				action = ActionDeprovision
 			} else if !prev.Active && intent.active {
 				action = ActionReprovision
 			}
 		}
 		out = domainUserFromRow(row)
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
 			"set_active":       intent.setActive,
 			"active":           intent.active,
 			"set_display_name": intent.setDisplayName,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
+	}
+	if deprovisioned {
+		s.forgetCredentials(tenantID, id)
 	}
 	return out, nil
 }
@@ -349,27 +396,40 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
-		if _, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
+		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
-		}); gErr != nil {
+		})
+		if gErr != nil {
 			if errors.Is(gErr, pgx.ErrNoRows) {
 				return ErrUserNotFound
 			}
 			return gErr
+		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active)
+		if wErr != nil {
+			return wErr
 		}
 		if _, sErr := q.SetSCIMUserActive(ctx, dbx.SetSCIMUserActiveParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}, Active: false,
 		}); sErr != nil {
 			return fmt.Errorf("scim: delete (disable): %w", sErr)
 		}
-		if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+		if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 			return rErr
 		}
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, ActionDelete, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, ActionDelete, map[string]any{
 			"soft_disabled": true,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
+	if err != nil {
+		return err
+	}
+	s.forgetCredentials(tenantID, id)
+	return nil
 }
 
 // --- internals ---
@@ -445,14 +505,145 @@ func planPatch(ops []PatchOperation) (patchIntent, error) {
 	return intent, nil
 }
 
-func (s *Store) revokeSessions(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, userID uuid.UUID) error {
-	if _, err := q.RevokeAllSCIMUserSessions(ctx, dbx.RevokeAllSCIMUserSessionsParams{
-		TenantID: tenantID,
-		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
-	}); err != nil {
-		return fmt.Errorf("scim: revoke sessions: %w", err)
+// revokeAccess revokes the user's sessions and API keys inside the
+// deprovision transaction (AC-4, #1915).
+func (s *Store) revokeAccess(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, userID uuid.UUID) error {
+	if err := users.RevokeAccess(ctx, q, uuid.UUID(tenantID.Bytes), userID); err != nil {
+		return fmt.Errorf("scim: %w", err)
 	}
 	return nil
+}
+
+// adminWatch carries the tenant's admin-roster lock and pre-change admin
+// count through a deprovision (#2273). The zero value watches nothing.
+type adminWatch struct {
+	guard  users.AdminGuard
+	active bool
+}
+
+// watchAdmins takes the tenant's admin-roster lock and counts its active
+// admins when deprovisioning is true. It runs before the deprovision's
+// writes, so the count is the tenant's state before them, and holding the
+// same lock as the admin API means two concurrent deprovisions of the last
+// two admins cannot both see the other still active. The deprovision is
+// never refused (#2261 decisions D5); alertIfLastAdmin only reports.
+func (s *Store) watchAdmins(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, deprovisioning bool) (adminWatch, error) {
+	if !deprovisioning {
+		return adminWatch{}, nil
+	}
+	g, err := users.LockAdmins(ctx, q, uuid.UUID(tenantID.Bytes))
+	if err != nil {
+		return adminWatch{}, fmt.Errorf("scim: %w", err)
+	}
+	return adminWatch{guard: g, active: true}, nil
+}
+
+// alertIfLastAdmin recounts the tenant's active admins after a deprovision.
+// When the count went from one or more to zero it notifies every active
+// super-admin and writes a tenant_last_admin_deprovisioned audit row, in the
+// deprovision's transaction (#2273).
+//
+// The alert is best-effort (#2504). The notify call and the audit write each
+// run under a SAVEPOINT, so an error in either rolls back only that step and
+// is logged at ERROR; the deprovision still commits, because a departed
+// person must not keep access while the IdP retries. A notify failure is
+// recorded on the audit row as notify_error (see notifyErrorDetail), with the
+// full error in the log line. If rolling back to a savepoint
+// itself fails, the transaction is aborted and the commit reports it.
+func (s *Store) alertIfLastAdmin(ctx context.Context, tx pgx.Tx, w adminWatch, tenantID pgtype.UUID, actorCredentialID, targetUserID uuid.UUID) error {
+	if !w.active {
+		return nil
+	}
+	err := w.guard.Check(ctx, dbx.New(tx))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, users.ErrLastAdmin) {
+		return fmt.Errorf("scim: %w", err)
+	}
+	detail := map[string]any{
+		"active_admins_before": w.guard.Before(),
+		"active_admins_after":  0,
+	}
+	var notified int32
+	if err := savepoint(ctx, tx, func(db dbx.DBTX) error {
+		var nErr error
+		notified, nErr = s.notifySuperAdmins(ctx, db, dbx.NotifySuperAdminsLastAdminDeprovisionedParams{
+			TenantID:            tenantID,
+			DeprovisionedUserID: pgtype.UUID{Bytes: targetUserID, Valid: true},
+		})
+		return nErr
+	}); err != nil {
+		slog.ErrorContext(ctx, "scim: last-admin alert: notify super-admins failed; deprovision proceeds",
+			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
+		detail["notify_error"] = notifyErrorDetail(err)
+	} else {
+		detail["super_admins_notified"] = notified
+	}
+	if err := savepoint(ctx, tx, func(db dbx.DBTX) error {
+		return s.writeAudit(ctx, dbx.New(db), tenantID, actorCredentialID, targetUserID, ActionLastAdminDeprovisioned, detail)
+	}); err != nil {
+		slog.ErrorContext(ctx, "scim: last-admin alert: audit write failed; deprovision proceeds",
+			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
+	}
+	return nil
+}
+
+// notifyErrorOther is the notify_error text for a failure that is not a
+// Postgres error.
+const notifyErrorOther = "notify failed (not a database error); see the server log"
+
+// notifyErrorDetail is the notify_error value for the last-admin audit row.
+// Tenant admins can read that row, so it never carries err.Error(): a
+// connection failure or timeout can name hosts, ports and pool settings
+// (#2514). A Postgres error is recorded by its SQLSTATE; anything else gets
+// a fixed text. The full error goes to the slog line beside it.
+func notifyErrorDetail(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return "SQLSTATE " + pgErr.Code
+	}
+	return notifyErrorOther
+}
+
+// notifySuperAdmins calls the SECURITY DEFINER notifier, or the test hook
+// when one is set.
+func (s *Store) notifySuperAdmins(ctx context.Context, db dbx.DBTX, arg dbx.NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error) {
+	if s.notify != nil {
+		return s.notify(ctx, db, arg)
+	}
+	n, err := dbx.New(db).NotifySuperAdminsLastAdminDeprovisioned(ctx, arg)
+	if err != nil {
+		return 0, fmt.Errorf("scim: notify super-admins: %w", err)
+	}
+	return n, nil
+}
+
+// savepoint runs fn under a SAVEPOINT of tx. An error from fn rolls back to
+// the savepoint and is returned, leaving tx usable.
+func savepoint(ctx context.Context, tx pgx.Tx, fn func(dbx.DBTX) error) error {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("scim: savepoint: %w", err)
+	}
+	if err := fn(sp); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return fmt.Errorf("scim: rollback to savepoint: %w (after %w)", rbErr, err)
+		}
+		return err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return fmt.Errorf("scim: release savepoint: %w", err)
+	}
+	return nil
+}
+
+// forgetCredentials is the after-commit half of revokeAccess: drop the
+// user's keys from credstore memory.
+func (s *Store) forgetCredentials(tenantID string, userID uuid.UUID) {
+	if s.creds != nil {
+		s.creds.RevokeUserInMemory(tenantID, userID.String())
+	}
 }
 
 func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, actorCredentialID uuid.UUID, targetUserID uuid.UUID, action string, detail map[string]any) error {
@@ -473,6 +664,12 @@ func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID pgtype.
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {
+	return s.inTxWith(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries) error { return fn(ctx, q) })
+}
+
+// inTxWith is inTx that also hands fn the transaction, for a step that needs
+// a SAVEPOINT (#2504).
+func (s *Store) inTxWith(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.Queries) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -481,7 +678,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries)
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx)); err != nil {
+	if err := fn(ctx, tx, dbx.New(tx)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

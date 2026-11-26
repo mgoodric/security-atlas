@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { UploadZone } from "@/components/questionnaire/upload-zone";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 interface Questionnaire {
   id: string;
@@ -57,13 +62,7 @@ interface ListResp {
 async function fetchList(): Promise<Questionnaire[]> {
   const res = await fetch("/api/questionnaires", { cache: "no-store" });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   const body = (await res.json()) as ListResp;
@@ -77,13 +76,7 @@ async function createQuestionnaire(name: string): Promise<Questionnaire> {
     body: JSON.stringify({ name, source_filename: name }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as Questionnaire;
@@ -97,13 +90,7 @@ async function importExcel(id: string, file: File): Promise<void> {
     body: form,
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
 }
@@ -141,19 +128,19 @@ export default function QuestionnairesPage() {
   const isEmpty = !listQ.isLoading && items.length === 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Questionnaires
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Vendor security diligence questionnaires. Upload an Excel workbook
-            to import questions; author answers with prior-answer suggestions
-            and policy / evidence citations.
-          </p>
-        </div>
-        {!isEmpty && !listQ.isLoading ? (
+    <PageShell
+      title={pageTitle("/questionnaires")}
+      subtitle={
+        <>
+          Vendor security diligence{" "}
+          <Term id="questionnaire">questionnaires</Term>. Upload an Excel
+          workbook to import questions; author answers with{" "}
+          <Term id="prior-answer">prior-answer</Term> suggestions and policy /
+          evidence citations.
+        </>
+      }
+      actions={
+        !isEmpty && !listQ.isLoading ? (
           <Button
             data-testid="questionnaires-upload-button"
             onClick={() => {
@@ -171,9 +158,9 @@ export default function QuestionnairesPage() {
           >
             + Upload Excel
           </Button>
-        ) : null}
-      </div>
-
+        ) : null
+      }
+    >
       {error ? (
         <Alert variant="destructive" data-testid="questionnaires-error">
           <AlertTitle>Upload failed</AlertTitle>
@@ -235,7 +222,7 @@ export default function QuestionnairesPage() {
           </Card>
         </>
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 
@@ -276,7 +263,7 @@ function QuestionnaireTable({ items }: { items: Questionnaire[] }) {
               <StatusBadge value={q.status} />
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {q.updated_at ? new Date(q.updated_at).toLocaleString() : "never"}
+              <Timestamp value={q.updated_at} fallback="never" />
             </TableCell>
           </TableRow>
         ))}

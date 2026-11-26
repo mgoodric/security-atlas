@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -53,7 +54,7 @@ func newS3Cmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.bucket, "bucket", "", "S3 bucket [required]")
 	cmd.Flags().StringVar(&f.prefix, "prefix", "", "S3 key prefix [required]")
 	cmd.Flags().StringVar(&f.region, "region", "", "AWS region (optional; falls back to standard chain)")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-05", "control id to attach to each record")
 	cmd.Flags().StringArrayVar(&f.scope, "scope", nil, "scope tag in key=value form (repeatable, at least one required)")
 	return cmd
 }
@@ -88,21 +89,24 @@ func doS3(ctx context.Context, f s3Flags) error {
 	defer func() { _ = client.Close() }()
 
 	now := time.Now().UTC().Truncate(time.Hour)
-	pushed := 0
+	pushed, already := 0, 0
 	for _, obj := range objs {
 		rec, err := buildS3Record(obj, f.controlID, scope, now)
 		if err != nil {
 			return fmt.Errorf("build record key=%q: %w", obj.Key, err)
 		}
-		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err = client.Push(pctx, rec)
-		cancel()
+		held, err := pushRecord(ctx, client, rec)
 		if err != nil {
 			return fmt.Errorf("push key=%q: %w", obj.Key, err)
 		}
+		if held {
+			_, _ = fmt.Fprintf(os.Stderr, "already ingested key=%q etag=%s: its key is in the ledger under an earlier push (AlreadyExists); not pushed again\n", obj.Key, obj.ETag)
+			already++
+			continue
+		}
 		pushed++
 	}
-	fmt.Printf("pushed %d records (bucket=%s prefix=%s)\n", pushed, f.bucket, f.prefix)
+	fmt.Printf("pushed %d records, %d already ingested (bucket=%s prefix=%s)\n", pushed, already, f.bucket, f.prefix)
 	return nil
 }
 
@@ -123,7 +127,7 @@ func buildS3Record(obj manuals3.Object, controlID string, scope []*evidencev1.Sc
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.S3ObjectKey(obj.Bucket, obj.Key, obj.ETag),
 		EvidenceKind:   "manual.upload.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  schemaVersion,
 		ControlId:      controlID,
 		Scope:          scope,
 		ObservedAt:     timestamppb.New(observedAt),

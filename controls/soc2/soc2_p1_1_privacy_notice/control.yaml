@@ -1,0 +1,55 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p1_1_privacy_notice
+title: "Privacy notice is published, current, and reviewed annually"
+description: |
+  People are told what personal information is gathered about them and
+  what is done with it (TSC P1.1). The privacy notice is published where
+  data subjects meet the service (website, sign-up flow, app) and is
+  reviewed at least annually and whenever a new purpose or category of
+  personal information is introduced. The owner uploads the review record:
+  the notice URL, its effective date, and what changed.
+
+scf_anchor_id: PRI-21
+scf_release: test-2026.3
+control_family: PRI
+implementation_type: semi_automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+evidence_queries:
+  - id: privacy_notice_review_within_365d
+    language: rego
+    evidence_kind: manual.upload.v1
+    description: "A privacy-notice review upload exists within the last 400 days (annual plus 35-day grace)"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+
+manual_evidence_schema:
+  type: object
+  required: [reviewed_at, reviewer, notice_uri, effective_date]
+  properties:
+    reviewed_at: { type: string, format: date-time }
+    reviewer: { type: string, minLength: 1 }
+    notice_uri: { type: string, format: uri }
+    effective_date: { type: string, format: date }
+    changes_summary: { type: string }

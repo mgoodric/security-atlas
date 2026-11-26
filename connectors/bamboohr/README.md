@@ -137,7 +137,7 @@ pass/fail per `(control, scope)`.
 ## Default SCF anchors (maintainer recheck — OQ #9)
 
 - `hris.worker_lifecycle.v1` → `IAC-22` (Termination of employment), `IAC-09`
-  (Account management / provisioning), `HRS-04` (Personnel security) —
+  (Account management / provisioning), `HRS-02` (Human Resources Security Management) —
   consistent with the existing `okta.user_lifecycle.v1` anchors.
 
 ## Follow-ons (out of v0 scope)

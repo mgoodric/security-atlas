@@ -12,6 +12,11 @@
 //   5. Coverage bar (fills at coverage %, not strength %) — slice 256
 //   6. Chevron affordance for per-row drill-down — slice 256
 //
+// #1800 — the requirement code links to the requirement detail page, and a
+// row reached through the tenant's overlay edge carries an "org mapping"
+// badge with its rationale, source, author and date: that requirement is
+// credited only through the organisation's own mapping.
+//
 // Rows whose framework_version is out of scope for this control
 // (effective scope is empty — slice 018) render dashed/greyed with an
 // "out of FrameworkScope" note and an "n/a" coverage value — never
@@ -33,6 +38,13 @@
 // chevron with a tooltip explains the affordance without breaking
 // navigation.
 
+import Link from "next/link";
+
+import {
+  OrgMappingBadge,
+  OrgMappingDetails,
+} from "@/components/mappings/org-mapping";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -43,7 +55,9 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { CoverageRequirement } from "@/lib/api/control-detail";
+import { isOrgMapping } from "@/lib/api/org-mapping";
 import { strmStyle } from "@/components/control/strm";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 import {
   coverageBarPercent,
   formatCoverage,
@@ -98,11 +112,18 @@ export function CoverageTable({
             // disagree.
             const band = classifyBand(outOfScope ? null : req.coverage);
             const bStyle = bandStyle(band);
+            // #1800 — a row reached through the tenant's own overlay edge
+            // is credited only through that org mapping (the platform keeps
+            // one path per requirement/anchor pair). The mark is the
+            // platform's `origin`, never inferred here.
+            const orgMapping = isOrgMapping(req);
             return (
               <TableRow
                 key={req.edge_id}
                 data-testid="coverage-row"
                 data-out-of-scope={outOfScope ? "true" : "false"}
+                data-origin={orgMapping ? "overlay" : "catalog"}
+                data-excluded={req.exclusion ? "true" : "false"}
                 className={cn(
                   outOfScope &&
                     "border-dashed text-muted-foreground opacity-60",
@@ -115,12 +136,52 @@ export function CoverageTable({
                       outOfScope ? "text-muted-foreground" : "text-foreground",
                     )}
                   >
-                    {req.framework_name} · {req.code} — {req.title}
+                    {frameworkLabel(req.framework_name, req.framework_version)}{" "}
+                    ·{" "}
+                    <Link
+                      href={`/requirements/${encodeURIComponent(
+                        req.requirement_id,
+                      )}`}
+                      className="hover:underline"
+                    >
+                      {req.code}
+                    </Link>{" "}
+                    — {req.title}
                   </div>
                   <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                     {req.framework_slug}:{req.framework_version}:{req.code}
                     {outOfScope ? " · out of FrameworkScope" : ""}
                   </div>
+                  {orgMapping ? (
+                    <div className="mt-1" data-testid="coverage-org-mapping">
+                      <div className="flex items-center gap-2 text-xs">
+                        <OrgMappingBadge />
+                        <span className="text-muted-foreground">
+                          Credited through your org mapping, not the catalog
+                          crosswalk
+                        </span>
+                      </div>
+                      <OrgMappingDetails
+                        rationale={req.rationale}
+                        overlay={req.overlay}
+                      />
+                    </div>
+                  ) : null}
+                  {/* #2140 — the activated Statement of Applicability
+                      excludes this requirement: it earns no credit here. */}
+                  {req.exclusion ? (
+                    <div
+                      className="mt-1 flex flex-wrap items-center gap-2 text-xs"
+                      data-testid="coverage-soa-exclusion"
+                    >
+                      <Badge variant="outline">Excluded by SoA</Badge>
+                      {req.exclusion.justification ? (
+                        <span className="text-muted-foreground">
+                          {req.exclusion.justification}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </TableCell>
                 <TableCell>
                   <span
@@ -129,9 +190,8 @@ export function CoverageTable({
                       style.badge,
                     )}
                     data-strm={req.relationship_type}
-                    title={style.label}
                   >
-                    {req.relationship_type}
+                    {style.label}
                   </span>
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">

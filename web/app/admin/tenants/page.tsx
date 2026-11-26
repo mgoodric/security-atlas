@@ -61,18 +61,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
-type TenantListResponse = { items: TenantRow[]; error?: string };
+type TenantListResponse = { items: TenantRow[] };
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
-
-function formatCreatedAt(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
 
 export default function AdminTenantsPage() {
   const queryClient = useQueryClient();
@@ -88,10 +84,10 @@ export default function AdminTenantsPage() {
     queryKey: ["admin", "tenants"],
     queryFn: async () => {
       const res = await fetch("/api/admin/tenants", { cache: "no-store" });
-      const body = (await res.json()) as TenantListResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as TenantListResponse;
       return body.items ?? [];
     },
   });
@@ -107,13 +103,10 @@ export default function AdminTenantsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as {
-        error?: string;
-      } & CreateTenantResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as CreateTenantResponse;
     },
     onSuccess: async (out) => {
       setName("");
@@ -146,17 +139,19 @@ export default function AdminTenantsPage() {
   const createErrorId = createError ? "create-tenant-error" : undefined;
 
   return (
-    <div className="space-y-6" data-testid="admin-tenants-page">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Tenants</h1>
-        <p className="text-sm text-muted-foreground">
-          Platform-global tenant identities. Super admins create new tenants
-          here. Each new tenant ships with one builtin <code>environment</code>{" "}
-          scope dimension and a default <code>All</code> scope cell so it is
+    <PageShell
+      title="Tenants"
+      data-testid="admin-tenants-page"
+      subtitle={
+        <>
+          Platform-global <Term id="tenant">tenant</Term> identities.{" "}
+          <Term id="super-admin">Super admins</Term> create new tenants here.
+          Each new tenant ships with one builtin <code>environment</code> scope
+          dimension and a default <code>All</code> scope cell so it is
           immediately usable for control + evidence work.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Create discipline</AlertTitle>
         <AlertDescription>
@@ -277,9 +272,8 @@ export default function AdminTenantsPage() {
         <CardHeader>
           <CardTitle>Current tenants</CardTitle>
           <CardDescription>
-            All tenant identity rows on the platform. The bootstrap row (
-            <code>is_bootstrap_tenant=true</code>) was provisioned at first
-            install via the OIDC sign-in path (slice 198).
+            Every tenant on this deployment. The bootstrap tenant was created by
+            the first sign-in after install.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -329,7 +323,7 @@ export default function AdminTenantsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatCreatedAt(t.created_at)}
+                      <Timestamp value={t.created_at} style="datetime" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -403,6 +397,6 @@ export default function AdminTenantsPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

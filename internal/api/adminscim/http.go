@@ -1,8 +1,9 @@
 // Package adminscim is the admin HTTP surface for managing SCIM provisioning
 // credentials (slice 508): /v1/admin/scim-credentials.
 //
-// These routes live on the /v1 tree and require an ADMIN atlas credential
-// (cred.IsAdmin) — issuing a SCIM token is an administrative act (AC-3). The
+// These routes live on the /v1 tree and require an admin of the caller's
+// tenant (authz.IsTenantAdmin, #2503) — issuing a SCIM token is an
+// administrative act (AC-3). The
 // SCIM token they mint is a DIFFERENT, narrower credential (internal/scim
 // CredentialStore) that can ONLY drive /scim/v2 (P0-508-2); this admin surface
 // is the issuance/revocation control plane for it.
@@ -21,8 +22,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -61,11 +64,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	var issuedBy *uuid.UUID
-	if u, err := parseUserID(cred.UserID); err == nil {
-		issuedBy = &u
-	}
-	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, req.Description, issuedBy)
+	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, req.Description, cred.actor())
 	if err != nil {
 		httperr.WriteInternal(w, r, "issue scim credential", err)
 		return
@@ -135,7 +134,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
-	if err := h.store.Revoke(r.Context(), cred.TenantID, id); err != nil {
+	if err := h.store.Revoke(r.Context(), cred.TenantID, id, cred.actor()); err != nil {
 		if errors.Is(err, scim.ErrUnknownCredential) {
 			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
 			return
@@ -149,8 +148,19 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 // --- helpers ---
 
 type adminCred struct {
-	TenantID string
-	UserID   string
+	TenantID  string
+	UserID    string
+	Principal string
+}
+
+// actor is who the audit row names (#2609): the users(id) behind the
+// caller, when there is one, and the credential's principal (#2329).
+func (c adminCred) actor() scim.Actor {
+	a := scim.Actor{Principal: c.Principal}
+	if u, err := parseUserID(c.UserID); err == nil {
+		a.UserID = &u
+	}
+	return a
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
@@ -159,11 +169,14 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return adminCred{}, false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles manages its own tenant's SCIM
+	// bearer. The tenant comes from the credential, and the store runs
+	// every query under that tenant's RLS.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return adminCred{}, false
 	}
-	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID}, true
+	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID, Principal: credstore.PrincipalOf(cred)}, true
 }
 
 // parseUserID strips the "user:" prefix the atlas JWT subject carries before

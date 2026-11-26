@@ -1,6 +1,6 @@
 // Slice 755 — pure-Go unit tests for the SCF-mapping suggest/approve/reject
 // handler branches: the role gate, the missing-tenant / missing-credential
-// 401, the nil-service 503, the bad-uuid 400, and the service-error → HTTP
+// 401, the nil-service 409, the bad-uuid 400, and the service-error → HTTP
 // status mapping (404 / 409 / 400 / 500) plus the 200 render. The service is
 // a real *qmapsuggest.Service backed by in-memory fakes (the slice-353 Q-2
 // fast-loop convention), so none of these touch Postgres. The happy-path DB
@@ -13,15 +13,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 const (
@@ -42,11 +46,18 @@ func (f mapReader) QuestionTextForMapping(context.Context, uuid.UUID) (string, e
 	return f.text, f.textErr
 }
 
-func (f mapReader) RetrieveCandidates(context.Context, []string) ([]qmapsuggest.Candidate, error) {
+func (f mapReader) LookupRelease(_ context.Context, label string) (scfrelease.Release, error) {
+	if label != "" && label != "B" {
+		return scfrelease.Release{}, fmt.Errorf("%w %q", scfrelease.ErrUnknownRelease, label)
+	}
+	return scfrelease.Release{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, Version: "B", Status: "current"}, nil
+}
+
+func (f mapReader) RetrieveCandidatesInRelease(context.Context, string, []string) ([]qmapsuggest.Candidate, error) {
 	return f.candidates, nil
 }
 
-func (f mapReader) ResolveAnchor(context.Context, string) (qmapsuggest.Candidate, bool, error) {
+func (f mapReader) ResolveAnchorInRelease(context.Context, string, string) (qmapsuggest.Candidate, bool, error) {
 	return qmapsuggest.Candidate{}, false, nil
 }
 
@@ -98,10 +109,10 @@ func mappingHandler(reader qmapsuggest.Reader, store qmapsuggest.ProposalStore) 
 }
 
 func grcCred() *credstore.Credential {
-	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 }
 
-// guardCases exercises the shared guard ladder (401 / 403 / 503) that all
+// guardCases exercises the shared guard ladder (401 / 403 / 409) that all
 // three mapping handlers repeat, without reaching any service call.
 func guardCases(t *testing.T, name string, fn func(h *Handler) http.HandlerFunc) {
 	t.Helper()
@@ -119,9 +130,9 @@ func guardCases(t *testing.T, name string, fn func(h *Handler) http.HandlerFunc)
 	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, &viewer), nil); w.Code != http.StatusForbidden {
 		t.Errorf("%s viewer: got %d, want 403", name, w.Code)
 	}
-	// Authorized but mapping service not wired -> 503, not a panic.
-	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, grcCred()), nil); w.Code != http.StatusServiceUnavailable {
-		t.Errorf("%s nil-service: got %d, want 503", name, w.Code)
+	// Authorized but mapping service not wired -> 409, not a panic.
+	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, grcCred()), nil); w.Code != http.StatusConflict {
+		t.Errorf("%s nil-service: got %d, want 409", name, w.Code)
 	}
 }
 
@@ -193,6 +204,30 @@ func TestMappingSuggest_ManualOnlyOK(t *testing.T) {
 	}
 	if out.SCFAnchorID != "" || out.ProposalID != "" {
 		t.Errorf("manual-only must not name an anchor or proposal: %+v", out)
+	}
+	if out.SCFRelease != "B" {
+		t.Errorf("scf_release = %q; want the current release B named", out.SCFRelease)
+	}
+}
+
+// #1772: ?scf_release= names the release; one that is not loaded is a 404
+// that says so, not a silent fall back to the current release.
+func TestMappingSuggest_SCFReleaseParam(t *testing.T) {
+	t.Parallel()
+	h := mappingHandler(mapReader{text: "some question"}, &mapStore{})
+	w := route(h.MappingSuggest, reqWith(t, "POST", "/x?scf_release=nope", testTenant, grcCred()),
+		map[string]string{"qid": testQID})
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "unknown SCF release") {
+		t.Fatalf("unknown release: got %d %s, want 404 naming the unknown release", w.Code, w.Body.String())
+	}
+	w = route(h.MappingSuggest, reqWith(t, "POST", "/x?scf_release=B", testTenant, grcCred()),
+		map[string]string{"qid": testQID})
+	var out qmapsuggest.Proposal
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("named release: got %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	if out.SCFRelease != "B" {
+		t.Errorf("scf_release = %q; want B", out.SCFRelease)
 	}
 }
 

@@ -57,6 +57,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -112,6 +113,14 @@ type Options struct {
 	// docs/audit-log/371-auth-clock-injection-substrate-decisions.md
 	// (D3).
 	Now func() int64
+
+	// SuperAdmins re-reads `super_admins` for any token carrying
+	// `atlas:super_admin`. When the subject is no longer a super_admin
+	// (demoted after the token was minted) the claim is dropped for
+	// this request; the token stays valid for its tenants. Nil skips
+	// the re-check (unit harnesses that do not wire a DB); production
+	// wiring always sets it (#1850).
+	SuperAdmins superadmin.Checker
 }
 
 // Middleware returns a chi-compatible middleware that gates the
@@ -173,6 +182,17 @@ func Middleware(signer *tokensign.Signer, revoked *revocation.Store, opts Option
 					write401(w)
 					return
 				}
+			}
+
+			// #1850: the super_admin claim is a mint-time snapshot. A
+			// demote deletes the super_admins row but cannot reach the
+			// tokens already issued, so re-read the table here and drop
+			// the claim if it no longer holds. Only the claim goes: the
+			// user keeps access to the tenants the token names, which
+			// is what a demote should leave them with.
+			if claims.SuperAdmin && opts.SuperAdmins != nil &&
+				!superadmin.Confirm(r.Context(), opts.SuperAdmins, claims.Subject) {
+				claims.SuperAdmin = false
 			}
 
 			// P0-190-3: tenant GUC is set from the VERIFIED claim, not

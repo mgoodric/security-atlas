@@ -1,14 +1,15 @@
 // Package exception implements the slice-021 exception/waiver workflow.
 //
 // An Exception is a time-bounded, scope-bounded waiver of a control's normal
-// evaluation. Canvas §6.3 sets the rules; CONTEXT.md captures the precise
+// evaluation. Canvas §6.3 sets the rules; GLOSSARY.md captures the precise
 // domain definition.
 //
-// The state machine has five states:
+// The state machine has six states:
 //
 //	requested -> approved -> active -> expired   (happy path)
 //	requested -> denied                          (terminal; file a new exception to retry)
 //	active    -> expired                         (system; daily auto-expiry tick)
+//	active    -> revoked                         (terminal; an approver ends it early, #2113)
 //
 // Every transition writes one row to exception_audit_log (append-only). The
 // auto-expiry tick is NOT silent (anti-criterion P0).
@@ -25,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -74,6 +77,9 @@ const (
 	StateDenied    = "denied"
 	StateActive    = "active"
 	StateExpired   = "expired"
+	// StateRevoked is an active exception an approver ended before its
+	// expires_at (#2113). Terminal: file a new exception to waive again.
+	StateRevoked = "revoked"
 )
 
 // Audit-log action vocabulary.
@@ -83,6 +89,7 @@ const (
 	ActionDenied    = "denied"
 	ActionActivated = "activated"
 	ActionExpired   = "expired"
+	ActionRevoked   = "revoked"
 )
 
 // SystemActor is the actor name used when the auto-expiry cron writes audit
@@ -95,6 +102,9 @@ var (
 	// ErrNotFound is returned when an id doesn't resolve under the active
 	// tenant context. RLS-friendly: same shape as "in another tenant".
 	ErrNotFound = errors.New("exception: not found")
+	// ErrIdempotencyKeyReused is returned when an Idempotency-Key inside
+	// its window arrives with a different request body (#2618).
+	ErrIdempotencyKeyReused = errors.New("exception: Idempotency-Key was already used with a different request")
 	// ErrWrongState is returned when a transition is requested from a
 	// state that doesn't permit it (e.g. approve on a denied row).
 	// HTTP 409.
@@ -113,10 +123,28 @@ var (
 	ErrJustificationRequired = errors.New("exception: justification is required")
 	// ErrRequesterRequired is returned when create input lacks requested_by.
 	ErrRequesterRequired = errors.New("exception: requested_by is required")
+	// ErrReasonRequired is returned when a revoke carries no reason. The
+	// reason is the audit row's record of why the waiver ended early.
+	ErrReasonRequired = errors.New("exception: a reason is required")
 	// ErrSegregationOfDuties is returned when the approver/denier credential
 	// matches the requester. Same credential cannot file and adjudicate.
 	ErrSegregationOfDuties = errors.New("exception: approver must differ from requester (segregation of duties)")
+	// ErrApproverNotPerson is returned when the approving credential
+	// belongs to no user: an unbound API key, an OAuth client or the
+	// bootstrap admin. Only people approve, with or without the
+	// organisation's Allow self-approval setting (#2101). HTTP 403.
+	ErrApproverNotPerson = errors.New("exception: only a person can approve an exception; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
 )
+
+// SelfApprovedReason is the reason written on the 'approved' audit row of
+// an exception its requester approved under Allow self-approval (#2101).
+const SelfApprovedReason = "self-approved: the organisation allows self-approval"
+
+// legacySessionRequesterPrefix marks a requested_by recorded before #2101
+// from a JWT credential id ("jwt:<token id>"). An exception cannot be
+// re-requested, so such a row keeps its original rule: the approving
+// credential must differ from it.
+const legacySessionRequesterPrefix = "jwt:"
 
 // pgErrForeignKeyViolation is the SQLSTATE Postgres returns when a
 // composite FK references a (tenant_id, control_id) tuple that does not
@@ -127,6 +155,12 @@ const pgErrForeignKeyViolation = "23503"
 // constraint fails. exceptions_max_365d, exceptions_expires_after_request,
 // and exceptions_sod all surface here.
 const pgErrCheckViolation = "23514"
+
+// WholeControlPredicate is the stored scope_cell_predicate of an
+// exception that covers every scope cell of its control. A create that
+// omits the predicate stores it (#2600); legacy rows may still hold {} or
+// null, which the evaluator reads the same way.
+const WholeControlPredicate = `{"op":"true"}`
 
 // Exception is the domain shape returned from store calls.
 type Exception struct {
@@ -140,16 +174,21 @@ type Exception struct {
 	RequestedAt          time.Time
 	ApprovedBy           *string
 	ApprovedAt           *time.Time
-	DeniedBy             *string
-	DeniedAt             *time.Time
-	ActivatedBy          *string
-	ActivatedAt          *time.Time
-	EffectiveFrom        *time.Time
-	ExpiresAt            time.Time
-	ExpiredAt            *time.Time
-	Status               string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// SelfApproved marks an exception its requester approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved  bool
+	DeniedBy      *string
+	DeniedAt      *time.Time
+	ActivatedBy   *string
+	ActivatedAt   *time.Time
+	EffectiveFrom *time.Time
+	ExpiresAt     time.Time
+	ExpiredAt     *time.Time
+	RevokedBy     *string
+	RevokedAt     *time.Time
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // AuditEntry is the public shape of an exception_audit_log row.
@@ -170,11 +209,61 @@ type AuditEntry struct {
 // applies the tenant GUC, and runs queries inside that transaction.
 type Store struct {
 	pool *pgxpool.Pool
+	// reevaluate, when set, re-evaluates a control after one of its
+	// exceptions is activated or revoked (#2269). See WithReevaluate.
+	reevaluate Reevaluator
+	// background, when set, tracks each re-evaluation goroutine so the
+	// server's shutdown can wait for it (#2688). See WithWaitGroup.
+	background Background
 }
+
+// Background starts a function in its own goroutine and tracks it so its
+// owner can wait for it. *sync.WaitGroup satisfies it; the HTTP server's
+// group also stops tracking once its shutdown has begun (#2748).
+type Background interface {
+	Go(f func())
+}
+
+// Reevaluator re-evaluates one control in one tenant. eval builds it
+// (eval.ExceptionChangeReevaluator); this package only calls it, so it does
+// not import the engine.
+type Reevaluator func(ctx context.Context, tenantID, controlID uuid.UUID)
 
 // NewStore constructs a Store over an existing pgx pool. The pool must be
 // connected as `atlas_app` (NOSUPERUSER NOBYPASSRLS) for RLS to fire.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithReevaluate makes Activate and Revoke re-evaluate the exception's
+// control once the state change has committed (#2269). The call runs in
+// its own goroutine, detached from the request: the response does not wait
+// for the evaluation and a client that hangs up does not cancel it.
+func (s *Store) WithReevaluate(r Reevaluator) *Store {
+	s.reevaluate = r
+	return s
+}
+
+// WithWaitGroup tracks each re-evaluation goroutine WithReevaluate starts
+// in wg, so a shutdown that waits on wg does not cut one off mid-write
+// (#2688). With a bare *sync.WaitGroup the owner must stop calling Activate
+// and Revoke before it calls wg.Wait; the HTTP server passes a group that
+// enforces that itself (#2748).
+func (s *Store) WithWaitGroup(wg Background) *Store {
+	s.background = wg
+	return s
+}
+
+// afterStateChange runs the reevaluator for a committed transition.
+func (s *Store) afterStateChange(ctx context.Context, x Exception) {
+	if s.reevaluate == nil {
+		return
+	}
+	run := func() { s.reevaluate(context.WithoutCancel(ctx), x.TenantID, x.ControlID) }
+	if s.background == nil {
+		go run()
+		return
+	}
+	s.background.Go(run)
+}
 
 // CreateInput is the API shape for POST /v1/exceptions. The store
 // re-validates every rule the handler should have validated already;
@@ -189,45 +278,85 @@ type CreateInput struct {
 	// Now is the request-time clock used to enforce the 365-day cap.
 	// Defaults to time.Now() when zero -- callers override only in tests.
 	Now time.Time
+	// IdempotencyKey, when set, makes the create idempotent (#2618): a
+	// repeat of the key by the same requester inside IdempotencyWindow
+	// returns the exception the first request created. RequestHash
+	// identifies the request body; the same key with a different hash is
+	// ErrIdempotencyKeyReused.
+	IdempotencyKey string
+	RequestHash    string
+	// LegacyRequestHash is the same request hashed the #2618 way, before
+	// #2714 made the hash canonical. A key recorded before the upgrade
+	// replays when it matches.
+	// TODO(remove after next release, #2803): drop with legacyRequestHash in
+	// internal/api/exceptions once no key from before #2714 can be inside
+	// IdempotencyWindow.
+	LegacyRequestHash string
 }
+
+// IdempotencyWindow is how long an Idempotency-Key on POST /v1/exceptions
+// is remembered (#2618). A client retry after a timeout lands well inside
+// it; a key reused after it files a new exception.
+const IdempotencyWindow = 24 * time.Hour
 
 // Create inserts a new exception in `requested` state and writes the
 // matching audit-log row. AC-1 + AC-2 + AC-7.
 func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
+	out, _, err := s.CreateIdempotent(ctx, in)
+	return out, err
+}
+
+// CreateIdempotent is Create that also reports whether the result is a
+// replay: true when in.IdempotencyKey matched an earlier request inside
+// IdempotencyWindow and nothing new was filed (#2618). Two requests with
+// one key are serialised on a transaction-scoped advisory lock, so the
+// second waits for the first and replays it.
+func (s *Store) CreateIdempotent(ctx context.Context, in CreateInput) (Exception, bool, error) {
 	if in.Now.IsZero() {
 		in.Now = time.Now().UTC()
 	}
 	if in.ControlID == uuid.Nil {
-		return Exception{}, ErrControlRequired
+		return Exception{}, false, ErrControlRequired
 	}
 	if in.Justification == "" {
-		return Exception{}, ErrJustificationRequired
+		return Exception{}, false, ErrJustificationRequired
 	}
 	if in.RequestedBy == "" {
-		return Exception{}, ErrRequesterRequired
+		return Exception{}, false, ErrRequesterRequired
 	}
 	if in.ExpiresAt.IsZero() {
-		return Exception{}, ErrExpiresAtRequired
+		return Exception{}, false, ErrExpiresAtRequired
 	}
 	if !in.ExpiresAt.After(in.Now) {
-		return Exception{}, ErrExpiresAtInPast
+		return Exception{}, false, ErrExpiresAtInPast
 	}
 	// AC-2 + anti-criterion P0: 365-day cap. Computed from the request-time
 	// clock, NOT requested_at-from-the-DB (which defaults to now()) -- the
 	// two could drift by milliseconds and tip a borderline create over.
 	if in.ExpiresAt.After(in.Now.Add(MaxLifetime)) {
-		return Exception{}, ErrExpiresAtExceedsCap
+		return Exception{}, false, ErrExpiresAtExceedsCap
 	}
 	if in.CompensatingControls == nil {
 		in.CompensatingControls = []string{}
 	}
 	predicate := in.ScopeCellPredicate
 	if len(predicate) == 0 {
-		predicate = []byte("{}") // empty predicate means "every cell"
+		predicate = []byte(WholeControlPredicate)
 	}
 
 	var out Exception
+	replayed := false
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if in.IdempotencyKey != "" {
+			prior, found, err := replayIdempotent(ctx, q, tenantID, in)
+			if err != nil {
+				return err
+			}
+			if found {
+				out, replayed = prior, true
+				return nil
+			}
+		}
 		id := uuid.New()
 		row, err := q.CreateException(ctx, dbx.CreateExceptionParams{
 			ID:                   pgUUID(id),
@@ -258,57 +387,156 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
 		}); alErr != nil {
 			return fmt.Errorf("write requested audit log: %w", alErr)
 		}
+		if in.IdempotencyKey != "" {
+			if err := q.PutExceptionIdempotencyKey(ctx, dbx.PutExceptionIdempotencyKeyParams{
+				TenantID:       pgUUID(tenantID),
+				RequestedBy:    in.RequestedBy,
+				IdempotencyKey: in.IdempotencyKey,
+				RequestHash:    in.RequestHash,
+				ExceptionID:    row.ID,
+				CreatedAt:      pgTimestamptz(in.Now),
+			}); err != nil {
+				return fmt.Errorf("record idempotency key: %w", err)
+			}
+		}
 		// Slice 126: fan out to the external sink.
 		emitSinkException(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
 			ActionRequested, in.RequestedBy, "", StateRequested, "")
 		return nil
 	})
-	return out, err
+	return out, replayed, err
+}
+
+// requestHashMatches reports whether a recorded key's hash is this
+// request's, under the current canonical hash or, for a key recorded
+// before #2714, the legacy one.
+func requestHashMatches(recorded string, in CreateInput) bool {
+	if recorded == in.RequestHash {
+		return true
+	}
+	return in.LegacyRequestHash != "" && recorded == in.LegacyRequestHash
+}
+
+// replayIdempotent takes the key's lock and returns the exception an
+// earlier request with in.IdempotencyKey created, if one did inside
+// IdempotencyWindow. The lock is held until the transaction ends, so a
+// concurrent request with the same key waits here and then finds the row.
+func replayIdempotent(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, in CreateInput) (Exception, bool, error) {
+	if err := q.LockExceptionIdempotencyKey(ctx, dbx.LockExceptionIdempotencyKeyParams{
+		TenantID:       tenantID.String(),
+		RequestedBy:    in.RequestedBy,
+		IdempotencyKey: in.IdempotencyKey,
+	}); err != nil {
+		return Exception{}, false, fmt.Errorf("lock idempotency key: %w", err)
+	}
+	key, err := q.GetExceptionIdempotencyKey(ctx, dbx.GetExceptionIdempotencyKeyParams{
+		TenantID:       pgUUID(tenantID),
+		RequestedBy:    in.RequestedBy,
+		IdempotencyKey: in.IdempotencyKey,
+		NotBefore:      pgTimestamptz(in.Now.Add(-IdempotencyWindow)),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Exception{}, false, nil
+	}
+	if err != nil {
+		return Exception{}, false, fmt.Errorf("read idempotency key: %w", err)
+	}
+	if !requestHashMatches(key.RequestHash, in) {
+		return Exception{}, false, ErrIdempotencyKeyReused
+	}
+	row, err := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       key.ExceptionID,
+	})
+	if err != nil {
+		return Exception{}, false, fmt.Errorf("read replayed exception: %w", err)
+	}
+	return exceptionFromRow(row), true, nil
 }
 
 // Approve transitions requested -> approved. AC-3 + AC-7.
-// The handler validates IsApprover before calling here; defense-in-depth is
-// the segregation-of-duties check below + the DB CHECK exceptions_sod.
-func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Exception, error) {
-	if approver == "" {
+// The handler validates IsApprover before calling here. The store applies
+// the shared approval rule (internal/approval, #2101) in the same
+// transaction: only a person approves, and never the requester unless the
+// organisation allows self-approval. A self-approval sets self_approved,
+// which is what lets the DB CHECK exceptions_sod admit it, and names it in
+// the audit row's reason.
+func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver approval.Approver) (Exception, error) {
+	if approver.UserID == "" && approver.CredentialID == "" {
 		return Exception{}, ErrRequesterRequired
 	}
 	return s.transition(ctx, id, transitionParams{
 		expectedPrior: StateRequested,
 		newState:      StateApproved,
-		actor:         approver,
+		actor:         approver.UserID,
 		action:        ActionApproved,
-		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Exception, error) {
+		run: func(q *dbx.Queries, tenantID uuid.UUID, self bool) (dbx.Exception, error) {
 			return q.ApproveException(ctx, dbx.ApproveExceptionParams{
-				TenantID:   pgUUID(tenantID),
-				ID:         pgUUID(id),
-				ApprovedBy: stringPtr(approver),
+				TenantID:     pgUUID(tenantID),
+				ID:           pgUUID(id),
+				ApprovedBy:   stringPtr(approver.UserID),
+				SelfApproved: self,
 			})
 		},
-		requesterCheck: approver,
+		approver: &approver,
 	})
 }
 
+// CheckApprover applies the shared approval rule to an exception and maps
+// its errors onto this package's. A machine credential never approves,
+// whatever the setting. A requester recorded as a session id before #2101
+// is compared against the approving credential, as it always was.
+// GET /v1/approvals (#2119) calls it per row, so it lists exactly what
+// Approve accepts.
+func CheckApprover(requester string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
+	if strings.HasPrefix(requester, legacySessionRequesterPrefix) {
+		if requester == a.CredentialID {
+			return false, ErrSegregationOfDuties
+		}
+		requester = ""
+	}
+	self, err := approval.Check(requester, a, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrApproverNotPerson
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrSegregationOfDuties
+	}
+	return self, err
+}
+
+// Denier names who is denying an exception. Principal is who stands
+// behind the credential (credstore.PrincipalOf: the users(id) for a person)
+// and is recorded as denied_by. CredentialID is the credential itself:
+// requested_by held the credential id before #2101, so a requester recorded
+// that way is matched against it too.
+type Denier struct {
+	Principal    string
+	CredentialID string
+}
+
 // Deny transitions requested -> denied (terminal). AC-7.
-// Same SoD invariant as Approve.
-func (s *Store) Deny(ctx context.Context, id uuid.UUID, denier, reason string) (Exception, error) {
-	if denier == "" {
+// The requester cannot deny their own exception: the denier must differ
+// from requested_by by principal and by credential id (#2101). Allow
+// self-approval does not extend to denial.
+func (s *Store) Deny(ctx context.Context, id uuid.UUID, denier Denier, reason string) (Exception, error) {
+	if denier.Principal == "" {
 		return Exception{}, ErrRequesterRequired
 	}
 	return s.transition(ctx, id, transitionParams{
 		expectedPrior: StateRequested,
 		newState:      StateDenied,
-		actor:         denier,
+		actor:         denier.Principal,
 		action:        ActionDenied,
 		reason:        reason,
-		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Exception, error) {
+		run: func(q *dbx.Queries, tenantID uuid.UUID, _ bool) (dbx.Exception, error) {
 			return q.DenyException(ctx, dbx.DenyExceptionParams{
 				TenantID: pgUUID(tenantID),
 				ID:       pgUUID(id),
-				DeniedBy: stringPtr(denier),
+				DeniedBy: stringPtr(denier.Principal),
 			})
 		},
-		requesterCheck: denier,
+		requesterChecks: []string{denier.Principal, denier.CredentialID},
 	})
 }
 
@@ -321,12 +549,15 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, activator string, ef
 	if effectiveFrom.IsZero() {
 		effectiveFrom = time.Now().UTC()
 	}
-	return s.transition(ctx, id, transitionParams{
+	// #2269: an effective_from in the future applies only from then; this
+	// run records the control as it stands now, and the scheduled run picks
+	// the exception up once it is in force.
+	out, err := s.transition(ctx, id, transitionParams{
 		expectedPrior: StateApproved,
 		newState:      StateActive,
 		actor:         activator,
 		action:        ActionActivated,
-		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Exception, error) {
+		run: func(q *dbx.Queries, tenantID uuid.UUID, _ bool) (dbx.Exception, error) {
 			return q.ActivateException(ctx, dbx.ActivateExceptionParams{
 				TenantID:      pgUUID(tenantID),
 				ID:            pgUUID(id),
@@ -335,6 +566,50 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, activator string, ef
 			})
 		},
 	})
+	if err != nil {
+		return out, err
+	}
+	s.afterStateChange(ctx, out)
+	return out, nil
+}
+
+// Revoke transitions active -> revoked (terminal, #2113). An approver
+// ends an active exception before it expires; the handler checks the
+// approver role. reason is required and is written as the audit row's
+// reason. revoker is who stands behind the credential
+// (credstore.PrincipalOf), recorded as revoked_by.
+//
+// Revoking narrows what is waived, so it carries no segregation-of-duties
+// check: the requester, if they are an approver, may withdraw their own
+// exception.
+func (s *Store) Revoke(ctx context.Context, id uuid.UUID, revoker, reason string) (Exception, error) {
+	if revoker == "" {
+		return Exception{}, ErrRequesterRequired
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Exception{}, ErrReasonRequired
+	}
+	out, err := s.transition(ctx, id, transitionParams{
+		expectedPrior: StateActive,
+		newState:      StateRevoked,
+		actor:         revoker,
+		action:        ActionRevoked,
+		reason:        reason,
+		run: func(q *dbx.Queries, tenantID uuid.UUID, _ bool) (dbx.Exception, error) {
+			return q.RevokeException(ctx, dbx.RevokeExceptionParams{
+				TenantID:  pgUUID(tenantID),
+				ID:        pgUUID(id),
+				RevokedBy: stringPtr(revoker),
+			})
+		},
+	})
+	if err != nil {
+		return out, err
+	}
+	// #2269: the control is no longer waived; re-evaluate it now.
+	s.afterStateChange(ctx, out)
+	return out, nil
 }
 
 // Get returns a single exception by id. ErrNotFound when absent.
@@ -360,10 +635,14 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Exception, error) {
 // ListFilter narrows the result set of List. Empty fields are ignored.
 type ListFilter struct {
 	Status string
+	// ControlID narrows the list to one control's exceptions (#2140);
+	// uuid.Nil lists every control's.
+	ControlID uuid.UUID
 }
 
 // List returns every exception for the active tenant, newest first.
-// Status filter is applied in-memory; cardinality is small for v1.
+// The status and control filters are applied in-memory; cardinality is
+// small for v1.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Exception, error) {
 	var out []Exception
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -374,6 +653,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Exception, error
 		out = make([]Exception, 0, len(rows))
 		for _, r := range rows {
 			if filter.Status != "" && r.Status != filter.Status {
+				continue
+			}
+			if filter.ControlID != uuid.Nil && (!r.ControlID.Valid || uuid.UUID(r.ControlID.Bytes) != filter.ControlID) {
 				continue
 			}
 			out = append(out, exceptionFromRow(r))
@@ -454,13 +736,20 @@ func (s *Store) ListAuditLog(ctx context.Context, exceptionID uuid.UUID) ([]Audi
 // ----- transition plumbing -----
 
 type transitionParams struct {
-	expectedPrior  string
-	newState       string
-	actor          string
-	action         string
-	reason         string
-	run            func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Exception, error)
-	requesterCheck string // when non-empty, asserts actor != row.RequestedBy (segregation of duties)
+	expectedPrior string
+	newState      string
+	actor         string
+	action        string
+	reason        string
+	// run performs the UPDATE; self is true when an approval was allowed
+	// as a self-approval (#2101), false for every other transition.
+	run func(q *dbx.Queries, tenantID uuid.UUID, self bool) (dbx.Exception, error)
+	// requesterChecks, when non-empty, asserts row.RequestedBy matches none
+	// of these non-empty identities (segregation of duties).
+	requesterChecks []string
+	// approver, when set, applies the shared approval rule (#2101) instead
+	// of requesterChecks.
+	approver *approval.Approver
 }
 
 // transition runs a state-changing UPDATE that may return zero rows because
@@ -472,7 +761,7 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 		// Segregation-of-duties pre-check (only for approve/deny). Fetch
 		// the row first so we can compare actor against requested_by.
 		var priorRequester string
-		if p.requesterCheck != "" {
+		if len(p.requesterChecks) > 0 {
 			before, gErr := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{
 				TenantID: pgUUID(tenantID),
 				ID:       pgUUID(id),
@@ -484,12 +773,41 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 				return fmt.Errorf("get exception (sod): %w", gErr)
 			}
 			priorRequester = before.RequestedBy
-			if priorRequester == p.requesterCheck {
-				return ErrSegregationOfDuties
+			for _, who := range p.requesterChecks {
+				if who != "" && priorRequester == who {
+					return ErrSegregationOfDuties
+				}
 			}
 		}
+		var self bool
+		if p.approver != nil {
+			before, gErr := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
+			})
+			if gErr != nil {
+				if errors.Is(gErr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return fmt.Errorf("get exception (approval): %w", gErr)
+			}
+			if before.Status == p.expectedPrior {
+				allowSelf, aErr := approval.AllowSelf(ctx, q, tenantID)
+				if aErr != nil {
+					return aErr
+				}
+				var cErr error
+				if self, cErr = CheckApprover(before.RequestedBy, *p.approver, allowSelf); cErr != nil {
+					return cErr
+				}
+			}
+		}
+		reason := p.reason
+		if self {
+			reason = SelfApprovedReason
+		}
 
-		row, err := p.run(q, tenantID)
+		row, err := p.run(q, tenantID, self)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Either missing row or wrong prior state. Probe to
@@ -523,13 +841,13 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 			Actor:       p.actor,
 			FromState:   stringPtr(fromState),
 			ToState:     p.newState,
-			Reason:      p.reason,
+			Reason:      reason,
 		}); alErr != nil {
 			return fmt.Errorf("write %s audit log: %w", p.action, alErr)
 		}
 		// Slice 126: fan out to the external sink.
 		emitSinkException(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
-			p.action, p.actor, fromState, p.newState, p.reason)
+			p.action, p.actor, fromState, p.newState, reason)
 		return nil
 	})
 	return out, err
@@ -611,6 +929,7 @@ func exceptionFromRow(r dbx.Exception) Exception {
 		t := r.ApprovedAt.Time
 		out.ApprovedAt = &t
 	}
+	out.SelfApproved = r.SelfApproved
 	if r.DeniedBy != nil {
 		v := *r.DeniedBy
 		out.DeniedBy = &v
@@ -637,6 +956,14 @@ func exceptionFromRow(r dbx.Exception) Exception {
 	if r.ExpiredAt.Valid {
 		t := r.ExpiredAt.Time
 		out.ExpiredAt = &t
+	}
+	if r.RevokedBy != nil {
+		v := *r.RevokedBy
+		out.RevokedBy = &v
+	}
+	if r.RevokedAt.Valid {
+		t := r.RevokedAt.Time
+		out.RevokedAt = &t
 	}
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time

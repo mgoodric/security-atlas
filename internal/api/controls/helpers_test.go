@@ -52,6 +52,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -134,11 +135,28 @@ func TestDecodeJSONBObject_Malformed(t *testing.T) {
 // deriveIdempotencyKey
 // ---------------------------------------------------------------------
 
+// w0 is a fixed retry-window start for the key tests.
+var w0 = time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+
+// #2509: the same body in a later retry window is a new attestation, so it
+// gets a new key; inside one window it keeps the old one.
+func TestDeriveIdempotencyKey_RetryWindow(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"statement":"hello"}`)
+	if deriveIdempotencyKey("u", "c", body, w0) == deriveIdempotencyKey("u", "c", body, w0.Add(attestRetryWindow)) {
+		t.Fatal("the same body in the next window must get a new key")
+	}
+	inWindow := time.Date(2026, 11, 17, 12, 4, 59, 0, time.UTC).Truncate(attestRetryWindow)
+	if deriveIdempotencyKey("u", "c", body, w0) != deriveIdempotencyKey("u", "c", body, inWindow) {
+		t.Fatal("a retry inside the window must keep the key")
+	}
+}
+
 func TestDeriveIdempotencyKey_Deterministic(t *testing.T) {
 	t.Parallel()
 	body := []byte(`{"statement":"hello"}`)
-	a := deriveIdempotencyKey("user-1", "ctrl-1", body)
-	b := deriveIdempotencyKey("user-1", "ctrl-1", body)
+	a := deriveIdempotencyKey("user-1", "ctrl-1", body, w0)
+	b := deriveIdempotencyKey("user-1", "ctrl-1", body, w0)
 	if a != b {
 		t.Fatalf("same inputs must produce same key: a=%s b=%s", a, b)
 	}
@@ -146,7 +164,7 @@ func TestDeriveIdempotencyKey_Deterministic(t *testing.T) {
 
 func TestDeriveIdempotencyKey_PrefixAndLength(t *testing.T) {
 	t.Parallel()
-	got := deriveIdempotencyKey("u", "c", []byte("body"))
+	got := deriveIdempotencyKey("u", "c", []byte("body"), w0)
 	if !strings.HasPrefix(got, "attest-") {
 		t.Fatalf("key must have attest- prefix; got %q", got)
 	}
@@ -161,12 +179,12 @@ func TestDeriveIdempotencyKey_PrefixAndLength(t *testing.T) {
 
 func TestDeriveIdempotencyKey_DifferentInputsDifferentKeys(t *testing.T) {
 	t.Parallel()
-	base := deriveIdempotencyKey("u1", "c1", []byte("body"))
+	base := deriveIdempotencyKey("u1", "c1", []byte("body"), w0)
 
 	cases := map[string]string{
-		"different user":    deriveIdempotencyKey("u2", "c1", []byte("body")),
-		"different control": deriveIdempotencyKey("u1", "c2", []byte("body")),
-		"different body":    deriveIdempotencyKey("u1", "c1", []byte("body2")),
+		"different user":    deriveIdempotencyKey("u2", "c1", []byte("body"), w0),
+		"different control": deriveIdempotencyKey("u1", "c2", []byte("body"), w0),
+		"different body":    deriveIdempotencyKey("u1", "c1", []byte("body2"), w0),
 	}
 	for name, k := range cases {
 		if k == base {
@@ -180,8 +198,8 @@ func TestDeriveIdempotencyKey_ZeroByteSeparator(t *testing.T) {
 	// The sha256 separator is a single 0-byte so "u1" + "c1" + "body"
 	// must NOT collide with "u" + "1c1" + "body". This pins the
 	// separator invariant the docstring relies on.
-	a := deriveIdempotencyKey("u1", "c1", []byte("body"))
-	b := deriveIdempotencyKey("u", "1c1", []byte("body"))
+	a := deriveIdempotencyKey("u1", "c1", []byte("body"), w0)
+	b := deriveIdempotencyKey("u", "1c1", []byte("body"), w0)
 	if a == b {
 		t.Fatalf("zero-byte separator failed: u1/c1 and u/1c1 collided (%q)", a)
 	}

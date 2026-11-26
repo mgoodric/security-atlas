@@ -10,9 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -45,7 +47,9 @@ type controlDetailReader interface {
 //     (GET /v1/evidence with no control_id, the slice-106 + slice-234
 //     filter-matrix branch), keyset-paginated over the six optional filters.
 //   - CountEvidenceForTenant — the slice-236 tenant-wide ledger total the
-//     wire envelope's `total` carries on both branches.
+//     tenant-wide branch's `total` carries.
+//   - CountEvidenceForControl — the per-control branch's `total`: the rows
+//     matching that request's control and window (#2470).
 //
 // The contract recorders (evidence_contract_test.go) inject a fixed-row stub
 // satisfying this seam so both evidence wire shapes record on the plain
@@ -63,6 +67,10 @@ type evidenceWindowReader interface {
 	EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error)
 	EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error)
 	CountEvidenceForTenant(ctx context.Context) (int64, error)
+	CountEvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) (int64, error)
+	// DemoEvidence returns which of ids the in-place demo seed added
+	// (#2043), so each row can carry the demo badge.
+	DemoEvidence(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error)
 }
 
 // Handler bundles the slice-064 control-detail read routes over a single
@@ -78,6 +86,13 @@ type Handler struct {
 	// (slice 692 per-control + slice 704 tenant-wide); New points it at store,
 	// so production behavior is identical.
 	evidence evidenceWindowReader
+	// detail is the GET /v1/evidence/{id} read seam (#2137); New points it
+	// at store. redaction, when set, re-applies current redaction rules.
+	detail    evidenceDetailReader
+	redaction RedactionLookup
+	// anchors is the GET /v1/controls/{id}/anchor-history read seam
+	// (#2392); New points it at store.
+	anchors anchorHistoryReader
 }
 
 // New constructs a Handler over the application pgx pool. The slice-411
@@ -85,7 +100,7 @@ type Handler struct {
 // the per-control and tenant-wide branches) are wired to the same store — the
 // public signature is unchanged (P0-409-2).
 func New(store *Store) *Handler {
-	return &Handler{store: store, reader: store, evidence: store}
+	return &Handler{store: store, reader: store, evidence: store, detail: store, anchors: store}
 }
 
 // newHandlerWithReader constructs a Handler whose policies/risks/history
@@ -119,9 +134,16 @@ type evidenceWire struct {
 	EvidenceKind *string         `json:"evidence_kind"`
 	ObservedAt   string          `json:"observed_at"`
 	Source       json.RawMessage `json:"source"`
-	ContentHash  string          `json:"content_hash"`
-	ScopeCell    *string         `json:"scope_cell"`
-	Result       string          `json:"result"`
+	// SourceAttribution is the pusher's actor claim ({actor_type,
+	// actor_id, session_id}), the column the source_actor_* filters
+	// match (#2771). `source` stays the server-observed provenance.
+	SourceAttribution json.RawMessage `json:"source_attribution"`
+	ContentHash       string          `json:"content_hash"`
+	ScopeCell         *string         `json:"scope_cell"`
+	Result            string          `json:"result"`
+	// Demo is true when the in-place demo seed added this record to the
+	// organisation (#2043). Omitted otherwise.
+	Demo bool `json:"demo,omitempty"`
 }
 
 // policyWire is the AC-2 row shape: one linked policy.
@@ -133,9 +155,12 @@ type policyWire struct {
 }
 
 // riskWire is the AC-3 row shape: one linked risk + its link weight.
+// Methodology says how to read the scores (#2185): on a "fair" risk the
+// residual is a dollar amount, not a 1..25 severity, and has no band.
 type riskWire struct {
 	RiskID        string          `json:"risk_id"`
 	Title         string          `json:"title"`
+	Methodology   string          `json:"methodology"`
 	InherentScore json.RawMessage `json:"inherent_score"`
 	ResidualScore json.RawMessage `json:"residual_score"`
 	LinkWeight    *float64        `json:"link_weight"`
@@ -148,6 +173,10 @@ type historyWire struct {
 	ComputedState   string  `json:"computed_state"`
 	FreshnessStatus string  `json:"freshness_status"`
 	EvidenceCount   int     `json:"evidence_count"`
+	// Trigger is what started the run (ingest | scheduled | manual |
+	// replay); TriggeredBy is who, for a manual run (#2479), else null.
+	Trigger     string  `json:"trigger"`
+	TriggeredBy *string `json:"triggered_by"`
 }
 
 // ===== AC-1: GET /v1/evidence?control_id=<id> =====
@@ -283,6 +312,9 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		for i, rec := range page {
 			out[i] = evidenceWireFromListRow(rec)
 		}
+		if !h.markDemoEvidence(w, r, out) {
+			return
+		}
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 			"control_id":  "",
 			"evidence":    out,
@@ -294,22 +326,29 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Per-control path (slice 064 behavior, preserved verbatim). Slice 692
-	// routes BOTH reads through the per-control evidenceWindowReader seam so
-	// the wire shape records with no Postgres pool. The tenant-wide ledger
-	// total (slice 236) the envelope's `total` carries is read via the same
-	// seam (CountEvidenceForTenant); production *Store satisfies it verbatim.
-	total, err := h.evidence.CountEvidenceForTenant(ctx)
-	if err != nil {
-		httperr.WriteInternal(w, r, "controldetail", err)
-		return
-	}
-	rows, err := h.evidence.EvidenceForControl(ctx, controlID, evidencePage{
+	// Per-control path (slice 064). Slice 692 routes both reads through the
+	// evidenceWindowReader seam so the wire shape records with no Postgres
+	// pool.
+	//
+	// #2470: `total` counts the rows this request's control and window
+	// match, not the tenant ledger, so an auditor admitted for one control
+	// in one period learns nothing about the rest. A period-scoped caller
+	// also resolves the control by control_id alone, the lookup its authz
+	// decision covered (audit.Store.ControlPeriods).
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	p := evidencePage{
 		since:    since,
 		until:    until,
 		cursor:   cursor,
 		pageRows: pageRows,
-	})
+		idOnly:   !readsUnscopedEvidence(cred),
+	}
+	total, err := h.evidence.CountEvidenceForControl(ctx, controlID, p)
+	if err != nil {
+		httperr.WriteInternal(w, r, "controldetail", err)
+		return
+	}
+	rows, err := h.evidence.EvidenceForControl(ctx, controlID, p)
 	if err != nil {
 		httperr.WriteInternal(w, r, "controldetail", err)
 		return
@@ -319,6 +358,9 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	out := make([]evidenceWire, len(page))
 	for i, rec := range page {
 		out[i] = evidenceWireFrom(rec)
+	}
+	if !h.markDemoEvidence(w, r, out) {
+		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":  controlID.String(),
@@ -383,6 +425,7 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 		out[i] = riskWire{
 			RiskID:        uuidString(rk.ID),
 			Title:         rk.Title,
+			Methodology:   string(rk.Methodology),
 			InherentScore: jsonOrNull(rk.InherentScore),
 			ResidualScore: jsonOrNull(rk.ResidualScore),
 			LinkWeight:    numericToFloat(rk.DesignScore),
@@ -437,6 +480,8 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 			ComputedState:   string(ev.Result),
 			FreshnessStatus: ev.FreshnessStatus,
 			EvidenceCount:   int(ev.EvidenceCountInWindow),
+			Trigger:         ev.Trigger,
+			TriggeredBy:     ev.TriggeredBy,
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -486,19 +531,21 @@ func splitHistoryPage(rows []dbx.ListControlEvaluationHistoryPagedRow, pageRows 
 
 // evidenceWireFrom maps a sqlc per-control evidence row to the AC-1 wire
 // shape. The `source` field carries the provenance JSONB verbatim (canvas
-// §2.3: connector id, source system id, query hash, runner id);
+// §2.3: connector id, source system id, query hash, runner id) and
+// `source_attribution` the pusher's actor claim (#2771);
 // `scope_cell` carries the nullable scope_id. Slice 106 surfaces
 // `result` from the evidence_records.result column (always present in
 // the DB; the slice-064 shape omitted it).
 func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 	return evidenceWire{
-		EvidenceID:   uuidString(rec.ID),
-		EvidenceKind: rec.EvidenceKind,
-		ObservedAt:   tsString(rec.ObservedAt),
-		Source:       jsonOrNull(rec.Provenance),
-		ContentHash:  rec.Hash,
-		ScopeCell:    uuidPtr(rec.ScopeID),
-		Result:       string(rec.Result),
+		EvidenceID:        uuidString(rec.ID),
+		EvidenceKind:      rec.EvidenceKind,
+		ObservedAt:        tsString(rec.ObservedAt),
+		Source:            jsonOrNull(rec.Provenance),
+		SourceAttribution: jsonOrNull(rec.SourceAttribution),
+		ContentHash:       rec.Hash,
+		ScopeCell:         uuidPtr(rec.ScopeID),
+		Result:            string(rec.Result),
 	}
 }
 
@@ -508,14 +555,37 @@ func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 // distinct named queries.
 func evidenceWireFromListRow(rec dbx.ListEvidencePagedRow) evidenceWire {
 	return evidenceWire{
-		EvidenceID:   uuidString(rec.ID),
-		EvidenceKind: rec.EvidenceKind,
-		ObservedAt:   tsString(rec.ObservedAt),
-		Source:       jsonOrNull(rec.Provenance),
-		ContentHash:  rec.Hash,
-		ScopeCell:    uuidPtr(rec.ScopeID),
-		Result:       string(rec.Result),
+		EvidenceID:        uuidString(rec.ID),
+		EvidenceKind:      rec.EvidenceKind,
+		ObservedAt:        tsString(rec.ObservedAt),
+		Source:            jsonOrNull(rec.Provenance),
+		SourceAttribution: jsonOrNull(rec.SourceAttribution),
+		ContentHash:       rec.Hash,
+		ScopeCell:         uuidPtr(rec.ScopeID),
+		Result:            string(rec.Result),
 	}
+}
+
+// markDemoEvidence sets Demo on each row the in-place demo seed added
+// (#2043). It writes the 500 itself and returns false on a lookup error.
+func (h *Handler) markDemoEvidence(w http.ResponseWriter, r *http.Request, rows []evidenceWire) bool {
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		if id, err := uuid.Parse(row.EvidenceID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	demo, err := h.evidence.DemoEvidence(r.Context(), ids)
+	if err != nil {
+		httperr.WriteInternal(w, r, "controldetail", err)
+		return false
+	}
+	for i := range rows {
+		if id, err := uuid.Parse(rows[i].EvidenceID); err == nil {
+			rows[i].Demo = demo.Has(id)
+		}
+	}
+	return true
 }
 
 // ===== helpers =====

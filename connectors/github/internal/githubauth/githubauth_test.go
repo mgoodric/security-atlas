@@ -124,7 +124,7 @@ func TestDocumentedScopes_NoWriteOrDeleteAccess(t *testing.T) {
 func TestDocumentedScopes_CoversAllThreeKinds(t *testing.T) {
 	scopes := githubauth.DocumentedScopes()
 	want := map[string]bool{
-		"github.repo_protection.v1": false,
+		"github.repo_protection.v2": false,
 		"github.scim_user.v1":       false,
 		"github.audit_event.v1":     false,
 	}

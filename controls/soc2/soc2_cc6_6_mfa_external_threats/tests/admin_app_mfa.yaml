@@ -1,0 +1,656 @@
+# okta.app_assignment.v1 records, shaped as the Okta connector emits them
+# at schema 1.2.0 (connectors/okta/cmd/atlas-okta/cmd_run.go
+# buildAppAssignmentRecord, #2828, #2951). app_id, app_name, status and
+# assigned_group_ids are always present. classification is present once
+# the operator classified any app (--admin-apps, --infrastructure-apps);
+# sign_on_policy_id when the app names an app sign-in policy;
+# sign_on_mfa_required when the connector could decide it, otherwise
+# reason says why; and session_mfa_required, the org's global session
+# policy verdict, when it could decide that, otherwise session_reason. `result` is always inconclusive: the connector leaves
+# the decision to the platform, and the query ignores it.
+cases:
+  - name: admin-and-infrastructure-apps-require-mfa-passes
+    description: a standard app on a 1FA policy is out of scope
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa2aws,
+            app_name: AWS,
+            status: ACTIVE,
+            assigned_group_ids: [00g1eng],
+            assigned_group_count: 1,
+            classification: infrastructure,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa3slack,
+            app_name: Slack,
+            status: ACTIVE,
+            assigned_group_ids: [00g1everyone],
+            assigned_group_count: 1,
+            classification: standard,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: admin-app-allowing-1fa-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa2aws,
+            app_name: AWS,
+            status: ACTIVE,
+            assigned_group_ids: [00g1eng],
+            assigned_group_count: 1,
+            classification: infrastructure,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+
+  - name: infrastructure-app-allowing-1fa-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa2aws,
+            app_name: AWS,
+            status: ACTIVE,
+            assigned_group_ids: [00g1eng],
+            assigned_group_count: 1,
+            classification: infrastructure,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: admin-app-mfa-undecided-is-inconclusive
+    description: an identity-proofing rule leaves sign_on_mfa_required omitted, and the session does not require MFA
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1chain,
+            reason: rule rul1 verification method is not ASSURANCE,
+            session_mfa_required: false,
+          }
+
+  - name: admin-app-without-policy-is-inconclusive
+    description: a Classic Engine org's app carries no _links.accessPolicy
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            reason: app has no app sign-in policy (_links.accessPolicy absent),
+          }
+
+  - name: known-failure-outranks-undecided
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1chain,
+            reason: rule rul1 verification method is not ASSURANCE,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa2aws,
+            app_name: AWS,
+            status: ACTIVE,
+            assigned_group_ids: [00g1eng],
+            assigned_group_count: 1,
+            classification: infrastructure,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: only-standard-apps-is-inconclusive
+    description: no admin or infrastructure app was received
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa3slack,
+            app_name: Slack,
+            status: ACTIVE,
+            assigned_group_ids: [00g1everyone],
+            assigned_group_count: 1,
+            classification: standard,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: inactive-admin-app-is-out-of-scope
+    description: Okta does not sign anyone in to an inactive app
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Old Admin Tool,
+            status: INACTIVE,
+            assigned_group_ids: [],
+            assigned_group_count: 0,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: unclassified-app-requiring-mfa-passes
+    description: the operator classified no app; every app requires MFA, so every admin app does
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+
+  - name: unclassified-app-allowing-1fa-is-inconclusive
+    description: the app may be admin; without a classification it cannot fail the control
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa3slack,
+            app_name: Slack,
+            status: ACTIVE,
+            assigned_group_ids: [00g1everyone],
+            assigned_group_count: 1,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: v100-record-is-inconclusive
+    description: a connector older than #2828 sends neither field
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            sign_on_mode: SAML_2_0,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+          }
+
+  - name: latest-record-decides
+    description: the admin app moved from a 1FA policy to a 2FA one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T05:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+
+  - name: latest-record-reclassified-standard-is-out-of-scope
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T05:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: standard,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: tie-without-mfa-fails-closed
+    description: at one instant, MFA required and not required disagree; not required decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: tie-with-standard-classification-still-fails
+    description: at one instant, admin without MFA and standard disagree; the admin record decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: standard,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  - name: mistyped-classification-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: Admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+
+  - name: mistyped-mfa-flag-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: "true",
+          }
+
+  - name: keyless-record-is-left-out
+    description: a record without a string app_id is not counted, failing or not
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: "",
+            app_name: Broken,
+            status: ACTIVE,
+            assigned_group_ids: [],
+            assigned_group_count: 0,
+            classification: admin,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            app_id: 12345,
+            app_name: Numeric,
+            status: ACTIVE,
+            assigned_group_ids: [],
+            assigned_group_count: 0,
+            classification: admin,
+            sign_on_mfa_required: false,
+            session_mfa_required: false,
+          }
+
+  # #2951: the global session policy.
+  - name: admin-app-1fa-with-session-mfa-passes
+    description: the app sign-in policy allows 1FA, but every session is established with MFA
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: true,
+          }
+
+  - name: admin-app-undecided-with-session-mfa-passes
+    description: the app's own policy is undecided, the session requires MFA
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            reason: app has no app sign-in policy (_links.accessPolicy absent),
+            session_mfa_required: true,
+          }
+
+  - name: admin-app-1fa-with-session-undecided-is-inconclusive
+    description: the session may require MFA; the connector could not tell
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_reason: "global session policy: everyone group not found among BUILT_IN groups",
+          }
+
+  - name: v110-record-allowing-1fa-is-inconclusive
+    description: a connector older than #2951 does not read the global session policy
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+          }
+
+  - name: mistyped-session-flag-fails
+    description: a mistyped field fails even when the other says MFA
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa1admin,
+            app_name: Okta Admin Console,
+            status: ACTIVE,
+            assigned_group_ids: [00g1admins],
+            assigned_group_count: 1,
+            classification: admin,
+            sign_on_policy_id: rst1admin,
+            sign_on_mfa_required: true,
+            session_mfa_required: "true",
+          }
+
+  - name: unclassified-app-with-session-mfa-passes
+    description: every session requires MFA, so every admin app does
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: okta.app_assignment.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            app_id: 0oa3slack,
+            app_name: Slack,
+            status: ACTIVE,
+            assigned_group_ids: [00g1everyone],
+            assigned_group_count: 1,
+            sign_on_policy_id: rst1default,
+            sign_on_mfa_required: false,
+            session_mfa_required: true,
+          }
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records: []

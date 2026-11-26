@@ -23,7 +23,8 @@ func (q *Queries) CountFrameworkRequirementsForVersion(ctx context.Context, fram
 }
 
 const countFwToScfEdgesBySourceAttribution = `-- name: CountFwToScfEdgesBySourceAttribution :one
-SELECT count(*) FROM fw_to_scf_edges WHERE source_attribution = $1
+SELECT count(*) FROM fw_to_scf_edges
+WHERE source_attribution = $1 AND retired_at IS NULL
 `
 
 // Audit query — exposed for integration tests + the audit log.
@@ -35,7 +36,7 @@ func (q *Queries) CountFwToScfEdgesBySourceAttribution(ctx context.Context, sour
 }
 
 const getFrameworkRequirementByCurrentVersion = `-- name: GetFrameworkRequirementByCurrentVersion :one
-SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at
+SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at, fr.points_of_focus
 FROM framework_requirements fr
 JOIN framework_versions fv ON fv.id = fr.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -60,12 +61,13 @@ func (q *Queries) GetFrameworkRequirementByCurrentVersion(ctx context.Context, a
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByFrameworkSlugVersionCode = `-- name: GetFrameworkRequirementByFrameworkSlugVersionCode :one
-SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at
+SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at, fr.points_of_focus
 FROM framework_requirements fr
 JOIN framework_versions fv ON fv.id = fr.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -92,12 +94,13 @@ func (q *Queries) GetFrameworkRequirementByFrameworkSlugVersionCode(ctx context.
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByID = `-- name: GetFrameworkRequirementByID :one
-SELECT id, framework_version_id, code, title, body, created_at, updated_at FROM framework_requirements WHERE id = $1
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus FROM framework_requirements WHERE id = $1
 `
 
 func (q *Queries) GetFrameworkRequirementByID(ctx context.Context, id pgtype.UUID) (FrameworkRequirement, error) {
@@ -111,12 +114,13 @@ func (q *Queries) GetFrameworkRequirementByID(ctx context.Context, id pgtype.UUI
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByVersionAndCode = `-- name: GetFrameworkRequirementByVersionAndCode :one
-SELECT id, framework_version_id, code, title, body, created_at, updated_at FROM framework_requirements
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus FROM framework_requirements
 WHERE framework_version_id = $1 AND code = $2
 `
 
@@ -139,13 +143,15 @@ func (q *Queries) GetFrameworkRequirementByVersionAndCode(ctx context.Context, a
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFwToScfEdge = `-- name: GetFwToScfEdge :one
-SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier FROM fw_to_scf_edges
+SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source, retired_at FROM fw_to_scf_edges
 WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
+  AND retired_at IS NULL
 `
 
 type GetFwToScfEdgeParams struct {
@@ -156,6 +162,7 @@ type GetFwToScfEdgeParams struct {
 // Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 // edge doesn't exist yet. Importer calls this first to classify
 // Created/Updated/Unchanged.
+// Retired edges (#1971) are excluded.
 func (q *Queries) GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error) {
 	row := q.db.QueryRow(ctx, getFwToScfEdge, arg.FrameworkRequirementID, arg.ScfAnchorID)
 	var i FwToScfEdge
@@ -170,6 +177,47 @@ func (q *Queries) GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
+		&i.RetiredAt,
+	)
+	return i, err
+}
+
+const getFwToScfEdgeForUpdate = `-- name: GetFwToScfEdgeForUpdate :one
+SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source, retired_at FROM fw_to_scf_edges
+WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
+FOR UPDATE
+`
+
+type GetFwToScfEdgeForUpdateParams struct {
+	FrameworkRequirementID pgtype.UUID `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID `json:"scf_anchor_id"`
+}
+
+// Row-lock one edge by (requirement, anchor) inside the import transaction.
+// The importer compares source_attribution precedence before it updates
+// (issue #1754); without the lock a concurrent weaker import that passed its
+// check against the old row would overwrite a just-committed scf_official
+// edge at READ COMMITTED. Same read-validate-write guard as
+// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+// Unlike every other reader it also returns a RETIRED edge (#1971): a
+// crosswalk that lists the pair again restores it (RestoreFwToScfEdge).
+func (q *Queries) GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error) {
+	row := q.db.QueryRow(ctx, getFwToScfEdgeForUpdate, arg.FrameworkRequirementID, arg.ScfAnchorID)
+	var i FwToScfEdge
+	err := row.Scan(
+		&i.ID,
+		&i.FrameworkRequirementID,
+		&i.ScfAnchorID,
+		&i.RelationshipType,
+		&i.Strength,
+		&i.SourceAttribution,
+		&i.Rationale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MappingTier,
+		&i.CrosswalkSource,
+		&i.RetiredAt,
 	)
 	return i, err
 }
@@ -178,7 +226,7 @@ const getFwToScfEdgeTier = `-- name: GetFwToScfEdgeTier :one
 
 SELECT id, mapping_tier, source_attribution
 FROM fw_to_scf_edges
-WHERE id = $1
+WHERE id = $1 AND retired_at IS NULL
 `
 
 type GetFwToScfEdgeTierRow struct {
@@ -201,7 +249,7 @@ func (q *Queries) GetFwToScfEdgeTier(ctx context.Context, id pgtype.UUID) (GetFw
 const getFwToScfEdgeTierForUpdate = `-- name: GetFwToScfEdgeTierForUpdate :one
 SELECT id, mapping_tier, source_attribution
 FROM fw_to_scf_edges
-WHERE id = $1
+WHERE id = $1 AND retired_at IS NULL
 FOR UPDATE
 `
 
@@ -224,10 +272,11 @@ func (q *Queries) GetFwToScfEdgeTierForUpdate(ctx context.Context, id pgtype.UUI
 const insertFwToScfEdge = `-- name: InsertFwToScfEdge :one
 INSERT INTO fw_to_scf_edges (
     id, framework_requirement_id, scf_anchor_id,
-    relationship_type, strength, source_attribution, rationale
+    relationship_type, strength, source_attribution, rationale,
+    crosswalk_source
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source, retired_at
 `
 
 type InsertFwToScfEdgeParams struct {
@@ -238,6 +287,7 @@ type InsertFwToScfEdgeParams struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	Rationale              string                     `json:"rationale"`
+	CrosswalkSource        *string                    `json:"crosswalk_source"`
 }
 
 func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error) {
@@ -249,6 +299,7 @@ func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgePa
 		arg.Strength,
 		arg.SourceAttribution,
 		arg.Rationale,
+		arg.CrosswalkSource,
 	)
 	var i FwToScfEdge
 	err := row.Scan(
@@ -262,6 +313,8 @@ func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
+		&i.RetiredAt,
 	)
 	return i, err
 }
@@ -306,7 +359,7 @@ func (q *Queries) InsertFwToScfEdgeTierTransition(ctx context.Context, arg Inser
 }
 
 const listFrameworkRequirementsForVersion = `-- name: ListFrameworkRequirementsForVersion :many
-SELECT id, framework_version_id, code, title, body, created_at, updated_at
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus
 FROM framework_requirements
 WHERE framework_version_id = $1
 ORDER BY code
@@ -329,6 +382,7 @@ func (q *Queries) ListFrameworkRequirementsForVersion(ctx context.Context, frame
 			&i.Body,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PointsOfFocus,
 		); err != nil {
 			return nil, err
 		}
@@ -391,7 +445,7 @@ SELECT
     a.scf_id,
     a.family,
     a.title AS anchor_title
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
 ORDER BY e.strength DESC, a.scf_id
@@ -446,6 +500,101 @@ func (q *Queries) ListFwToScfEdgesForRequirement(ctx context.Context, frameworkR
 	return items, nil
 }
 
+const listFwToScfEdgesForVersionForUpdate = `-- name: ListFwToScfEdgesForVersionForUpdate :many
+SELECT
+    e.id,
+    e.framework_requirement_id,
+    e.scf_anchor_id,
+    fr.code AS requirement_code,
+    a.scf_id,
+    e.source_attribution,
+    e.mapping_tier,
+    e.crosswalk_source
+FROM fw_to_scf_edges e
+JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+JOIN scf_anchors a ON a.id = e.scf_anchor_id
+WHERE fr.framework_version_id = $1
+  AND e.retired_at IS NULL
+ORDER BY fr.code, a.scf_id
+FOR UPDATE OF e
+`
+
+type ListFwToScfEdgesForVersionForUpdateRow struct {
+	ID                     pgtype.UUID                `json:"id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID                `json:"scf_anchor_id"`
+	RequirementCode        string                     `json:"requirement_code"`
+	ScfID                  string                     `json:"scf_id"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	CrosswalkSource        *string                    `json:"crosswalk_source"`
+}
+
+// Every live catalog edge under one framework_version, row-locked, with the
+// requirement code and anchor scf_id for the import report. The crosswalk
+// importer reads this after its upsert pass to find edges the crosswalk no
+// longer lists (#1971): an SCF remap or a new SCF release moves a mapping to
+// another anchor row, and the edge on the old one would otherwise keep
+// counting as coverage. Already-retired edges are not returned.
+func (q *Queries) ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listFwToScfEdgesForVersionForUpdate, frameworkVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFwToScfEdgesForVersionForUpdateRow
+	for rows.Next() {
+		var i ListFwToScfEdgesForVersionForUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkRequirementID,
+			&i.ScfAnchorID,
+			&i.RequirementCode,
+			&i.ScfID,
+			&i.SourceAttribution,
+			&i.MappingTier,
+			&i.CrosswalkSource,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const restoreFwToScfEdge = `-- name: RestoreFwToScfEdge :exec
+UPDATE fw_to_scf_edges
+SET retired_at = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+// Clear retired_at on an edge a crosswalk lists again (#1971). The importer
+// writes a transition row recording the restore in the same transaction.
+func (q *Queries) RestoreFwToScfEdge(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, restoreFwToScfEdge, id)
+	return err
+}
+
+const retireFwToScfEdge = `-- name: RetireFwToScfEdge :exec
+UPDATE fw_to_scf_edges
+SET retired_at = now(),
+    updated_at = now()
+WHERE id = $1 AND retired_at IS NULL
+`
+
+// Retire one catalog edge the crosswalk no longer lists (#1971). The row and
+// its append-only tier-transition history stay; effective_fw_to_scf_edges
+// and the other readers stop seeing it. The importer writes a transition row
+// recording the retirement in the same transaction.
+func (q *Queries) RetireFwToScfEdge(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, retireFwToScfEdge, id)
+	return err
+}
+
 const setFwToScfEdgeTier = `-- name: SetFwToScfEdgeTier :exec
 UPDATE fw_to_scf_edges
 SET mapping_tier = $2,
@@ -491,9 +640,10 @@ SET relationship_type    = $2,
     strength             = $3,
     source_attribution   = $4,
     rationale            = $5,
+    crosswalk_source     = $6,
     updated_at           = now()
 WHERE id = $1
-RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier
+RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source, retired_at
 `
 
 type UpdateFwToScfEdgeParams struct {
@@ -502,6 +652,7 @@ type UpdateFwToScfEdgeParams struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	Rationale         string                     `json:"rationale"`
+	CrosswalkSource   *string                    `json:"crosswalk_source"`
 }
 
 // Update an existing edge in place. Importer decides whether to call this
@@ -513,6 +664,7 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 		arg.Strength,
 		arg.SourceAttribution,
 		arg.Rationale,
+		arg.CrosswalkSource,
 	)
 	var i FwToScfEdge
 	err := row.Scan(
@@ -526,18 +678,21 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
+		&i.RetiredAt,
 	)
 	return i, err
 }
 
 const upsertFrameworkRequirement = `-- name: UpsertFrameworkRequirement :one
-INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO framework_requirements (id, framework_version_id, code, title, body, points_of_focus)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (id) DO UPDATE
-SET title       = EXCLUDED.title,
-    body        = EXCLUDED.body,
-    updated_at  = now()
-RETURNING id, framework_version_id, code, title, body, created_at, updated_at
+SET title           = EXCLUDED.title,
+    body            = EXCLUDED.body,
+    points_of_focus = EXCLUDED.points_of_focus,
+    updated_at      = now()
+RETURNING id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus
 `
 
 type UpsertFrameworkRequirementParams struct {
@@ -546,11 +701,14 @@ type UpsertFrameworkRequirementParams struct {
 	Code               string      `json:"code"`
 	Title              string      `json:"title"`
 	Body               string      `json:"body"`
+	PointsOfFocus      []byte      `json:"points_of_focus"`
 }
 
 // Insert or update a framework_requirements row. Deterministic id derived
 // from (framework_version_id, code) so re-imports are idempotent without
 // relying on NULLs-distinct gotchas on the UNIQUE constraint.
+// points_of_focus (#1731) is the JSON array of SOC 2 points of focus rolled up
+// onto this criterion; '[]' for a requirement with none.
 func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFrameworkRequirementParams) (FrameworkRequirement, error) {
 	row := q.db.QueryRow(ctx, upsertFrameworkRequirement,
 		arg.ID,
@@ -558,6 +716,7 @@ func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFram
 		arg.Code,
 		arg.Title,
 		arg.Body,
+		arg.PointsOfFocus,
 	)
 	var i FrameworkRequirement
 	err := row.Scan(
@@ -568,6 +727,7 @@ func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFram
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }

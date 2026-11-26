@@ -16,15 +16,16 @@ package mcpwriteproposals
 //                          tool), 400 (missing ai_model_* fields)
 //   - ListProposals      — 401 (no auth)
 //   - GetProposal        — 401 (no auth), 400 (non-UUID id)
-//   - ConfirmProposal    — 401 (no auth), 403 (no approver role),
+//   - ConfirmProposal    — 401 (no auth), 403 (not a tenant admin),
 //                          400 (non-UUID id)
-//   - RejectProposal     — 401 (no auth), 403 (no approver role),
+//   - RejectProposal     — 401 (no auth), 403 (not a tenant admin),
 //                          400 (non-UUID id)
 //   - writeCreateErr     — every documented branch (Unknown tool /
 //                          Invalid input / Pending cap exceeded /
 //                          fallthrough server error)
 //   - writeTransitionErr — every documented branch (NotFound /
-//                          WrongState / UnknownTool / fallthrough)
+//                          WrongState / UnknownTool / applier refusals
+//                          from ingest (#1751) / fallthrough)
 //   - writeServerErr     — direct call exercises the 500 wrap
 //   - proposalWireFrom   — empty-ToolInput defaults to "{}"
 //
@@ -37,6 +38,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +50,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -82,9 +86,9 @@ func validCred() credstore.Credential {
 	}
 }
 
-func approverCred() credstore.Credential {
+func adminCred() credstore.Credential {
 	c := validCred()
-	c.IsApprover = true
+	c.IsAdmin = true
 	return c
 }
 
@@ -307,8 +311,32 @@ func TestConfirmProposal_403WhenNotApprover(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "approver role required") {
-		t.Fatalf("body = %s, want approver-required message", w.Body.String())
+	if !strings.Contains(w.Body.String(), "admin role required") {
+		t.Fatalf("body = %s, want admin-required message", w.Body.String())
+	}
+}
+
+// #3031: grc_engineer files proposals and the engine admits it to the
+// create route only. The handler gate behind confirm and reject is
+// IsTenantAdmin, not IsTenantApprover, so it refuses a live grc_engineer
+// and an approver-flag key too, should the engine ever admit them.
+func TestDecideProposal_403ForGRCEngineerAndApproverFlag(t *testing.T) {
+	t.Parallel()
+	grc := validCred()
+	grc.TenantRoles = []string{"grc_engineer"}
+	approver := validCred()
+	approver.IsApprover = true
+	h := New(nil)
+	for name, cred := range map[string]credstore.Credential{"grc_engineer": grc, "approver flag": approver} {
+		for verb, handle := range map[string]http.HandlerFunc{"confirm": h.ConfirmProposal, "reject": h.RejectProposal} {
+			r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/x/"+verb, nil)
+			r = r.WithContext(withTenantAndCred(t, cred))
+			w := httptest.NewRecorder()
+			handle(w, r)
+			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "admin role required") {
+				t.Errorf("%s %s: %d %s; want 403 admin role required", name, verb, w.Code, w.Body.String())
+			}
+		}
 	}
 }
 
@@ -317,7 +345,7 @@ func TestConfirmProposal_400OnNonUUID(t *testing.T) {
 	h := New(nil)
 	r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/abc/confirm", nil)
 	r = withURLParam(r, "id", "abc")
-	r = r.WithContext(withTenantAndCred(t, approverCred()))
+	r = r.WithContext(withTenantAndCred(t, adminCred()))
 	w := httptest.NewRecorder()
 	h.ConfirmProposal(w, r)
 	if w.Code != http.StatusBadRequest {
@@ -357,7 +385,7 @@ func TestRejectProposal_400OnNonUUID(t *testing.T) {
 	h := New(nil)
 	r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/abc/reject", nil)
 	r = withURLParam(r, "id", "abc")
-	r = r.WithContext(withTenantAndCred(t, approverCred()))
+	r = r.WithContext(withTenantAndCred(t, adminCred()))
 	w := httptest.NewRecorder()
 	h.RejectProposal(w, r)
 	if w.Code != http.StatusBadRequest {
@@ -400,6 +428,31 @@ func TestWriteCreateErr_PendingCapExceeded(t *testing.T) {
 	}
 }
 
+// #2502: a create_risk score refused when the proposal is filed takes the
+// status POST /v1/risks gives it, and the refusal's message.
+func TestWriteCreateErr_ScoreRefusals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err    error
+		status int
+	}{
+		{risk.ErrScoreNotNumeric, http.StatusUnprocessableEntity},
+		{risk.ErrInherentScoreInvalid, http.StatusBadRequest},
+		{risk.ErrInvalidMethodology, http.StatusBadRequest},
+	}
+	h := New(nil)
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		h.writeCreateErr(w, httptest.NewRequest(http.MethodPost, "/", nil), fmt.Errorf("%w: inherent_score.impact", tc.err))
+		if w.Code != tc.status {
+			t.Fatalf("%v: status = %d, want %d", tc.err, w.Code, tc.status)
+		}
+		if !strings.Contains(w.Body.String(), "score_validation_failed") || !strings.Contains(w.Body.String(), "inherent_score.impact") {
+			t.Fatalf("%v: body = %s, want the code and the refusal", tc.err, w.Body.String())
+		}
+	}
+}
+
 func TestWriteCreateErr_Fallthrough500(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
@@ -410,7 +463,73 @@ func TestWriteCreateErr_Fallthrough500(t *testing.T) {
 	}
 }
 
+// ----- writeTransitionErr: applier refusals (#1751) -----
+
+// An ingest refusal at confirm is a client error with a stable code, not
+// an opaque 500. The applier wraps the sentinel, so the mapping must use
+// errors.Is.
+func TestWriteTransitionErr_ApplierRefusals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{ingest.ErrObservedAtSkew, http.StatusBadRequest, "observed_at_skew"},
+		{ingest.ErrValidation, http.StatusBadRequest, "schema_validation_failed"},
+		{ingest.ErrUnknownKind, http.StatusBadRequest, "unknown_evidence_kind"},
+		{ingest.ErrMissingField, http.StatusBadRequest, "missing_field"},
+		{ingest.ErrOversized, http.StatusRequestEntityTooLarge, "oversized_payload"},
+		{ingest.ErrScopeViolation, http.StatusForbidden, "scope_violation"},
+		{ingest.ErrIdempotencyMismatch, http.StatusConflict, "idempotency_mismatch"},
+		{writeproposals.ErrInvalidInput, http.StatusBadRequest, "invalid_input"},
+		{writeproposals.ErrIngestUnavailable, http.StatusServiceUnavailable, "ingest_unavailable"},
+		{risk.ErrTreatmentValidation, http.StatusBadRequest, "treatment_validation_failed"},
+		{risk.ErrScoreNotNumeric, http.StatusUnprocessableEntity, "score_validation_failed"},
+		{risk.ErrInherentScoreInvalid, http.StatusBadRequest, "score_validation_failed"},
+		{risk.ErrInvalidMethodology, http.StatusBadRequest, "score_validation_failed"},
+	}
+	h := New(nil)
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		wrapped := fmt.Errorf("apply: apply push_evidence: %w: skew=-720h0m0s", tc.err)
+		h.writeTransitionErr(w, httptest.NewRequest(http.MethodPost, "/", nil), wrapped)
+		if w.Code != tc.status {
+			t.Fatalf("%v: status = %d, want %d", tc.err, w.Code, tc.status)
+		}
+		var body struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%v: decode body: %v", tc.err, err)
+		}
+		if body.Code != tc.code {
+			t.Fatalf("%v: code = %q, want %q", tc.err, body.Code, tc.code)
+		}
+		if tc.status >= http.StatusInternalServerError && strings.Contains(body.Error, "skew=") {
+			t.Fatalf("%v: 5xx body leaks the wrapped error: %q", tc.err, body.Error)
+		}
+	}
+}
+
 // ----- writeTransitionErr: every documented branch -----
+
+// #2175: a proposal into a switched-off module answers 409 with a stable
+// code; the proposal stays pending.
+func TestWriteTransitionErr_ModuleOff(t *testing.T) {
+	t.Parallel()
+	h := New(nil)
+	w := httptest.NewRecorder()
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodPost, "/", nil),
+		fmt.Errorf("%w: risk", writeproposals.ErrModuleOff))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"module_switched_off"`) {
+		t.Fatalf("body = %s; want code module_switched_off", w.Body.String())
+	}
+}
 
 func TestWriteTransitionErr_NotFound(t *testing.T) {
 	t.Parallel()

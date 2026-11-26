@@ -30,6 +30,15 @@ type Manifest struct {
 	GeneratedAt string `json:"generated_at"`
 	// RequestedBy is the credential / user id that triggered the export.
 	RequestedBy string `json:"requested_by"`
+	// FreezeRevision and RevisionHash name the period's freeze revision
+	// the bundle was generated from (1 = the original freeze), and its hex
+	// hash; both are covered by the signature. AmendedByImport and
+	// AmendReason state a revision above 1 and the admin's reason (#1742).
+	// Absent in bundles exported before #1742.
+	FreezeRevision  int    `json:"freeze_revision,omitempty"`
+	RevisionHash    string `json:"revision_hash,omitempty"`
+	AmendedByImport bool   `json:"amended_by_import,omitempty"`
+	AmendReason     string `json:"amend_reason,omitempty"`
 	// Members lists each OSCAL document in the bundle with its content
 	// hash.
 	Members []ManifestMember `json:"members"`
@@ -70,12 +79,15 @@ func newMember(filename, modelType string, jsonBytes []byte) BundleMember {
 // return a Bundle whose signing failed.
 func assembleBundle(agg *aggregate, members []BundleMember, requestedBy string) *Bundle {
 	return &Bundle{
-		AuditPeriodID: uuidFromPg(agg.period.ID),
-		FrozenAt:      agg.frozenAt.UTC().Format(time.RFC3339),
-		OSCALVersion:  OSCALVersion,
-		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		RequestedBy:   requestedBy,
-		Members:       members,
+		AuditPeriodID:  uuidFromPg(agg.period.ID),
+		FrozenAt:       agg.frozenAt.UTC().Format(time.RFC3339),
+		FreezeRevision: agg.freezeRevision,
+		RevisionHash:   hex.EncodeToString(agg.revisionHash),
+		AmendReason:    agg.amendReason,
+		OSCALVersion:   OSCALVersion,
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		RequestedBy:    requestedBy,
+		Members:        members,
 	}
 }
 
@@ -91,14 +103,18 @@ func (b *Bundle) Manifest() Manifest {
 		})
 	}
 	return Manifest{
-		SchemaVersion: SchemaVersion,
-		AuditPeriodID: b.AuditPeriodID.String(),
-		FrozenAt:      b.FrozenAt,
-		OSCALVersion:  b.OSCALVersion,
-		GeneratedAt:   b.GeneratedAt,
-		RequestedBy:   b.RequestedBy,
-		Members:       members,
-		Signature:     b.Signature,
+		SchemaVersion:   SchemaVersion,
+		AuditPeriodID:   b.AuditPeriodID.String(),
+		FrozenAt:        b.FrozenAt,
+		FreezeRevision:  b.FreezeRevision,
+		RevisionHash:    b.RevisionHash,
+		AmendedByImport: b.FreezeRevision > 1,
+		AmendReason:     b.AmendReason,
+		OSCALVersion:    b.OSCALVersion,
+		GeneratedAt:     b.GeneratedAt,
+		RequestedBy:     b.RequestedBy,
+		Members:         members,
+		Signature:       b.Signature,
 	}
 }
 
@@ -177,12 +193,15 @@ func ReadBundle(dir string) (*Bundle, error) {
 		members = append(members, newMember(mm.Filename, mm.ModelType, jsonBytes))
 	}
 	return &Bundle{
-		AuditPeriodID: periodID,
-		FrozenAt:      man.FrozenAt,
-		OSCALVersion:  man.OSCALVersion,
-		GeneratedAt:   man.GeneratedAt,
-		RequestedBy:   man.RequestedBy,
-		Members:       members,
-		Signature:     man.Signature,
+		AuditPeriodID:  periodID,
+		FrozenAt:       man.FrozenAt,
+		FreezeRevision: man.FreezeRevision,
+		RevisionHash:   man.RevisionHash,
+		AmendReason:    man.AmendReason,
+		OSCALVersion:   man.OSCALVersion,
+		GeneratedAt:    man.GeneratedAt,
+		RequestedBy:    man.RequestedBy,
+		Members:        members,
+		Signature:      man.Signature,
 	}, nil
 }

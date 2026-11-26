@@ -23,15 +23,13 @@
 // risk, one evidence record, each carrying the token `AcmeVault`, which
 // appears in no other fixture and in no bundled SCF anchor.
 //
-// Why the result ORDER below is deterministic (and not a guess): the
-// endpoint sorts relevance DESC, then type ASC, then id ASC. A
-// single-token query scores every matching row 1.0, so the merge is
-// ordered by type name — and the UI's flat keyboard-navigation order is
-// GROUP_ORDER (anchors, controls, risks, evidence) flattened. With zero
-// `anchors` hits the first flat row is the control and the second is the
-// risk. The spec asserts the absent anchors group explicitly so a future
-// catalog change that starts matching `AcmeVault` fails loudly on that
-// assertion instead of silently changing which row Enter opens.
+// Why the result ORDER below is deterministic (and not a guess): since
+// #2067 the endpoint groups hits by type in the order controls, risks,
+// policies, evidence, anchors, and the UI's flat keyboard-navigation
+// order is GROUP_ORDER, the same list. The first flat row is the control
+// and the second is the risk. The spec still asserts the absent anchors
+// group, so a future catalog change that starts matching `AcmeVault`
+// fails loudly there rather than shifting a count.
 //
 // Timeouts follow the slice-275 convention documented in
 // `web/e2e/README.md`: gate the first visibility assertion on the
@@ -44,6 +42,7 @@
 //   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/global-search.spec.ts
 
+import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, test } from "./fixtures";
 
 import { seedFromFixture } from "./seed";
@@ -59,7 +58,7 @@ const CONTROL_TITLE = "AcmeVault secret rotation — production credentials";
 const RISK_TITLE = "AcmeVault credential sprawl";
 // The endpoint synthesizes the evidence label as
 // "<evidence_kind> · <control_ref>" (internal/api/search/search.go).
-const EVIDENCE_TITLE = "acmevault.secret_rotation.v1 · IAC-10";
+const EVIDENCE_TITLE = "acmevault.secret_rotation.v1 · IAC-14";
 
 // The query the operator types. Lower-case on purpose — the match is
 // ILIKE, so this also pins case-insensitivity through the whole path.
@@ -76,6 +75,7 @@ interface SearchHitWire {
 interface SearchResponseWire {
   hits: SearchHitWire[];
   count: number;
+  groups: { type: string; count: number }[];
   partial_types: string[];
 }
 
@@ -102,6 +102,11 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     );
 
     // 1. Open with the keyboard shortcut.
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
 
@@ -144,6 +149,29 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     await expect(page.getByTestId("global-search-group-anchors")).toHaveCount(
       0,
     );
+    // The open popover is swept too (#2397): the route sweep only sees
+    // the page in its initial, closed state.
+    expectNoSeriousAxe(
+      await seriousAxeViolations(page),
+      "global search popover open",
+    );
+
+    // #2067 — each group shows the real endpoint's match count for this
+    // tenant, and the response's groups array is in group order.
+    expect(body.groups.map((g) => g.type)).toEqual([
+      "controls",
+      "risks",
+      "policies",
+      "evidence",
+      "anchors",
+    ]);
+    for (const type of ["controls", "risks", "evidence"]) {
+      const reported = body.groups.find((g) => g.type === type)?.count;
+      expect(reported).toBeGreaterThanOrEqual(1);
+      await expect(
+        page.getByTestId(`global-search-group-count-${type}`),
+      ).toHaveText(String(reported));
+    }
 
     await expect(
       page.getByTestId("global-search-row-controls").first(),
@@ -204,6 +232,11 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     const searchResponse = page.waitForResponse(
       (r) => r.url().includes("/api/search") && r.status() === 200,
       { timeout: 30_000 },
+    );
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
     );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();

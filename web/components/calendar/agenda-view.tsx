@@ -44,6 +44,10 @@ const TYPE_COLOR: Record<string, string> = {
   policy: "bg-purple-500",
   vendor: "bg-rose-500",
   control: "bg-emerald-500",
+  risk: "bg-orange-500",
+  action_plan: "bg-cyan-500",
+  policy_ack: "bg-violet-500",
+  offboarding: "bg-slate-500",
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -52,6 +56,10 @@ const TYPE_LABEL: Record<string, string> = {
   policy: "Policy",
   vendor: "Vendor review",
   control: "Control review",
+  risk: "Risk review",
+  action_plan: "Action plan",
+  policy_ack: "Policy acknowledgement",
+  offboarding: "Offboarding",
 };
 
 function monthKey(iso: string): string {
@@ -130,6 +138,7 @@ export function AgendaView({ events, truncated }: Props) {
               const rowBody = (
                 <>
                   <span
+                    role="img"
                     aria-label={
                       isOverdue ? "Overdue" : TYPE_LABEL[ev.type] ?? ev.type
                     }

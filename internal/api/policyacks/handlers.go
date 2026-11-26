@@ -4,8 +4,10 @@
 // Routes (registered onto the platform root router by
 // internal/api/httpserver.go):
 //
-//	GET  /v1/me/acknowledgments                     pending acks for current user (AC-1)
-//	POST /v1/policies/{id}/acknowledge              record an ack + emit evidence (AC-2)
+//	GET  /v1/me/acknowledgments                     pending acks for current user (AC-1);
+//	                                                ?include=current adds the fresh ones (#2668)
+//	POST /v1/policies/{id}/acknowledge              record an ack + emit evidence (AC-2);
+//	                                                body {"policy_version_id"} pins the version (#2668)
 //	GET  /v1/policies/{id}/acknowledgment-rate      numerator/denominator/percent (AC-6)
 //
 // All handlers run with the tenant set by upstream auth middleware
@@ -29,9 +31,12 @@ package policyacks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -86,11 +91,27 @@ type pendingItem struct {
 	EffectiveDate      *string    `json:"effective_date,omitempty"`
 	RequiredRoles      []string   `json:"required_roles"`
 	LastAcknowledgedAt *time.Time `json:"last_acknowledged_at,omitempty"`
+	// Status and DueAt are policy.Pending.Due, the rule
+	// GET /v1/needs-attention bands the item by (#2736).
+	Status string     `json:"status"`
+	DueAt  *time.Time `json:"due_at,omitempty"`
+}
+
+// currentItem is a policy the caller has acknowledged, for its current
+// version, within the window (#2668).
+type currentItem struct {
+	PolicyID        string    `json:"policy_id"`
+	PolicyVersionID string    `json:"policy_version_id"`
+	Title           string    `json:"title"`
+	Version         string    `json:"version"`
+	AcknowledgedAt  time.Time `json:"acknowledged_at"`
 }
 
 type pendingResponse struct {
 	Pending []pendingItem `json:"pending"`
 	Count   int           `json:"count"`
+	// Current is set only for ?include=current (#2668).
+	Current *[]currentItem `json:"current,omitempty"`
 	// WindowSeconds tells the frontend how to compute "fresh until"
 	// without hardcoding 365 days.
 	WindowSeconds int64 `json:"window_seconds"`
@@ -135,16 +156,22 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if !isUUIDUser(cred.UserID) {
-		httpresp.WriteJSON(w, http.StatusOK, pendingResponse{
+	withCurrent := includesCurrent(r)
+	if _, isUser := credstore.CallerUserID(cred); !isUser {
+		out := pendingResponse{
 			Pending:       []pendingItem{},
 			Count:         0,
 			WindowSeconds: int64(policy.AcknowledgmentFreshness / time.Second),
-		})
+		}
+		if withCurrent {
+			out.Current = &[]currentItem{}
+		}
+		httpresp.WriteJSON(w, http.StatusOK, out)
 
 		return
 	}
-	pending, err := h.store.PendingForUser(ctx, ackCallerFromCred(cred))
+	now := h.store.Now()
+	acks, err := h.store.ForUser(ctx, CallerFromCred(cred))
 	if err != nil {
 		if errors.Is(err, policy.ErrAckMissingUser) {
 			httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
@@ -154,10 +181,10 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := pendingResponse{
-		Pending:       make([]pendingItem, 0, len(pending)),
+		Pending:       make([]pendingItem, 0, len(acks.Pending)),
 		WindowSeconds: int64(policy.AcknowledgmentFreshness / time.Second),
 	}
-	for _, p := range pending {
+	for _, p := range acks.Pending {
 		item := pendingItem{
 			PolicyID:        p.PolicyID.String(),
 			PolicyVersionID: p.PolicyVersionID.String(),
@@ -173,16 +200,77 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 			t := *p.LastAcknowledgedAt
 			item.LastAcknowledgedAt = &t
 		}
+		item.DueAt, item.Status = p.Due(now)
 		out.Pending = append(out.Pending, item)
 	}
 	out.Count = len(out.Pending)
+	if withCurrent {
+		current := make([]currentItem, 0, len(acks.Current))
+		for _, p := range acks.Current {
+			item := currentItem{
+				PolicyID:        p.PolicyID.String(),
+				PolicyVersionID: p.PolicyVersionID.String(),
+				Title:           p.Title,
+				Version:         p.Version,
+			}
+			if p.LastAcknowledgedAt != nil {
+				item.AcknowledgedAt = *p.LastAcknowledgedAt
+			}
+			current = append(current, item)
+		}
+		out.Current = &current
+	}
 	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// includesCurrent reports whether the request asked for ?include=current.
+// Parsed like the policy list's ?include=ack_rate: CSV or repeated
+// params, unknown tokens ignored.
+func includesCurrent(r *http.Request) bool {
+	for _, v := range r.URL.Query()["include"] {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.TrimSpace(tok) == "current" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ackRequest is the optional POST body. PolicyVersionID pins the version
+// the caller was shown; absent, the ack is for the policy id (#2668).
+type ackRequest struct {
+	PolicyVersionID string `json:"policy_version_id"`
+}
+
+// decodeAckRequest reads the optional body. An empty body, or one without
+// policy_version_id, pins nothing.
+func decodeAckRequest(r *http.Request) (*uuid.UUID, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	var req ackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		return nil, errors.New("body must be a JSON object")
+	}
+	if req.PolicyVersionID == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(req.PolicyVersionID)
+	if err != nil {
+		return nil, errors.New("policy_version_id must be a uuid")
+	}
+	return &id, nil
 }
 
 // Acknowledge serves POST /v1/policies/{id}/acknowledge.
 //
 // Flow (anti-criterion P0 honored):
-//  1. Auth gate: cred.UserID == "" => 401.
+//  1. Auth gate: no credential => 401; a credential not bound to a
+//     user (a machine actor) => 403 (#2586).
 //  2. Parse id; reject malformed.
 //  3. Reserve the ack row via AckStore.Record. Returns:
 //     ErrAckPolicyNotPublished => 409 (P0-3).
@@ -201,8 +289,12 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if cred.UserID == "" {
-		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
+	// #2586: an ack is a person attesting. A machine credential (an unbound
+	// key, the bootstrap key) names no users row, so it is refused here,
+	// before Record, rather than failing there on its non-uuid id. An
+	// unbound key with a live label otherwise matches an "everyone" policy.
+	if _, isUser := credstore.CallerUserID(cred); !isUser {
+		httpresp.WriteError(w, http.StatusForbidden, "only a person can acknowledge a policy; this credential is not bound to a user")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -210,13 +302,19 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "policy id must be a uuid")
 		return
 	}
+	versionID, berr := decodeAckRequest(r)
+	if berr != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, berr.Error())
+		return
+	}
 	if h.ingester == nil {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest service not configured")
 		return
 	}
 	ack, rerr := h.store.Record(ctx, policy.RecordInput{
-		PolicyID: policyID,
-		Caller:   ackCallerFromCred(cred),
+		PolicyID:        policyID,
+		Caller:          CallerFromCred(cred),
+		PolicyVersionID: versionID,
 	})
 	if rerr != nil {
 		h.writeRecordError(w, r, rerr)
@@ -228,6 +326,14 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		"policy_version_id": ack.PolicyVersionID.String(),
 		"user_id":           ack.UserID.String(),
 		"acknowledged_at":   ack.AcknowledgedAt.UTC().Format(time.RFC3339Nano),
+	}
+	// #2832: the stock ack checks (cc1_5, cc5_3, cc7_4) key on the title
+	// and version, which schema 1.0.0 declares as optional snapshots.
+	if ack.PolicyTitle != "" {
+		payload["policy_title"] = ack.PolicyTitle
+	}
+	if ack.PolicyVersion != "" {
+		payload["policy_version"] = ack.PolicyVersion
 	}
 	payloadStruct, perr := structpb.NewStruct(payload)
 	if perr != nil {
@@ -242,7 +348,7 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		SchemaVersion:  EvidenceVersion,
 		// control_id is a non-UUID reference; ingest stores it in
 		// control_ref only (ingest.go line 386-392). This is legit per
-		// CONTEXT.md "Policy acknowledgment (slice 023)".
+		// GLOSSARY.md "Policy acknowledgment (slice 023)".
 		ControlId: fmt.Sprintf("policy:%s:v%s", ack.PolicyID.String(), ack.PolicyVersionID.String()),
 		Scope: []*evidencev1.ScopeDimension{{
 			Key:    "policy_id",
@@ -257,7 +363,9 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 			SessionId: cred.ID,
 		},
 	}
-	pathed := h.ingester.WithPath(IngestionPath)
+	// #2873: this handler is the kind's only writer; every other ingest
+	// path refuses it.
+	pathed := h.ingester.WithPath(IngestionPath).WithOwnedKind(EvidenceKind)
 	receipt, _, ierr := pathed.Process(ctx, rec, cred)
 	if ierr != nil {
 		h.writeAckResp(w, ack, false, ierr)
@@ -341,8 +449,10 @@ func (h *Handler) writeRecordError(w http.ResponseWriter, r *http.Request, err e
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrAckPolicyNotPublished):
 		httpresp.WriteError(w, http.StatusConflict, "policy is not in published state")
+	case errors.Is(err, policy.ErrAckVersionMismatch):
+		httpresp.WriteError(w, http.StatusConflict, "policy_version_id is not the version this policy id names; reload the policy and acknowledge the version shown")
 	case errors.Is(err, policy.ErrAckNotRequired):
-		httpresp.WriteError(w, http.StatusForbidden, "caller's roles do not intersect the policy's acknowledgment_required_roles")
+		httpresp.WriteError(w, http.StatusForbidden, "caller is not in this policy's acknowledgment audience: no live tenant role it names")
 	case errors.Is(err, policy.ErrAckMissingUser):
 		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
 	case errors.Is(err, policy.ErrAckMissingPolicyID):
@@ -363,23 +473,15 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 	return r.Context(), cred, true
 }
 
-// isUUIDUser reports whether the credential's UserID is a parseable
-// UUID. Slice 150 — a non-UUID UserID is the platform's marker for a
-// service-account / bootstrap credential; the user-pending-acks read
-// path returns an empty envelope rather than 500-ing the dashboard
-// panel. See MyAcknowledgments for the contract.
-func isUUIDUser(id string) bool {
-	if id == "" {
-		return false
+// CallerFromCred hands the ack store the users(id) behind c, or "" when c
+// is not a user (the store then answers ErrAckMissingUser) (#2183). The
+// store reads that user's live user_roles for the audience match, so the
+// credential's role claim, key label and super-admin flag play no part
+// (#2505, #2728).
+func CallerFromCred(c credstore.Credential) policy.AckCaller {
+	userID := ""
+	if u, ok := credstore.CallerUserID(c); ok {
+		userID = u.String()
 	}
-	_, err := uuid.Parse(id)
-	return err == nil
-}
-
-func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
-	return policy.AckCaller{
-		UserID:     c.UserID,
-		OwnerRoles: append([]string(nil), c.OwnerRoles...),
-		IsAdmin:    c.IsAdmin,
-	}
+	return policy.AckCaller{UserID: userID}
 }

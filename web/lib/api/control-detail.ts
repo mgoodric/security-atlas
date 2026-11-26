@@ -4,6 +4,8 @@
 // policies/risks/history reads.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import type { EdgeOrigin, OverlayProvenance } from "./org-mapping";
+import type { RequirementExclusion } from "./requirement-coverage";
 
 // ===== Slice 041 — Control detail view =====
 //
@@ -43,6 +45,27 @@ export type ControlWire = {
   lifecycle_state: string;
   owner_role: string;
   freshness_class?: string;
+  // Issue #1736 — how well the SCF anchor fits the control, and why a
+  // non-exact fit is not exact. Absent means exact.
+  anchor_fit?: "exact" | "partial" | "none";
+  anchor_fit_note?: string;
+  // #1737 — control.yaml external_refs[]; omitted when the control has none.
+  external_refs?: ExternalRefWire[];
+  // #2043 — true when the in-place demo seed added this control; omitted
+  // for real controls.
+  demo?: boolean;
+  // #2128 — the person "assign owner" made this control's owner, as a
+  // user id for <Person>; omitted when nobody is assigned. owner_role
+  // above stays the manifest's default owner role.
+  owner_user_id?: string;
+};
+
+// externalRefWire mirrors `externalRefWire` in internal/api/ucfcoverage/handlers.go.
+export type ExternalRefWire = {
+  system: string;
+  kind: "reference" | "tested_under";
+  id: string;
+  note?: string;
 };
 
 // anchorWire mirrors `anchorWire` in the same handler (bare anchor form).
@@ -79,7 +102,15 @@ export type CoverageRequirement = {
   strength: number;
   coverage: number | null;
   source_attribution: string;
+  // "catalog", or "overlay" when the path is the tenant's own org mapping
+  // (#1798); `overlay` carries that mapping's source, author and date
+  // (#1800).
+  origin?: EdgeOrigin;
   rationale?: string;
+  overlay?: OverlayProvenance;
+  // #2140: the activated Statement of Applicability's exclusion of this
+  // requirement; omitted when it is applicable or undecided.
+  exclusion?: RequirementExclusion;
 };
 
 export type ControlCoverage = {
@@ -98,6 +129,9 @@ export type ControlStateEntry = {
   evaluated_at: string;
   freshness_class: string;
   trigger: string;
+  // Present when result is inconclusive: the first evaluation of the
+  // cell's current inconclusive run (#2915).
+  inconclusive_since?: string;
 };
 
 export type ControlStateResponse = {
@@ -163,6 +197,9 @@ export type ControlLinkedPoliciesResponse = {
 export type ControlLinkedRisk = {
   risk_id: string;
   title: string;
+  // #2185: tells the page how to read the scores. On "fair" the residual
+  // is a dollar amount with no band.
+  methodology: string;
   inherent_score: unknown;
   residual_score: unknown;
   link_weight: number | null;
@@ -184,11 +221,45 @@ export type ControlHistoryEntry = {
   computed_state: string;
   freshness_status: string;
   evidence_count: number;
+  // What started the run: ingest | scheduled | manual | replay.
+  trigger: string;
+  // Who started a manual run (#2479): a users(id), or a key or client id;
+  // null for every other trigger, and for manual runs with no caller.
+  triggered_by: string | null;
 };
 
 export type ControlHistoryResponse = {
   control_id: string;
   history: ControlHistoryEntry[];
+  count: number;
+  next_cursor: string;
+};
+
+// #2392 — anchorHistoryWire, one row of GET /v1/controls/{id}/anchor-history:
+// a reviewer's decision on an SCF remap proposal, for any revision of the
+// control's bundle. Newest first, keyset paged. The new_* fields are set on
+// an approval only.
+export type ControlAnchorDecision = {
+  id: string;
+  decision: "approved" | "rejected" | "kept_legacy";
+  bulk: boolean;
+  legacy_control_id: string;
+  legacy_version: number;
+  legacy_scf_id: string;
+  legacy_release: string;
+  new_control_id: string | null;
+  new_version: number | null;
+  new_scf_id: string | null;
+  new_release: string | null;
+  reason: string | null;
+  // A users(id), or a "system:" principal; render it with <Person>.
+  decided_by: string;
+  decided_at: string;
+};
+
+export type ControlAnchorHistoryResponse = {
+  control_id: string;
+  decisions: ControlAnchorDecision[];
   count: number;
   next_cursor: string;
 };
@@ -413,6 +484,21 @@ export async function getControlHistory(
   return (await res.json()) as ControlHistoryResponse;
 }
 
+// #2392 — one page (the platform's default 50) of the control's anchor
+// history; cursor is a next_cursor from the page before.
+export async function getControlAnchorHistory(
+  bearer: string,
+  controlID: string,
+  cursor?: string,
+): Promise<ControlAnchorHistoryResponse> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/anchor-history${qs}`,
+    bearer,
+  );
+  return (await res.json()) as ControlAnchorHistoryResponse;
+}
+
 export async function getControlGapExplanation(
   bearer: string,
   controlID: string,
@@ -488,6 +574,16 @@ export function fetchControlHistory(
 ): Promise<ControlHistoryResponse> {
   return bffControlFetch<ControlHistoryResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/history`,
+  );
+}
+
+export function fetchControlAnchorHistory(
+  controlID: string,
+  cursor?: string,
+): Promise<ControlAnchorHistoryResponse> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return bffControlFetch<ControlAnchorHistoryResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/anchor-history${qs}`,
   );
 }
 

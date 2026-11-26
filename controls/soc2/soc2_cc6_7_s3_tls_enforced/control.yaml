@@ -1,0 +1,89 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_7_s3_tls_enforced
+title: "S3 bucket policies deny requests not sent over TLS"
+description: |
+  Data moves, and leaves, only by approved paths and to approved
+  recipients, and is protected in transit (TSC CC6.7). This bundle covers
+  one in-transit path: requests to AWS S3. Encryption at rest on the same
+  buckets is soc2_cc6_7_encryption_in_transit (#2950). Load balancer and
+  CDN listeners (HTTPS-only, minimum TLS version) are not checked yet.
+
+  What runs today: a SQL query over the payloads of the AWS connector's
+  `aws.s3.bucket_tls_enforcement.v1` records, one per bucket per
+  connector run (`aws-connector run --kind
+  aws.s3.bucket_tls_enforcement.v1`). It takes each bucket's latest
+  in-window record, keyed by `bucket_name` and ordered by `observed_at`.
+  A bucket passes when that record's `result` is pass and
+  `denies_insecure_transport` is true: the connector read the bucket
+  policy and found Deny statements for every principal (`"*"` or
+  `{"AWS": "*"}`) and every S3 action (`s3:*` or `*`), on the bucket and
+  its objects, whose only condition is `Bool` `aws:SecureTransport`
+  `"false"`. That is the statement the S3 user guide gives under
+  "Restrict access to only HTTPS requests".
+
+  A bucket fails when the connector's verdict is fail and
+  `denies_insecure_transport` is false: the bucket has no policy
+  (`NoSuchBucketPolicy`, `policy_present` false), or its policy has no
+  such statement. Any failing bucket fails the control. Otherwise the
+  control passes only when every bucket passes, and is inconclusive when
+  any bucket is unread: the connector could not resolve its region, read
+  its policy or parse it (`result` inconclusive, both booleans omitted),
+  or the latest record's `observed_at` is more than an hour after the
+  evaluation instant. No in-window record also leaves it inconclusive.
+
+  The connector reads a statement it does not recognise as not denying,
+  so an equivalent policy written another way (a wildcard ARN pattern such
+  as `arn:aws:s3:::logs*`, a NotPrincipal form, or a second condition that
+  narrows the deny, such as a VPC endpoint exception) fails rather than
+  passes. Records without a `bucket_name` are left out. When a bucket's
+  latest records tie on `observed_at` (the connector truncates it to the
+  hour), the bucket passes only if every tied record passes, and any tied
+  failing record fails it.
+
+  Not checked: access point policies, or Organizations policies that
+  enforce TLS above the bucket; a bucket covered only that way fails
+  here. Only the buckets the connector reported are checked: a bucket
+  in an account the connector does not read is not seen, which waits on
+  an inventory (#2834).
+
+scf_anchor_id: CRY-05
+scf_release: test-2026.3
+control_family: CRY
+implementation_type: automated
+owner_role: security-engineering
+lifecycle_state: active
+freshness_class: daily
+
+evidence_queries:
+  - id: all_s3_buckets_deny_insecure_transport
+    language: sql
+    evidence_kind: aws.s3.bucket_tls_enforcement.v1
+    description: "Every bucket's latest record shows a bucket policy that denies requests with aws:SecureTransport false"
+    expression: |
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_bad) THEN 'fail'
+               WHEN bool_and(all_ok) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT bucket,
+               bool_or(coalesce(
+                 readable AND result = 'fail' AND denies = 'false'::jsonb, false)) AS any_bad,
+               bool_and(coalesce(
+                 readable AND result = 'pass' AND denies = 'true'::jsonb, false)) AS all_ok
+        FROM (
+          SELECT payload->>'bucket_name' AS bucket,
+                 result,
+                 payload->'denies_insecure_transport' AS denies,
+                 observed_at <= evaluated_at + interval '1 hour' AS readable,
+                 rank() OVER (
+                   PARTITION BY payload->>'bucket_name'
+                   ORDER BY observed_at DESC
+                 ) AS recency
+          FROM evidence
+          WHERE coalesce(payload->>'bucket_name', '') <> ''
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY bucket
+      ) AS per_bucket

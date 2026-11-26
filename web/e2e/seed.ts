@@ -52,6 +52,12 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // Slice 201: the global-setup module also uses this UUID as the JWT
 // `sub` claim so the synthesized credential's UserID matches.
 export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
+// #2142 — seeded by fixtures/e2e/theme.sql. The stored theme is per user,
+// so the theme spec signs in as this user rather than the shared demo one.
+export const THEME_USER_ID = "44444444-4444-4444-4444-444444442142";
+// #2145 — seeded by fixtures/e2e/onboarding-hints.sql. Hint dismissals are
+// per user, so the hints spec signs in as this user, not the demo one.
+export const HINTS_USER_ID = "44444444-4444-4444-4444-444444442145";
 
 // The fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
@@ -96,13 +102,112 @@ export type FixtureName =
   | "audit-workspace"
   | "risk-hierarchy"
   | "admin-bootstrap"
-  | "audit-log"
   | "settings"
   | "audits-header"
   | "controls-top-bar"
   | "controls-list"
   | "global-search"
-  | "tenant-switch";
+  | "tenant-switch"
+  // #1794 — synthetic ISO/IEC 27001 version + crosswalk + three
+  // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-soa"
+  // #1795 — synthetic framework version with four requirements for the
+  // review-screen applicability diff (framework-scope-diff.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-diff"
+  // #2089 — one manual_attested control so attest.spec.ts can load the
+  // real attest form (the base control is automated).
+  | "attest"
+  // #2111 — a second manual_attested control that attest-result.spec.ts
+  // attests for real (pass and fail), kept apart from attest.spec.ts's.
+  | "attest-result"
+  // #2081 — a dedicated tenant with `board.reporting` + `vendor.claims`
+  // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
+  | "sidebar-nav"
+  // #2137 — one manual attestation for evidence-detail.spec.ts.
+  | "evidence-detail"
+  // #2142 — a user of settings-theme.spec.ts's own, its stored theme
+  // reset to never-chosen on each run.
+  | "theme"
+  // #2145 — a user of onboarding-hints.spec.ts's own, its hint dismissals
+  // cleared on each run.
+  | "onboarding-hints"
+  // #1800 — a requirement with a catalog edge and a demo-tenant overlay
+  // edge, a control behind the overlay, and a second tenant
+  // (org-mapping.spec.ts).
+  | "org-mapping"
+  // #2118 — an open audit period and an auditor user of its own, with
+  // no assignment, for period-auditors.spec.ts.
+  | "period-auditors"
+  // #2381 — a viewer user with a viewer user_roles row in each of
+  // feature-flag-gating.spec.ts's two tenants.
+  | "feature-flag-gating"
+  // #2085: a named user who owns an action plan, created an audit
+  // period and completed a personnel item, for person-names.spec.ts.
+  | "person-names"
+  // #2385 — a named user who requested an exception (and its history)
+  // and published a board pack, for person-names-2385.spec.ts.
+  | "person-names-2385"
+  // #2136 — two framework versions, one with an activated scope and no
+  // posture target (reset each run), one with no scope, for
+  // posture-targets.spec.ts.
+  | "posture-targets"
+  // #2115 — a framework version with no scope (reset each run) and an
+  // admin approver user, for framework-scope-wizard.spec.ts.
+  | "framework-scope-wizard"
+  // #2433 — a tenant with Allow self-approval off, two tenant admins and
+  // a framework version with no scope (reset each run), for
+  // framework-scope-self-approval.spec.ts.
+  | "framework-scope-self-approval"
+  // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
+  | "policy-lifecycle"
+  // #2172 — a tenant with one grc_engineer member whose module access
+  // is reset to "all" each run, for module-access.spec.ts.
+  | "module-access"
+  // #2173 — a tenant with a policy, a risk and a vendor review due soon
+  // and one grc_engineer member limited to Policies, for
+  // combined-views-modules.spec.ts.
+  | "combined-views-modules"
+  // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
+  // uploads never change the demo tenant's controls.
+  | "control-actions"
+  // #2174 — a tenant with a control linked to a policy and one
+  // grc_engineer member without Policies access, for
+  // module-links.spec.ts.
+  | "module-links"
+  // #2494 — a tenant with one member whose roles are cleared each run,
+  // for no-tenant-role.spec.ts.
+  | "no-tenant-role"
+  // #2503 — a tenant with a tenant admin and a viewer member whose roles
+  // are reset each run, for tenant-admin-users.spec.ts.
+  | "tenant-admin-users"
+  // #2141 — a tenant with three controls and a second member, for
+  // controls-bulk-2141.spec.ts's bulk writes. #2780: inserts only, no
+  // reset, so an apply from another worker never undoes a test's write.
+  | "controls-bulk"
+  // #2531 — the shared e2e user and its live roles, so the owner pickers
+  // in risks-create.spec.ts and create-toasts.spec.ts list a user when the
+  // spec runs alone or first.
+  | "owner-picker"
+  // Slice 218 / #2711 — one draft quarter-end board pack, for
+  // board-pack-detail.spec.ts's breadcrumb.
+  | "board-pack-detail"
+  // Slice 160 / #2711 — a tenant of the spec's own with zero controls,
+  // for control-detail-empty.spec.ts's empty states.
+  | "control-detail-empty"
+  // #2755 — one tenant of its own per list spec whose assertions #2755
+  // restored, so counts, filters and empty states never read rows that
+  // other specs add to the demo tenant. Each file names its tenant UUID.
+  | "audit-periods-vendors-export"
+  | "audits-list"
+  | "calendar"
+  | "evidence-list"
+  | "evidence-pagination"
+  | "exceptions-list"
+  | "metrics-dashboard"
+  | "policies-list"
+  | "risks-list";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

@@ -419,10 +419,11 @@ ensure_oauth_client() {
   # `oauth issue-client` prints the client_secret on stdout as well. It is
   # captured into a local and never written to the run log or to disk —
   # the authorize probe needs only the client_id (the authorize endpoint
-  # takes no secret).
+  # takes no secret). --unbound: an authorize-flow client needs no tenant
+  # of its own (security-atlas#1739); the user's token carries one.
   local issued
   issued="$(compose run --rm --entrypoint atlas-cli atlas-bootstrap \
-    oauth issue-client "exp4-authorize-probe-$RUN_TAG" 2>>"$RUN_LOG" || true)"
+    oauth issue-client "exp4-authorize-probe-$RUN_TAG" --unbound 2>>"$RUN_LOG" || true)"
   OAUTH_CLIENT_ID="$(sed -n 's/^client_id: *//p' <<<"$issued" | tr -d '\r' | head -1)"
   issued=""
   [[ -n "$OAUTH_CLIENT_ID" ]] || die "could not issue an OAuth client for the authorize probe"

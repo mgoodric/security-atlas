@@ -1,88 +1,65 @@
 "use client";
 
-// Slice 040 — recent activity feed (AC-6) — REBOUND by slice 147.
+// Slice 040 — recent activity feed (AC-6) — REBOUND by slice 147, and by
+// #2135.
 //
-// Binds to `GET /v1/activity` via the dashboard BFF (slice 066 backend
-// reads). Per `docs/audit-log/066-...-decisions.md` D1 the endpoint
-// reads slice-062's `admin_audit_log_v` view filtered to the
-// `evidence_audit_log` source table (slice 015 ingestion's durable
-// append-only archive), keyed newest-first by `received_at`.
-//
-// Slice 040 originally shipped this as a `MissingEndpointPanel` with
-// disabled filter chips. Slice 147 bound the panel to real data but left
-// the filter chips visually present and inert. Slice 667 removed them:
-// the dashboard endpoint surfaces only the evidence branch and takes no
-// kind/source filter, so the chips had nothing to bind to and carried a
-// developer-facing placeholder tooltip. Wiring real filtering requires a
-// backend slice (widen the dashboard source + add a `?kind=` param) and
-// is tracked as a follow-up — see the slice 667 decisions log.
+// #2135: the panel reads the last 10 rows of the unified activity log
+// (GET /v1/activity/unified?limit=10, the /activity page's source, which
+// the platform filters by module, #2477) and renders each as a sentence,
+// "<Person> approved exception …", through the same `describeEvent`
+// templates the /activity page uses (#2093). Before #2135 it read the
+// evidence-ingest archive (GET /v1/activity) and printed raw event kinds,
+// which in a busy tenant was 40 identical evidence rows (#2072).
 
 import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api/dashboard";
+import { Person } from "@/components/ui/person";
+import { Timestamp } from "@/components/ui/timestamp";
+import { describeEvent } from "@/lib/activity-sentences";
+import type { UnifiedEntry, UnifiedListResponse } from "@/lib/api/audit-log";
 
-// relativeTime renders an RFC3339Nano timestamp as a short human-readable
-// "Nm ago" / "Nh ago" / "Nd ago" string. Future timestamps degrade to
-// "just now" (a server clock skew shouldn't break the feed render).
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return iso;
-  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
-function eventTypeBadgeClass(eventType: string): string {
-  const lower = eventType.toLowerCase();
-  if (lower.includes("reject") || lower.includes("fail")) {
-    return "text-destructive";
-  }
-  if (lower.includes("dedup")) return "text-muted-foreground";
-  return "text-emerald-600 dark:text-emerald-400";
-}
-
-function ActivityRow({ event }: { event: ActivityEvent }) {
+function ActivityRow({ entry }: { entry: UnifiedEntry }) {
+  const s = describeEvent(entry);
+  const target = s.targetId ? s.targetId.slice(0, 8) : "";
   return (
-    <li data-testid="activity-feed-row" className="py-3 text-sm">
-      <div className="flex items-baseline justify-between gap-3">
-        <span
-          className={`font-mono text-xs ${eventTypeBadgeClass(
-            event.event_type,
-          )}`}
-          data-testid="activity-feed-row-event-type"
-        >
-          {event.event_type}
-        </span>
-        <span
-          className="shrink-0 text-xs text-muted-foreground"
-          data-testid="activity-feed-row-ts"
-        >
-          {relativeTime(event.ts)}
-        </span>
-      </div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        <span className="font-mono">{event.resource_type}</span>
-        {event.resource_id ? (
+    <li
+      data-testid="activity-feed-row"
+      data-kind={entry.kind}
+      className="flex items-baseline justify-between gap-3 py-2.5 text-sm"
+    >
+      <p data-testid="activity-feed-sentence" className="min-w-0 flex-1">
+        <Person id={entry.actor_id} className="font-medium" /> {s.phrase}
+        {s.noun ? ` ${s.noun}` : ""}
+        {target && s.person ? (
           <>
-            {" · "}
-            <span className="font-mono">{event.resource_id.slice(0, 12)}</span>
+            {" "}
+            <Person id={s.targetId} />
+          </>
+        ) : target ? (
+          <>
+            {" "}
+            {s.href ? (
+              <Link
+                href={s.href}
+                className="font-mono text-xs underline underline-offset-2"
+              >
+                {target}
+              </Link>
+            ) : (
+              <span className="font-mono text-xs" title={s.targetId}>
+                {target}
+              </span>
+            )}
           </>
         ) : null}
-        {event.actor ? (
-          <>
-            {" · by "}
-            <span className="font-mono">{event.actor}</span>
-          </>
-        ) : null}
-      </div>
+        {s.suffix ? ` ${s.suffix}` : ""}
+      </p>
+      <Timestamp
+        value={entry.occurred_at}
+        className="shrink-0 text-xs text-muted-foreground"
+        testId="activity-feed-row-ts"
+      />
     </li>
   );
 }
@@ -91,48 +68,43 @@ export function ActivityFeedPanel({
   report,
   state,
 }: {
-  report: ActivityFeedResponse | undefined;
+  report: UnifiedListResponse | undefined;
   state: PanelState;
 }) {
+  const entries = report?.entries ?? [];
   return (
     <PanelCard
       title="Recent activity"
-      description="Evidence ingest, control state changes, approvals"
+      description="The last 10 changes across the program"
+      action={
+        <Link
+          href="/activity"
+          className="text-xs text-primary hover:underline"
+          data-testid="activity-feed-ledger-link"
+        >
+          View all activity →
+        </Link>
+      }
       state={state}
       skeletonClassName="h-48 w-full"
       testid="activity-feed-panel"
     >
-      {!report || report.activity.length === 0 ? (
+      {entries.length === 0 ? (
         <p
           className="py-6 text-sm text-muted-foreground"
           data-testid="activity-feed-empty"
         >
-          No evidence-ingest activity yet. Push evidence via a connector or the
-          CLI to populate this feed.
+          No activity in the last 90 days.
         </p>
       ) : (
-        <>
-          <ul
-            className="divide-y divide-foreground/5"
-            data-testid="activity-feed-list"
-          >
-            {report.activity.map((event, idx) => (
-              <ActivityRow
-                key={`${event.ts}:${event.resource_id}:${idx}`}
-                event={event}
-              />
-            ))}
-          </ul>
-          <div className="mt-4 text-center">
-            <Link
-              href="/activity"
-              className="text-xs text-muted-foreground hover:text-foreground"
-              data-testid="activity-feed-ledger-link"
-            >
-              View full activity ledger →
-            </Link>
-          </div>
-        </>
+        <ul
+          className="divide-y divide-foreground/5"
+          data-testid="activity-feed-list"
+        >
+          {entries.map((entry) => (
+            <ActivityRow key={`${entry.kind}:${entry.row_id}`} entry={entry} />
+          ))}
+        </ul>
       )}
     </PanelCard>
   );

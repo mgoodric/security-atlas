@@ -30,7 +30,16 @@
 // Hard rule (P0-A9): neutral test strings only; no vendor-prefixed
 // tokens.
 
+import type { Risk } from "@/lib/api/risks";
+
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
+import { seedFromFixture } from "./seed";
+
+// #2531: the owner picker lists real users, so seed the one it picks.
+test.beforeAll(() => {
+  seedFromFixture("owner-picker");
+});
 
 const NEW_RISK_TITLE = "E2E test risk — unauthorized data export";
 const CREATED_RISK_ID = "00000000-0000-0000-0000-0000000r1s01";
@@ -40,8 +49,9 @@ test.describe("/risks/new risk-create form", () => {
     authedPage: page,
   }) => {
     // True-zero ledger so the "Add first risk" CTA renders (not the
-    // filter-empty "Clear filters" CTA).
-    await page.route("**/api/risks", async (route, req) => {
+    // filter-empty "Clear filters" CTA). The register sends its page as a
+    // query string (#2132), so the route matches one.
+    await page.route(/\/api\/risks(\?.*)?$/, async (route, req) => {
       if (req.method() !== "GET") {
         await route.fallback();
         return;
@@ -72,6 +82,9 @@ test.describe("/risks/new risk-create form", () => {
   }) => {
     // List GET: empty before create, holds the new row after.
     let created = false;
+    let postedAcceptanceStatus: string | undefined;
+    let postedJustification: string | undefined;
+    let postedProposedUntil: string | undefined;
     await page.route("**/api/risks", async (route, req) => {
       if (req.method() === "GET") {
         const risks = created
@@ -97,6 +110,14 @@ test.describe("/risks/new risk-create form", () => {
       }
       // POST = create. The BFF returns { risk } on 201 (slice 105
       // contract — see web/app/(authed)/risks/new/actions.ts).
+      const posted = JSON.parse(req.postData() ?? "{}") as {
+        acceptance_status?: string;
+        justification?: string;
+        proposed_until?: string;
+      };
+      postedAcceptanceStatus = posted.acceptance_status;
+      postedJustification = posted.justification;
+      postedProposedUntil = posted.proposed_until;
       created = true;
       await route.fulfill({
         status: 201,
@@ -122,10 +143,16 @@ test.describe("/risks/new risk-create form", () => {
     });
 
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // treatment=accept avoids the mitigate-requires-linked-control
-    // client-side validation rule (validateRiskForm).
+    // client-side validation rule (validateRiskForm). The form has no
+    // accepter / expiry inputs, so it posts a proposed acceptance (#1746),
+    // with the proposal's justification and proposed expiry (#2391).
     await page.getByTestId("risks-create-treatment").selectOption("accept");
+    await page
+      .getByTestId("risks-create-justification")
+      .fill("Compensated by the edge filter.");
+    await page.getByTestId("risks-create-proposed-until").fill("2099-03-31");
 
     const createResp = page.waitForResponse(
       (r) =>
@@ -136,23 +163,23 @@ test.describe("/risks/new risk-create form", () => {
     );
     await page.getByTestId("risks-create-submit").click();
     await createResp;
+    expect(postedAcceptanceStatus).toBe("proposed");
+    expect(postedJustification).toBe("Compensated by the edge filter.");
+    expect(postedProposedUntil).toBe("2099-03-31");
 
-    // AC: routed back to /risks and the new row appears (cache
-    // invalidation + re-fetch).
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // #2089 create convention: land on the new risk with a toast.
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("toast")).toHaveText(/Risk created/);
   });
 
   test("AC-1: a fresh tenant (zero controls) creates a risk through the default flow without linking a control", async ({
     authedPage: page,
   }) => {
-    // Slice 663 regression guard. The form opens on treatment "avoid"
-    // (the fresh-tenant-safe default), so a brand-new operator can fill
+    // Slice 663 regression guard, revised by #1746. The form opens on
+    // treatment "untreated" (no decision yet, no required fields), so a
+    // brand-new operator can fill
     // only the required fields and submit — no unsatisfiable
     // mitigate-requires-control gate. We do NOT touch the treatment
     // dropdown: the default flow itself must succeed.
@@ -176,7 +203,7 @@ test.describe("/risks/new risk-create form", () => {
                 id: CREATED_RISK_ID,
                 title: NEW_RISK_TITLE,
                 category: "operational",
-                treatment: "avoid",
+                treatment: "untreated",
                 treatment_owner: "e2e-owner",
                 methodology: "nist_800_30",
                 inherent_score: { likelihood: 3, impact: 3, severity: 9 },
@@ -202,7 +229,7 @@ test.describe("/risks/new risk-create form", () => {
             id: CREATED_RISK_ID,
             title: NEW_RISK_TITLE,
             category: "operational",
-            treatment: "avoid",
+            treatment: "untreated",
             treatment_owner: "e2e-owner",
             methodology: "nist_800_30",
             inherent_score: { likelihood: 3, impact: 3, severity: 9 },
@@ -217,15 +244,19 @@ test.describe("/risks/new risk-create form", () => {
       timeout: 30_000,
     });
 
+    // The form opens on "untreated", never a real treatment decision.
+    await expect(page.getByTestId("risks-create-treatment")).toHaveValue(
+      "untreated",
+    );
     // The control picker is NOT rendered on the default flow (treatment
-    // is "avoid"), so there is no unsatisfiable required field.
+    // is "untreated"), so there is no unsatisfiable required field.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toHaveCount(0);
 
     // Fill only the required fields and submit the default flow.
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
 
     const createResp = page.waitForResponse(
       (r) =>
@@ -237,31 +268,23 @@ test.describe("/risks/new risk-create form", () => {
     await page.getByTestId("risks-create-submit").click();
     await createResp;
 
-    // The default-flow submit posts treatment=avoid (the slice 663
-    // fresh-tenant-safe default) and routes back with the new row.
-    expect(postedTreatment).toBe("avoid");
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // The default-flow submit posts treatment=untreated (#1746) and
+    // lands on the new risk (#2089).
+    expect(postedTreatment).toBe("untreated");
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
   });
 
   test("empty title is gated client-side: no server round-trip, input preserved", async ({
     authedPage: page,
   }) => {
-    // HONEST behaviour (verified locally): the title <input> carries the
-    // native HTML5 `required` attribute, so the browser blocks the form
-    // submit BEFORE React's `handleSubmit` runs when title is empty.
-    // That means: no POST /api/risks fires, the page stays on
-    // /risks/new, and the user's other input is preserved. (The
-    // React-level `risks-create-title-error` testid only renders when
-    // native validation is bypassed — it is the belt to native
-    // validation's suspenders; this spec asserts the gate that actually
-    // fires first.) If a POST DID fire on an empty title, that would be
-    // the bug this spec guards against.
+    // #2089: the form is noValidate, so the browser shows no native
+    // bubble; validateRiskForm renders `risks-create-title-error` inline
+    // beside the field, linked by aria-describedby. No POST /api/risks
+    // fires, the page stays on /risks/new, and the user's other input is
+    // preserved. If a POST DID fire on an empty title, that would be the
+    // bug this spec guards against.
     let postFired = false;
     await page.route("**/api/risks", async (route, req) => {
       if (req.method() === "POST") {
@@ -279,25 +302,118 @@ test.describe("/risks/new risk-create form", () => {
       timeout: 30_000,
     });
 
-    // Leave title empty; fill owner + pick a no-link treatment. Submit.
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    // Leave title empty; pick an owner + a no-link treatment. Submit.
+    const owner = await pickFirstUser(page, "risks-create-owner");
     await page.getByTestId("risks-create-treatment").selectOption("accept");
     await page.getByTestId("risks-create-submit").click();
 
-    // The title input is flagged invalid by native validation; the form
-    // did not submit. Assert the form did not navigate and no POST went
-    // out. The title input reports the native invalid state.
-    const titleInvalid = await page
-      .getByTestId("risks-create-title")
-      .evaluate((el) => (el as HTMLInputElement).validity.valueMissing);
-    expect(titleInvalid).toBe(true);
+    // The inline error renders beside the title and is wired to it.
+    const titleError = page.getByTestId("risks-create-title-error");
+    await expect(titleError).toHaveText(/required/i);
+    const title = page.getByTestId("risks-create-title");
+    await expect(title).toHaveAttribute("aria-invalid", "true");
+    await expect(title).toHaveAttribute(
+      "aria-describedby",
+      (await titleError.getAttribute("id"))!,
+    );
+    // No native bubble: the form opts out of constraint validation, so
+    // the browser never blocked the submit itself.
+    expect(
+      await page
+        .getByTestId("risks-create-form")
+        .evaluate((f) => (f as HTMLFormElement).noValidate),
+    ).toBe(true);
 
     // Form state preserved (owner not cleared) — honest UX.
-    await expect(page.getByTestId("risks-create-treatment-owner")).toHaveValue(
-      "e2e-owner",
-    );
+    await expect(page.getByTestId("risks-create-owner")).toHaveValue(owner);
     // Stayed on the create form; no server round-trip happened.
     await expect(page).toHaveURL(/\/risks\/new$/);
     expect(postFired).toBe(false);
+  });
+
+  test("#2511: Score later posts no inherent score and the risk reads as Unscored", async ({
+    authedPage: page,
+  }) => {
+    // The whole wire shape the platform returns, typed so a field the
+    // detail page reads cannot be left out of the mock.
+    const unscored: Risk = {
+      id: CREATED_RISK_ID,
+      title: NEW_RISK_TITLE,
+      description: "",
+      category: "operational",
+      methodology: "nist_800_30",
+      inherent_score: {},
+      treatment: "untreated",
+      treatment_owner: "e2e-owner",
+      residual_score: {},
+      review_due_at: "2027-01-01T00:00:00Z",
+      accepter: "",
+      instrument_reference: "",
+      linked_control_ids: [],
+      created_at: "2026-11-17T00:00:00Z",
+      updated_at: "2026-11-17T00:00:00Z",
+      themes: [],
+      severity: 0,
+      status: "open",
+    };
+    let posted: Record<string, unknown> | undefined;
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      posted = JSON.parse(req.postData() ?? "{}") as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+    await page.route(`**/api/risks/${CREATED_RISK_ID}`, async (route, req) => {
+      if (req.method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await pickFirstUser(page, "risks-create-owner");
+
+    await page.getByTestId("risks-create-score-later").check();
+    await expect(page.getByTestId("risks-create-inherent-score")).toHaveCount(
+      0,
+    );
+
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+    expect(posted).toBeDefined();
+    expect(posted).not.toHaveProperty("inherent_score");
+
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("risk-detail-unscored")).toHaveText(
+      "Unscored",
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId("risk-detail-residual")).toHaveText(
+      "Unscored",
+    );
   });
 });

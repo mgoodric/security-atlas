@@ -3,8 +3,8 @@
     "id": "acme-soc2-ac-1",
     "bundle_id": "acme-soc2-bundle",
     "version": 3,
-    "scf_id": "IAC-06",
-    "scf_anchor_id": "scf-iac-06",
+    "scf_id": "IAC-37",
+    "scf_anchor_id": "scf-iac-37",
     "title": "Access provisioning approvals",
     "control_family": "Access Control",
     "implementation_type": "automated",
@@ -13,8 +13,8 @@
     "freshness_class": "daily"
   },
   "anchor": {
-    "id": "scf-iac-06",
-    "scf_id": "IAC-06",
+    "id": "scf-iac-37",
+    "scf_id": "IAC-37",
     "family": "Identification & Authentication",
     "name": "Identity Provisioning",
     "description": "Mechanisms exist to establish, activate, modify, review, disable, and remove identifiers and credentials."

@@ -5,66 +5,34 @@
 package board
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 )
 
-// programPosture: freshnessPct is fresh/total; coveragePct is
-// not-stale-with-evidence / with-evidence.
-func TestProgramPosture(t *testing.T) {
+// evidenceFreshnessRate is fresh / total controls, rounded: stale controls
+// count against it whether or not they have evidence.
+func TestEvidenceFreshnessRate(t *testing.T) {
 	rows := []freshness.ControlFreshness{
-		{IsStale: false, EvidenceCount: 3}, // fresh, has evidence -> covered
-		{IsStale: false, EvidenceCount: 1}, // fresh, has evidence -> covered
-		{IsStale: true, EvidenceCount: 2},  // stale, has evidence -> not covered
-		{IsStale: true, EvidenceCount: 0},  // no evidence -> stale, not covered, not in coverage denominator
+		{IsStale: false, EvidenceCount: 3},
+		{IsStale: false, EvidenceCount: 1},
+		{IsStale: true, EvidenceCount: 2},
 	}
-	coverage, fresh := programPosture(rows)
-	// fresh = 2/4 = 50%.
-	if fresh != 50 {
-		t.Errorf("freshnessPct = %d, want 50", fresh)
-	}
-	// coverage = covered-with-evidence (2) / with-evidence (3) = 66.67 -> 67%.
-	if coverage != 67 {
-		t.Errorf("coveragePct = %d, want 67", coverage)
+	// 2/3 = 66.67 -> 67%.
+	if got := evidenceFreshnessRate(rows); got != 67 {
+		t.Errorf("evidenceFreshnessRate = %d, want 67", got)
 	}
 }
 
-// programPosture: zero controls is an honest 0%/0% — a program with no
-// controls has nothing covered and nothing fresh.
-func TestProgramPosture_NoControls(t *testing.T) {
-	coverage, fresh := programPosture(nil)
-	if coverage != 0 || fresh != 0 {
-		t.Errorf("programPosture(nil) = (%d, %d), want (0, 0)", coverage, fresh)
-	}
-}
-
-// programPosture: controls exist but none have evidence -> coverage 0%
-// (not a divide-by-zero), freshness reflects the not-stale set.
-func TestProgramPosture_NoEvidence(t *testing.T) {
-	rows := []freshness.ControlFreshness{
-		{IsStale: true, EvidenceCount: 0},
-		{IsStale: true, EvidenceCount: 0},
-	}
-	coverage, fresh := programPosture(rows)
-	if coverage != 0 {
-		t.Errorf("coveragePct = %d, want 0 (no evidence anywhere)", coverage)
-	}
-	if fresh != 0 {
-		t.Errorf("freshnessPct = %d, want 0 (all stale)", fresh)
-	}
-}
-
-// trendFromDelta maps the signed drift delta to a trend token.
-func TestTrendFromDelta(t *testing.T) {
-	cases := map[int]string{5: TrendUp, -3: TrendDown, 0: TrendFlat}
-	for delta, want := range cases {
-		if got := trendFromDelta(delta); got != want {
-			t.Errorf("trendFromDelta(%d) = %q, want %q", delta, got, want)
-		}
+// evidenceFreshnessRate: zero controls is 0%, not a divide-by-zero.
+func TestEvidenceFreshnessRate_NoControls(t *testing.T) {
+	if got := evidenceFreshnessRate(nil); got != 0 {
+		t.Errorf("evidenceFreshnessRate(nil) = %d, want 0", got)
 	}
 }
 
@@ -85,27 +53,95 @@ func TestStateFromCoverage(t *testing.T) {
 	}
 }
 
-// extractSeverity pulls a ranking scalar from the methodology-dependent
-// score JSONB shapes.
-func TestExtractSeverity(t *testing.T) {
-	cases := []struct {
-		name string
-		blob string
-		want float64
-	}{
-		{"residual score field", `{"score": 12.5, "warning": ""}`, 12.5},
-		{"aggregated severity field", `{"severity": 20, "child_count": 3}`, 20},
-		{"likelihood times impact", `{"likelihood": 4, "impact": 5}`, 20},
-		{"empty blob", ``, 0},
-		{"unrecognized shape", `{"foo": "bar"}`, 0},
-		{"malformed json", `{not json`, 0},
-	}
-	for _, c := range cases {
-		got := extractSeverity([]byte(c.blob))
-		if got != c.want {
-			t.Errorf("%s: extractSeverity(%q) = %v, want %v", c.name, c.blob, got, c.want)
+// rankTopRisks keeps FAIR (dollar) residuals out of the 5x5 ranking
+// (#2185): every 5x5 risk ranks above every FAIR risk, so a $250,000 FAIR
+// residual never outranks a residual severity of 2 by raw number. Among
+// FAIR risks the larger exposure ranks first.
+func TestRankTopRisks_FAIRNeverOutranks5x5(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)
+	mk := func(title string, m dbx.RiskMethodology, residual string) riskRow {
+		return riskRow{
+			ID: uuid.New(), Title: title, Methodology: m,
+			ResidualScore: []byte(residual), UpdatedAt: now,
 		}
 	}
+	rows := []riskRow{
+		mk("fair big", dbx.RiskMethodologyFair, `{"score": 250000}`),
+		mk("5x5 low", dbx.RiskMethodologyNist80030, `{"score": 2}`),
+		mk("fair small", dbx.RiskMethodologyFair, `{"score": 900}`),
+		mk("5x5 high", dbx.RiskMethodologyQualitative5x5, `{"likelihood": 4, "impact": 5}`),
+	}
+	top := rankTopRisks(rows, now, 4)
+	want := []string{"5x5 high", "5x5 low", "fair big", "fair small"}
+	for i, w := range want {
+		if top[i].Title != w {
+			t.Fatalf("top[%d] = %q, want %q (order %v)", i, top[i].Title, w, titles(top))
+		}
+	}
+	if top[2].Methodology != "fair" || !top[2].Monetary() || top[2].Band() != "" {
+		t.Errorf("FAIR row: methodology=%q monetary=%v band=%q, want fair/true/\"\"",
+			top[2].Methodology, top[2].Monetary(), top[2].Band())
+	}
+	if got := top[2].ResidualLabel(); got != "$250,000" {
+		t.Errorf("FAIR ResidualLabel = %q, want $250,000", got)
+	}
+	if got := top[0].ResidualLabel(); got != "20.0 High" {
+		t.Errorf("5x5 ResidualLabel = %q, want \"20.0 High\"", got)
+	}
+}
+
+// #2511: a risk with no score at all ranks after every scored risk, FAIR
+// included, prints as Unscored rather than a severity of 0, and the brief
+// renders it.
+func TestRankTopRisks_UnscoredLast(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)
+	mk := func(title string, m dbx.RiskMethodology, inherent, residual string, age int) riskRow {
+		return riskRow{
+			ID: uuid.New(), Title: title, Methodology: m,
+			InherentScore: []byte(inherent), ResidualScore: []byte(residual),
+			UpdatedAt: now.AddDate(0, 0, -age),
+		}
+	}
+	rows := []riskRow{
+		mk("unscored old", dbx.RiskMethodologyNist80030, `{}`, `{}`, 90),
+		mk("fair small", dbx.RiskMethodologyFair, `{}`, `{"score": 900}`, 1),
+		mk("unscored nil", dbx.RiskMethodologyFair, ``, ``, 1),
+		mk("5x5 low", dbx.RiskMethodologyNist80030, `{"likelihood":1,"impact":1}`, `{}`, 1),
+	}
+	top := rankTopRisks(rows, now, 4)
+	want := []string{"5x5 low", "fair small", "unscored old", "unscored nil"}
+	for i, w := range want {
+		if top[i].Title != w {
+			t.Fatalf("top[%d] = %q, want %q (order %v)", i, top[i].Title, w, titles(top))
+		}
+	}
+	if top[0].Unscored || top[1].Unscored || !top[2].Unscored || !top[3].Unscored {
+		t.Fatalf("Unscored flags %v %v %v %v, want false false true true",
+			top[0].Unscored, top[1].Unscored, top[2].Unscored, top[3].Unscored)
+	}
+	if got := top[2].ResidualLabel(); got != "Unscored" {
+		t.Errorf("unscored ResidualLabel = %q, want Unscored", got)
+	}
+	if got := top[3].Band(); got != "" {
+		t.Errorf("unscored Band = %q, want empty", got)
+	}
+	md, err := RenderNarrative(Brief{TopRisks: top})
+	if err != nil {
+		t.Fatalf("RenderNarrative: %v", err)
+	}
+	if !strings.Contains(md, "**unscored old** (") || !strings.Contains(md, "— unscored, open 90 day(s)") {
+		t.Errorf("narrative does not print the unscored risk as unscored:\n%s", md)
+	}
+}
+
+func titles(rs []RiskAging) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Title
+	}
+	return out
 }
 
 // rankTopRisks: ranks by residual severity DESC, then age DESC, and keeps

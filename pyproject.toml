@@ -4,6 +4,12 @@ version = "0.0.0"
 description = "security-atlas — open-source GRC platform (monorepo root)"
 requires-python = ">=3.11"
 
+[tool.uv]
+# One uv minor for local and CI (#1877). astral-sh/setup-uv reads this and
+# installs the newest matching release; a local uv outside the range refuses
+# to run. Bump the range deliberately, not by drift.
+required-version = ">=0.13.1,<0.14"
+
 [tool.uv.workspace]
 members = ["oscal-bridge"]
 

@@ -11,10 +11,11 @@
 //
 // The ActionPlan lifecycle is its own state machine:
 //
-//	draft -> in_progress -> blocked -> completed -> verified
+//	draft -> in_progress -> blocked -> completed <-> verified
 //
-// with `verified` terminal and no edge back to `draft` (a new plan is the
-// way to restart). The allowed edges are enumerated in AllowedTransition;
+// with no edge back to `draft` (a new plan is the way to restart). The only
+// way out of `verified` is the system's: a linked control failing its latest
+// evaluation returns the plan to `completed` (#2109). The allowed edges are enumerated in AllowedTransition;
 // they are validated at the handler/store layer AND by the DB transition
 // trigger (defense in depth, AC-13/AC-15).
 //
@@ -49,6 +50,11 @@ const (
 	ActionControlUnlinked = "control_unlinked"
 	ActionTombstoned      = "tombstoned"
 )
+
+// SystemActor names the system in an audit row it writes: the
+// completed <-> verified moves made from control evaluations (#2109). It
+// must match the action_plan_audit_log_system_actor_known CHECK.
+const SystemActor = "system:action-plan-verification"
 
 // Field length bounds (threat-model T) — mirror the DB CHECK constraints.
 const (
@@ -91,11 +97,13 @@ func ValidStatus(s string) bool {
 //	in_progress -> blocked | completed
 //	blocked     -> in_progress | completed
 //	completed   -> verified | in_progress    (reopen if verification fails)
-//	verified    -> (terminal)
+//	verified    -> completed                 (system only, #2109)
 //
 // No edge BACK to draft from any state (AC-15: "* -> draft" rejected except
-// creation). `verified` has no outbound edge (terminal). Unknown statuses
-// are never allowed.
+// creation). verified -> completed is the system's move, made by
+// action_plans_reconcile_verification when a linked control fails; Update
+// refuses it for a person and the DB trigger refuses it outside that
+// function. Unknown statuses are never allowed.
 func AllowedTransition(from, to string) bool {
 	if !ValidStatus(from) || !ValidStatus(to) {
 		return false
@@ -113,7 +121,7 @@ func AllowedTransition(from, to string) bool {
 	case StatusCompleted:
 		return to == StatusVerified || to == StatusInProgress
 	case StatusVerified:
-		return false // terminal
+		return to == StatusCompleted // system only (#2109)
 	}
 	return false
 }
@@ -135,8 +143,8 @@ var (
 	ErrTriggeringEventTooLong = errors.New("actionplan: triggering_event exceeds 500 characters")
 	// ErrOwnerRequired — create owner_id is empty. 400.
 	ErrOwnerRequired = errors.New("actionplan: owner_id is required")
-	// ErrOwnerNotInTenant — owner_id does not resolve to a tenant user. 400.
-	ErrOwnerNotInTenant = errors.New("actionplan: owner_id is not a user in this tenant")
+	// ErrOwnerNotInTenant — owner_id does not resolve to an active tenant user. 400.
+	ErrOwnerNotInTenant = errors.New("actionplan: owner_id is not an active user in this tenant")
 	// ErrDueDateTooFar — due_date is more than 5 years out (P0-384-8). 400.
 	ErrDueDateTooFar = errors.New("actionplan: due_date exceeds 5-year horizon")
 	// ErrInvalidStatus — a status value outside the five-state enum. 400.
@@ -149,9 +157,30 @@ var (
 	ErrAlreadyLinked = errors.New("actionplan: already linked")
 	// ErrNotLinked — an unlink targets a non-existent link. 404.
 	ErrNotLinked = errors.New("actionplan: link does not exist")
+	// ErrVerifyThroughVerify — a PATCH asked for status verified. A person
+	// verifies through POST .../verify (#2108). 422.
+	ErrVerifyThroughVerify = errors.New("actionplan: verify a plan through its verify action, not by setting its status")
+	// ErrVerifyHasControls — verify on a plan with linked controls; their
+	// evaluations verify it (#2109). 409.
+	ErrVerifyHasControls = errors.New("actionplan: a plan with linked controls is verified by their evaluations, not by hand")
+	// ErrOwnerCannotVerify — the plan's owner tried to verify it. The owner
+	// never verifies their own plan, whatever the self-approval setting
+	// (#2108). 403.
+	ErrOwnerCannotVerify = errors.New("actionplan: the plan's owner cannot verify it")
+	// ErrVerifierInvolved — the verifier moved the plan to completed, or
+	// owned it at some point since, per its audit trail; or the trail
+	// could not be read, and the rule fails closed (#2434). 403.
+	ErrVerifierInvolved = errors.New("actionplan: whoever completed the plan, or owned it since, cannot verify it")
+	// ErrVerifierNotPerson — the verifying credential belongs to no user. 403.
+	ErrVerifierNotPerson = errors.New("actionplan: only a person can verify a plan")
 	// ErrLimitExceeded — the per-plan 50-risk / 50-control cap is hit
 	// (P0-384-7). 422 with code limit_exceeded.
 	ErrLimitExceeded = errors.New("actionplan: linkage limit exceeded")
+	// ErrMitigationRequired — a tombstone or risk unlink would leave a
+	// mitigate risk with no linked control and no live action plan
+	// (#2449). 409. The store returns it wrapped in MitigationRequiredError,
+	// which names the risk.
+	ErrMitigationRequired = errors.New("actionplan: a mitigate risk would be left with no linked control or live action plan")
 )
 
 // ValidateTitle enforces the title length bounds (AC-1 / threat-model T).

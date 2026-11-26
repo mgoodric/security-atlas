@@ -24,10 +24,7 @@ package profileimport_test
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/oscal/bridgetest"
 	"github.com/mgoodric/security-atlas/internal/oscal/profileimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -73,54 +71,31 @@ func loadFixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// startBridge starts the Python oscal-bridge on a free loopback port.
-// Skips the test if the bridge cannot start (slice-030 D2 pattern).
+// startBridge starts the Python oscal-bridge on a free loopback port. It
+// skips when the bridge is unavailable, or fails under
+// ATLAS_REQUIRE_OSCAL_BRIDGE=1 (CI) — see internal/oscal/bridgetest.
 func startBridge(t *testing.T) (string, func()) {
 	t.Helper()
-	py := os.Getenv("OSCAL_BRIDGE_PYTHON")
-	if py == "" {
-		py = "python3"
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("pick port: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	return bridgetest.Start(t)
+}
 
-	repoRoot, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
+// currentSCFRelease returns the label of the current SCF release, where
+// seedCurrentSCFAnchor put the anchor. An import declares it: a release is
+// required since #1774.
+func currentSCFRelease(t *testing.T, admin *pgxpool.Pool) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`).Scan(&label); err != nil {
+		t.Fatalf("current SCF release: %v", err)
 	}
-	bridgeDir := filepath.Join(repoRoot, "oscal-bridge")
-
-	cmd := exec.Command(py, "-m", "atlas_oscal_bridge.server", "--address", addr)
-	cmd.Dir = bridgeDir
-	cmd.Env = append(os.Environ(), "PYTHONPATH="+bridgeDir)
-	if err := cmd.Start(); err != nil {
-		t.Skipf("oscal-bridge could not start (%s): %v — skipping bridge-dependent test", py, err)
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, derr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-		if derr == nil {
-			_ = conn.Close()
-			return addr, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }
-		}
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			t.Skipf("oscal-bridge exited during startup — skipping bridge-dependent test")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_ = cmd.Process.Kill()
-	t.Skipf("oscal-bridge did not become ready on %s — skipping bridge-dependent test", addr)
-	return "", func() {}
+	return label
 }
 
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a control id in the
-// resolved profile ("IAC-06"). Proves the deterministic requirement -> SCF
+// resolved profile ("IAC-37"). Proves the deterministic requirement -> SCF
 // anchor mapping (slice-511 D3). scf_anchors is global — seeded idempotently.
 func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
 	t.Helper()
@@ -167,7 +142,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -183,21 +158,23 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "FedRAMP Moderate test",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	// include-controls selected exactly ac-1, ac-2, IAC-06 (NOT ac-3).
+	// include-controls selected exactly ac-1, ac-2, IAC-37 (NOT ac-3).
 	if report.ControlCount != 3 {
-		t.Errorf("ControlCount = %d, want 3 (import selected ac-1, ac-2, IAC-06)", report.ControlCount)
+		t.Errorf("ControlCount = %d, want 3 (import selected ac-1, ac-2, IAC-37)", report.ControlCount)
 	}
-	// IAC-06 deterministically matched the seeded SCF anchor (D3).
+	// IAC-37 deterministically matched the seeded SCF anchor (D3).
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
-	if report.OSCALVersion == "" {
-		t.Error("OSCALVersion must be echoed from the resolved document")
+	// The entry profile's declared oscal-version, not the resolver's stamp.
+	if report.OSCALVersion != "1.1.2" {
+		t.Errorf("OSCALVersion = %q, want the profile's declared 1.1.2", report.OSCALVersion)
 	}
 	if report.ProfileTitle != "FedRAMP-style Test Moderate Baseline" {
 		t.Errorf("ProfileTitle = %q, want the resolved profile's declared title", report.ProfileTitle)
@@ -228,7 +205,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 		t.Errorf("source_sha256 = %q (report %q)", sha, report.SourceSha256)
 	}
 
-	// IAC-06 control mapped to the SCF anchor; the other two are NULL.
+	// IAC-37 control mapped to the SCF anchor; the other two are NULL.
 	var mapped, total int
 	if err := admin.QueryRow(ctx,
 		`SELECT count(*) FILTER (WHERE scf_anchor_id IS NOT NULL), count(*)
@@ -242,12 +219,12 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	var anchorID *string
 	if err := admin.QueryRow(ctx,
 		`SELECT scf_anchor_id FROM imported_catalog_controls
-		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-06'`,
+		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-37'`,
 		report.ProfileID).Scan(&anchorID); err != nil {
-		t.Fatalf("read IAC-06 mapping: %v", err)
+		t.Fatalf("read IAC-37 mapping: %v", err)
 	}
-	if anchorID == nil || *anchorID != "IAC-06" {
-		t.Errorf("IAC-06 scf_anchor_id = %v, want IAC-06 (requirement -> SCF anchor)", anchorID)
+	if anchorID == nil || *anchorID != "IAC-37" {
+		t.Errorf("IAC-37 scf_anchor_id = %v, want IAC-37 (requirement -> SCF anchor)", anchorID)
 	}
 	// ac-3 was NOT selected by the import directive.
 	var ac3Count int
@@ -304,6 +281,7 @@ func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_external_href.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "malicious",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -356,6 +334,7 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 		ProfileJSON: loadFixture(t, "profile_malformed.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "bad",
+		SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 		ImportedBy:  "grc-tester",
 		Role:        authz.RoleGRCEngineer,
 	})
@@ -379,7 +358,7 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -397,18 +376,19 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "Chained baseline test",
 		ImportedBy:  "grc-tester",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {
 		t.Fatalf("Import (chained): %v", err)
 	}
-	// The entry narrowed the intermediate (ac-1, ac-2, ac-3, IAC-06) down to
-	// ac-1, ac-2, IAC-06.
+	// The entry narrowed the intermediate (ac-1, ac-2, ac-3, IAC-37) down to
+	// ac-1, ac-2, IAC-37.
 	if report.ControlCount != 3 {
 		t.Errorf("ControlCount = %d, want 3 (entry narrowed the chain)", report.ControlCount)
 	}
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
 
 	ctx := context.Background()
@@ -464,6 +444,7 @@ func TestImportProfile_CyclicChainRejected(t *testing.T) {
 			Profiles:    [][]byte{loadFixture(t, "profile_cycle_b.json")},
 			Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 			SourceLabel: "cyclic",
+			SCFRelease:  "test-2026.3", // reaches validation; a release is required since #1774
 			ImportedBy:  "grc-tester",
 			Role:        authz.RoleGRCEngineer,
 		})
@@ -519,6 +500,7 @@ func TestImportProfile_TenantIsolation(t *testing.T) {
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "Tenant A baseline",
 		ImportedBy:  "grc-a",
+		SCFRelease:  currentSCFRelease(t, admin),
 		Role:        authz.RoleGRCEngineer,
 	})
 	if err != nil {

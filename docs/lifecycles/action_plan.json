@@ -1,0 +1,164 @@
+{
+  "name": "action_plan",
+  "title": "Action plan",
+  "entity": "action_plans",
+  "column": "status",
+  "enforcement": "database",
+  "states": [
+    "draft",
+    "in_progress",
+    "blocked",
+    "completed",
+    "verified"
+  ],
+  "initial": [
+    {
+      "state": "draft",
+      "action": "create",
+      "routes": [
+        "POST /v1/action-plans"
+      ],
+      "roles": [
+        "admin"
+      ]
+    }
+  ],
+  "terminal": [],
+  "transitions": [
+    {
+      "from": "draft",
+      "to": "in_progress",
+      "action": "start",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "in_progress",
+      "to": "blocked",
+      "action": "block",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "in_progress",
+      "to": "completed",
+      "action": "complete",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "blocked",
+      "to": "in_progress",
+      "action": "resume",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "blocked",
+      "to": "completed",
+      "action": "complete",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "completed",
+      "to": "verified",
+      "action": "verify",
+      "actor": "person",
+      "routes": [
+        "POST /v1/action-plans/{id}/verify"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": false,
+      "note": "A person verifies only a plan with no linked controls, and never its owner, whoever moved it to completed, or anyone who owned it since (#2434), whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109)."
+    },
+    {
+      "from": "completed",
+      "to": "in_progress",
+      "action": "reopen",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/action-plans/{id}"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Reopened when verification fails."
+    },
+    {
+      "from": "verified",
+      "to": "completed",
+      "action": "unverify",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "After each control evaluation, a verified plan with a linked control that no longer passes returns to completed (#2109). No person or key makes this move."
+    }
+  ],
+  "trigger": {
+    "name": "action_plans_status_transition_guard",
+    "from": [
+      "draft",
+      "in_progress",
+      "blocked",
+      "completed",
+      "verified"
+    ]
+  }
+}

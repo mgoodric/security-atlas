@@ -104,13 +104,16 @@ func TestMapResult(t *testing.T) {
 // TestInferDataClassification covers both branches of the per-host
 // classification ladder.
 func TestInferDataClassification(t *testing.T) {
-	managed := osqueryposture.HostPosture{MDMEnrolled: true}
+	managed := osqueryposture.HostPosture{MDMEnrolled: ptr(true)}
 	if got := inferDataClassification(managed); got != "restricted" {
 		t.Errorf("MDM-enrolled = %q; want restricted", got)
 	}
-	unmanaged := osqueryposture.HostPosture{MDMEnrolled: false}
+	unmanaged := osqueryposture.HostPosture{MDMEnrolled: ptr(false)}
 	if got := inferDataClassification(unmanaged); got != "unknown" {
 		t.Errorf("un-enrolled = %q; want unknown", got)
+	}
+	if got := inferDataClassification(osqueryposture.HostPosture{}); got != "unknown" {
+		t.Errorf("enrolment unread = %q; want unknown", got)
 	}
 }
 
@@ -349,6 +352,52 @@ func TestNewRunCmd_PreRunLocalModeMissingSocket(t *testing.T) {
 	}
 }
 
+// #2921: the policy flags name Fleet policies, so --mode=local rejects them
+// rather than silently ignoring them.
+func TestNewRunCmd_PreRunLocalModeRejectsPolicyFlags(t *testing.T) {
+	for _, flag := range []string{"--firewall-policy", "--screenlock-policy", "--antimalware-definitions-report", "--antimalware-definitions-column"} {
+		t.Run(flag, func(t *testing.T) {
+			resetCommon(t)
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags([]string{
+				"--org", "example",
+				"--environment", "prod",
+				"--mode", "local",
+				flag, "Firewall enabled (macOS)",
+			}); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "--mode=fleet only") {
+				t.Errorf("err = %v; want a fleet-only rejection", err)
+			}
+		})
+	}
+}
+
+// #2936: a definitions report without its column, or the reverse, cannot
+// be read, so it is refused rather than silently ignored.
+func TestNewRunCmd_PreRunDefinitionsReportNeedsColumn(t *testing.T) {
+	for _, flag := range []string{"--antimalware-definitions-report", "--antimalware-definitions-column"} {
+		t.Run(flag, func(t *testing.T) {
+			resetCommon(t)
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags([]string{
+				"--org", "example",
+				"--environment", "prod",
+				"--fleet-base-url", "https://fleet.example.com",
+				flag, "x",
+			}); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "set together") {
+				t.Errorf("err = %v; want a set-together rejection", err)
+			}
+		})
+	}
+}
+
 // TestNewRunCmd_PreRunInvalidMode covers PreRunE branch (e): unknown
 // --mode value.
 func TestNewRunCmd_PreRunInvalidMode(t *testing.T) {
@@ -561,7 +610,7 @@ func TestDoRun_FleetMode_FailsOnUnreachableFleet(t *testing.T) {
 		environment:    "prod",
 		fleetBaseURL:   srv.URL,
 		token:          "fleet-test",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected doRun fleet-pull error against closed server")
@@ -590,7 +639,7 @@ func TestDoRun_InvalidMode(t *testing.T) {
 		org:            "example",
 		environment:    "prod",
 		token:          "fleet-test",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected unreachable-mode error from doRun")
@@ -615,7 +664,7 @@ func TestDoRun_AuthResolveFails(t *testing.T) {
 		org:            "example",
 		environment:    "prod",
 		fleetBaseURL:   "https://fleet.example.invalid",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected auth.Resolve error from doRun")
@@ -637,7 +686,7 @@ func TestBuildHostPostureRecord_HostnameFallback(t *testing.T) {
 		Platform:   "darwin",
 		ObservedAt: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildHostPostureRecord(state, "example", "prod", "scf:END-04")
+	rec, err := buildHostPostureRecord(state, "example", "prod", "scf:END-03")
 	if err != nil {
 		t.Fatalf("buildHostPostureRecord: %v", err)
 	}

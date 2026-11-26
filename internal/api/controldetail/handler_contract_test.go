@@ -61,6 +61,9 @@ const (
 	contractScopeID   = "44444444-4444-4444-8444-444444444444"
 )
 
+// contractTriggeredBy is the principal on the manual history row (#2479).
+var contractTriggeredBy = "55555555-5555-4555-8555-555555555555"
+
 // stubReader is the fixed-row implementation of the per-route
 // controlDetailReader seam. It returns deterministic rows with no Postgres.
 type stubReader struct {
@@ -177,6 +180,7 @@ func TestContract_ControlRisks(t *testing.T) {
 		{
 			ID:            pgID(contractRiskID),
 			Title:         "Unpatched perimeter dependency",
+			Methodology:   dbx.RiskMethodologyNist80030,
 			InherentScore: []byte(`{"likelihood":4,"impact":5,"severity":20}`),
 			ResidualScore: []byte(`{"likelihood":2,"impact":4,"severity":8}`),
 			DesignScore:   mustNumeric("0.750"),
@@ -185,6 +189,7 @@ func TestContract_ControlRisks(t *testing.T) {
 		{
 			ID:            pgID(contractScopeID),
 			Title:         "Vendor SOC 2 report pending renewal",
+			Methodology:   dbx.RiskMethodologyFair,
 			InherentScore: nil,
 			ResidualScore: nil,
 			DesignScore:   pgtype.Numeric{Valid: false},
@@ -221,6 +226,8 @@ func TestContract_ControlHistory(t *testing.T) {
 			Result:                dbx.EvidenceResult("pass"),
 			FreshnessStatus:       "fresh",
 			EvidenceCountInWindow: 3,
+			Trigger:               "manual",
+			TriggeredBy:           &contractTriggeredBy,
 		},
 		{
 			ID:                    pgID(contractPolicyID),
@@ -229,6 +236,7 @@ func TestContract_ControlHistory(t *testing.T) {
 			Result:                dbx.EvidenceResult("fail"),
 			FreshnessStatus:       "stale",
 			EvidenceCountInWindow: 0,
+			Trigger:               "scheduled",
 		},
 	}}
 	empty := stubReader{history: nil}

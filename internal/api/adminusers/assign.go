@@ -75,12 +75,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -101,6 +105,10 @@ const (
 
 	// assignRoleGrantedBy is the granted_by string the user_roles rows carry.
 	assignRoleGrantedBy = "admin:user_assign"
+
+	// lastAdminReason is the 409 body when a change would leave the tenant
+	// with no active admin (#2261).
+	lastAdminReason = "Cannot remove the tenant's last active admin; grant admin to another active user first"
 
 	// maxAssignBody caps the assign/revoke request body.
 	maxAssignBody = 16 * 1024
@@ -172,6 +180,10 @@ type CrossTenantUserResponse struct {
 	IDPIssuer   string   `json:"idp_issuer"`
 	IDPSubject  string   `json:"idp_subject"`
 	Roles       []string `json:"roles"`
+	// ModuleAccess is the membership's module access (#2172): null for
+	// all modules. It is set with PUT /v1/admin/users/{id}/module-access
+	// from inside that tenant.
+	ModuleAccess []string `json:"module_access"`
 }
 
 // CrossTenantListResponse is the super-admin GET /v1/admin/users response.
@@ -222,7 +234,11 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 		              WHERE ur.tenant_id = u.tenant_id
 		                AND ur.user_id   = u.id::text),
 		            ARRAY[]::text[]
-		        )::text[] AS roles
+		        )::text[] AS roles,
+		        (SELECT ma.modules
+		           FROM member_module_access ma
+		          WHERE ma.tenant_id = u.tenant_id
+		            AND ma.user_id   = u.id::text) AS module_access
 		   FROM users u
 		  WHERE ($1::uuid IS NULL)
 		     OR (u.tenant_id, u.id) > ($1::uuid, $2::uuid)
@@ -242,9 +258,9 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 			id, tenantID               uuid.UUID
 			email, displayName, status string
 			idpIssuer, idpSubject      string
-			roles                      []string
+			roles, moduleAccess        []string
 		)
-		if serr := rows.Scan(&id, &tenantID, &email, &displayName, &status, &idpIssuer, &idpSubject, &roles); serr != nil {
+		if serr := rows.Scan(&id, &tenantID, &email, &displayName, &status, &idpIssuer, &idpSubject, &roles, &moduleAccess); serr != nil {
 			httperr.WriteInternal(w, r, "scan cross-tenant user", serr)
 			return
 		}
@@ -252,14 +268,15 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 			roles = []string{}
 		}
 		items = append(items, CrossTenantUserResponse{
-			ID:          id.String(),
-			TenantID:    tenantID.String(),
-			Email:       email,
-			DisplayName: displayName,
-			Status:      status,
-			IDPIssuer:   idpIssuer,
-			IDPSubject:  idpSubject,
-			Roles:       roles,
+			ID:           id.String(),
+			TenantID:     tenantID.String(),
+			Email:        email,
+			DisplayName:  displayName,
+			Status:       status,
+			IDPIssuer:    idpIssuer,
+			IDPSubject:   idpSubject,
+			Roles:        roles,
+			ModuleAccess: moduleAccess,
 		})
 	}
 	if rerr := rows.Err(); rerr != nil {
@@ -362,6 +379,10 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 }
 
 var errOriginNotFound = errors.New("origin user not found")
+
+// errTargetNotMember is returned when a within-tenant role change or revoke
+// names a user who is not a member of the tenant (#2503). It maps to 404.
+var errTargetNotMember = errors.New("target user not in tenant")
 
 type assignParams struct {
 	originUserID  uuid.UUID
@@ -582,6 +603,31 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// #2503: within the caller's tenant the target must be a member. An id
+	// from another tenant matches no row under RLS and is a 404, not a 204.
+	if !crossTenant {
+		var member bool
+		if merr := tx.QueryRow(r.Context(),
+			`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND tenant_id = $2)`,
+			targetUserID, destTenant,
+		).Scan(&member); merr != nil {
+			httperr.WriteInternal(w, r, "lookup target", merr)
+			return
+		}
+		if !member {
+			httpresp.WriteError(w, http.StatusNotFound, "user not found")
+			return
+		}
+	}
+
+	// Lock the tenant's admin roster before touching roles, so two revokes
+	// of the last two admins cannot both pass (#2261).
+	guard, gerr := users.LockAdmins(r.Context(), dbx.New(tx), destTenant)
+	if gerr != nil {
+		httperr.WriteInternal(w, r, "lock admins", gerr)
+		return
+	}
+
 	if _, derr := tx.Exec(r.Context(),
 		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`,
 		destTenant, targetUserID.String(),
@@ -599,6 +645,23 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 			httperr.WriteInternal(w, r, "disable membership", uerr)
 			return
 		}
+		// A disabled membership loses its sessions and owned API keys in
+		// the same transaction (#1915).
+		if rerr := users.RevokeAccess(r.Context(), dbx.New(tx), destTenant, targetUserID); rerr != nil {
+			httperr.WriteInternal(w, r, "revoke access", rerr)
+			return
+		}
+	}
+
+	// Refuse before the audit write; the deferred rollback discards the
+	// role delete, so a refused revoke writes nothing (#2261).
+	if cerr := guard.Check(r.Context(), dbx.New(tx)); cerr != nil {
+		if errors.Is(cerr, users.ErrLastAdmin) {
+			httpresp.WriteError(w, http.StatusConflict, lastAdminReason)
+			return
+		}
+		httperr.WriteInternal(w, r, "check admins", cerr)
+		return
 	}
 
 	if aerr := h.writeAssignAudit(r.Context(), tx, auditAssignParams{
@@ -616,9 +679,16 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.beforeRevokeCommit != nil {
+		h.beforeRevokeCommit()
+	}
+
 	if cerr := tx.Commit(r.Context()); cerr != nil {
 		httperr.WriteInternal(w, r, "commit", cerr)
 		return
+	}
+	if req.RemoveMembership && h.creds != nil {
+		h.creds.RevokeUserInMemory(destTenant.String(), targetUserID.String())
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -756,8 +826,8 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 			return u
 		}
 	}
-	if cred, ok := credentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID)); err == nil {
+	if cred, ok := authctx.CredentialFromContext(ctx); ok {
+		if u, ok := credstore.CallerUserID(cred); ok {
 			return u
 		}
 	}

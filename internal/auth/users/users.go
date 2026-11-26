@@ -6,16 +6,20 @@
 // canonical pair.
 //
 // Slice 198 adds BootstrapFirstInstallOrUpsert — the OIDC-first-install
-// path that creates the Default Tenant + super_admin grant when the
-// `tenants` table is empty. The bootstrap branch is wired to an optional
+// path that attaches the first user to the bootstrap tenant (creating it
+// only when no tenant exists) with a super_admin grant. The bootstrap
+// branch is wired to an optional
 // BYPASSRLS auth pool because the standard `users` RLS context cannot
 // apply when no tenant exists yet.
 package users
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/password"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -62,12 +67,18 @@ type User struct {
 	Email       string
 	DisplayName string
 	Status      string
-	IdpIssuer   string
-	IdpSubject  string
+	// Active is the SCIM deprovision mirror (users.active); false once the
+	// IdP deprovisions the user.
+	Active     bool
+	IdpIssuer  string
+	IdpSubject string
 	// TimeZone is an IANA timezone name (e.g. "America/Los_Angeles") or
 	// "" (empty = browser-derived; the backend never invents a timezone).
 	// Slice 108 added the column via an additive ALTER on users.
-	TimeZone  string
+	TimeZone string
+	// Theme is the /settings appearance choice: "system" (follows the
+	// OS), "light", "dark", or "" when the user has never chosen (#2142).
+	Theme     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -163,10 +174,61 @@ type UpsertOIDCInput struct {
 	DisplayName string
 	Issuer      string
 	Subject     string
+	// EmailVerified is the ID token's email_verified claim; nil when the IdP
+	// omits it (#1944).
+	EmailVerified *bool
+	// TrustUnverifiedEmail is the IdP config's
+	// trust_unverified_email_for_link: when true, an absent EmailVerified
+	// may still link by email. False, the zero value, is strict (D3).
+	TrustUnverifiedEmail bool
+	// IDPConfigID is the oidc_idp_configs row the sign-in came through, kept
+	// in the link audit row. uuid.Nil when the resolver supplied none.
+	IDPConfigID uuid.UUID
+}
+
+// emailLinkAllowed reports whether a sign-in may claim an existing SCIM row
+// by email (#1944 D3, Matt's decision of 2026-11-13). email_verified=true
+// links and an explicit false never does. An absent claim links only when
+// the IdP config opts in with trust_unverified_email_for_link, which is for
+// IdPs such as Microsoft Entra ID that never send the claim.
+func emailLinkAllowed(verified *bool, trustUnverified bool) bool {
+	if verified != nil {
+		return *verified
+	}
+	return trustUnverified
+}
+
+// ErrIdentityConflict is returned by UpsertOIDC when the sign-in's email
+// already belongs to a same-tenant user it may not link to: one bound to a
+// different IdP principal, one with a local password or a super_admin grant,
+// or an unbound one while the IdP says the email is unverified (#1944). The
+// callback refuses the sign-in.
+var ErrIdentityConflict = errors.New("users: email belongs to another identity")
+
+// oidcLinkAuditAction is the me_audit_log action for an email link
+// (migration 20260920000000).
+const oidcLinkAuditAction = "oidc_identity_link"
+
+// isUniqueViolationOn reports whether err is a unique_violation on one of the
+// named constraints or indexes.
+func isUniqueViolationOn(err error, names ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgUniqueViolation {
+		return false
+	}
+	for _, n := range names {
+		if pgErr.ConstraintName == n {
+			return true
+		}
+	}
+	return false
 }
 
 // UpsertOIDC provisions-or-updates the user keyed on (idp_issuer, idp_subject).
-// Returns the resulting row.
+// On first sign-in it links to a same-tenant SCIM-provisioned row with the
+// same email and an empty idp tuple (#1944) instead of inserting, and audits
+// the link. Returns the resulting row, or ErrIdentityConflict when the email
+// belongs to a row it may not link to.
 func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error) {
 	if in.Issuer == "" || in.Subject == "" {
 		return User{}, fmt.Errorf("users: UpsertOIDC requires non-empty issuer + subject")
@@ -183,6 +245,30 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 
 	id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	tIDU := pgtype.UUID{Bytes: in.TenantID, Valid: true}
+	if emailLinkAllowed(in.EmailVerified, in.TrustUnverifiedEmail) {
+		linked, err := linkByEmail(ctx, q, in, tIDU)
+		switch {
+		case err == nil:
+			if err := tx.Commit(ctx); err != nil {
+				return User{}, err
+			}
+			return userFromRow(linked), nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return User{}, err
+		}
+	}
+	taken, err := q.OIDCFirstSignInEmailTaken(ctx, dbx.OIDCFirstSignInEmailTakenParams{
+		TenantID:   tIDU,
+		Email:      in.Email,
+		IdpIssuer:  in.Issuer,
+		IdpSubject: in.Subject,
+	})
+	if err != nil {
+		return User{}, fmt.Errorf("users: check OIDC email: %w", err)
+	}
+	if taken {
+		return User{}, ErrIdentityConflict
+	}
 	row, err := q.UpsertUserByIdpSubject(ctx, dbx.UpsertUserByIdpSubjectParams{
 		ID:          id,
 		TenantID:    tIDU,
@@ -193,12 +279,58 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 		IdpSubject:  in.Subject,
 	})
 	if err != nil {
+		if isUniqueViolationOn(err, "users_email_per_tenant_unique") {
+			return User{}, ErrIdentityConflict
+		}
 		return User{}, fmt.Errorf("users: upsert OIDC: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, err
 	}
 	return userFromRow(row), nil
+}
+
+// linkByEmail binds the principal to the SCIM row and writes the
+// oidc_identity_link audit row in the caller's transaction. pgx.ErrNoRows
+// means no row qualified. A concurrent sign-in that bound the same principal
+// first trips users_idp_principal_unique; that is a refusal, not a 500.
+func linkByEmail(ctx context.Context, q *dbx.Queries, in UpsertOIDCInput, tIDU pgtype.UUID) (dbx.User, error) {
+	linked, err := q.LinkUserIdpByEmail(ctx, dbx.LinkUserIdpByEmailParams{
+		IdpIssuer:   in.Issuer,
+		IdpSubject:  in.Subject,
+		DisplayName: in.DisplayName,
+		TenantID:    tIDU,
+		Email:       in.Email,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.User{}, err
+		}
+		if isUniqueViolationOn(err, "users_idp_principal_unique") {
+			return dbx.User{}, ErrIdentityConflict
+		}
+		return dbx.User{}, fmt.Errorf("users: link OIDC by email: %w", err)
+	}
+	// No email in the row: the issuer and IdP config say which IdP now
+	// signs this user in.
+	after := map[string]string{"idp_issuer": in.Issuer, "idp_config_id": ""}
+	if in.IDPConfigID != uuid.Nil {
+		after["idp_config_id"] = in.IDPConfigID.String()
+	}
+	payload, err := json.Marshal(after)
+	if err != nil {
+		return dbx.User{}, fmt.Errorf("users: marshal link audit: %w", err)
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID: tIDU,
+		UserID:   linked.ID,
+		Action:   oidcLinkAuditAction,
+		Before:   []byte("{}"),
+		After:    payload,
+	}); err != nil {
+		return dbx.User{}, fmt.Errorf("users: audit OIDC link: %w", err)
+	}
+	return linked, nil
 }
 
 // ErrBootstrapUnavailable is returned by BootstrapFirstInstallOrUpsert
@@ -221,16 +353,15 @@ type BootstrapInput struct {
 
 // BootstrapResult is what BootstrapFirstInstallOrUpsert returns.
 //
-//   - Bootstrapped=true means this call landed the first row in tenants
+//   - Bootstrapped=true means this call created the first user, in the
+//     bootstrap tenant, granted super_admin + tenant_admin and wrote the
+//     audit row. TenantID is the bootstrap tenant; UserID is the new
+//     user. The caller MUST NOT call UpsertOIDC after this; the
+//     bootstrap branch already created the row.
 //
-//   - created the OIDC user + granted super_admin + tenant_admin +
-//     wrote the audit row. The TenantID + UserID fields carry the
-//     synthesized IDs. The caller MUST NOT call UpsertOIDC after this;
-//     the bootstrap branch already created the row.
-//
-//   - Bootstrapped=false means the count(*) gate found ≥1 tenant. The
-//     caller falls through to the existing UpsertOIDC path. The
-//     TenantID and UserID fields are zero-valued.
+//   - Bootstrapped=false means a user or a super_admin already exists. The caller falls
+//     through to the existing UpsertOIDC path. The TenantID and UserID
+//     fields are zero-valued.
 type BootstrapResult struct {
 	Bootstrapped bool
 	TenantID     uuid.UUID
@@ -238,22 +369,25 @@ type BootstrapResult struct {
 }
 
 // BootstrapFirstInstallOrUpsert is the slice 198 OIDC-first-install
-// path. The method runs the count(*) gate, and if zero, atomically:
+// path. Under a transaction-scoped advisory lock (READ COMMITTED) it checks
+// whether any user or super_admin exists, and if none does, atomically:
 //
-//  1. Creates the Default Tenant row with is_bootstrap_tenant=true.
-//     (slice 144 partial UNIQUE index serializes against concurrent
-//     first-installers.)
-//  2. Creates the OIDC users row under the new tenant.
-//  3. Inserts user_roles(role='admin') for the user under the new
-//     tenant.
+//  1. Resolves the implied tenant (tenancy.ResolveImplicitTenant). The
+//     bootstrap tenant is canonical: with one tenant (e.g. the one
+//     bootstrap.sh seeded) the user attaches to it, flagging it
+//     is_bootstrap_tenant if no tenant is flagged yet; with none it
+//     creates the Default Tenant row with is_bootstrap_tenant=true. With
+//     several it returns an error wrapping *tenancy.AmbiguousTenantError.
+//  2. Creates the OIDC users row under that tenant.
+//  3. Inserts user_roles(role='admin') for the user under that tenant.
 //  4. Inserts super_admins(user_id, granted_via='bootstrap_first_install').
 //  5. Inserts me_audit_log(action='bootstrap_first_install').
 //  6. Commits.
 //
-// Race-handling: on SQLSTATE 23505 from the tenants insert (concurrent
-// first-installer beat us to the partial UNIQUE index), the
-// transaction rolls back, we recheck count(*), and fall through with
-// Bootstrapped=false.
+// Race-handling: the advisory lock serializes first-installers; the
+// loser sees the winner's user and falls through. On SQLSTATE 23505
+// from the tenants insert (partial UNIQUE index, second leg) the
+// transaction rolls back and the gate is re-run once.
 //
 // When the Store lacks an authPool, returns ErrBootstrapUnavailable —
 // the caller's existing UpsertOIDC path is unaffected.
@@ -261,7 +395,7 @@ type BootstrapResult struct {
 // Constitutional invariants honored:
 //
 //   - P0-198-1: single transaction across all five inserts.
-//   - P0-198-2: count(*) gate is the first read.
+//   - P0-198-2: the first-user gate is the first read.
 //   - P0-198-3: race-handling via 23505 retry-then-fall-through.
 //   - P0-198-4: me_audit_log row in same tx as the grants.
 //   - P0-198-5: super_admins INSERT carries no tenant_id (the table
@@ -286,53 +420,99 @@ func (s *Store) BootstrapFirstInstallOrUpsert(ctx context.Context, in BootstrapI
 			return res, nil
 		}
 	}
-	// Should be unreachable — second attempt's count(*) check sees
+	// Should be unreachable — second attempt's first-user gate sees
 	// the winning row and returns Bootstrapped=false.
 	return BootstrapResult{Bootstrapped: false}, nil
 }
 
-// bootstrapAttempt runs one count-gate + bootstrap-or-skip pass. The
+// bootstrapAttempt runs one first-user gate + bootstrap-or-skip pass. The
 // retry boolean is true when the partial UNIQUE index trip indicates a
 // concurrent first-installer beat us; the caller re-enters the loop
 // once.
 func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (BootstrapResult, bool, error) {
-	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{})
+	// READ COMMITTED is load-bearing: each statement takes a fresh
+	// snapshot, so the gate below, read after the advisory lock is
+	// granted, sees the user a concurrent winner committed while we
+	// waited. Under REPEATABLE READ the snapshot would predate the lock
+	// and the loser would bootstrap a second admin.
+	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// P0-198-2: count gate is the first read inside the tx so the
-	// established-install path falls through without writes.
-	var count int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&count); err != nil {
-		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap count tenants: %w", err)
+	// Serialize concurrent first-installers. When the bootstrap tenant
+	// already exists (seeded by bootstrap.sh) no tenants INSERT happens,
+	// so the partial UNIQUE index cannot do it; the advisory lock does.
+	// The lock is advisorylock.BootstrapFirstInstall (#1759, #2273).
+	if err := advisorylock.Lock(ctx, tx, advisorylock.BootstrapFirstInstall, 0); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap lock: %w", err)
 	}
-	if count > 0 {
+
+	// P0-198-2: the gate is the first read inside the tx so the
+	// established-install path falls through without writes. The gate
+	// is "nobody has been provisioned yet": no user and no super_admin.
+	// The first user is the bootstrap admin, whether or not the bootstrap
+	// tenant was seeded before them. Requiring no super_admins row too
+	// keeps the gate shut on an install whose users were all deleted:
+	// super_admins has no FK to users, so the grant outlives them.
+	var provisioned bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users) OR EXISTS (SELECT 1 FROM super_admins)`,
+	).Scan(&provisioned); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap check provisioned: %w", err)
+	}
+	if provisioned {
 		// Established-install path — caller falls through to UpsertOIDC.
 		return BootstrapResult{Bootstrapped: false}, false, nil
 	}
 
-	// Synthesize the new tenant + user IDs up front so the audit-log
-	// row references them.
-	tenantID := uuid.New()
 	userID := uuid.New()
 
-	// 1. tenants row with is_bootstrap_tenant=true. The slice 144
-	//    partial UNIQUE index `idx_tenants_bootstrap_singleton`
-	//    serializes against concurrent first-installers.
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, true)`,
-		tenantID, DefaultBootstrapTenantName,
-	); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			// P0-198-3: concurrent first-installer beat us. Roll back,
-			// caller re-enters loop, second pass sees count > 0 and
-			// returns Bootstrapped=false.
-			return BootstrapResult{}, true, nil
+	// 1. The bootstrap tenant is canonical: attach the first user to the
+	//    implied tenant, and create + flag it only when none exists.
+	var tenantID uuid.UUID
+	tenant, err := tenancy.ResolveImplicitTenant(ctx, tx)
+	switch {
+	case err == nil:
+		tenantID = tenant.ID
+		// Flag it as the bootstrap tenant unless some tenant already is.
+		if _, err := tx.Exec(ctx,
+			`UPDATE tenants SET is_bootstrap_tenant = true
+			 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_bootstrap_tenant)`,
+			tenantID,
+		); err != nil {
+			return BootstrapResult{}, false, fmt.Errorf("users: bootstrap flag tenant: %w", err)
 		}
-		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap insert tenants: %w", err)
+	case errors.Is(err, tenancy.ErrNoTenants):
+		// The slice 144 partial UNIQUE index
+		// `idx_tenants_bootstrap_singleton` is the second leg of defense
+		// against concurrent first-installers.
+		tenantID = uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, true)`,
+			tenantID, DefaultBootstrapTenantName,
+		); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+				// P0-198-3: concurrent first-installer beat us. Roll back,
+				// caller re-enters loop, second pass sees the user and
+				// returns Bootstrapped=false.
+				return BootstrapResult{}, true, nil
+			}
+			return BootstrapResult{}, false, fmt.Errorf("users: bootstrap insert tenants: %w", err)
+		}
+	default:
+		// Several tenants and no user: no tenant is implied, so the first
+		// user cannot be placed. The wrapped *tenancy.AmbiguousTenantError
+		// lists the tenants for the caller.
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap resolve tenant: %w", err)
+	}
+
+	// 1b. The tenant's seven seeded risk categories (#1809). Idempotent,
+	//     so an existing tenant that already has them is unchanged.
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, tenantID); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap seed risk categories: %w", err)
 	}
 
 	// 2. users row keyed on (tenant_id, idp_issuer, idp_subject).
@@ -389,11 +569,50 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 	}, false, nil
 }
 
+// timingDummyHash is a password hash no login input is expected to match.
+// VerifyLocalLogin verifies against it when the user or credential is
+// missing, so an unknown email or tenant costs the same argon2id work as a
+// wrong password and response time is no enumeration oracle (#1727).
+//
+// A failed build is logged and returns "": VerifyLocalLogin then fails
+// every login closed rather than answering a fast 401 (#1913).
+var timingDummyHash = sync.OnceValue(func() string {
+	return buildTimingDummyHash(password.Hash)
+})
+
+func buildTimingDummyHash(hash func(string) (string, error)) string {
+	h, err := hash("atlas-login-timing-equalizer")
+	if err != nil {
+		slog.Error("users: build login timing-equalizer hash; local login fails closed", "err", err)
+		return ""
+	}
+	return h
+}
+
+// errTimingEqualizerUnavailable fails a login closed when the dummy hash
+// could not be built: answering 401 without the argon2id work would make
+// response time an account-existence oracle.
+var errTimingEqualizerUnavailable = errors.New("users: login timing equalizer unavailable")
+
+// burnPasswordVerify spends one password verification against dummyHash
+// and discards the result.
+func burnPasswordVerify(plaintext, dummyHash string) {
+	_, _ = password.Verify(plaintext, dummyHash)
+}
+
 // VerifyLocalLogin returns the User on a successful (tenant, email, password)
-// triple. Returns ErrInvalidCredentials when either no user exists or the
-// password does not verify — never both. The caller (HTTP login handler)
+// triple. Returns ErrInvalidCredentials when no user exists, the password
+// does not verify, or the user is deactivated. The caller (HTTP login handler)
 // surfaces 401 on this sentinel.
+//
+// Without the timing-equalizer hash every login fails closed with
+// errTimingEqualizerUnavailable, before any lookup, so known and unknown
+// accounts still answer alike (#1913).
 func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email, plaintextPassword string) (User, error) {
+	dummyHash := timingDummyHash()
+	if dummyHash == "" {
+		return User{}, errTimingEqualizerUnavailable
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return User{}, err
@@ -408,6 +627,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	row, err := q.GetUserByEmail(ctx, dbx.GetUserByEmailParams{TenantID: tIDU, Email: email})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
@@ -415,6 +635,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	cred, err := q.GetLocalCredentialByUserID(ctx, dbx.GetLocalCredentialByUserIDParams{TenantID: tIDU, UserID: row.ID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
@@ -423,10 +644,45 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	if err != nil {
 		return User{}, err
 	}
-	if !ok {
+	// A deactivated user is refused only after the full verify, with the
+	// same sentinel, so status is no oracle by response or timing (#1912).
+	usr := userFromRow(row)
+	if !ok || !usr.CanSignIn() {
 		return User{}, ErrInvalidCredentials
 	}
-	return userFromRow(row), nil
+	return usr, nil
+}
+
+// CanSignIn reports whether the user may start a session. Admin
+// revoke-membership sets status='disabled'; SCIM deprovision sets
+// active=false. Either one refuses (#1912).
+func (u User) CanSignIn() bool {
+	return SignInAllowed(u.Status, u.Active)
+}
+
+// SignInAllowed is CanSignIn over the raw users columns, for auth paths that
+// hold a dbx row rather than a User (#1915).
+func SignInAllowed(status string, active bool) bool {
+	return status == "active" && active
+}
+
+// RevokeAccess revokes every live session and every API key the user owns
+// (api_keys.issued_by), inside the caller's transaction. Deactivation calls
+// it in the same transaction that disables the user (#1915). Keys with no
+// owner are untouched. The caller drops the keys from credstore memory after
+// commit.
+func RevokeAccess(ctx context.Context, q *dbx.Queries, tenantID, userID uuid.UUID) error {
+	tid := pgtype.UUID{Bytes: tenantID, Valid: true}
+	uid := pgtype.UUID{Bytes: userID, Valid: true}
+	if _, err := q.RevokeAllSCIMUserSessions(ctx, dbx.RevokeAllSCIMUserSessionsParams{
+		TenantID: tid, UserID: uid,
+	}); err != nil {
+		return fmt.Errorf("users: revoke sessions: %w", err)
+	}
+	if _, err := q.RevokeUserAPIKeys(ctx, dbx.RevokeUserAPIKeysParams{TenantID: tid, IssuedBy: uid}); err != nil {
+		return fmt.Errorf("users: revoke api keys: %w", err)
+	}
+	return nil
 }
 
 // GetByID returns the user under (tenant, id) or ErrNotFound.
@@ -460,6 +716,7 @@ type UpdateProfileInput struct {
 	ID          uuid.UUID
 	DisplayName string
 	TimeZone    string
+	Theme       string
 }
 
 // UpdateProfile writes the slice 108 PATCH /v1/me mutation. Returns the resulting
@@ -480,6 +737,7 @@ func (s *Store) UpdateProfile(ctx context.Context, in UpdateProfileInput) (User,
 		ID:          pgtype.UUID{Bytes: in.ID, Valid: true},
 		DisplayName: in.DisplayName,
 		TimeZone:    in.TimeZone,
+		Theme:       in.Theme,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -500,9 +758,11 @@ func userFromRow(row dbx.User) User {
 		Email:       row.Email,
 		DisplayName: row.DisplayName,
 		Status:      row.Status,
+		Active:      row.Active,
 		IdpIssuer:   row.IdpIssuer,
 		IdpSubject:  row.IdpSubject,
 		TimeZone:    row.TimeZone,
+		Theme:       row.Theme,
 		CreatedAt:   row.CreatedAt.Time,
 		UpdatedAt:   row.UpdatedAt.Time,
 	}

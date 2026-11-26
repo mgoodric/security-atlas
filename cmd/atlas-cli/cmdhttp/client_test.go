@@ -87,10 +87,15 @@ func TestClientReturnsDistinctInstances(t *testing.T) {
 		t.Fatalf("expected distinct *http.Client instances, got the same pointer: %p", c1)
 	}
 
-	t1, ok1 := c1.Transport.(*http.Transport)
-	t2, ok2 := c2.Transport.(*http.Transport)
+	g1, ok1 := c1.Transport.(*guard)
+	g2, ok2 := c2.Transport.(*guard)
 	if !ok1 || !ok2 {
-		t.Fatalf("expected *http.Transport on both clients (got %T and %T)", c1.Transport, c2.Transport)
+		t.Fatalf("expected *guard on both clients (got %T and %T)", c1.Transport, c2.Transport)
+	}
+	t1, ok1 := g1.next.(*http.Transport)
+	t2, ok2 := g2.next.(*http.Transport)
+	if !ok1 || !ok2 {
+		t.Fatalf("expected *http.Transport under both guards (got %T and %T)", g1.next, g2.next)
 	}
 	if t1 == t2 {
 		t.Fatalf("expected distinct *http.Transport instances, got the same pointer: %p", t1)

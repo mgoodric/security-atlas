@@ -14,6 +14,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/datadogauth"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/firingevents"
+	"github.com/mgoodric/security-atlas/connectors/datadog/internal/hostcapacity"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/monitors"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemrules"
 	"github.com/mgoodric/security-atlas/connectors/datadog/internal/siemsignals"
@@ -55,6 +56,12 @@ var (
 	newFiringAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) firingevents.API {
 		return firingevents.NewClient(hc, baseURL, apiKey, appKey)
 	}
+	// capacityCollect + newCapacityAPI are the #2935 seams: tests swap in a
+	// fake Datadog metrics query read.
+	capacityCollect = hostcapacity.Collect
+	newCapacityAPI  = func(hc *http.Client, baseURL, apiKey, appKey string) hostcapacity.API {
+		return hostcapacity.NewClient(hc, baseURL, apiKey, appKey)
+	}
 )
 
 // sdkPushClient is the narrow surface doRun consumes from sdk.Client.
@@ -72,6 +79,8 @@ type runFlags struct {
 	siemLookback      time.Duration
 	firingLookback    time.Duration
 	site              string
+	capacityScope     string
+	capacityControl   string
 }
 
 func newRunCmd() *cobra.Command {
@@ -114,13 +123,15 @@ time-series.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.monitorControl, "monitor-control", "scf:MON-01", "control_id to attach to monitoring.alert_config.v1 records")
-	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-01", "control_id to attach to datadog.siem_rule.v1 records")
-	cmd.Flags().StringVar(&f.siemSignalControl, "siem-signal-control", "scf:IRO-09", "control_id to attach to datadog.siem_signal.v1 records")
-	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-09", "control_id to attach to monitoring.alert_firing.v1 records")
+	cmd.Flags().StringVar(&f.monitorControl, "monitor-control", "scf:MON-02", "control_id to attach to monitoring.alert_config.v1 records")
+	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-02", "control_id to attach to datadog.siem_rule.v1 records")
+	cmd.Flags().StringVar(&f.siemSignalControl, "siem-signal-control", "scf:IRO-06", "control_id to attach to datadog.siem_signal.v1 records")
+	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-06", "control_id to attach to monitoring.alert_firing.v1 records")
 	cmd.Flags().DurationVar(&f.siemLookback, "siem-lookback", 24*time.Hour, "bounded look-back window for the SIEM signal-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().DurationVar(&f.firingLookback, "datadog-firing-lookback", 24*time.Hour, "bounded look-back window for the monitor alert-firing-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().StringVar(&f.site, "site", "", "Datadog site override (env: DATADOG_SITE; default datadoghq.com)")
+	cmd.Flags().StringVar(&f.capacityScope, "capacity-production-scope", "", "Datadog tag scope selecting production hosts, e.g. env:production; set it to read monitoring.host_capacity.v1 (needs the timeseries_query permission). Empty (the default) skips the surface")
+	cmd.Flags().StringVar(&f.capacityControl, "capacity-control", "", "control_id to attach to monitoring.host_capacity.v1 records; empty (the default) routes each record to every control that queries monitoring.host_capacity.v1 (#2924)")
 	return cmd
 }
 
@@ -130,7 +141,15 @@ func doRun(ctx context.Context, f runFlags) error {
 		return fmt.Errorf("auth: %w", err)
 	}
 
-	httpClient := &http.Client{Timeout: 20 * time.Second}
+	if f.capacityScope != "" {
+		if err := hostcapacity.CheckScope(f.capacityScope); err != nil {
+			return fmt.Errorf("--capacity-production-scope: %w", err)
+		}
+	}
+
+	// Every request carries both Datadog keys, so a redirect may not move
+	// them to another host or scheme.
+	httpClient := &http.Client{Timeout: 20 * time.Second, CheckRedirect: datadogauth.CheckRedirect}
 	sdkClient, err := newSDKClient(common.endpoint, common.token, sdkOpts()...)
 	if err != nil {
 		return fmt.Errorf("sdk client: %w", err)
@@ -171,9 +190,41 @@ func doRun(ctx context.Context, f runFlags) error {
 		return err
 	}
 
-	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d siem_signals=%d alert_firings=%d)\n",
-		pushed+siemPushed+signalPushed+firingPushed, f.environment, pushed, siemPushed, signalPushed, firingPushed)
+	capacityPushed, err := runCapacity(ctx, f, cred, httpClient, sdkClient)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("pushed %d records (vendor=datadog environment=%s: monitors=%d siem_rules=%d siem_signals=%d alert_firings=%d host_capacity=%d)\n",
+		pushed+siemPushed+signalPushed+firingPushed+capacityPushed, f.environment, pushed, siemPushed, signalPushed, firingPushed, capacityPushed)
 	return nil
+}
+
+// runCapacity collects + pushes host capacity (monitoring.host_capacity.v1,
+// #2935) for the hosts in --capacity-production-scope, one record per host.
+// It is skipped when the scope is empty: the surface needs the
+// timeseries_query permission, which keys made for the other surfaces lack.
+func runCapacity(ctx context.Context, f runFlags, cred datadogauth.Credential, httpClient *http.Client, sdkClient sdkPushClient) (int, error) {
+	if f.capacityScope == "" {
+		return 0, nil
+	}
+	api := newCapacityAPI(httpClient, cred.BaseURL(), cred.APIKey(), cred.AppKey())
+	hosts, err := capacityCollect(ctx, api, f.capacityScope, nil)
+	if err != nil {
+		return 0, fmt.Errorf("datadog capacity collect: %w", err)
+	}
+	pushed := 0
+	for _, h := range hosts {
+		rec, err := hostcapacity.Build(h, f.capacityScope, f.capacityControl, actorID("hostcapacity"), "datadog", f.environment)
+		if err != nil {
+			return pushed, fmt.Errorf("build capacity record %s: %w", h.HostName, err)
+		}
+		if err := pushOne(ctx, sdkClient, rec); err != nil {
+			return pushed, fmt.Errorf("push capacity %s: %w", h.HostName, err)
+		}
+		pushed++
+	}
+	return pushed, nil
 }
 
 // runFiring collects + pushes Datadog monitor alert-firing-history evidence

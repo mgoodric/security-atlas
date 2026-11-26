@@ -18,6 +18,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -60,16 +62,19 @@ type exceptionExportRow struct {
 	RequestedAt          time.Time
 	ApprovedBy           string // empty when null
 	ApprovedAt           string // RFC3339 when set
-	DeniedBy             string
-	DeniedAt             string
-	ActivatedBy          string
-	ActivatedAt          string
-	EffectiveFrom        string
-	ExpiresAt            time.Time
-	ExpiredAt            string
-	DurationDays         int64 // expires_at − requested_at, in days
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// SelfApproved marks an exception its requester approved under Allow
+	// self-approval (#2101).
+	SelfApproved  bool
+	DeniedBy      string
+	DeniedAt      string
+	ActivatedBy   string
+	ActivatedAt   string
+	EffectiveFrom string
+	ExpiresAt     time.Time
+	ExpiredAt     string
+	DurationDays  int64 // expires_at − requested_at, in days
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func NewExportHandler(pool *pgxpool.Pool) *ExportHandler {
@@ -244,6 +249,7 @@ func exceptionsExportHeader() []string {
 		"requested_at",
 		"approved_by",
 		"approved_at",
+		"self_approved",
 		"denied_by",
 		"denied_at",
 		"activated_by",
@@ -271,6 +277,7 @@ func exceptionsToRowIter(rows []exceptionExportRow) iter.Seq[[]string] {
 				r.RequestedAt.UTC().Format(time.RFC3339),
 				r.ApprovedBy,
 				r.ApprovedAt,
+				strconv.FormatBool(r.SelfApproved),
 				r.DeniedBy,
 				r.DeniedAt,
 				r.ActivatedBy,
@@ -328,6 +335,7 @@ func (h *ExportHandler) listExceptionsDirect(ctx context.Context, limit int) ([]
 			requested_at,
 			approved_by,
 			approved_at,
+			self_approved,
 			denied_by,
 			denied_at,
 			activated_by,
@@ -360,6 +368,7 @@ func (h *ExportHandler) listExceptionsDirect(ctx context.Context, limit int) ([]
 			requestedAt   time.Time
 			approvedBy    pgtype.Text
 			approvedAt    pgtype.Timestamptz
+			selfApproved  bool
 			deniedBy      pgtype.Text
 			deniedAt      pgtype.Timestamptz
 			activatedBy   pgtype.Text
@@ -374,7 +383,7 @@ func (h *ExportHandler) listExceptionsDirect(ctx context.Context, limit int) ([]
 			&id, &controlID, &status, &justification,
 			&compensating, &scopeCellPred,
 			&requestedBy, &requestedAt,
-			&approvedBy, &approvedAt,
+			&approvedBy, &approvedAt, &selfApproved,
 			&deniedBy, &deniedAt,
 			&activatedBy, &activatedAt,
 			&effectiveFrom, &expiresAt, &expiredAt,
@@ -391,6 +400,7 @@ func (h *ExportHandler) listExceptionsDirect(ctx context.Context, limit int) ([]
 			ScopeCellPredicate:   scopeCellPred,
 			RequestedBy:          requestedBy,
 			RequestedAt:          requestedAt,
+			SelfApproved:         selfApproved,
 			ExpiresAt:            expiresAt,
 			CreatedAt:            createdAt,
 			UpdatedAt:            updatedAt,
@@ -490,8 +500,14 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
+// exceptionsHasProgramRead reports whether the credential may read the
+// exceptions export: a tenant approver by its live roles
+// (authz.IsTenantApprover), as OPA reads it for admin and grc_engineer only.
+// #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which
+// counted a session's role claim (#2381) and admitted roles OPA refuses
+// here.
 func exceptionsHasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantApprover(c)
 }
 
 // ===== Counting writer / shared helpers =====

@@ -29,6 +29,16 @@ SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: LockOpenFrameworkScope :one
+-- The applicability carry-over's target (#2179): a draft or review revision
+-- of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+-- (approved, activated, superseded) or unknown revision.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1 AND id = $2
+  AND state IN ('draft', 'review')
+FOR UPDATE;
+
 -- name: ListFrameworkScopes :many
 -- Newest first. Caller filters by framework_version + state in the
 -- application layer because sqlc-static optional WHERE is noisy; the row
@@ -37,6 +47,15 @@ WHERE tenant_id = $1 AND id = $2;
 SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC;
+
+-- name: ListFrameworkScopesInReview :many
+-- #2457: the framework scopes waiting for approval, for GET /v1/approvals
+-- and its sidebar badge.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1
+  AND state = 'review'
 ORDER BY created_at DESC, id ASC;
 
 -- name: ListFrameworkScopesByFrameworkVersion :many
@@ -60,6 +79,9 @@ WHERE tenant_id = $1
 -- supplied timestamp. The row whose effective_from <= as_of AND (the row was
 -- not yet superseded at as_of OR was never superseded).
 -- ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
+-- A backdated effective_from counts here, for planning. A read pinned to a
+-- frozen audit period also requires activated_at <= frozen_at (#2078; see
+-- ListExcludedRequirementsAsOfForExport).
 SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1
@@ -86,10 +108,16 @@ RETURNING *;
 -- name: SubmitFrameworkScope :one
 -- AC-6: draft -> review. Guarded so callers can never re-submit an already
 -- under-review row by accident (would still be valid but masks bugs).
+-- #2101: records the submitter as a person, so approval can compare. Also
+-- re-submits a review row whose submitter is unrecorded (NULL) or a session
+-- id ('jwt:<token id>'), which approval refuses because it names no person.
 UPDATE framework_scopes
 SET state = 'review',
+    submitted_by = sqlc.arg('submitted_by'),
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND state = 'draft'
+WHERE tenant_id = $1 AND id = $2
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
 RETURNING *;
 
 -- name: ApproveFrameworkScope :one
@@ -104,6 +132,7 @@ SET state = 'approved',
     predicate_hash_at_approval = predicate_hash,
     approval_evidence_file_url = $4,
     approval_evidence_file_hash = $5,
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'review'
 RETURNING *;
@@ -113,7 +142,8 @@ RETURNING *;
 -- (timestamptz). The application supersedes the prior `activated` row in
 -- the same transaction by calling SupersedePreviousActivated below; both
 -- statements run inside one tx so the partial unique index never sees
--- two `activated` rows at once.
+-- two `activated` rows at once. activated_at is stamped by the
+-- framework_scopes_stamp_activated_at trigger (#2078).
 UPDATE framework_scopes
 SET state = 'activated',
     effective_from = $3,
@@ -136,9 +166,206 @@ WHERE tenant_id = $1
   AND id <> $3
   AND state = 'activated';
 
+-- name: LockFrameworkScopeFreeze :exec
+-- Serialises framework-scope activation against audit-period freeze on one
+-- (tenant, framework version) for the rest of the transaction (#2078).
+-- Activate takes it before reading the latest freeze; Freeze takes it
+-- before writing frozen_at. Namespace 10 is
+-- advisorylock.FrameworkScopeFreeze.
+SELECT pg_advisory_xact_lock(10, hashtext(sqlc.arg(tenant_id)::uuid::text || '/' || sqlc.arg(framework_version_id)::uuid::text));
+
+-- name: GetLatestFrozenAtForFrameworkVersion :one
+-- The latest frozen_at of the tenant's frozen audit periods on a framework
+-- version, or NULL when none is frozen. Activate refuses an effective_from
+-- at or before it (#2078).
+SELECT max(frozen_at)::timestamptz AS frozen_at
+FROM audit_periods
+WHERE tenant_id = $1
+  AND framework_version_id = $2
+  AND status = 'frozen';
+
 -- name: DeleteFrameworkScope :exec
 -- Used by tests + cleanup paths. Production deployments will rarely delete
 -- a scope (supersession is the lifecycle exit); the row is preserved as
 -- audit trail.
 DELETE FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
+
+-- ===== framework_scope_workflow_log (issue #1786) =====
+--
+-- Append-only history of framework_scopes changes. Written by
+-- internal/frameworkscope.Store in the same tx as the change it records.
+-- No UPDATE or DELETE query exists, and atlas_app holds no grant for one.
+
+-- name: InsertFrameworkScopeWorkflowLog :exec
+INSERT INTO framework_scope_workflow_log (
+    tenant_id, framework_scope_id, action, from_state, to_state, before, after, actor
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+);
+
+-- name: ListFrameworkScopeWorkflowLog :many
+SELECT * FROM framework_scope_workflow_log
+WHERE tenant_id = $1 AND framework_scope_id = $2
+ORDER BY occurred_at, id;
+
+-- ===== framework_scope_applicability (issue #1787) =====
+--
+-- Statement of Applicability decisions on a framework-scope revision. The
+-- guard + reset triggers on the table enforce the workflow; these queries
+-- only read and upsert.
+
+-- name: GetFrameworkRequirementInVersion :one
+SELECT id, code, title
+FROM framework_requirements
+WHERE id = $1 AND framework_version_id = $2;
+
+-- name: GetFrameworkScopeApplicability :one
+SELECT *
+FROM framework_scope_applicability
+WHERE tenant_id = $1 AND framework_scope_id = $2 AND framework_requirement_id = $3;
+
+-- name: UpsertFrameworkScopeApplicability :one
+INSERT INTO framework_scope_applicability (
+    tenant_id, framework_scope_id, framework_requirement_id,
+    decision, justification, implementation_ref, updated_by
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (framework_scope_id, framework_requirement_id) DO UPDATE
+SET decision = EXCLUDED.decision,
+    justification = EXCLUDED.justification,
+    implementation_ref = EXCLUDED.implementation_ref,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListFrameworkScopeApplicability :many
+-- Every requirement of the framework version, with the revision's decision
+-- when one exists. A NULL framework_scope_id (no revision in force) returns
+-- every requirement undecided.
+SELECT r.id AS requirement_id,
+       r.code,
+       r.title,
+       a.decision,
+       a.justification,
+       a.implementation_ref,
+       a.updated_by,
+       a.updated_at
+FROM framework_requirements r
+LEFT JOIN framework_scope_applicability a
+       ON a.framework_requirement_id = r.id
+      AND a.tenant_id = @tenant_id
+      AND a.framework_scope_id = sqlc.narg(framework_scope_id)
+WHERE r.framework_version_id = @framework_version_id
+ORDER BY r.code, r.id;
+
+-- name: GetActivatedExclusionForRequirement :one
+-- The exclusion, if any, the tenant's ACTIVATED scope revision records for a
+-- requirement (#1788). Per-requirement coverage reads report such a
+-- requirement as `excluded` instead of uncovered. No row means the
+-- requirement is applicable or undecided, or no revision is activated.
+SELECT fsa.framework_scope_id,
+       fsa.justification,
+       fsa.implementation_ref,
+       fsa.updated_at
+FROM framework_scope_applicability fsa
+JOIN framework_scopes fs
+  ON fs.id = fsa.framework_scope_id
+ AND fs.tenant_id = fsa.tenant_id
+WHERE fsa.tenant_id = @tenant_id
+  AND fsa.framework_requirement_id = @framework_requirement_id
+  AND fsa.decision = 'excluded'
+  AND fs.state = 'activated';
+
+-- name: ListFrameworkScopeContradictions :many
+-- Requirements a scope revision excludes that still have passing controls
+-- behind them (#1789). A requirement is in contradiction when it is excluded
+-- on this revision and at least one active tenant control reaches it through
+-- the crosswalk with a passing latest evaluation. Computed on read.
+--
+-- The crosswalk is read through effective_fw_to_scf_edges, the one place
+-- edge eligibility is decided (#1796). Tenant overlay edges (#1735) join
+-- that view, so they count as a path here with no change to this query.
+-- "Latest evaluation" is per control across scope cells, as in
+-- FrameworkPosture.
+--
+-- "Active control" here is lifecycle_state = 'active' AND superseded_by IS
+-- NULL, deliberately stricter than FrameworkPosture (dashboard.sql), which
+-- counts any non-superseded control: posture measures coverage by any
+-- defined control, a contradiction claims a working control sits behind an
+-- exclusion (#1789 D3). Do not align either one to the other. See GLOSSARY
+-- "Active control".
+SELECT DISTINCT fsa.framework_requirement_id
+FROM framework_scope_applicability fsa
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = fsa.framework_requirement_id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = @tenant_id
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+JOIN LATERAL (
+    SELECT ce.result
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = @tenant_id
+      AND ce.control_id = c.id
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
+    ORDER BY ce.evaluated_at DESC, ce.id DESC
+    LIMIT 1
+) latest ON latest.result = 'pass'
+WHERE fsa.tenant_id = @tenant_id
+  AND fsa.framework_scope_id = @framework_scope_id
+  AND fsa.decision = 'excluded';
+
+-- name: GetFrameworkVersionLabel :one
+-- The framework name, slug and version string that title an SoA export
+-- (#1791). Global catalog rows and the caller tenant's own rows are visible.
+SELECT f.name AS framework_name,
+       f.slug AS framework_slug,
+       fv.version AS framework_version
+FROM framework_versions fv
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE fv.id = @framework_version_id
+  AND (fv.tenant_id IS NULL OR fv.tenant_id = @tenant_id);
+
+-- name: ListFrameworkVersionLinkedControls :many
+-- The tenant controls behind each requirement of a framework version, for
+-- the SoA export's linked-controls column (#1791). The crosswalk and the
+-- "active control" rule are the ones ListFrameworkScopeContradictions uses,
+-- so an exported contradiction always lists the control behind it.
+SELECT DISTINCT e.framework_requirement_id AS requirement_id,
+       c.bundle_id
+FROM framework_requirements r
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = r.id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = @tenant_id
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+WHERE r.framework_version_id = @framework_version_id
+ORDER BY e.framework_requirement_id, c.bundle_id;
+
+-- name: GetFrameworkScopeLatestApprover :one
+-- The actor of a revision's most recent approval, for the SoA export
+-- (#1791). approver_user_id holds it only when the credential id is a UUID;
+-- the workflow log always does.
+SELECT actor
+FROM framework_scope_workflow_log
+WHERE tenant_id = @tenant_id
+  AND framework_scope_id = @framework_scope_id
+  AND action = 'approve'
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;
+
+-- name: ListFrameworkVersionMigrationsInto :many
+-- Every version-migration queue row (ADR 0019) whose target is one framework
+-- version, for the applicability carry-over (#1793). Catalog rows: no tenant.
+SELECT * FROM framework_version_migrations
+WHERE to_version_id = $1
+ORDER BY from_version_id, match_kind, requirement_code;

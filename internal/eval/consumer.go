@@ -26,11 +26,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/protobuf/proto"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -143,12 +147,13 @@ func (s *Scheduler) SweepOnce(ctx context.Context) (int, error) {
 			s.logger.Error("eval scheduler: tenant ctx", "tenant", tenantID, "err", err.Error())
 			continue
 		}
+		// EvaluateAll keeps going past a failing control (#1859), so n counts
+		// the controls that did evaluate even when err joins the failures.
 		n, err := s.newEngine().EvaluateAll(tctx, TriggerScheduled, FarFuture)
+		total += n
 		if err != nil {
 			s.logger.Error("eval scheduler: evaluate tenant", "tenant", tenantID, "err", err.Error())
-			continue
 		}
-		total += n
 	}
 	return total, nil
 }
@@ -233,8 +238,10 @@ func (s *IngestSubscriber) Start(ctx context.Context) error {
 // tenant id rides on the message header (slice 015 sets
 // HeaderCredentialTenant from the authenticated credential — the proto
 // EvidenceRecord itself carries no tenant). Ack semantics: Ack on success or
-// on a non-retryable decode failure (a poison message would redeliver
-// forever); Nak on a transient evaluation error so the redelivery retries.
+// on an unknown control; Term a poison message or a control that cannot be
+// evaluated as stored (ErrUnevaluable), either of which would redeliver
+// forever; Nak on a transient evaluation error so the redelivery retries,
+// backing off per delivery (streambuf.RedeliveryDelay).
 // EvaluateControl is idempotent, so a redelivery just appends another
 // identical-computed-columns row — never corruption.
 func (s *IngestSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
@@ -253,7 +260,7 @@ func (s *IngestSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	controlID, err := uuid.Parse(rec.ControlId)
 	if err != nil {
 		// control_id is a free-form string in the SDK (may be an SCF anchor
-		// like "scf:VPM-04"). When it is not a UUID there is no control row
+		// like "scf:VPM-06"). When it is not a UUID there is no control row
 		// to evaluate by id — slice 015's ledger writer still stores the
 		// record under control_ref. Ack and move on; the scheduled sweep
 		// picks up anchor-ref controls via their UUID.
@@ -275,14 +282,54 @@ func (s *IngestSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 			_ = msg.Ack()
 			return
 		}
+		if errors.Is(err, ErrUnevaluable) {
+			// The control as stored cannot be evaluated: a redelivery reads
+			// the same rows and fails the same way, and MaxDeliver is
+			// unlimited (#3005). The next ingest or the scheduled sweep
+			// evaluates it again once the control is fixed.
+			countUnevaluable(tctx)
+			s.logger.Warn("eval subscriber: control unevaluable; terming",
+				"tenant", tenantID, "control", controlID, "err", err.Error())
+			_ = msg.Term()
+			return
+		}
 		s.logger.Warn("eval subscriber: evaluate; will redeliver", "control", controlID, "err", err.Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if err := msg.Ack(); err != nil {
 		s.logger.Warn("eval subscriber: ack failed", "err", err.Error())
 	}
 }
+
+// unevaluableControls counts ingest messages the subscriber termed because
+// the control cannot be evaluated as stored (#3005). The OTel counter is
+// created on first use, after main has wired the MeterProvider; the
+// in-process count lets tests assert it without a collector.
+var unevaluableControls struct {
+	once    sync.Once
+	counter metric.Int64Counter
+	n       atomic.Uint64
+}
+
+func countUnevaluable(ctx context.Context) {
+	unevaluableControls.n.Add(1)
+	unevaluableControls.once.Do(func() {
+		c, err := otel.Meter("github.com/mgoodric/security-atlas/internal/eval").Int64Counter(
+			"atlas.eval.control_unevaluable",
+			metric.WithDescription("Ingest messages the eval subscriber termed because the control cannot be evaluated as stored"))
+		if err == nil {
+			unevaluableControls.counter = c
+		}
+	})
+	if c := unevaluableControls.counter; c != nil {
+		c.Add(ctx, 1)
+	}
+}
+
+// UnevaluableControls returns how many ingest messages the eval subscriber
+// has termed as unevaluable since the process started.
+func UnevaluableControls() uint64 { return unevaluableControls.n.Load() }
 
 // discardWriter is a no-op io.Writer for the default discard logger.
 type discardWriter struct{}

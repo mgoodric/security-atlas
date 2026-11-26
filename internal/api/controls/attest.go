@@ -18,7 +18,8 @@
 //     credstore.Credential to the request context. Missing → 401.
 //   - AuthZ (AC-5): POST requires the caller to hold the control's
 //     `owner_role` (declared in the slice-009 bundle manifest) via
-//     credstore.Credential.HasOwnerRole. IsAdmin is a wildcard.
+//     authz.HasOwnerRole. IsAdmin is a wildcard; a user session counts
+//     its live user_roles, not its role claim (#2523).
 //   - Tenant boundary: GetControlByID is parameterized on the tenant
 //     from the credential; cross-tenant control ids resolve to 404
 //     (we map pgx.ErrNoRows → 404 without disclosing existence).
@@ -28,6 +29,12 @@
 //     which is set only at credential issue time.
 //   - Audit (AC-6): the ingest.Service.Process call writes one
 //     evidence_audit_log row per attempt, keyed by credential id.
+//
+// #2111: an attestation carries a result, pass or fail, and a fail needs a
+// fail_reason. The record's result is the submitted one, not a hard-coded
+// pass. After the record lands the handler evaluates the control at once,
+// because this path writes the ledger directly and never crosses the
+// message bus the ingest subscriber listens on.
 package controls
 
 import (
@@ -38,7 +45,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -51,18 +61,21 @@ import (
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // AttestationKind is the platform evidence_kind used for manual
-// attestations. Slice 014 ships the schema at this id at boot
-// (`manual.attestation/1.1.0.json`).
+// attestations. Slice 014 ships the schema at this id at boot; #2111's
+// `manual.attestation/1.2.0.json` adds result + fail_reason.
 const (
-	AttestationKind    = "manual.attestation.v1"
-	AttestationVersion = "1.1.0"
+	AttestationKind    = attestation.Kind
+	AttestationVersion = "1.2.0"
 	// IngestionPath is the ledger-row tag identifying records that flow
 	// through this handler. Canvas §4.7 enumerates the allowed values
 	// (push/pull/subscribe/webhook/manual_upload); slice 002's
@@ -92,6 +105,10 @@ type AttestHandler struct {
 	// `go test ./...` unit surface with no Postgres pool (ADR-0007 /
 	// P0-409-1). NewAttestHandler's signature is unchanged (P0-409-2).
 	reader controlByIDReader
+
+	// evaluator, when set, evaluates the control right after an
+	// attestation lands (#2111). Nil leaves evaluation to the scheduler.
+	evaluator controlEvaluator
 
 	// maxBodyBytes caps the JSON request body. Attestation payloads are
 	// schema-validated and small; the cap is just a belt against a
@@ -144,6 +161,107 @@ func (p poolControlReader) ControlByID(ctx context.Context, tenantID string, id 
 		return nil
 	})
 	return out, err
+}
+
+// idempotencyReader looks up an attestation already on the ledger by its
+// idempotency key (#2509). poolControlReader implements it; the contract
+// test's stub reader does not need to.
+type idempotencyReader interface {
+	AttestationByIdempotencyKey(ctx context.Context, tenantID string, controlID uuid.UUID, idemKey string) (priorAttestation, bool, error)
+}
+
+// priorAttestation is the record already under an idempotency key.
+// superseded reports that the control has a later attestation than it,
+// under the engine's latest-attestation order (#2520).
+type priorAttestation struct {
+	observedAt time.Time
+	superseded bool
+}
+
+// AttestationByIdempotencyKey returns the tenant's record under idemKey,
+// and whether a later attestation for controlID exists, inside one
+// tenant-GUC read tx. found is false when there is none.
+func (p poolControlReader) AttestationByIdempotencyKey(ctx context.Context, tenantID string, controlID uuid.UUID, idemKey string) (priorAttestation, bool, error) {
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return priorAttestation{}, false, fmt.Errorf("parse tenant: %w", err)
+	}
+	var (
+		out   priorAttestation
+		found bool
+	)
+	err = pgx.BeginTxFunc(ctx, p.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if terr := tenancy.ApplyTenant(ctx, tx); terr != nil {
+			return terr
+		}
+		q := dbx.New(tx)
+		rec, gerr := q.GetEvidenceRecordByIdempotency(ctx, dbx.GetEvidenceRecordByIdempotencyParams{
+			TenantID:       pgtype.UUID{Bytes: tenantUUID, Valid: true},
+			IdempotencyKey: &idemKey,
+		})
+		if errors.Is(gerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if gerr != nil {
+			return gerr
+		}
+		// ingested_at is NOT NULL DEFAULT now() on evidence_records, so a
+		// ledger row always carries it; the engine's zero fallback in
+		// attestedAt is for fixtures only (#2520).
+		if !rec.IngestedAt.Valid {
+			return errors.New("evidence record has no ingested_at")
+		}
+		observed, ingested := rec.ObservedAt.Time.UTC(), rec.IngestedAt.Time.UTC()
+		attested := observed
+		if ingested.Before(observed) {
+			attested = ingested
+		}
+		newer, eerr := q.ExistsAttestationAfter(ctx, dbx.ExistsAttestationAfterParams{
+			TenantID:     pgtype.UUID{Bytes: tenantUUID, Valid: true},
+			ControlID:    pgtype.UUID{Bytes: controlID, Valid: true},
+			ControlRef:   controlID.String(),
+			EvidenceKind: AttestationKind,
+			ID:           rec.ID,
+			AttestedAt:   pgtype.Timestamptz{Time: attested, Valid: true},
+			IngestedAt:   pgtype.Timestamptz{Time: ingested, Valid: true},
+			IDText:       uuid.UUID(rec.ID.Bytes).String(),
+		})
+		if eerr != nil {
+			return eerr
+		}
+		out, found = priorAttestation{observedAt: observed, superseded: newer}, true
+		return nil
+	})
+	return out, found, err
+}
+
+// attestRetryWindow is how long a server-keyed attestation dedupes: a
+// retry of the same body inside one window returns the first receipt, and
+// the same body after it is a new attestation (#2509).
+const attestRetryWindow = 5 * time.Minute
+
+// attestMaxFutureSkew is how far ahead of server time a client-supplied
+// observed_at may be (#2509): enough for ordinary clock drift, far short
+// of ingest's MaxObservedAtSkew.
+const attestMaxFutureSkew = 5 * time.Minute
+
+// controlEvaluator is the slice-012 engine call the handler runs after an
+// attestation: the same EvaluateControl the ingest subscriber, scheduler
+// and Evaluate now run.
+type controlEvaluator interface {
+	EvaluateControl(ctx context.Context, controlID uuid.UUID, trigger string, asOf time.Time) (int, error)
+}
+
+// attestEvaluateTimeout bounds the post-attestation evaluation. It matches
+// Evaluate now's bound (#2110); a slower evaluation leaves the record in
+// place and the next scheduled run picks the control up.
+const attestEvaluateTimeout = 30 * time.Second
+
+// WithEvaluator makes the handler evaluate the control after each
+// attestation it records (#2111).
+func (h *AttestHandler) WithEvaluator(e controlEvaluator) *AttestHandler {
+	h.evaluator = e
+	return h
 }
 
 // ArtifactUploader is the slice-036 surface this handler depends on. The
@@ -222,6 +340,11 @@ type attestSubmitRequest struct {
 	ArtifactID      string         `json:"artifact_id,omitempty"`
 	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
 	ObservedAt      string         `json:"observed_at,omitempty"`
+	// Result is "pass" or "fail" (#2111). Absent means pass, which is what
+	// every attestation before 1.2.0 was.
+	Result string `json:"result,omitempty"`
+	// FailReason is required when Result is "fail" and ignored otherwise.
+	FailReason string `json:"fail_reason,omitempty"`
 }
 
 type attestSubmitResponse struct {
@@ -231,6 +354,12 @@ type attestSubmitResponse struct {
 	CredentialID string `json:"credential_id"`
 	Deduplicated bool   `json:"deduplicated"`
 	PayloadURI   string `json:"payload_uri,omitempty"`
+	// Result is the outcome recorded, pass or fail (#2111).
+	Result string `json:"result"`
+	// Evaluated reports whether the control was evaluated after the record
+	// landed. False means the evaluation failed or is not wired; the
+	// scheduled run will pick the control up.
+	Evaluated bool `json:"evaluated"`
 }
 
 type attestErrorBody struct {
@@ -293,7 +422,7 @@ func (h *AttestHandler) AttestForm(w http.ResponseWriter, r *http.Request) {
 		OwnerRole:              row.OwnerRole,
 		FreshnessClass:         row.FreshnessClass,
 		ManualEvidenceSchema:   schemaMap,
-		CallerCanAttest:        cred.HasOwnerRole(row.OwnerRole),
+		CallerCanAttest:        authz.HasOwnerRole(cred, row.OwnerRole),
 		PlatformSchemaKind:     AttestationKind,
 		PlatformSchemaVersion:  AttestationVersion,
 		PlatformSchemaRequires: []string{"attestor", "statement"},
@@ -330,6 +459,36 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		writeAttestError(w, http.StatusBadRequest, "statement is required")
 		return
 	}
+	result, failReason, rerr := attestResult(req.Result, req.FailReason)
+	if rerr != nil {
+		writeAttestError(w, http.StatusBadRequest, rerr.Error())
+		return
+	}
+
+	// Microsecond precision: the ledger stores observed_at as timestamptz,
+	// and a retry that reuses a stored observed_at must hash the same.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	observed := now
+	if req.ObservedAt != "" {
+		parsed, perr := time.Parse(time.RFC3339Nano, req.ObservedAt)
+		if perr != nil {
+			parsed, perr = time.Parse(time.RFC3339, req.ObservedAt)
+			if perr != nil {
+				writeAttestError(w, http.StatusBadRequest, "observed_at must be RFC3339: "+perr.Error())
+				return
+			}
+		}
+		// #2509: a future-dated attestation would outvote every honest
+		// later one until its date passed. Backdating only makes it lose,
+		// so it stays allowed (within ingest's MaxObservedAtSkew).
+		if parsed.After(now.Add(attestMaxFutureSkew)) {
+			writeAttestError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("observed_at %s is in the future; at most %s ahead of server time is allowed",
+					parsed.UTC().Format(time.RFC3339), attestMaxFutureSkew))
+			return
+		}
+		observed = parsed
+	}
 
 	// Pre-DB path: short-circuit for the unit-test branches that don't
 	// configure a read path. The handler shouldn't 500 just because tests
@@ -354,7 +513,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// AC-5: owner-role gate. Admins satisfy any role (wildcard).
-	if !cred.HasOwnerRole(row.OwnerRole) {
+	if !authz.HasOwnerRole(cred, row.OwnerRole) {
 		writeAttestError(w, http.StatusForbidden,
 			fmt.Sprintf("caller credential does not hold owner_role %q for this control", row.OwnerRole))
 		return
@@ -401,25 +560,24 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		payloadURI = uri
 	}
 
-	// Idempotency key default — a deterministic key over the inputs so
-	// retries from the browser don't double-write while still allowing
-	// the caller to opt in to their own key.
-	idemKey := req.IdempotencyKey
-	if idemKey == "" {
-		idemKey = deriveIdempotencyKey(cred.UserID, id.String(), body)
+	// Idempotency key default (#2509): the inputs plus the retry window
+	// the request falls in. A retry of the same body inside the window gets
+	// the same key and deduplicates; the same text attested again later
+	// gets a new key and is recorded. A caller may send its own key.
+	idemKey, prior, found, kerr := h.resolveIdempotencyKey(ctx, cred.TenantID, cred.UserID, id, body, req.IdempotencyKey, now)
+	if errors.Is(kerr, errAttestKeyChainExhausted) {
+		writeAttestError(w, http.StatusConflict, kerr.Error())
+		return
 	}
-
-	observed := time.Now().UTC()
-	if req.ObservedAt != "" {
-		parsed, perr := time.Parse(time.RFC3339Nano, req.ObservedAt)
-		if perr != nil {
-			parsed, perr = time.Parse(time.RFC3339, req.ObservedAt)
-			if perr != nil {
-				writeAttestError(w, http.StatusBadRequest, "observed_at must be RFC3339: "+perr.Error())
-				return
-			}
-		}
-		observed = parsed
+	if kerr != nil {
+		writeAttestError(w, http.StatusInternalServerError, "idempotency lookup: "+kerr.Error())
+		return
+	}
+	// The server stamps observed_at when the body has none, so a retry
+	// would carry a new time and hash differently. Reuse the first
+	// request's observed_at so the retry deduplicates instead of 409ing.
+	if req.ObservedAt == "" && found {
+		observed = prior
 	}
 
 	// Build the manual.attestation.v1 payload. actor_type=human and
@@ -428,6 +586,10 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{
 		"attestor":  cred.UserID,
 		"statement": req.Statement,
+		"result":    result,
+	}
+	if failReason != "" {
+		payload["fail_reason"] = failReason
 	}
 	if req.SupportingURI != "" {
 		payload["supporting_uri"] = req.SupportingURI
@@ -451,7 +613,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 			Values: []string{row.OwnerRole},
 		}},
 		ObservedAt: timestamppb.New(observed),
-		Result:     evidencev1.Result_RESULT_PASS,
+		Result:     attestResultProto(result),
 		Payload:    payloadStruct,
 		SourceAttribution: &evidencev1.SourceAttribution{
 			ActorType: "human",
@@ -471,7 +633,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	pathed := h.ingest.WithPath(IngestionPath)
 	receipt, _, perr := pathed.Process(r.Context(), rec, cred)
 	if perr != nil {
-		writeAttestError(w, ingestErrorToStatus(perr), perr.Error())
+		writeIngestError(w, perr)
 		return
 	}
 	out := attestSubmitResponse{
@@ -481,15 +643,63 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		CredentialID: receipt.CredentialID,
 		Deduplicated: receipt.Deduplicated,
 		PayloadURI:   payloadURI,
+		Result:       result,
 	}
 	status := http.StatusCreated
 	if receipt.Deduplicated {
+		// A replay wrote nothing; the first request already evaluated.
 		status = http.StatusOK
+	} else {
+		out.Evaluated = h.evaluateAfterAttest(r.Context(), id)
 	}
 	writeAttestJSON(w, status, out)
 }
 
 // ----- helpers -----
+
+// attestResult normalises the submitted result (#2111). An empty result is
+// a pass. A fail needs a non-blank fail_reason; a pass drops any reason
+// sent with it. The 1.2.0 schema enforces the same rule on the ledger
+// side; checking here gives the caller a plain 400 before anything is read.
+func attestResult(result, failReason string) (string, string, error) {
+	switch result {
+	case "", eval.ResultPass:
+		return eval.ResultPass, "", nil
+	case eval.ResultFail:
+		reason := strings.TrimSpace(failReason)
+		if reason == "" {
+			return "", "", errors.New("fail_reason is required when result is fail")
+		}
+		return eval.ResultFail, reason, nil
+	}
+	return "", "", fmt.Errorf("result must be %q or %q", eval.ResultPass, eval.ResultFail)
+}
+
+func attestResultProto(result string) evidencev1.Result {
+	if result == eval.ResultFail {
+		return evidencev1.Result_RESULT_FAIL
+	}
+	return evidencev1.Result_RESULT_PASS
+}
+
+// evaluateAfterAttest evaluates the control once the attestation is on the
+// ledger, so the control page shows the new state without waiting for the
+// scheduled run. The attestation is already recorded, so a failed
+// evaluation is logged and reported as evaluated=false, never as an error.
+// It runs detached from the request's cancellation, bounded by
+// attestEvaluateTimeout.
+func (h *AttestHandler) evaluateAfterAttest(ctx context.Context, controlID uuid.UUID) bool {
+	if h.evaluator == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), attestEvaluateTimeout)
+	defer cancel()
+	if _, err := h.evaluator.EvaluateControl(ctx, controlID, eval.TriggerIngest, eval.FarFuture); err != nil {
+		slog.WarnContext(ctx, "evaluate control after attestation", "control_id", controlID.String(), "error", err)
+		return false
+	}
+	return true
+}
 
 // isManualImplementation returns true for manual_attested / manual_periodic.
 // Bundles declaring automated / semi_automated cannot be attested via this
@@ -520,17 +730,77 @@ func decodeJSONBObject(b []byte) (map[string]any, error) {
 }
 
 // deriveIdempotencyKey produces a deterministic key for retries. The
-// caller-supplied request body bytes are sha256'd along with the user
-// and control id so two identical attestations within milliseconds
-// deduplicate, but any field-level change produces a fresh key.
-func deriveIdempotencyKey(userID, controlID string, body []byte) string {
+// caller-supplied request body bytes are sha256'd along with the user,
+// the control id and the start of the retry window, so identical requests
+// inside one window deduplicate, while any field-level change, or the same
+// body in a later window, produces a fresh key (#2509).
+func deriveIdempotencyKey(userID, controlID string, body []byte, window time.Time) string {
 	h := sha256.New()
 	h.Write([]byte(userID))
 	h.Write([]byte{0})
 	h.Write([]byte(controlID))
 	h.Write([]byte{0})
 	h.Write(body)
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.FormatInt(window.Unix(), 10)))
 	return "attest-" + hex.EncodeToString(h.Sum(nil))[:32]
+}
+
+// attestMaxKeyGenerations bounds how far one server-derived key steps
+// inside a retry window (#2520). Each step needs a newer attestation
+// between two identical bodies, so no person submitting by hand reaches it.
+const attestMaxKeyGenerations = 32
+
+// errAttestKeyChainExhausted is a keyless caller repeating one body past
+// attestMaxKeyGenerations in a window. The caller can reach it, so it is a
+// 409 telling them to send their own key, not a 500.
+var errAttestKeyChainExhausted = fmt.Errorf("the same attestation was repeated more than %d times in one %s window without an idempotency_key; send an idempotency_key with each attestation", attestMaxKeyGenerations, attestRetryWindow)
+
+// resolveIdempotencyKey picks the key the attestation is recorded under,
+// and returns the observed_at of the record already under it, if any.
+//
+// A client-supplied key is used as-is and dedupes strictly. A
+// server-derived key dedupes a retry, but not a repeat that a later
+// attestation has overtaken (#2520): keyless fail, pass, fail inside one
+// window would otherwise map the second fail onto the first, skip
+// evaluation and leave the control passing. While the record under the
+// key is superseded, the key steps to its next generation (key.1, key.2,
+// ...); the first generation with no record, or whose record is still the
+// latest, is used. A retry of a stepped request walks the same chain and
+// stops on the same generation, so it still dedupes.
+//
+// Without a reader that can look keys up (unit tests) it reports no prior
+// record, and a retry falls back to ingest's 409.
+func (h *AttestHandler) resolveIdempotencyKey(ctx context.Context, tenantID, userID string, controlID uuid.UUID, body []byte, clientKey string, now time.Time) (string, time.Time, bool, error) {
+	lr, canLookup := h.reader.(idempotencyReader)
+	if clientKey != "" {
+		if !canLookup {
+			return clientKey, time.Time{}, false, nil
+		}
+		prior, found, err := lr.AttestationByIdempotencyKey(ctx, tenantID, controlID, clientKey)
+		return clientKey, prior.observedAt, found, err
+	}
+	base := deriveIdempotencyKey(userID, controlID.String(), body, now.Truncate(attestRetryWindow))
+	if !canLookup {
+		return base, time.Time{}, false, nil
+	}
+	for gen := 0; gen < attestMaxKeyGenerations; gen++ {
+		key := base
+		if gen > 0 {
+			key = base + "." + strconv.Itoa(gen)
+		}
+		prior, found, err := lr.AttestationByIdempotencyKey(ctx, tenantID, controlID, key)
+		if err != nil {
+			return "", time.Time{}, false, err
+		}
+		if !found {
+			return key, time.Time{}, false, nil
+		}
+		if !prior.superseded {
+			return key, prior.observedAt, true, nil
+		}
+	}
+	return "", time.Time{}, false, errAttestKeyChainExhausted
 }
 
 func ingestErrorToStatus(err error) int {
@@ -549,6 +819,10 @@ func ingestErrorToStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, ingest.ErrOversized):
 		return http.StatusRequestEntityTooLarge
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt;
+		// nothing was written, and a retry succeeds.
+		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }
@@ -557,6 +831,17 @@ func writeAttestJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// writeIngestError answers an ingest refusal of the attestation. A concurrent
+// freeze carries the concurrent_freeze code the other ledger writers send,
+// so a client can retry on the code (#3060).
+func writeIngestError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ingest.ErrConcurrentFreeze) {
+		httpresp.WriteConcurrentFreeze(w, err.Error())
+		return
+	}
+	writeAttestError(w, ingestErrorToStatus(err), err.Error())
 }
 
 func writeAttestError(w http.ResponseWriter, status int, msg string) {

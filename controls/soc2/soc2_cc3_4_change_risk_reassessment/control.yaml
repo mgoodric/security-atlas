@@ -2,17 +2,25 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc3_4_change_risk_reassessment
 title: "Material configuration changes are reviewed before merge"
 description: |
-  The entity identifies and assesses changes that could significantly
-  impact the system of internal control (TSC CC3.4). Operationally for a
-  SaaS startup the auditor-tested manifestation is: configuration
-  changes (infrastructure-as-code, security-relevant code, schema
-  migrations) are subject to peer review before merge. The query reads
-  the GitHub audit log and asserts that every push to a protected branch
-  in the period was preceded by a pull-request approval from a non-author
-  reviewer.
+  Significant changes are assessed for their effect on controls before
+  they land (TSC CC3.4). The intended test is that every push to a
+  protected branch was preceded by a pull-request approval from a reviewer
+  other than the author.
 
-scf_anchor_id: CFG-04
-control_family: CFG
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the GitHub
+  connector's `github.audit_event.v1` webhook events, which it emits as
+  inconclusive by design, leaving the decision to the platform. This
+  control is therefore inconclusive whatever the events contain.
+
+  Pending: joining each protected-branch push to a non-author approval. No
+  source supplies the pull-request reviews yet; it needs a design (#2834
+  or its own).
+
+scf_anchor_id: CHG-03
+scf_release: test-2026.3
+control_family: CHG
 implementation_type: automated
 owner_role: security-engineering
 lifecycle_state: active
@@ -24,18 +32,23 @@ evidence_queries:
     evidence_kind: github.audit_event.v1
     description: "Every push to a protected branch had a non-author PR approval"
     expression: |
-      package atlas.controls.soc2.cc3_4
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every e in input.audit_events {
-          e.action == "git.push"
-          e.protected_branch == true
-          some pr in input.pull_requests
-          pr.merge_commit_sha == e.commit_sha
-          some r in pr.reviews
-          r.state == "approved"
-          r.user != pr.author
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

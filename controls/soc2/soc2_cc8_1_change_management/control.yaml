@@ -1,16 +1,53 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc8_1_change_management
-title: "Production-deploying repositories enforce branch protection"
+title: "Repositories require an approving review, enforced on admins"
 description: |
-  The entity authorizes, designs, develops or acquires, configures,
-  documents, tests, approves, and implements changes to infrastructure,
-  data, software, and procedures (TSC CC8.1). For a SaaS codebase the
-  testable manifestation is: every repository that deploys to
-  production has GitHub branch protection enabled on the production
-  branch — required pull-request reviews, status checks, no force-push,
-  no direct push by non-admins.
+  Changes to infrastructure, data, software and procedures reach
+  production only by a controlled, approved path (TSC CC8.1). The intended
+  test is that every repository that deploys to production has branch
+  protection on its production branch: required pull-request reviews,
+  status checks, no force-push and protection enforced on admins.
+
+  What runs today: a SQL query over the payloads of the GitHub connector's
+  `github.repo_protection.v2` records, one per repository's default branch
+  per connector run. The connector merges classic branch protection with
+  every active repository and organization ruleset, so a branch protected
+  only by a ruleset counts. The query takes each repository's latest
+  in-window record, keyed by its stable `repo_id`, so a rename does not
+  split one repository in two. Records without a numeric `repo_id` are
+  left out. Every repository must have `required_reviews` of at least 1
+  and `enforce_admins` true. A repository whose `deploys_to_production` is
+  true must also have at least one entry in `required_status_checks` and
+  `allow_force_pushes` false. The connector sets `deploys_to_production`
+  from the repository's topics: true when they include its production
+  topic (`--production-topic`, default `production`).
+
+  One repository whose latest record is off on any of these fails the
+  control, whatever the other repositories report, and so does a
+  mistyped field. A field the connector could not read is omitted, and
+  leaves the control inconclusive unless another field or repository
+  fails it. A repository whose `deploys_to_production` is omitted (the
+  listing gave no topics, or a 2.0.0 record from a connector older than
+  #2827) passes only if it meets the production conditions anyway;
+  otherwise it is inconclusive. When two records for one repository tie
+  on `observed_at`, the worse verdict decides. No in-window v2 record
+  leaves the control inconclusive, including when only
+  `github.repo_protection.v1` records arrived: v1 records are not read.
+  The connector's per-record verdict is not used.
+
+  The connector reports `enforce_admins` true when a source requiring a
+  review binds admins: classic `enforce_admins`, or a ruleset that only an
+  app or a deploy key may bypass. A role, team or user bypass actor may be
+  an admin, so it counts as admin bypass. Status checks and force pushes
+  are read without their bypass: who may skip a required check or
+  force-push past a block (classic admins, ruleset bypass actors) is not
+  checked.
+
+  Only the records the control receives are checked: a repository that
+  never reported is not seen, which waits on an inventory (#2834).
 
 scf_anchor_id: CHG-02
+scf_release: test-2026.3
 control_family: CHG
 implementation_type: automated
 owner_role: security-engineering
@@ -18,23 +55,65 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: prod_repos_have_branch_protection
-    language: rego
-    evidence_kind: github.repo_protection.v1
-    description: "Every prod-deploying repo has protected main branch with PR reviews and status checks"
+  - id: every_repo_requires_review_enforced_on_admins
+    language: sql
+    evidence_kind: github.repo_protection.v2
+    description: "Every repository's latest protection record requires an approving review enforced on admins; production repositories also require a status check and block force pushes"
     expression: |
-      package atlas.controls.soc2.cc8_1
-
-      default allow := false
-
-      allow if {
-        every r in input.repos {
-          r.deploys_to_prod == true
-          some p in r.protection_rules
-          p.branch == r.default_branch
-          p.required_pull_request_reviews.required_approving_review_count >= 1
-          p.required_status_checks.enabled == true
-          p.allow_force_pushes == false
-          p.enforce_admins == true
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT repo, min(verdict) AS verdict
+        FROM (
+          SELECT repo,
+                 least(
+                   review,
+                   admins,
+                   CASE
+                     WHEN deploys = 'false'::jsonb THEN 2
+                     WHEN deploys IS NULL THEN greatest(least(checks, force), 1)
+                     ELSE least(checks, force)
+                   END
+                 ) AS verdict,
+                 rank() OVER (PARTITION BY repo ORDER BY observed_at DESC) AS recency
+          FROM (
+            SELECT payload->'repo_id' AS repo,
+                   observed_at,
+                   payload->'deploys_to_production' AS deploys,
+                   CASE
+                     WHEN payload->'required_reviews' IS NULL THEN 1
+                     WHEN jsonb_typeof(payload->'required_reviews') <> 'number' THEN 0
+                     WHEN (payload->'required_reviews')::numeric < 1 THEN 0
+                     ELSE 2
+                   END AS review,
+                   CASE
+                     WHEN payload->'enforce_admins' IS NULL THEN 1
+                     WHEN payload->'enforce_admins' = 'true'::jsonb THEN 2
+                     ELSE 0
+                   END AS admins,
+                   CASE
+                     WHEN payload->'required_status_checks' IS NULL THEN 1
+                     WHEN jsonb_typeof(payload->'required_status_checks') <> 'array' THEN 0
+                     WHEN jsonb_array_length(payload->'required_status_checks') = 0 THEN 0
+                     ELSE 2
+                   END AS checks,
+                   CASE
+                     WHEN payload->'allow_force_pushes' IS NULL THEN 1
+                     WHEN payload->'allow_force_pushes' = 'false'::jsonb THEN 2
+                     ELSE 0
+                   END AS force
+            FROM evidence
+            WHERE CASE
+                    WHEN jsonb_typeof(payload->'repo_id') = 'number'
+                      THEN (payload->'repo_id')::numeric >= 1
+                    ELSE false
+                  END
+          ) AS checked
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY repo
+      ) AS per_repo

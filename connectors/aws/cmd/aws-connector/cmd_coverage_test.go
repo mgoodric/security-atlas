@@ -461,7 +461,7 @@ func TestDoRun_FailsFastOnAlreadyCancelledContext(t *testing.T) {
 		roleARN:     "arn:aws:iam::111122223333:role/test",
 		region:      "us-east-1",
 		environment: "test",
-		controlID:   "scf:CRY-04",
+		controlID:   "scf:CRY-07",
 	})
 	if err == nil {
 		t.Fatal("expected doRun to fail against cancelled context")

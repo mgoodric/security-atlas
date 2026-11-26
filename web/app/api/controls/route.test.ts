@@ -111,7 +111,7 @@ describe("GET /api/controls", () => {
           anchors: [
             {
               id: "00000000-0000-0000-0000-000000000002",
-              scf_id: "IAC-06",
+              scf_id: "IAC-37",
               family: "IAC",
               name: "Multi-Factor Authentication (MFA)",
               description: "",
@@ -211,7 +211,7 @@ describe("GET /api/controls", () => {
           anchors: [
             {
               id: "00000000-0000-0000-0000-000000000226",
-              scf_id: "IAC-06",
+              scf_id: "IAC-37",
               family: "IAC",
               name: "MFA enforcement",
               description: "",
@@ -221,7 +221,7 @@ describe("GET /api/controls", () => {
                 last_observed_at: "2026-05-15T09:30:00Z",
                 evaluated_at: "2026-05-16T10:00:00Z",
               },
-              // Mockup row IAC-06 example.
+              // Mockup row IAC-37 example.
               frameworks: ["CSF", "ISO", "SOC2"],
             },
             {
@@ -248,5 +248,92 @@ describe("GET /api/controls", () => {
     expect(body.anchors).toHaveLength(2);
     expect(body.anchors[0].frameworks).toEqual(["CSF", "ISO", "SOC2"]);
     expect(body.anchors[1].frameworks).toEqual([]);
+  });
+
+  // Issue #1741 — `has_control` is forwarded to the platform (which
+  // filters in SQL ahead of paging) and the totals come back through.
+  test("issue 1741: forwards has_control and passes the totals through", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          anchors: [],
+          total: 37,
+          catalog_total: 1451,
+          with_control_total: 37,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const res = await GET(makeReq("/api/controls?has_control=true") as never);
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("has_control=true");
+    const body = (await res.json()) as {
+      total: number;
+      catalog_total: number;
+      with_control_total: number;
+    };
+    expect(body).toMatchObject({
+      total: 37,
+      catalog_total: 1451,
+      with_control_total: 37,
+    });
+  });
+
+  test("issue 1741: rejects a has_control value other than true/false", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await GET(makeReq("/api/controls?has_control=yes") as never);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("issue 1832: forwards a positive limit so the totals can ride a one-row page", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1832" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ anchors: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    await GET(makeReq("/api/controls?has_control=true&limit=1") as never);
+    expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain("limit=1");
+
+    for (const bad of ["0", "-1", "abc", ""]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?limit=${bad}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).not.toContain("limit=");
+    }
+  });
+
+  test("issue 1740: forwards a non-negative offset so the catalog can be walked", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1740" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ anchors: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    for (const good of ["0", "500"]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?limit=500&offset=${good}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain(
+        `offset=${good}`,
+      );
+    }
+
+    for (const bad of ["-1", "abc", "1.5", ""]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?offset=${bad}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).not.toContain(
+        "offset=",
+      );
+    }
   });
 });

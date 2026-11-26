@@ -81,6 +81,14 @@ jobs:
       # code on `main`; `resolve` forces `code=true` whenever the queue diff
       # base cannot be trusted.
       code: ${{ steps.resolve.outputs.code }}
+      # #2099 — the two tier outputs, resolved by the same `resolve` step.
+      # `go` gates the Go + Python jobs, `web` the frontend jobs. Each is
+      # `false` only when `code` is false, or on a `pull_request` whose every
+      # changed file sits in the OTHER tier's allowlist and none in the shared
+      # set. `push` and `merge_group` always resolve both to `code`. See
+      # docs/ci/PATH_FILTERING.md "Tiers".
+      go: ${{ steps.resolve.outputs.go }}
+      web: ${{ steps.resolve.outputs.web }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
       # check only runs when a PR touches the canonical
       # `internal/api/schemaregistry/schemas/` tree, so we gate the job
@@ -89,13 +97,13 @@ jobs:
       schemas: ${{ steps.filter.outputs.schemas }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: filter
         with:
           # Slice 415 AC-4 — explicit diff base for `merge_group` events.
@@ -175,6 +183,119 @@ jobs:
               - 'buf.yaml'
               - 'buf.gen.yaml'
               - 'scripts/**'
+              # #2148 — the exported lifecycles the help diagram check reads.
+              - 'docs/lifecycles/**'
+              # #2394 — the spec web/lib/api/generated/openapi.d.ts is
+              # generated from.
+              - 'docs/openapi.yaml'
+              # #2676 — stock control bundles and the framework crosswalk.
+              # Go-embedded data read by Go · lint (lint-soc2-coverage), the
+              # internal/control + scfimport unit tests and the self-host leg.
+              - 'controls/**'
+              - 'data/crosswalks/**'
+
+      # #2099 — tier classification. A separate step because
+      # `predicate-quantifier` is per step, and the `code` filter above must
+      # keep its default `some` semantics.
+      #
+      # With `every`, a file matches a filter only when it matches EVERY
+      # pattern. Each filter below is `**` minus one tier's allowlist, so:
+      #   * `non_web` is true when some changed file is NOT web-only;
+      #   * `non_go`  is true when some changed file is NOT Go-only.
+      # A tier is skipped only when its `non_*` filter is false, i.e. every
+      # changed file sits in the other tier's allowlist. Anything unlisted
+      # (an `.nvmrc`, a `tools/` file, a new top-level dir) matches both
+      # `non_*` filters and runs both tiers.
+      #
+      # The two allowlists are deliberately narrow. Do NOT add a shared path
+      # here; add it to `shared` below.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: tiers
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: every
+          filters: |
+            non_web:
+              - '**'
+              - '!web/**'
+              - '!package.json'
+              - '!package-lock.json'
+              - '!**/package.json'
+              - '!**/package-lock.json'
+              - '!pnpm-lock.yaml'
+            non_go:
+              - '**'
+              - '!**/*.go'
+              - '!go.mod'
+              - '!go.sum'
+              - '!go.work'
+              - '!go.work.sum'
+              - '!internal/**'
+              - '!cmd/**'
+              - '!pkg/**'
+              - '!connectors/**'
+              # #2676 — Go-embedded data; no web test reads it.
+              - '!controls/**'
+              - '!data/crosswalks/**'
+              - '!**/*.py'
+              - '!oscal-bridge/**'
+              - '!pyproject.toml'
+              - '!**/pyproject.toml'
+              - '!uv.lock'
+              - '!**/uv.lock'
+
+      # #2099 — the shared set: paths both tiers depend on. A match here runs
+      # both tiers even when the file also sits in a tier allowlist (a
+      # `scripts/x.py`, a `deploy/**/package.json`), so the allowlists'
+      # globs can never classify a shared path as single-tier. Default
+      # `some` quantifier: any one pattern matching is enough.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: shared
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            shared:
+              # Contract-tier goldens: recorded by Go provider tests under
+              # internal/api/** and asserted by web consumer tests, so a
+              # golden-only change must run both tiers. Any web/ file a Go
+              # test reads belongs here.
+              - 'web/lib/contracts/**'
+              # Go files a web test reads: web/lib/labels/enum-labels.test.ts
+              # fails when a backend enum value has no display label (#2083).
+              - 'internal/db/dbx/models.go'
+              - 'internal/featureflag/seed.go'
+              # #2430: web/lib/api/audit-log.test.ts checks AUDIT_LOG_KINDS
+              # against unifiedlog.AllKinds.
+              - 'internal/audit/unifiedlog/unifiedlog.go'
+              # #2148: exported by cmd/atlas-lifecycles (Go) and checked
+              # against the help diagrams by web/lib/help/diagrams.test.ts.
+              - 'docs/lifecycles/**'
+              # #2394: written by cmd/atlas-openapi (Go); the web client's
+              # types are generated from it and checked in Frontend build.
+              - 'docs/openapi.yaml'
+              - 'migrations/**'
+              - 'sql/**'
+              - 'atlas.hcl'
+              - 'sqlc.yaml'
+              - 'proto/**'
+              - 'gen/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'policies/**'
+              - 'schemas/**'
+              - 'fixtures/**'
+              - 'deploy/**'
+              - 'Dockerfile*'
+              - '**/Dockerfile*'
+              - 'docker-compose*.yml'
+              - '**/docker-compose*.yml'
+              - '.github/**'
+              - 'justfile'
+              - 'scripts/**'
+              - '.golangci.yml'
+              - '.pre-commit-config.yaml'
+              - '.nvmrc'
+              - 'codecov.yml'
 
       # ================================================================
       # Slice 415 (threat T-1 / anti-criterion P0-2) — fail-closed
@@ -206,6 +327,9 @@ jobs:
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
           MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
           FILTER_CODE: ${{ steps.filter.outputs.code }}
+          FILTER_NON_WEB: ${{ steps.tiers.outputs.non_web }}
+          FILTER_NON_GO: ${{ steps.tiers.outputs.non_go }}
+          FILTER_SHARED: ${{ steps.shared.outputs.shared }}
         run: |
           set -euo pipefail
           code="${FILTER_CODE:-}"
@@ -235,6 +359,38 @@ jobs:
           echo "resolved code=${code} — ${reason}"
           echo "code=${code}" >> "$GITHUB_OUTPUT"
 
+          # #2099 — the `go` / `web` tiers. Every branch that is not an
+          # affirmative single-tier signal on a pull_request resolves a tier
+          # to `code`, so the failure mode is again spent minutes, never a
+          # skipped tier. `push` (main) and `merge_group` always run both.
+          go="$code"
+          web="$code"
+          tier_reason="both tiers follow code (${EVENT_NAME})"
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$code" = "true" ]; then
+            # An empty filter output reads as `true`: run the tier.
+            non_web="${FILTER_NON_WEB:-true}"
+            non_go="${FILTER_NON_GO:-true}"
+            shared="${FILTER_SHARED:-true}"
+            if [ "$shared" = "true" ]; then
+              tier_reason="a shared path changed, so both tiers run"
+            else
+              [ "$non_web" = "true" ] || go=false
+              [ "$non_go" = "true" ] || web=false
+              if [ "$go" = "false" ] && [ "$web" = "false" ]; then
+                # Every file matched both allowlists (e.g. a package.json
+                # under connectors/). code=true must never skip everything.
+                go=true
+                web=true
+                tier_reason="FAIL-OPEN: every file matched both tier allowlists; both tiers run"
+              else
+                tier_reason="pull_request diff: non_web=${non_web} non_go=${non_go} shared=${shared}"
+              fi
+            fi
+          fi
+          echo "resolved go=${go} web=${web} — ${tier_reason}"
+          echo "go=${go}" >> "$GITHUB_OUTPUT"
+          echo "web=${web}" >> "$GITHUB_OUTPUT"
+
           # Job summary so the merge_group run's path-filter decision is
           # inspectable without digging through step logs — this is the
           # artifact slice 415 AC-5 / AC-6 are verified against.
@@ -249,6 +405,9 @@ jobs:
             echo "| raw paths-filter \`code\` | \`${FILTER_CODE:-<empty>}\` |"
             echo "| resolved \`code\` | \`${code}\` |"
             echo "| basis | ${reason} |"
+            echo "| raw \`non_web\` / \`non_go\` / \`shared\` | \`${FILTER_NON_WEB:-<empty>}\` / \`${FILTER_NON_GO:-<empty>}\` / \`${FILTER_SHARED:-<empty>}\` |"
+            echo "| resolved \`go\` / \`web\` | \`${go}\` / \`${web}\` |"
+            echo "| tier basis | ${tier_reason} |"
             echo
             if [ "$code" = "true" ]; then
               echo "Real build/test/lint jobs run; the slice-061 stub-twins are skipped."
@@ -260,12 +419,12 @@ jobs:
   build-go:
     name: Go · build + test
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -273,7 +432,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - name: Verify go.mod is tidy
         run: |
@@ -300,7 +460,7 @@ jobs:
       # profile is still uploaded as a workflow artifact so the merge
       # step in tests-integration can pull it.
       - name: Upload unit coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -308,9 +468,10 @@ jobs:
           fail_ci_if_error: false
       - name: Upload coverage profile as workflow artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-unit-coverage
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
 
@@ -320,12 +481,12 @@ jobs:
   build-go-stub:
     name: Go · build + test
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -346,17 +507,18 @@ jobs:
   # ~1 min instead of ~7.5 min: the dedup's billing win is kept (one host
   # compile shared 3×) WITHOUT the wall-clock regression. It is NOT a
   # required check (absent from branch-protection) and needs no stub twin —
-  # it is `if: code == 'true'` like `build-go`, so on docs-only PRs it skips
-  # alongside the real playwright jobs (whose stubs then post the checks).
+  # it is gated on the `web` tier (#2099) like the playwright jobs it feeds,
+  # so whenever they skip (docs-only or Go-only PRs) it skips with them and
+  # their stubs post the checks.
   build-atlas:
     name: Go · build atlas binary (shared)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -364,15 +526,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - name: Build atlas binary
         run: go build -o atlas ./cmd/atlas
+      # #2980 — atlas-cli rides in the same artifact so the Playwright
+      # demoseed spec runs it prebuilt instead of `go run` (up to 600 s).
+      - name: Build atlas-cli binary
+        run: go build -o atlas-cli ./cmd/atlas-cli
       - name: Upload atlas binary as workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: atlas-binary
-          path: atlas
+          retention-days: 7
+          path: |
+            atlas
+            atlas-cli
           if-no-files-found: error
 
   # ====================================================================
@@ -423,7 +593,7 @@ jobs:
   tests-integration-shard:
     name: Go · integration (shard ${{ matrix.leg }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -473,9 +643,14 @@ jobs:
       MINIO_SECRET_KEY: minioadmin
       # Slice 015 — NATS JetStream endpoint reachable from the runner.
       NATS_URL: nats://localhost:4222
+      # #1847: ubuntu-latest ships Google Chrome, so the PDF handler tests
+      # (board brief, board pack, questionnaire, walkthrough) must get a real
+      # 200 %PDF- body here; a 503 fails them instead of passing as
+      # graceful degradation. See pdfrender.RequireRealPDF.
+      ATLAS_REQUIRE_PDF: "1"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -483,8 +658,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
+      - name: Warm headless Chrome in the background (#2743)
+        # WORKAROUND (ADR 0032) for a GitHub-hosted runner-image behaviour
+        # this repo cannot change. Remove it (with the wait step below) when
+        # the runner image ships a warm Chrome, or PDF rendering moves to a
+        # CHROME_DEBUG_URL headless-shell service, whichever comes first.
+        # Removal ticket: #2751.
+        #
+        # The first Chrome launch on a fresh runner is slow, and only the
+        # first: on leg B3 the first PDF render (TestExportPDF_SmokeTest)
+        # took 7-90s across 25 runs and hit the 90s render deadline twice,
+        # while on leg B2 five back-to-back renders after the first take
+        # ~0.7s each. Each render is its own Chrome process with a fresh
+        # profile, so the cost is per runner, not per process. This step
+        # pays it once, off the test's clock and alongside the service
+        # bring-up below, through the production renderer so it launches
+        # the same binary chromedp picks. Best-effort: the PDF tests under
+        # ATLAS_REQUIRE_PDF stay the gate.
+        run: |
+          nohup bash -c 'start=$(date +%s)
+            go test -count=1 -v -run "^TestPrintHTML_AllowsDataResources$" ./internal/pdfrender
+            echo "warm-up exit=$? after $(( $(date +%s) - start ))s"' \
+            > "$RUNNER_TEMP/chrome-warm.log" 2>&1 &
       - name: Install cosign
         # Slice 413: the internal/oscal/cosign integration tests exercise
         # the real `cosign sign-blob`/`verify-blob` exec boundary (ADR-0010
@@ -494,9 +692,30 @@ jobs:
         # cosign version. Absent this step the cosign integration tests
         # self-skip (binary not on PATH) — installing it makes them run and
         # keeps the internal/oscal/cosign coverage floor honest.
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: the bridge-dependent Go tests (internal/oscal on B5,
+      # catalogimport + profileimport on B3, componentimport on B5) start the
+      # Python oscal-bridge as a subprocess. Install it on those two legs and
+      # set ATLAS_REQUIRE_OSCAL_BRIDGE=1 so an unavailable bridge fails the
+      # test instead of skipping it (internal/oscal/bridgetest). The bridge is
+      # a uv workspace member, so the env lands in the root .venv.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start LocalStack KMS (slice 425 — OPTIONAL, leg B3 only)
         # Slice 425: the internal/oscal/cosign LocalStack round-trip test
         # (cosign_kms_localstack_integration_test.go) drives the REAL
@@ -559,6 +778,15 @@ jobs:
         # so pg_catalog reads are not RLS-filtered. See scripts/audit-rls.sh
         # and docs/architecture/rls.md.
         run: ./scripts/audit-rls.sh
+      - name: Wait for the Chrome warm-up (#2743)
+        # Bounded at 180s and never fails the job; prints the warm-up's
+        # timing so a slow cold start stays visible in the log.
+        run: |
+          for _ in $(seq 1 90); do
+            grep -q '^warm-up exit=' "$RUNNER_TEMP/chrome-warm.log" && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/chrome-warm.log"
       - name: Run integration shard (-p 1 within the leg)
         # Slice 417: run ONLY this leg's packages, read from the source of
         # truth scripts/integration-shards.txt via run-integration-shard.sh.
@@ -610,7 +838,7 @@ jobs:
         if: matrix.leg == 'A'
         run: bash scripts/check-integration-shard-coverage.sh
       - name: Upload integration coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -620,9 +848,10 @@ jobs:
       # DISTINCT artifact name so the fan-in job can merge all legs.
       - name: Upload this shard's integration coverage profile
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-integration-coverage-${{ matrix.leg }}
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
       # ================================================================
@@ -725,12 +954,12 @@ jobs:
   tests-integration:
     name: Go · integration (Postgres RLS)
     needs: [changes, build-go, tests-integration-shard]
-    if: always() && needs.changes.outputs.code == 'true'
+    if: always() && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -748,11 +977,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       # Slice 279 — the unit-coverage artifact (uploaded by build-go).
       - name: Download unit coverage artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: go-unit-coverage
           path: /tmp/cov/unit
@@ -761,7 +991,7 @@ jobs:
       # with a name pattern + merge-multiple pulls all four leg artifacts
       # (go-integration-coverage-A / -B1 / -B2 / -B3) into one directory.
       - name: Download all integration shard coverage profiles
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: go-integration-coverage-*
           path: /tmp/cov/shards
@@ -800,21 +1030,22 @@ jobs:
         run: go run ./cmd/scripts/coverage-gate -profile=merged-coverage.txt
       - name: Upload merged coverage profile as workflow artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-merged-coverage
+          retention-days: 7
           path: merged-coverage.txt
           if-no-files-found: warn
 
   tests-integration-stub:
     name: Go · integration (Postgres RLS)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -824,12 +1055,12 @@ jobs:
   lint-go:
     name: Go · lint
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -837,7 +1068,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
@@ -850,7 +1082,7 @@ jobs:
           # both in a dedicated `chore(golangci):` slice so the new analyzer
           # set lands as an auditable diff — never as a surprise red check on
           # an unrelated PR (mirrors the SQLC_VERSION bump convention).
-          version: v2.12.2
+          version: v2.15.0
 
       # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
       # err.Error() into 5xx JSON response bodies. Background: slice 327
@@ -871,15 +1103,24 @@ jobs:
       - name: Go · duphelper (slice 369 H-1 guard)
         run: go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
+      # #2426 — SOC 2 stock control kit gate. Every controls/soc2/ bundle
+      # parses and anchors to a catalog SCF id, at least half carry an
+      # evidence query, and the bundles cover at least 80% of the TSC codes
+      # in data/crosswalks/soc2-tsc-2017.yaml. #2422 added 18 Privacy
+      # criteria with no stock control and coverage fell to 72% unnoticed,
+      # because nothing ran this check.
+      - name: Go · SOC 2 control kit coverage (#2426)
+        run: go run ./cmd/scripts/coverage-check
+
   lint-go-stub:
     name: Go · lint
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -896,12 +1137,12 @@ jobs:
   fuzz:
     name: Go · fuzz (bounded)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -909,7 +1150,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - name: Bounded fuzz pass (20s per target)
         # FUZZTIME caps each target. Keep it tight: this is a regression
@@ -931,9 +1173,10 @@ jobs:
           run_fuzz ./internal/questionnaire/ FuzzParseExcel
       - name: Upload any discovered crashers
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-crashers
+          retention-days: 7
           path: "**/testdata/fuzz/**"
           if-no-files-found: ignore
 
@@ -943,12 +1186,12 @@ jobs:
   fuzz-stub:
     name: Go · fuzz (bounded)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -963,13 +1206,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
+      - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1
         with:
           setup_only: true
       - name: Lint protos
@@ -987,7 +1230,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -997,37 +1240,57 @@ jobs:
   build-frontend:
     name: Frontend · install + build
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
+      # #2394 — the committed client types must be what openapi-typescript
+      # writes from docs/openapi.yaml, so a platform shape change reaches
+      # the typecheck below.
+      # The generator is its own package (web/tools/openapi-types/README.md).
+      - name: Install the OpenAPI types generator
+        run: npm ci --prefix web/tools/openapi-types --no-audit --no-fund
+      - name: Generated API types match docs/openapi.yaml
+        run: npm run openapi:check --workspace @security-atlas/web
+      # `next build` typechecks tsconfig.json only, which excludes
+      # **/*.test.ts (slice 450). `typecheck` also runs tsconfig.test.json,
+      # so a type error in a vitest file reddens this job, and merge-gate
+      # with it (#1895), and tsconfig.e2e.json, which checks every
+      # Playwright spec (#2374, #2605).
+      - name: Typecheck web workspace (app + tests + e2e specs)
+        run: npm run typecheck --workspace @security-atlas/web
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
+      # #2148 — lifecycle diagrams are pre-rendered SVGs; Mermaid is a
+      # devDependency only. Fails when a client asset carries its runtime.
+      - name: Bundle check (no Mermaid runtime in the browser bundle)
+        working-directory: web
+        run: node scripts/check-no-mermaid-bundle.mjs
       - name: Build sdk-typescript workspace
         run: npm run build --workspace @security-atlas/sdk --if-present
 
   build-frontend-stub:
     name: Frontend · install + build
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1037,12 +1300,12 @@ jobs:
   lint-python:
     name: Python · ruff
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1055,7 +1318,7 @@ jobs:
       # 0.7.0 and the check/format-check commands keep their whole-repo `.`
       # scope.
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
       - run: uv tool run ruff@0.7.0 check .
@@ -1064,12 +1327,12 @@ jobs:
   lint-python-stub:
     name: Python · ruff
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1085,7 +1348,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1093,14 +1356,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 693 — cache the pre-commit hook environments (the dominant
       # cost of this job: pre-commit creates a venv/node_env per hook repo
@@ -1173,24 +1437,25 @@ jobs:
   oscal-bridge:
     name: OSCAL bridge · Python (ruff + pytest)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: oscal-bridge/uv.lock
+          # The bridge is a uv workspace member; the lockfile is the root one.
+          cache-dependency-glob: uv.lock
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.11 3.12
       - name: Sync oscal-bridge env
         working-directory: oscal-bridge
         run: uv sync --extra test
@@ -1201,16 +1466,23 @@ jobs:
       - name: Test (pytest — unit + in-process gRPC server)
         working-directory: oscal-bridge
         run: PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+      # Issue #1875: the bridge declares requires-python >=3.11; also run the
+      # suite on 3.12, in its own environment so the 3.11 one is untouched.
+      - name: Test on Python 3.12 (pytest)
+        working-directory: oscal-bridge
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-py312
+        run: PYTHONPATH=. uv run --python 3.12 --extra test python -m pytest tests/ -q
 
   oscal-bridge-stub:
     name: OSCAL bridge · Python (ruff + pytest)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1265,12 +1537,29 @@ jobs:
         mode: [bundled, external, proxy, migrate]
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # #2005: the bootstrap scripts split the atlas_migrate password out
+      # of DATABASE_URL before calling psql; the self-test pins that parse.
+      - name: Run pg-conn self-test
+        run: bash scripts/pg-conn_test.sh
+      # #2353: bootstrap sends its client secret and bearer over plain
+      # http:// only to the one private service host; the self-test pins
+      # which ATLAS_HTTP_URL values get --allow-insecure-http.
+      - name: Run http-endpoint self-test
+        run: bash scripts/http-endpoint_test.sh
+      # #2033: the scratch-cluster script must refuse a Postgres it did not
+      # start. The runner image ships PostgreSQL server binaries off PATH;
+      # the test skips (exit 0) if none are found. One matrix leg is enough.
+      - name: Run scratch-pg self-test
+        if: matrix.mode == 'bundled'
+        run: |
+          pgbin="$(find /usr/lib/postgresql -mindepth 2 -maxdepth 2 -name bin -type d 2>/dev/null | sort -V | tail -1)"
+          PATH="${pgbin:+$pgbin:}$PATH" bash scripts/scratch-pg_test.sh
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -1328,7 +1617,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1361,7 +1650,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1378,6 +1667,10 @@ jobs:
         run: helm template ci-default deploy/helm > /dev/null
       - name: helm template (production values)
         run: helm template ci-prod deploy/helm -f deploy/helm/values-production.yaml > /dev/null
+      - name: helm template test (artifact store wiring, #1939)
+        run: bash scripts/test-helm-artifacts.sh
+      - name: helm template test (OIDC key mount and fsGroup, #2609)
+        run: bash scripts/test-helm-oidc-key.sh
 
   helm-lint-stub:
     name: Helm chart · lint + template
@@ -1387,7 +1680,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1411,46 +1704,54 @@ jobs:
   frontend-vitest:
     name: Frontend · vitest
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # #2156: `issues: read` lets lib/help/coverage.test.ts confirm each
+    # help-pending route's ticket is still open.
+    permissions:
+      contents: read
+      issues: read
     defaults:
       run:
         working-directory: web
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         working-directory: .
         run: npm ci --no-audit --no-fund
       - name: Run vitest (with coverage)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run test:coverage
       - name: Upload coverage summary as workflow artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: frontend-vitest-coverage
+          retention-days: 7
           path: web/coverage/coverage-summary.json
           if-no-files-found: warn
 
   frontend-vitest-stub:
     name: Frontend · vitest
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1468,7 +1769,7 @@ jobs:
   frontend-lint:
     name: Frontend · lint
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -1476,15 +1777,15 @@ jobs:
         working-directory: web
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         working-directory: .
@@ -1495,12 +1796,12 @@ jobs:
   frontend-lint-stub:
     name: Frontend · lint
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1533,7 +1834,7 @@ jobs:
     # of recompiling). NOT build-go: gating on build-go's ~7.5-min -race
     # unit run regressed wall-clock; build-atlas is ~1 min (decisions D3).
     needs: [changes, build-atlas]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Slice 082 — un-quarantined. Slice 079's `continue-on-error: true`
@@ -1591,7 +1892,7 @@ jobs:
       BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           # Slice 117 per-job exception: Playwright's `npx playwright
@@ -1606,11 +1907,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 418 — shared bring-up, one canonical copy. The atlas server
       # is started by the SECOND call below (after the web build), which
@@ -1626,13 +1928,14 @@ jobs:
       # Unix executable bit, so `install -m 0755` is REQUIRED to make the
       # downloaded file runnable at /usr/local/bin/atlas.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
       - name: Install prebuilt atlas binary
         run: |
           install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          install -m 0755 /tmp/atlas-bin/atlas-cli /usr/local/bin/atlas-cli
           atlas --version || true
       - name: Install web workspace
         working-directory: .
@@ -1658,6 +1961,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server
         working-directory: web
         run: |
@@ -1671,12 +1977,27 @@ jobs:
           done
       - name: Run Playwright tests
         working-directory: web
+        env:
+          # #2980 — the demoseed spec runs this instead of `go run`.
+          ATLAS_CLI_BIN: /usr/local/bin/atlas-cli
         run: npx playwright test
+      # #2080 — the route sweep's axe findings (serious + critical) are
+      # REPORTED, not enforced: one JSON per route, uploaded on every run
+      # whether or not the suite passed.
+      - name: Upload route-sweep axe report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: route-sweep-axe-report
+          path: web/axe-report/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -1692,12 +2013,12 @@ jobs:
   frontend-playwright-stub:
     name: Frontend · Playwright e2e
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1747,7 +2068,7 @@ jobs:
     # Slice 695 — also depends on build-atlas (the lightweight shared-binary
     # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
     needs: [changes, build-atlas]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Slice 399 — BLOCKING. This leg builds + boots the Next.js
@@ -1804,9 +2125,14 @@ jobs:
       # logo-render-production-build.spec.ts (both `test.skip`-guarded
       # behind `!ATLAS_PROD_BUILD`). This is the ONLY job that sets it.
       ATLAS_PROD_BUILD: "1"
+      # #2062 — the opt-in leg for the developer token sign-in card. The
+      # dev-server leg leaves it unset (the default: card absent); this
+      # leg turns it on so login-dev-token-signin.spec.ts asserts the card
+      # renders and auth-open-redirect.spec.ts drives the token form.
+      ATLAS_WEB_DEV_TOKEN_SIGNIN: "true"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           # Same slice 069 / 117 D5 exception: Playwright's
@@ -1818,11 +2144,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 418 — shared bring-up, one canonical copy; same stack as the
       # dev-server Playwright leg. The atlas server is started by the
@@ -1838,7 +2165,7 @@ jobs:
       # Unix executable bit, so `install -m 0755` is REQUIRED. The web
       # standalone build below is unrelated and stays.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
@@ -1859,6 +2186,13 @@ jobs:
         # assets resolve under `node .next/standalone/web/server.js`.
         working-directory: web
         run: npm run build:standalone
+      # #2040: a browser-forged X-Forwarded-For must not reach atlas via
+      # the /v1 rewrite or the login BFF. Runs before atlas starts because
+      # the script's stand-in atlas binds :8080, the build-time rewrite
+      # destination.
+      - name: Check web vets X-Forwarded-For (standalone + preload)
+        working-directory: web
+        run: node scripts/check-forwarded-for.mjs
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
@@ -1876,6 +2210,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server (production-build standalone)
         # Slice 387 — boot the standalone Node server, NOT `npm start`.
         # The standalone entrypoint is `.next/standalone/web/server.js`
@@ -1903,16 +2240,26 @@ jobs:
         # Slice 399 — runs BOTH prod-build specs: the slice-153 logo spec
         # and the slice-146 bff-cookie spec (its body re-shaped to be
         # RSC-aware). The job is now blocking (continue-on-error removed).
+        #
+        # #2062 — plus the two token-card specs, which need
+        # ATLAS_WEB_DEV_TOKEN_SIGNIN=true (job env) on the web server.
+        #
+        # #2080 — plus the route sweep, so every authenticated route's
+        # shell checks also hold against the standalone build.
         working-directory: web
         run: |
           npx playwright test \
             bff-cookie-production-build.spec.ts \
-            logo-render-production-build.spec.ts
+            logo-render-production-build.spec.ts \
+            login-dev-token-signin.spec.ts \
+            auth-open-redirect.spec.ts \
+            route-sweep.spec.ts
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report-prod-build
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -1928,12 +2275,12 @@ jobs:
   frontend-playwright-prod-build-stub:
     name: Frontend · Playwright e2e (prod-build standalone)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1958,7 +2305,7 @@ jobs:
     # Slice 695 — also depends on build-atlas (the lightweight shared-binary
     # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
     needs: [changes, build-atlas]
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -1996,7 +2343,7 @@ jobs:
       BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           # Playwright's `--with-deps` still needs sudo for chromium's
@@ -2006,11 +2353,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
@@ -2033,7 +2381,7 @@ jobs:
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
@@ -2063,6 +2411,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server
         working-directory: web
         run: |
@@ -2188,9 +2539,10 @@ jobs:
           fi
       - name: Upload audit reports as artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ui-honesty-report-${{ github.run_id }}
+          retention-days: 3
           path: |
             web/e2e-audit/reports/
             comment-body.md
@@ -2206,12 +2558,12 @@ jobs:
   frontend-ui-honesty-stub:
     name: Frontend · UI honesty (advisory)
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2245,12 +2597,12 @@ jobs:
   govulncheck:
     name: Go · govulncheck
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2258,7 +2610,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       # Pinned version (not @latest) for reproducibility. Bump in a
       # dedicated PR so the diff is auditable. See slice 089 decisions
@@ -2289,9 +2642,10 @@ jobs:
           exit "$rc_text"
       - name: Upload govulncheck report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: govulncheck-report
+          retention-days: 7
           path: |
             govulncheck.txt
             govulncheck.sarif
@@ -2300,12 +2654,12 @@ jobs:
   govulncheck-stub:
     name: Go · govulncheck
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2335,12 +2689,12 @@ jobs:
   sqlc-drift:
     name: Go · sqlc generate diff
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2348,7 +2702,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - name: Read SQLC_VERSION from justfile
         id: pin
@@ -2375,12 +2730,12 @@ jobs:
   sqlc-drift-stub:
     name: Go · sqlc generate diff
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2514,9 +2869,10 @@ jobs:
           fi
       - name: Upload audit TSV as artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: audit-deps-tsv
+          retention-days: 7
           path: |
             audit-deps.tsv
             audit-deps.stderr
@@ -2577,7 +2933,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2657,20 +3013,20 @@ jobs:
   npm-audit:
     name: Frontend · npm audit
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces (production dependency tree only)
         # Use the lockfile-faithful install so audit sees the same
@@ -2696,9 +3052,10 @@ jobs:
           exit "$rc"
       - name: Upload npm-audit report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-audit-report
+          retention-days: 7
           path: |
             npm-audit.txt
             npm-audit.json
@@ -2707,12 +3064,12 @@ jobs:
   npm-audit-stub:
     name: Frontend · npm audit
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2779,7 +3136,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2883,7 +3240,7 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2938,9 +3295,10 @@ jobs:
 
       - name: Upload drift report as artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: branch-protection-drift-report
+          retention-days: 7
           path: |
             drift.stdout
             drift.stderr
@@ -2954,7 +3312,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2970,14 +3328,14 @@ jobs:
       # Finding 1.1; SHA pins reused verbatim from container-publish.yml per
       # the slice 128 pin discipline).
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       # Build the atlas image locally so Trivy has a target without
       # needing to push to a registry. The Dockerfile is the same one
       # release.yml uses; if a slice changes the Dockerfile, this job
       # picks the change up via the `changes.code` filter (which
       # includes deploy/**, Dockerfile*, and **/Dockerfile).
       - name: Build atlas image (local tag)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: deploy/docker/atlas.Dockerfile
@@ -3002,9 +3360,10 @@ jobs:
           output: trivy-report.txt
       - name: Upload Trivy report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: trivy-report
+          retention-days: 7
           path: trivy-report.txt
           if-no-files-found: warn
 
@@ -3016,7 +3375,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3056,7 +3415,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3092,9 +3451,8 @@ jobs:
   # / slice 140 openapi-drift-check / slice 345 integration-enrolment-check.
   #
   # Required-check status: ships NON-REQUIRED this slice (NOT added to
-  # .github/branch-protection.json). Promote to a required check in a
-  # follow-up once it has a few green runs — see the slice 458 PR body's
-  # required-check analysis.
+  # .github/branch-protection.json). Since #1887 it is in merge-gate's
+  # `needs:`, so a red run blocks the merge through the gate.
   #
   # Local repro: `bash scripts/check-staged-cache-paths.sh --all-tracked`
   #   pre-commit:  `pre-commit run cache-path-guard --all-files`
@@ -3107,7 +3465,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3149,7 +3507,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3158,7 +3516,8 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
 
       - name: Run check-openapi-drift.sh
@@ -3204,7 +3563,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3220,11 +3579,120 @@ jobs:
       - name: Run check-audit-log-subject-module.sh
         run: bash scripts/check-audit-log-subject-module.sh
 
+      # #3016: an integration harness that builds api.New without the authz
+      # engine runs no authz, so its role-claim bearers prove nothing.
+      - name: Run check-harness-engine self-test
+        run: bash scripts/check-harness-engine_test.sh
+
+      # #3026: the backlog only shrinks. Compare it to the base commit: a PR's
+      # and a queue entry's base on main, a push's previous main head. The
+      # checkout is shallow, so fetch that one commit first. A PR checkout is
+      # the merge ref, so an entry main dropped after the branch was cut is
+      # not reported against the PR.
+      - name: Run check-harness-engine.sh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::no base commit for the harness-engine backlog comparison"
+            exit 1
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          HARNESS_ENGINE_BASE="$BASE_SHA" bash scripts/check-harness-engine.sh
+
       # Slice 461: offline self-test for the seed order-independence guard
       # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in
       # the integration job, which has a live Postgres).
       - name: Run check-integration-seed-order-independence self-test
         run: bash scripts/check-integration-seed-order-independence_test.sh
+
+  # ====================================================================
+  # ISA probes (security-atlas#1690) — the runner that replaced the retired
+  # engine for isa/probes/. Ported from tend's isa-probes job.
+  #
+  # isa/run-probes.sh first runs isa/check-probes.sh (blocks on COLLISION,
+  # ORPHAN and SIGPIPE-RACE; reports MISSING), then runs every probe and
+  # fails ONLY when a probe for a claim ticked `- [x]` exits non-zero. An
+  # open claim's probe exiting 1 is expected; exit 3 (unrunnable) is never
+  # a failure. So this job is green on an ordinary PR and red only on a
+  # regression of something already claimed true.
+  #
+  # Postgres ONLY, with the roles + forward migrations the integration
+  # shards get, so `service`-tier SQL probes find a real schema with RLS and
+  # `$DATABASE_URL_APP` set. Go is on PATH for probes that compile against
+  # internal/. NATS and MinIO are deliberately absent: this job gates every
+  # PR, docs-only ones included, and each extra image pull (and the `mc mb`)
+  # is one more way an infra blip reddens merge-gate for a PR that is not at
+  # fault (slice 419 D-1; #1695 review finding 1). Add them back, by
+  # switching to ./.github/actions/atlas-stack-up, in the PR that lands the
+  # first probe needing NATS or MinIO — not before.
+  #
+  # No stub-twin and no path filter: the claims and probes live in isa/*.md,
+  # which the `code` filter treats as docs, and a claim ticked `- [x]` in a
+  # docs-only PR is exactly the change this job must check. Listed in
+  # merge-gate's `needs:`, so a regression blocks the merge.
+  #
+  # Local repro: `bash isa/run-probes.sh` (SQL probes exit 3 without a DB;
+  # `just db-up` + `just migrate-up` + the two DATABASE_URLs to run them).
+  # ====================================================================
+  isa-probes:
+    name: ISA · probes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: true
+          cache: true
+      # The Postgres half of ./.github/actions/atlas-stack-up, inlined
+      # because that action's `start-services` brings up MinIO + NATS with
+      # it. Keep these three steps in step with the action's.
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          # The password goes in on stdin and psql reads it with \getenv,
+          # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \getenv atlas_app_password ATLAS_APP_PASSWORD
+          ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+          SQL
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Run ISA probes (fails only on a closed claim's regression)
+        run: bash isa/run-probes.sh
 
   # ====================================================================
   # Slice 393 (Q-5) — coverage-exclude justification lint (HARD FAIL).
@@ -3257,7 +3725,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3269,6 +3737,246 @@ jobs:
 
       - name: Run check-coverage-excludes.sh
         run: bash scripts/check-coverage-excludes.sh
+
+  # ====================================================================
+  # #1880 — migration timestamp uniqueness (HARD FAIL).
+  #
+  # Refuses a migration under migrations/sql/ whose timestamp prefix
+  # another migration already uses, so the apply order stays the order
+  # the migrations were written in. The prefixes that collided before the
+  # check (six, including the two 20260811000000 files) are grandfathered
+  # by name in the script. #2883 adds a second rule: a migration main
+  # lacks must carry a timestamp after main's latest, with main fetched
+  # when the job runs. Fast; runs unconditionally (no `if:`), so
+  # merge-gate needs it and requires `success` on every PR.
+  #
+  # Local repro: `bash scripts/check-migration-timestamps.sh`
+  #   self-test: `bash scripts/check-migration-timestamps_test.sh`
+  # ====================================================================
+  migration-timestamps-check:
+    name: migration-timestamps-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-migration-timestamps self-test
+        run: bash scripts/check-migration-timestamps_test.sh
+
+      # #2883: compare against main as it is now, not as it was when the
+      # PR's merge ref was built, so a PR whose "next timestamp" another
+      # PR has since landed fails on any re-run. On a main push nothing
+      # is new relative to main, so the comparison is a no-op there.
+      - name: Fetch main's current tip
+        run: git fetch --no-tags --depth=1 origin main
+
+      - name: Run check-migration-timestamps.sh
+        env:
+          MIGRATIONS_BASE_REF: FETCH_HEAD
+        run: bash scripts/check-migration-timestamps.sh
+
+  # ====================================================================
+  # #2357 — changelog fragments (HARD FAIL).
+  #
+  # Unreleased changes live in changelog.d/<pr-or-issue>.<type>.md, not
+  # at the top of CHANGELOG.md, so parallel PRs stop conflicting on it.
+  # Every event validates the fragments. On a pull_request, a PR that
+  # changes code must also add one, unless it carries the `no-changelog`
+  # label, changes only docs, or comes from Dependabot or release-please.
+  #
+  # Labels are read from the API at run time, not from the event
+  # payload, so adding the label and re-running this job is enough; the
+  # workflow does not trigger on `labeled`, which would re-run all of CI.
+  #
+  # Local repro: `bash scripts/changelog.sh check`
+  #   self-test: `bash scripts/changelog_test.sh`
+  # ====================================================================
+  changelog-fragment:
+    name: changelog-fragment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run changelog self-test
+        run: bash scripts/changelog_test.sh
+
+      - name: Validate fragments
+        run: bash scripts/changelog.sh check
+
+      - name: Require a fragment on user-visible PRs
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          export PR_LABELS
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | "\(.status)\t\(.filename)"' >"$RUNNER_TEMP/files.txt"
+          bash scripts/changelog.sh require <"$RUNNER_TEMP/files.txt"
+
+  # ====================================================================
+  # #2891 — stock bundles must not supersede silently (HARD FAIL).
+  #
+  # Every start of an existing deployment re-uploads the stock bundles
+  # (deploy/docker/bootstrap/bootstrap.sh). A superseding change mints a
+  # new control id and leaves owners, evidence, exceptions and links on
+  # the old row (docs/audit-log/1908). The check compares each controls/**
+  # control.yaml with the PR base using control.SupersedingFields, the
+  # function Store.Upload uses, and fails on a supersede unless the PR
+  # carries the `supersedes-stock` label AND a changed docs/audit-log/*.md
+  # names the bundle. After adding the label, re-run the failed job.
+  # Unconditional (the PR step no-ops without a controls change), so
+  # merge-gate needs it.
+  #
+  # Local repro: `go run ./cmd/scripts/stock-supersede-check --base origin/main`
+  #   self-test: `go test ./cmd/scripts/stock-supersede-check`
+  # ====================================================================
+  stock-supersede-check:
+    name: stock-supersede-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Self-test
+        run: go test ./cmd/scripts/stock-supersede-check
+
+      - name: Compare stock bundles with the PR base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          go run ./cmd/scripts/stock-supersede-check --base "$BASE_SHA" --labels "$PR_LABELS"
+
+      # #2963: the stock hash list is append-only. A hash dropped from
+      # stock_manifests_gen.go makes IsStockManifest treat a tenant still on
+      # that revision as custom, silently. Fails listing the dropped entries,
+      # unless the PR carries `drops-stock-hash` AND a changed
+      # docs/audit-log/*.md names each dropped hash (after adding the label,
+      # re-run the failed job). PR-only, like the supersede step: a merge
+      # group carries no labels, and the queue's automatic three-way merge
+      # cannot delete a line that neither side deleted.
+      # Local repro: `bash scripts/check-stock-hashes-superset.sh origin/main`
+      - name: Stock hash list self-test
+        run: bash scripts/check-stock-hashes-superset_test.sh
+
+      - name: Stock hash list keeps every base entry
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          bash scripts/check-stock-hashes-superset.sh --labels "$PR_LABELS" "$BASE_SHA"
+
+  # ====================================================================
+  # #1887 — merge-gate needs-completeness (HARD FAIL).
+  #
+  # Refuses a job that runs on every PR (no job-level `if:`) but is not in
+  # merge-gate's `needs:`. Such a job reports red and blocks nothing:
+  # coverage-excludes-check, cache-path-guard and integration-enrolment-
+  # check all sat outside the gate until #1887. A job that must run on
+  # every PR without blocking goes on the script's ALLOWLIST with its
+  # reason; a stale entry fails too. Fast, no network; unconditional, so
+  # merge-gate needs it.
+  #
+  # Local repro: `bash scripts/check-merge-gate-needs.sh`
+  #   self-test: `bash scripts/check-merge-gate-needs_test.sh`
+  # ====================================================================
+  merge-gate-needs-check:
+    name: merge-gate-needs-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-merge-gate-needs self-test
+        run: bash scripts/check-merge-gate-needs_test.sh
+
+      - name: Run check-merge-gate-needs.sh
+        run: bash scripts/check-merge-gate-needs.sh
+
+  # ====================================================================
+  # #2099 — stub-twin guard (HARD FAIL).
+  #
+  # Refuses a path-filtered job whose slice-061 stub twin does not carry a
+  # byte-identical `name:` and the complementary `if:` on the SAME
+  # `changes` output (code / go / web). A real job moved to the `go` tier
+  # with its stub left on `code` would leave a web-only PR with neither
+  # job running and the required check waiting forever. A real job that
+  # deliberately has no stub goes on the script's NO_TWIN list with its
+  # reason. Fast, no network; unconditional, so merge-gate needs it.
+  #
+  # Local repro: `bash scripts/check-stub-twins.sh`
+  #   self-test: `bash scripts/check-stub-twins_test.sh`
+  # ====================================================================
+  stub-twin-check:
+    name: stub-twin-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-stub-twins self-test
+        run: bash scripts/check-stub-twins_test.sh
+
+      - name: Run check-stub-twins.sh
+        run: bash scripts/check-stub-twins.sh
 
   # ====================================================================
   # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
@@ -3294,7 +4002,7 @@ jobs:
   assertion-density:
     name: QA · assertion density
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -3413,9 +4121,10 @@ jobs:
 
       - name: Upload assertion-density report as artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: assertion-density-report
+          retention-days: 7
           path: |
             density.txt
             density.warn
@@ -3427,7 +4136,7 @@ jobs:
   assertion-density-stub:
     name: QA · assertion density
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -3492,10 +4201,13 @@ jobs:
   # docs/audit-log/631-ci-red-shard-merge-guard-decisions.md.
   #
   # CONSERVATIVE-BY-DESIGN: a normal GREEN Go PR has every leg `success`,
-  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so the
-  # gate short-circuits GREEN. The ONLY way this gate is RED is a real
+  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so its
+  # path-filtered legs may be `skipped`; the unconditional legs (below)
+  # must still succeed. The ONLY way this gate is RED is a real
   # failed/cancelled/skipped-but-needed leg — which is exactly when the
-  # merge SHOULD be blocked. It adds no new failure mode for a clean PR.
+  # merge SHOULD be blocked. One caveat for docs-only PRs: `isa-probes`
+  # pulls `postgres:16-alpine`, so a registry outage reddens the gate
+  # even when nothing in the PR is at fault.
   #
   # MAINTAINER HAND-OFF (cannot be done from a PR): add the check name
   # `CI · merge-gate` to `.github/branch-protection.json`'s
@@ -3545,7 +4257,9 @@ jobs:
   #     `!= 'true'` branch and PASSED the gate — the path-filter oracle
   #     failing must fail the gate closed, not open it.
   #   * The unconditional legs (`precommit`, `actions-pin-check`,
-  #     `openapi-drift-check`) are asserted on docs-only PRs too. Only a
+  #     `openapi-drift-check`, since #1690 `isa-probes`, and every other
+  #     job with no `if:`, which merge-gate-needs-check enforces since
+  #     #1887) are asserted on docs-only PRs too. Only a
   #     `skipped` result is forgiven when `code != 'true'`; those jobs
   #     have no `if:` so they never skip, and a RED one now reddens the
   #     gate instead of being short-circuited past.
@@ -3557,10 +4271,12 @@ jobs:
     # list anywhere. Adding a job here is sufficient to have it asserted.
     #
     # Every entry must be a job whose `if:` is either unconditional or
-    # exactly `needs.changes.outputs.code == 'true'`. A job gated on a
-    # NARROWER filter (e.g. `changes.outputs.schemas`) would be `skipped`
-    # on an ordinary code PR and would brick the gate — verify the `if:`
-    # before adding one.
+    # gated on `needs.changes.outputs.code`, `.go` or `.web` (#2099). The
+    # step reads each job's tier from its own `if:` in this file, so a
+    # skipped leg is forgiven only when ITS tier resolved false. A job
+    # gated on a NARROWER filter (e.g. `changes.outputs.schemas`) would be
+    # `skipped` on an ordinary code PR and would brick the gate — verify
+    # the `if:` before adding one.
     needs:
       # Path-filter oracle. Asserted unconditionally: if this job does not
       # succeed, `code` is untrustworthy and the gate fails closed.
@@ -3580,6 +4296,15 @@ jobs:
       - precommit # pre-commit · all hooks
       - actions-pin-check # actions-pin-check
       - openapi-drift-check # openapi-drift-check
+      - isa-probes # ISA · probes (unconditional; red only on a closed claim's regression)
+      - migration-timestamps-check # migration-timestamps-check (unconditional, #1880)
+      - coverage-excludes-check # coverage-excludes-check (unconditional, #1887)
+      - cache-path-guard # cache-path-guard (unconditional, #1887)
+      - integration-enrolment-check # integration-enrolment-check (unconditional, #1887)
+      - merge-gate-needs-check # merge-gate-needs-check (unconditional, #1887)
+      - stub-twin-check # stub-twin-check (unconditional, #2099)
+      - changelog-fragment # changelog-fragment (unconditional, #2357)
+      - stock-supersede-check # stock-supersede-check (unconditional, #2891)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3592,15 +4317,26 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
+
+      # #2099 — the gate reads each leg's tier from its `if:` in the
+      # workflow file itself, so there is no hand-kept job->tier list.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/workflows/ci.yml
+          sparse-checkout-cone-mode: false
 
       - name: Evaluate fail-closed merge-gate
         env:
           # Whether this PR/push touches Go-affecting paths (dorny/paths-filter).
           CODE: ${{ needs.changes.outputs.code }}
+          # #2099 tiers. A leg gated on `go` / `web` may be skipped only when
+          # that tier resolved to something other than 'true'.
+          TIER_GO: ${{ needs.changes.outputs.go }}
+          TIER_WEB: ${{ needs.changes.outputs.web }}
           # The path-filter oracle's own result. If this is not `success`,
           # CODE cannot be trusted and the gate fails closed.
           R_CHANGES: ${{ needs.changes.result }}
@@ -3638,12 +4374,16 @@ jobs:
           fi
 
           if [ "${CODE:-}" = "true" ]; then
-            echo "code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success'."
-            echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+            echo "code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success', except a"
+            echo "leg gated on a go/web tier that resolved false (#2099), which may be 'skipped'."
+            echo "A leg that is failure/cancelled, or skipped while its tier is 'true', fails this"
+            echo "gate CLOSED (slice 474 hole)."
           else
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
-            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check) still"
+            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes,"
+            echo "migration-timestamps-check, coverage-excludes-check, cache-path-guard,"
+            echo "integration-enrolment-check, merge-gate-needs-check, stub-twin-check) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3672,11 +4412,65 @@ jobs:
               oscal-bridge)                   echo "OSCAL bridge · Python (ruff + pytest)" ;;
               fuzz)                           echo "Go · fuzz (bounded)" ;;
               govulncheck)                    echo "Go · govulncheck" ;;
+              isa-probes)                     echo "ISA · probes" ;;
+              migration-timestamps-check)     echo "migration-timestamps-check" ;;
+              coverage-excludes-check)        echo "coverage-excludes-check" ;;
+              cache-path-guard)               echo "cache-path-guard" ;;
+              integration-enrolment-check)    echo "integration-enrolment-check" ;;
+              merge-gate-needs-check)         echo "merge-gate-needs-check" ;;
+              stub-twin-check)                echo "stub-twin-check" ;;
               *)                              echo "$1" ;;
             esac
           }
 
           pairs="$(printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"' | sort)"
+
+          # #2099: "<job> <code|go|web>" for every job whose `if:` reads one of
+          # the three outputs. A job it cannot classify (unparseable file,
+          # no tier in its `if:`) falls back to `code`, the widest tier, so
+          # a parse failure can only refuse a skip, never grant one.
+          tiers="$(python3 - .github/workflows/ci.yml <<'PY' || true
+          import re, sys, yaml
+          jobs = yaml.safe_load(open(sys.argv[1]))["jobs"]
+          for name, job in jobs.items():
+              cond = job.get("if") if isinstance(job, dict) else None
+              m = re.search(r"needs\.changes\.outputs\.(code|go|web)\b", cond if isinstance(cond, str) else "")
+              if m:
+                  print(name, m.group(1))
+          PY
+          )"
+          tier_of() {
+            t="$(printf '%s\n' "$tiers" | awk -v j="$1" '$1 == j { print $2; exit }')"
+            echo "${t:-code}"
+          }
+          tier_value() {
+            case "$1" in
+              go)  echo "${TIER_GO:-}" ;;
+              web) echo "${TIER_WEB:-}" ;;
+              *)   echo "${CODE:-}" ;;
+            esac
+          }
+          echo "tiers: code='${CODE:-}' go='${TIER_GO:-}' web='${TIER_WEB:-}'"
+          if [ -z "$tiers" ]; then
+            echo "WARNING: tier parse of .github/workflows/ci.yml returned nothing;" >&2
+            echo "every leg falls back to tier 'code', so no go/web skip is forgiven." >&2
+          fi
+
+          # #2099: with code='true' the tiers must be well-formed, and at
+          # least one must be on. Anything else means `resolve` misbehaved,
+          # and forgiving skips against it would be unsafe.
+          if [ "${CODE:-}" = "true" ]; then
+            for tv in "${TIER_GO:-}" "${TIER_WEB:-}"; do
+              if [ "$tv" != "true" ] && [ "$tv" != "false" ]; then
+                echo "merge-gate is RED: code='true' but tiers are go='${TIER_GO:-}' web='${TIER_WEB:-}' (each must be true or false)." >&2
+                exit 1
+              fi
+            done
+            if [ "${TIER_GO}" != "true" ] && [ "${TIER_WEB}" != "true" ]; then
+              echo "merge-gate is RED: code='true' but both go and web tiers are false." >&2
+              exit 1
+            fi
+          fi
 
           fail=0
           while IFS="$(printf '\t')" read -r job result; do
@@ -3690,8 +4484,8 @@ jobs:
             name="$(display "$job")"
             if [ "$result" = "success" ]; then
               echo "  OK    ${job} — ${name}: ${result}"
-            elif [ "$result" = "skipped" ] && [ "${CODE:-}" != "true" ]; then
-              echo "  SKIP  ${job} — ${name}: ${result}  (allowed: no Go-affecting changes)"
+            elif [ "$result" = "skipped" ] && [ "$(tier_value "$(tier_of "$job")")" != "true" ]; then
+              echo "  SKIP  ${job} — ${name}: ${result}  (allowed: tier '$(tier_of "$job")' resolved false)"
             else
               echo "  BLOCK ${job} — ${name}: ${result}  <-- not 'success'" >&2
               fail=1
@@ -3830,7 +4624,7 @@ jobs:
       NATS_URL: nats://localhost:4222
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3838,12 +4632,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+          check-latest: true
           cache: true
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: same oscal-bridge install as the PR-time shard matrix.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start MinIO
         run: |
           docker run -d --name minio \
@@ -3876,8 +4687,12 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          # The password goes in on stdin and psql reads it with \getenv,
+          # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \getenv atlas_app_password ATLAS_APP_PASSWORD
+          ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+          SQL
           echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
       - name: Apply forward migrations
         run: |

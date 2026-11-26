@@ -50,6 +50,9 @@ type Report struct {
 	Passed   int          `json:"passed"`
 	Failed   int          `json:"failed"`
 	Errored  int          `json:"errored"`
+	// Warnings are cases that run but cannot show what they are meant to
+	// (KindlessRecordWarnings). They do not fail the run.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // AllPassed reports whether every case passed (no failures, no errors). The CLI
@@ -98,7 +101,7 @@ func Run(ctx context.Context, bundleDir string, opts Options) (*Report, error) {
 		now = time.Now().UTC()
 	}
 
-	report := &Report{BundleID: bundle.Manifest.BundleID, Cases: make([]CaseResult, 0, len(cases))}
+	report := &Report{BundleID: bundle.Manifest.BundleID, Cases: make([]CaseResult, 0, len(cases)), Warnings: KindlessRecordWarnings(queries, cases)}
 	for i := range cases {
 		cr := runCase(ctx, &cases[i], queries, freshnessClass, now, opts.Tx)
 		report.Cases = append(report.Cases, cr)
@@ -151,7 +154,7 @@ func runCase(ctx context.Context, c *TestCase, queries []eval.FixtureQuery, fres
 func bundleQueries(b *control.Bundle) []eval.FixtureQuery {
 	out := make([]eval.FixtureQuery, 0, len(b.Manifest.EvidenceQueries))
 	for _, q := range b.Manifest.EvidenceQueries {
-		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression})
+		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
 	}
 	return out
 }
@@ -176,9 +179,10 @@ func toFixtureRecords(records []FixtureRecord, now time.Time) ([]eval.FixtureRec
 			payload = b
 		}
 		out = append(out, eval.FixtureRecord{
-			Result:     r.Result,
-			ObservedAt: observedAt,
-			Payload:    payload,
+			Result:       r.Result,
+			ObservedAt:   observedAt,
+			Payload:      payload,
+			EvidenceKind: r.EvidenceKind,
 		})
 	}
 	return out, nil

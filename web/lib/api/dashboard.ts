@@ -2,6 +2,17 @@
 // extracted from the former `web/lib/api.ts` god-file.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import {
+  MAX_WINDOW_DAYS,
+  buildUnifiedQuery,
+  type UnifiedListResponse,
+} from "./audit-log";
+import type { PostureTarget } from "./posture-targets";
+import {
+  type CalendarResponse,
+  fetchCalendarEvents,
+  getCalendarEvents,
+} from "./calendar";
 
 // ===== Slice 040 — Program dashboard view (+ slice 147 re-point) =====
 //
@@ -18,9 +29,9 @@ import { apiFetch, bffControlFetch } from "./_shared";
 //   * Top risks aging    GET /v1/risks?treatment=mitigate   (slice 019) — bound
 //       Server-side `sort=residual,age` (slice 066) is not yet passed —
 //       spillover at slice 148.
-//   * Upcoming items     GET /v1/exceptions/expiring?within=30d (slice 028) — bound
-//       The unified rollup `/v1/upcoming` (slice 066) is not yet consumed —
-//       spillover at slice 148.
+//   * Coming up          GET /v1/calendar, today + 14 days     (#2130) — bound
+//       The compliance calendar is the one list of what is due; it
+//       replaced the slice-066 upcoming rollup.
 //   * Framework posture  GET /v1/frameworks/posture          (slice 066) — bound by slice 147
 //   * Activity feed      GET /v1/activity                    (slice 066) — bound by slice 147
 //
@@ -35,6 +46,11 @@ export type DriftRow = {
   current_result: string;
 };
 
+// GainRow mirrors `gainRowWire`: a control that started passing (#2063).
+export type GainRow = {
+  control_id: string;
+};
+
 // DriftReport mirrors the Drift handler's JSON envelope.
 export type DriftReport = {
   since: string;
@@ -42,6 +58,8 @@ export type DriftReport = {
   delta: number;
   flipped_out_count: number;
   flipped_out: DriftRow[];
+  started_passing_count: number;
+  started_passing: GainRow[];
 };
 
 // freshnessClassBucket mirrors `freshnessClassBucket` in the same handler.
@@ -71,6 +89,11 @@ export type DashboardRisk = {
   methodology: string;
   inherent_score: unknown;
   treatment: string;
+  // #1746: proposed | approved when treatment is accept; absent otherwise.
+  acceptance_status?: "proposed" | "approved";
+  // #2129: the owner (a user id) and any unlinked free-text owner.
+  owner_user_id?: string | null;
+  owner_unlinked?: string;
   treatment_owner: string;
   residual_score: unknown;
   review_due_at?: string;
@@ -112,12 +135,30 @@ export type ExpiringExceptionsResponse = {
 // internal/api/dashboard/handler.go. One row per active framework version.
 // `coverage_pct` and `freshness_composite` are 0-100; `trend_delta_90d`
 // is signed (current coverage minus coverage 90 days ago, in points).
+// `covered_by_exception_pct` (#2112) is the part of `coverage_pct` that
+// rests only on active exceptions, 0-100.
+//
+// `scope_set` (#2114) is false when the tenant has no activated framework
+// scope for the version; every percentage is then null and the tile shows
+// "Scope not set", linking to `/framework-scopes/<framework_version_id>`.
 export type FrameworkPostureRow = {
   framework_id: string;
   framework_version: string;
-  coverage_pct: number;
-  freshness_composite: number;
-  trend_delta_90d: number;
+  framework_version_id: string;
+  // framework_name (#2083): label the tile with frameworkLabel(name, version).
+  framework_name: string;
+  scope_set: boolean;
+  coverage_pct: number | null;
+  covered_by_exception_pct: number | null;
+  freshness_composite: number | null;
+  trend_delta_90d: number | null;
+  // target (#2136): the organisation's posture target for the version, or
+  // null when none is set. The tile colours coverage against it.
+  target: PostureTarget | null;
+  // prior_target (#2406): when this version has no target, the target on
+  // the version it migrates from, or null. The Set target dialog prefills
+  // from it.
+  prior_target?: PostureTarget | null;
 };
 
 // FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.
@@ -126,28 +167,27 @@ export type FrameworkPostureReport = {
   count: number;
 };
 
-// UpcomingItem mirrors `upcomingWire` in
-// internal/api/dashboard/handler.go. One row of the unified upcoming
-// rollup — merges expiring exceptions, policy-ack expirations, vendor
-// reviews, and audit-period milestones into one date-sorted feed.
-// `category` is one of: exception / policy_ack / vendor_review /
-// audit_period.
-export type UpcomingItem = {
-  due_date: string;
-  category: string;
-  title: string;
-  resource_type: string;
-  resource_id: string;
-};
+// COMING_UP_DAYS is the dashboard's "Coming up" window (#2130): the
+// calendar from today (UTC) through the next 14 days. The Go dashboard
+// export reads the same window (dashboardexport.UpcomingWindow).
+export const COMING_UP_DAYS = 14;
 
-// UpcomingResponse mirrors the Upcoming handler's envelope.
-// `next_cursor` is the opaque base64url keyset token for the next page,
-// or "" when no next page exists.
-export type UpcomingResponse = {
-  upcoming: UpcomingItem[];
-  count: number;
-  next_cursor: string;
-};
+// comingUpWindow returns the calendar query for the "Coming up" window
+// at `now`: `from` is today's UTC date and `to` (inclusive on the
+// calendar API) is 13 days later, so the window is [today, today + 14d).
+export function comingUpWindow(now: Date = new Date()): {
+  from: string;
+  to: string;
+} {
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const last = new Date(today.getTime() + (COMING_UP_DAYS - 1) * 86_400_000);
+  return {
+    from: today.toISOString().slice(0, 10),
+    to: last.toISOString().slice(0, 10),
+  };
+}
 
 // ActivityEvent mirrors `activityWire` in internal/api/dashboard/handler.go.
 // `summary` is forwarded as-is — the slice-062 admin_audit_log_v evidence
@@ -192,19 +232,17 @@ export async function getEvidenceFreshness(
   return (await res.json()) as FreshnessReport;
 }
 
-// getMitigateRisks fetches the dashboard top-risks panel feed —
-// risks with treatment=mitigate, ranked by residual-score magnitude
-// descending then risk age ascending. The `sort=residual,age` ordering
-// is the slice-066 (AC-3) server-side capability that slice 157
-// re-points the dashboard onto; before slice 157 the dashboard rendered
-// the unsorted list with a labelled "ranking pending" footer.
-export async function getMitigateRisks(
-  bearer: string,
-): Promise<DashboardRisk[]> {
-  const res = await apiFetch(
-    `/v1/risks?treatment=mitigate&sort=residual,age`,
-    bearer,
-  );
+// TOP_RISKS_QUERY is the dashboard top-risks card's register query
+// (#2135): the 5 open risks with the highest residual, roll-ups left out,
+// in the register's own residual order (5x5, then FAIR, then unscored;
+// #2475/#2528). Every narrowing is the platform's; the card renders the
+// page it is given.
+export const TOP_RISKS_LIMIT = 5;
+export const TOP_RISKS_QUERY = `?status=open&include_rollups=false&sort=-residual&limit=${TOP_RISKS_LIMIT}`;
+
+// getTopRisks fetches the dashboard top-risks card feed.
+export async function getTopRisks(bearer: string): Promise<DashboardRisk[]> {
+  const res = await apiFetch(`/v1/risks${TOP_RISKS_QUERY}`, bearer);
   const body = (await res.json()) as RiskListResponse;
   return body.risks;
 }
@@ -234,16 +272,35 @@ export async function getActivity(
   return (await res.json()) as ActivityFeedResponse;
 }
 
-// getUpcoming fetches the dashboard's unified upcoming-rollup feed —
-// expiring exceptions, policy-ack expirations, vendor reviews, and
-// audit-period milestones merged into one date-sorted (ascending)
-// paginated feed. The slice-066 (AC-4) endpoint that slice 157
-// re-points the dashboard onto; before slice 157 the dashboard rendered
-// only the expiring-exceptions subset with a labelled "rollup pending"
-// footer.
-export async function getUpcoming(bearer: string): Promise<UpcomingResponse> {
-  const res = await apiFetch(`/v1/upcoming`, bearer);
-  return (await res.json()) as UpcomingResponse;
+// Recent activity (#2135): the last 10 rows of the unified activity log
+// (GET /v1/activity/unified, the /activity page's source, module-filtered
+// on the platform, #2477), rendered as sentences (#2093). The window is
+// the endpoint's widest, so a quiet tenant still shows its last changes.
+export const RECENT_ACTIVITY_LIMIT = 10;
+
+export function recentActivityQuery(now: Date = new Date()): string {
+  const from = new Date(now.getTime() - MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return buildUnifiedQuery({
+    from: from.toISOString(),
+    to: now.toISOString(),
+    limit: RECENT_ACTIVITY_LIMIT,
+  });
+}
+
+export async function getRecentActivity(
+  bearer: string,
+): Promise<UnifiedListResponse> {
+  const res = await apiFetch(
+    `/v1/activity/unified${recentActivityQuery()}`,
+    bearer,
+  );
+  return (await res.json()) as UnifiedListResponse;
+}
+
+// getComingUp fetches the dashboard's "Coming up" panel feed: the
+// compliance calendar for the next 14 days (#2130).
+export async function getComingUp(bearer: string): Promise<CalendarResponse> {
+  return getCalendarEvents(bearer, comingUpWindow());
 }
 
 // ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
@@ -262,8 +319,8 @@ export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
   );
 }
 
-export function fetchDashboardUpcoming(): Promise<UpcomingResponse> {
-  return bffControlFetch<UpcomingResponse>(`/api/dashboard/upcoming`);
+export function fetchDashboardComingUp(): Promise<CalendarResponse> {
+  return fetchCalendarEvents(comingUpWindow());
 }
 
 export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport> {
@@ -274,4 +331,12 @@ export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport
 
 export function fetchDashboardActivity(): Promise<ActivityFeedResponse> {
   return bffControlFetch<ActivityFeedResponse>(`/api/dashboard/activity`);
+}
+
+// fetchDashboardRecentActivity reads the activity BFF (the /activity
+// page's), which forwards the query to /v1/activity/unified.
+export function fetchDashboardRecentActivity(): Promise<UnifiedListResponse> {
+  return bffControlFetch<UnifiedListResponse>(
+    `/api/activity${recentActivityQuery()}`,
+  );
 }

@@ -2,15 +2,38 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_privileged_account_management
 title: "Privileged credentials vaulted with break-glass workflow"
 description: |
-  Privileged accounts are a tested subset of CC6.3 (authorize, modify,
-  remove access). The query reads the 1Password org-policy snapshot and
-  asserts that the vault containing privileged credentials (root keys,
-  shared admin passwords, break-glass accounts) has: a documented list
-  of vault members, sharing-disabled-by-default, and an audit-event
-  stream enabled. Personal-vault sharing of company secrets is
-  disallowed.
+  Privileged accounts are a tested subset of CC6.3 (granting, changing and
+  revoking access). The intended test is that the vault holding privileged
+  credentials (root keys, shared admin passwords, break-glass accounts)
+  has a documented member list, sharing disabled by default and an
+  audit-event stream enabled, and that company secrets are not shared from
+  personal vaults.
 
-scf_anchor_id: IAC-21
+  What runs today: a SQL query over the payloads of the 1Password
+  connector's `1password.org_policy.v2` snapshots. It takes each account's
+  latest in-window snapshot and fails the control when any of them has
+  `audit_events_enabled` false, meaning the Events Reporting integration
+  the connector reads through is not authorized for audit events, so the
+  account's audit-event stream does not reach this deployment through it.
+  Otherwise the control is inconclusive. It never passes. No in-window v2
+  snapshot also leaves it inconclusive, including when only
+  `1password.org_policy.v1` snapshots arrived (a connector older than
+  #2968): v1 snapshots are not read. The connector's per-record verdict is
+  not used.
+
+  Why it cannot pass: the v1 snapshot's two-factor and minimum password
+  length fields came from an endpoint no 1Password documentation
+  describes, and no documented 1Password API (Events, Users, Connect)
+  reports an account's two-factor requirement or password rules, so they
+  cannot be verified (#2968). The v2 snapshot's member counts are
+  recorded but not checked.
+
+  Not checked: vault membership, the sharing default, per-vault audit
+  events and personal-vault sharing (#2969); bounding the member count by
+  the privileged role, which needs an inventory (#2834).
+
+scf_anchor_id: IAC-10
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering
@@ -19,19 +42,17 @@ freshness_class: daily
 
 evidence_queries:
   - id: privileged_vault_locked_down
-    language: rego
-    evidence_kind: 1password.org_policy.v1
-    description: "Privileged vault has restricted membership, sharing-disabled-by-default, audit logging on"
+    language: sql
+    evidence_kind: 1password.org_policy.v2
+    description: "The 1Password account's audit-event stream reaches the platform; fails when it does not, never passes"
     expression: |
-      package atlas.controls.soc2.cc6_3_pam
-
-      default allow := false
-
-      allow if {
-        some v in input.vaults
-        v.kind == "privileged"
-        v.sharing_default == "disabled"
-        v.audit_events_enabled == true
-        count(v.members) > 0
-        count(v.members) <= input.privileged_role_count
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(payload->'audit_events_enabled' = 'false'::jsonb) THEN 'fail'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT DISTINCT ON (payload->>'org_id') payload
+        FROM evidence
+        ORDER BY payload->>'org_id', observed_at DESC
+      ) AS latest

@@ -13,6 +13,7 @@ import pytest
 from atlas_oscal_bridge import OSCAL_VERSION, oscal_pb2
 from atlas_oscal_bridge.serializer import (
     SerializeError,
+    _scalar_str,
     round_trip_validate,
     serialize_assessment,
     serialize_poam,
@@ -47,7 +48,7 @@ def _ssp_input() -> oscal_pb2.SspInput:
         control_implementations=[
             oscal_pb2.ControlImplementation(
                 control_id="ctrl-1",
-                scf_id="IAC-06",
+                scf_id="IAC-37",
                 title="Multi-factor authentication",
                 statement="MFA is enforced for all administrative access via Okta.",
                 evaluation_result="pass",
@@ -81,6 +82,64 @@ def test_serialize_ssp_emits_valid_oscal():
     assert valid, errors
 
 
+def test_serialize_ssp_marks_excluded_requirements_not_applicable():
+    """#1792: each excluded requirement becomes its own namespaced
+    implemented-requirement with implementation-status not-applicable, the
+    justification as remarks and an atlas framework prop. The per-control
+    entry is unchanged, and the SSP survives the trestle round-trip."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="iso27001-2022",
+            requirement_code="A.8.25",
+            requirement_title="Secure development life cycle",
+            justification="No in-house software development.",
+            framework_scope_id="scope-1",
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert len(impls) == 2
+
+    by_id = {ir["control-id"]: ir for ir in impls}
+    na = by_id["iso27001-2022_A.8.25"]
+    props = {(p["name"], p.get("ns")): p["value"] for p in na["props"]}
+    assert props[("implementation-status", None)] == "not-applicable"
+    atlas_ns = "https://security-atlas.dev/ns/oscal"
+    assert props[("framework", atlas_ns)] == "iso27001-2022"
+    assert props[("requirement-code", atlas_ns)] == "A.8.25"
+    assert na["remarks"] == "No in-house software development."
+    assert not any(p["name"] == "evaluation-result" for p in na["props"])
+
+    # The per-control entry is unchanged.
+    ctrl = by_id["iac-37"]
+    assert {p["name"]: p["value"] for p in ctrl["props"]}["evaluation-result"] == "pass"
+    assert not any(p["name"] == "implementation-status" for p in ctrl["props"])
+
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_ssp_requirement_token_sanitizes_code():
+    """A code with characters outside the OSCAL token alphabet still yields a
+    valid control-id (round-trip passes)."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="soc2-2017", requirement_code="CC 6.1/a", justification="n/a"
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert "soc2-2017_CC-6.1-a" in {ir["control-id"] for ir in impls}
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
 def test_serialize_ssp_rejects_empty_control_implementations():
     bad = _ssp_input()
     del bad.control_implementations[:]
@@ -94,7 +153,7 @@ def _ssp_input_with_vendor_claim() -> oscal_pb2.SspInput:
         oscal_pb2.VendorAttestedImplementation(
             claim_id="claim-aaaa",
             control_id="AC-2",
-            scf_id="IAC-07",
+            scf_id="IAC-04",
             component_uuid="vendor-uuid-1",
             component_title="AcmeVault",
             component_type="service",
@@ -187,6 +246,173 @@ def test_serialize_ssp_excludes_rejected_and_needs_info_claims():
     assert not any(any(p["name"] == "vendor-attested" for p in c.get("props", [])) for c in comps)
     impls = ssp["control-implementation"]["implemented-requirements"]
     assert not any(any(p["name"] == "vendor-attested" for p in ir.get("props", [])) for ir in impls)
+
+
+def test_serialize_ssp_marks_demo_seed_controls():
+    # #2043: a control the in-place demo seed added carries a demo-seed prop;
+    # a real control carries none.
+    inp = _ssp_input()
+    inp.control_implementations.append(
+        oscal_pb2.ControlImplementation(
+            control_id="ctrl-demo",
+            title="Demo control",
+            statement="Demo statement.",
+            evaluation_result="pass",
+            demo=True,
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+
+    def demo_props(ir):
+        return [p for p in ir.get("props", []) if p["name"] == "demo-seed"]
+
+    marked = [ir["control-id"] for ir in impls if demo_props(ir)]
+    assert marked == ["ctrl-demo"], marked
+    assert len(impls) == 2
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_assessment_marks_demo_seed_sampled_evidence():
+    # #2043: only the sampled records the in-place demo seed added carry a
+    # demo-seed prop, keyed to their sample ordinal.
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        populations=[
+            oscal_pb2.SamplePopulation(
+                population_id="pop-1",
+                control_id="ctrl-1",
+                population_size=40,
+                sampled_evidence_ids=["ev-1", "ev-2", "ev-3"],
+                demo_evidence_ids=["ev-2"],
+                frozen_at="2026-05-01T00:00:00+00:00",
+            )
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    result = json.loads(ar_json)["assessment-results"]["results"][0]
+    demo = {
+        p["name"]: p["value"] for p in result.get("props", []) if p["name"].endswith("-demo-seed")
+    }
+    assert demo == {"population-pop-1-sampled-1-demo-seed": "true"}
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
+
+
+def test_serialize_assessment_emits_excepted_cells_as_risk_accepted_observations():
+    # #2269: an excepted cell is a risk-accepted observation linked to the
+    # exception (id, expiry, approver) in back-matter, never a finding.
+    exc_id = "6f1c2a8e-3b7d-4e2f-9a10-5c4d3e2b1a00"
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        excepted_cells=[
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-1",
+                control_id="ctrl-1",
+                scope_cell_id="cell-a",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+                exceptions=[
+                    oscal_pb2.AcceptedException(
+                        id=exc_id,
+                        expires_at="2026-09-01T00:00:00+00:00",
+                        approved_by="user-approver",
+                        approved_at="2026-04-01T00:00:00+00:00",
+                        justification="Legacy host retires in Q3.",
+                        status="active",
+                    )
+                ],
+            ),
+            # The same exception covering a second cell appears once in
+            # back-matter.
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-2",
+                control_id="ctrl-1",
+                scope_cell_id="cell-b",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+                exceptions=[
+                    oscal_pb2.AcceptedException(id=exc_id, expires_at="2026-09-01T00:00:00+00:00")
+                ],
+            ),
+            # An exception that can no longer be resolved still yields an
+            # observation, with no link.
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-3",
+                control_id="ctrl-2",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+            ),
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    doc = json.loads(ar_json)["assessment-results"]
+    result = doc["results"][0]
+    assert "findings" not in result
+    obs = result["observations"]
+    assert len(obs) == 3
+    for o in obs:
+        props = {p["name"]: p["value"] for p in o["props"]}
+        assert props["observation-source"] == "exception"
+        assert props["risk-accepted"] == "true"
+        assert props["evaluation-result"] == "excepted"
+
+    first = obs[0]
+    assert first["links"] == [
+        {"href": f"#{exc_id}", "rel": "related", "text": "Accepting exception"}
+    ]
+    assert first["expires"].startswith("2026-09-01")
+    assert "links" not in obs[2]
+
+    resources = doc["back-matter"]["resources"]
+    assert len(resources) == 1
+    res = resources[0]
+    assert res["uuid"] == exc_id
+    res_props = {p["name"]: p["value"] for p in res["props"]}
+    assert res_props["expires-at"] == "2026-09-01T00:00:00+00:00"
+    assert res_props["approved-by"] == "user-approver"
+
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
+
+
+def test_serialize_assessment_excepted_replay_cell_carries_evaluated_as_of():
+    # #3071: a replay row is written at evaluated_at but judged an earlier
+    # instant; the observation names that instant. A live row has no such
+    # prop.
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        excepted_cells=[
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-replay",
+                control_id="ctrl-1",
+                evaluated_at="2026-05-11T00:00:00+00:00",
+                evaluated_as_of="2026-05-01T00:00:00+00:00",
+            ),
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-live",
+                control_id="ctrl-2",
+                evaluated_at="2026-05-11T00:00:00+00:00",
+            ),
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    obs = json.loads(ar_json)["assessment-results"]["results"][0]["observations"]
+    props = [{p["name"]: p["value"] for p in o["props"]} for o in obs]
+    assert props[0]["evaluated-as-of"] == "2026-05-01T00:00:00+00:00"
+    assert obs[0]["collected"].startswith("2026-05-11")
+    assert "evaluated-as-of" not in props[1]
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
 
 
 def test_serialize_assessment_emits_valid_ap_and_ar():
@@ -300,6 +526,33 @@ def test_serialize_poam_emits_valid_oscal():
     assert valid, errors
 
 
+def test_serialize_poam_names_a_replay_items_judged_instant():
+    # #3087: a finding from a replay row carries evaluated-as-of; a live
+    # finding does not.
+    inp = oscal_pb2.PoamInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        items=[
+            oscal_pb2.PoamItem(
+                id="replay",
+                control_id="ctrl-1",
+                severity="high",
+                due_date="2026-07-30T00:00:00Z",
+                evaluated_as_of="2026-05-01T00:00:00Z",
+            ),
+            oscal_pb2.PoamItem(id="live", control_id="ctrl-2", severity="high"),
+        ],
+    )
+    data = serialize_poam(inp)
+    valid, errors = round_trip_validate("plan-of-action-and-milestones", data)
+    assert valid, errors
+    items = json.loads(data)["plan-of-action-and-milestones"]["poam-items"]
+    props = [{p["name"]: p["value"] for p in it["props"]} for it in items]
+    assert props[0]["evaluated-as-of"] == "2026-05-01T00:00:00Z"
+    assert "evaluated-as-of" not in props[1]
+
+
 def test_serialize_poam_handles_zero_findings():
     # An audit period with no open findings still produces a valid POA&M.
     inp = oscal_pb2.PoamInput(
@@ -328,3 +581,18 @@ def test_round_trip_rejects_wrong_top_key():
     valid, errors = round_trip_validate("assessment-plan", b'{"wrong-key": {}}')
     assert not valid
     assert "missing top-level key" in errors[0]
+
+
+def test_scalar_str_unwraps_root_model_and_enum():
+    # DefinedComponent.type is ``StringDatatype | DefinedComponentTypeValidValues``.
+    # Parsed JSON lands on the RootModel; a model built in code can hold the
+    # plain Enum member, whose str() is ``Class.member`` (issue #1875).
+    from trestle.oscal.component import DefinedComponent, DefinedComponentTypeValidValues
+
+    base = {"uuid": "11111111-1111-4111-8111-111111111111", "title": "t", "description": "d"}
+    parsed = DefinedComponent.model_validate({**base, "type": "software"})
+    built = DefinedComponent(**base, type=DefinedComponentTypeValidValues.software)
+
+    assert _scalar_str(parsed.type) == "software"
+    assert _scalar_str(built.type) == "software"
+    assert _scalar_str(None) == ""

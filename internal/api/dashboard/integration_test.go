@@ -16,10 +16,10 @@
 //	ISC-18  framework posture aggregates correctly across versions
 //	ISC-19  activity feed paginates newest-first with a stable cursor
 //	ISC-20  risks sort=residual,age orders correctly (in risks_sort_test.go)
-//	ISC-21  upcoming rollup merges all four sources date-sorted
+//	ISC-21  (retired: the upcoming rollup was removed by #2130)
 //	ISC-22  all four endpoints 403 a role without program-read access
 //	ISC-23  all four endpoints are RLS-isolated across tenants
-//	(plus)  input validation: bad cursor / limit / category -> 400
+//	(plus)  input validation: bad cursor / limit -> 400
 
 package dashboard_test
 
@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -40,8 +39,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -72,6 +71,33 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"controls",
 		"users",
 	)
+}
+
+// activateScope gives the tenant an activated framework scope for the
+// version, with no applicability decisions. Posture reports a percentage
+// only for a version with an activated scope (#2114); without one the row
+// is "scope not set".
+func activateScope(t *testing.T, admin *pgxpool.Pool, tenant string, frameworkVersionID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	scopeID := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO framework_scopes (id, tenant_id, framework_version_id, name, predicate, predicate_hash, state)
+		VALUES ($1, $2, $3, 'ISMS', '{"op":"true"}'::jsonb, 'h0', 'draft')`,
+		scopeID, tenant, frameworkVersionID); err != nil {
+		t.Fatalf("seed framework_scope: %v", err)
+	}
+	if _, err := admin.Exec(ctx, `
+		UPDATE framework_scopes SET state = 'activated', effective_from = now()
+		WHERE id = $1`, scopeID); err != nil {
+		t.Fatalf("activate framework_scope: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(),
+			`DELETE FROM framework_scopes WHERE id = $1`, scopeID); err != nil {
+			t.Logf("cleanup activated scope: %v", err)
+		}
+	})
 }
 
 // framework bundles the ids a seeded framework version exposes so the tests
@@ -142,13 +168,28 @@ func seedFramework(t *testing.T, admin *pgxpool.Pool, slug, version string, reqC
 		// so any audit period a test seeded against this version must go
 		// first. Cleanups run LIFO and seedFramework is called after
 		// freshTenant, so this runs before freshTenant's audit_periods
-		// delete — clear them here too. fw_to_scf_edges +
+		// delete — clear them here too. The same LIFO order means the
+		// tenant's controls still exist here, and controls_scf_anchor_fk is
+		// ON DELETE RESTRICT, so the controls on these anchors (and their
+		// exceptions, also RESTRICT) go first or the framework delete fails
+		// and leaks the catalog rows (#2743). fw_to_scf_edges +
 		// framework_requirements + scf_anchors cascade from
 		// framework_versions; framework_versions cascades from frameworks.
 		if _, err := admin.Exec(ctx,
 			`DELETE FROM audit_periods WHERE framework_version_id = $1`,
 			fw.frameworkVersionID); err != nil {
 			t.Logf("cleanup audit_periods for framework: %v", err)
+		}
+		if _, err := admin.Exec(ctx, `
+			DELETE FROM exceptions WHERE control_id IN (
+				SELECT id FROM controls WHERE scf_anchor_id = ANY($1))`,
+			anchors); err != nil {
+			t.Logf("cleanup exceptions on framework anchors: %v", err)
+		}
+		if _, err := admin.Exec(ctx,
+			`DELETE FROM controls WHERE scf_anchor_id = ANY($1)`,
+			anchors); err != nil {
+			t.Logf("cleanup controls on framework anchors: %v", err)
 		}
 		if _, err := admin.Exec(ctx,
 			`DELETE FROM frameworks WHERE id = $1`, fw.frameworkID); err != nil {
@@ -224,23 +265,22 @@ func seedIngestEvent(t *testing.T, admin *pgxpool.Pool, tenant, decision string,
 }
 
 // seedException inserts one exceptions row. status='active' makes it appear
-// in the upcoming rollup; expiresAt is its due_date.
+// in tenant-scoped reads; expiresAt is when it lapses.
 func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, expiresAt time.Time) {
 	t.Helper()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO exceptions (
 			id, tenant_id, control_id, scope_cell_predicate,
-			justification, requested_by, requested_at, expires_at, status
+			justification, requested_by, requested_at, expires_at, activated_at, status
 		)
 		VALUES ($1, $2, $3, '{}'::jsonb,
-		        'slice 066 test exception', 'tester', now(), $4, 'active')
+		        'slice 066 test exception', 'tester', now(), $4, now(), 'active')
 	`, uuid.New(), tenant, ctrlID, expiresAt); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
 }
 
-// seedAuditPeriod inserts one open audit_periods row. periodEnd is its
-// due_date.
+// seedAuditPeriod inserts one open audit_periods row ending at periodEnd.
 func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid.UUID, periodEnd time.Time) {
 	t.Helper()
 	if _, err := admin.Exec(context.Background(), `
@@ -256,69 +296,6 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 	}
 }
 
-// seedVendor inserts one vendors row with a last_review_date so it appears
-// in the upcoming rollup (review due = last_review_date + cadence).
-func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant, name string, lastReview time.Time, cadence string) {
-	t.Helper()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO vendors (
-			id, tenant_id, name, criticality, review_cadence, last_review_date
-		)
-		VALUES ($1, $2, $3, 'medium', $4, $5)
-	`, uuid.New(), tenant, name, cadence, lastReview); err != nil {
-		t.Fatalf("seed vendor: %v", err)
-	}
-}
-
-func seedVendorRenewal(t *testing.T, admin *pgxpool.Pool, tenant, name string, renewalDate time.Time) uuid.UUID {
-	t.Helper()
-	id := uuid.New()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO vendors (
-			id, tenant_id, name, criticality, review_cadence, renewal_date,
-			annual_cost, currency, tool_category, commercial_status
-		)
-		VALUES ($1, $2, $3, 'medium', 'annual', $4, 25000, 'USD', 'iam', 'active')
-	`, id, tenant, name, renewalDate); err != nil {
-		t.Fatalf("seed vendor renewal: %v", err)
-	}
-	return id
-}
-
-// seedUserAndAck inserts a user + one policy + one policy_acknowledgments
-// row. The ack's due_date in the rollup is acknowledged_at + 365 days.
-func seedUserAndAck(t *testing.T, admin *pgxpool.Pool, tenant string, ackedAt time.Time) {
-	t.Helper()
-	userID := uuid.New()
-	policyID := uuid.New()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO users (id, tenant_id, email, display_name, status)
-		VALUES ($1, $2, $3, 'Slice 066 Tester', 'active')
-	`, userID, tenant, "slice066-"+uuid.NewString()[:8]+"@test.example"); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO policies (
-			id, tenant_id, title, version, body_md, status,
-			owner_role, approver_role, created_by, effective_date
-		)
-		VALUES ($1, $2, 'Slice 066 Policy', '1.0.0', '# policy', 'published',
-		        'grc_engineer', 'grc_engineer', 'tester', now())
-	`, policyID, tenant); err != nil {
-		t.Fatalf("seed policy: %v", err)
-	}
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO policy_acknowledgments (
-			id, tenant_id, policy_id, policy_version_id, user_id,
-			acknowledged_at, ack_token
-		)
-		VALUES ($1, $2, $3, $3, $4, $5, $6)
-	`, uuid.New(), tenant, policyID, userID, ackedAt,
-		"tok-"+uuid.NewString()[:12]); err != nil {
-		t.Fatalf("seed policy_acknowledgment: %v", err)
-	}
-}
-
 // testEnv bundles the running server with a bearer token bound to the tenant.
 type testEnv struct {
 	server *httptest.Server
@@ -326,13 +303,14 @@ type testEnv struct {
 }
 
 // testServer assembles the full platform router with an owner credential —
-// owner credentials carry OwnerRoles, so requireProgramRead admits them.
+// a control_owner by live role (liveroletest), which requireProgramRead admits.
 func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	// A control_owner by live role, through OPA (liveroletest, #2507).
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "control_owner")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")
@@ -383,7 +361,6 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 	r.Use(tenancymw.Middleware)
 	r.Get("/v1/frameworks/posture", h.FrameworkPosture)
 	r.Get("/v1/activity", h.Activity)
-	r.Get("/v1/upcoming", h.Upcoming)
 	return r
 }
 
@@ -411,6 +388,8 @@ func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
 
 	// Framework B: 2 requirements, tenant covers neither -> coverage 0%.
 	fwB, _ := seedFramework(t, admin, "fwb", "2025", 2)
+	activateScope(t, admin, tenant, fwA.frameworkVersionID)
+	activateScope(t, admin, tenant, fwB.frameworkVersionID)
 
 	resp, body := get(t, env, "/v1/frameworks/posture")
 	if resp.StatusCode != http.StatusOK {
@@ -429,6 +408,10 @@ func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
 	}
 	if rowA["framework_version"].(string) != "2024" {
 		t.Fatalf("ISC-18: framework A version = %v, want 2024", rowA["framework_version"])
+	}
+	// #2083: the row names its framework, so tiles show name plus version.
+	if rowA["framework_name"] != "Framework fwa" {
+		t.Fatalf("framework A name = %v, want %q", rowA["framework_name"], "Framework fwa")
 	}
 	if cov := rowA["coverage_pct"].(float64); cov != 50.0 {
 		t.Fatalf("ISC-18: framework A coverage_pct = %v, want 50.0", cov)
@@ -465,6 +448,7 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
 	seedEvaluation(t, admin, tenant, ctrl1, "pass", old) // passing then
 	seedEvaluation(t, admin, tenant, ctrl2, "fail", old) // NOT passing then
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
 
 	_, body := get(t, env, "/v1/frameworks/posture")
 	rows, _ := body["frameworks"].([]any)
@@ -483,6 +467,234 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 		return
 	}
 	t.Fatal("trend: framework posture row missing")
+}
+
+// #2112: an excepted control counts as covered, now and in the 90-day
+// baseline, and the share covered only by exception is reported separately.
+
+func TestFrameworkPosture_ExceptedCountsAsCoveredAndIsReportedSeparately(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	// Four requirements:
+	//   req0 — one control, excepted then and now: covered, by exception.
+	//   req1 — one control, passing then and now: covered.
+	//   req2 — two controls, one excepted and one passing now: covered, and
+	//          not by exception (the passing control does not need a waiver).
+	//   req3 — no control.
+	fw, anchors := seedFramework(t, admin, "fwexcepted", "2024", 4)
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-time.Hour)
+
+	ctrl0 := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	seedEvaluation(t, admin, tenant, ctrl0, "excepted", old)
+	seedEvaluation(t, admin, tenant, ctrl0, "excepted", recent)
+
+	ctrl1 := seedControlOnAnchor(t, admin, tenant, anchors[1])
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", old)
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", recent)
+
+	ctrl2a := seedControlOnAnchor(t, admin, tenant, anchors[2])
+	ctrl2b := seedControlOnAnchor(t, admin, tenant, anchors[2])
+	seedEvaluation(t, admin, tenant, ctrl2a, "excepted", recent)
+	seedEvaluation(t, admin, tenant, ctrl2b, "pass", recent)
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	_, body := get(t, env, "/v1/frameworks/posture")
+	rows, _ := body["frameworks"].([]any)
+	for _, r := range rows {
+		m := r.(map[string]any)
+		if m["framework_id"].(string) != fw.frameworkID.String() {
+			continue
+		}
+		if cov := m["coverage_pct"].(float64); cov != 75.0 {
+			t.Fatalf("coverage_pct = %v, want 75.0 (excepted counts as covered)", cov)
+		}
+		if exc := m["covered_by_exception_pct"].(float64); exc != 25.0 {
+			t.Fatalf("covered_by_exception_pct = %v, want 25.0 (req0 only)", exc)
+		}
+		// Then: req0 (excepted) + req1 (pass) = 50%. Now 75%. Delta +25. Were
+		// excepted not counted then, the delta would read +50.
+		if trend := m["trend_delta_90d"].(float64); trend != 25.0 {
+			t.Fatalf("trend_delta_90d = %v, want 25.0 (excepted counts in the baseline)", trend)
+		}
+		return
+	}
+	t.Fatal("framework posture row missing")
+}
+
+// #2269: a scope cell that stops applying while excepted no longer counts.
+// Only the cells in a control's latest evaluation run are the cells that
+// currently apply.
+
+func TestFrameworkPosture_ExceptedCellThatStopsApplyingDoesNotCount(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	fw, anchors := seedFramework(t, admin, "fwstalecell", "2024", 1)
+	cellA := uuid.New()
+	cellB := uuid.New()
+	for _, c := range []uuid.UUID{cellA, cellB} {
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
+			VALUES ($1, $2, $3, '{"environment":"prod"}'::jsonb, $4)
+		`, c, tenant, "cell-"+c.String()[:8], "hash-"+c.String()[:8]); err != nil {
+			t.Fatalf("seed cell: %v", err)
+		}
+	}
+	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	// Run 1: the control applies to cells A and B; A is excepted.
+	// Run 2: cell A no longer applies; the run covers B only, passing.
+	run1, run2 := uuid.New(), uuid.New()
+	earlier := time.Now().UTC().Add(-2 * time.Hour)
+	later := time.Now().UTC().Add(-time.Hour)
+	seedRunRow(t, admin, tenant, ctrl, run1, cellA, "excepted", earlier)
+	seedRunRow(t, admin, tenant, ctrl, run1, cellB, "pass", earlier)
+
+	exceptionPct := func() float64 {
+		t.Helper()
+		_, body := get(t, env, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			m := r.(map[string]any)
+			if m["framework_id"].(string) == fw.frameworkID.String() {
+				return m["covered_by_exception_pct"].(float64)
+			}
+		}
+		t.Fatal("framework posture row missing")
+		return 0
+	}
+
+	if got := exceptionPct(); got != 100.0 {
+		t.Fatalf("after run 1: covered_by_exception_pct = %v, want 100.0 (cell A excepted)", got)
+	}
+	seedRunRow(t, admin, tenant, ctrl, run2, cellB, "pass", later)
+	if got := exceptionPct(); got != 0.0 {
+		t.Fatalf("after run 2: covered_by_exception_pct = %v, want 0.0 (cell A no longer applies)", got)
+	}
+}
+
+// #3071: a replay of an earlier instant, written after the live run, is not
+// the control's latest run. The dashboard keeps the live result.
+func TestFrameworkPosture_ReplayOfAnEarlierInstantIsNotTheLatestRun(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	fw, anchors := seedFramework(t, admin, "fwreplay3071", "2024", 1)
+	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	// Live: pass an hour ago. Replay, written now: excepted as of a day ago.
+	seedEvaluation(t, admin, tenant, ctrl, "pass", time.Now().UTC().Add(-time.Hour))
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO control_evaluations (
+			id, tenant_id, control_id, eval_run_id, evaluated_at, evaluated_as_of,
+			result, freshness_status, evidence_count_in_window, trigger
+		)
+		VALUES ($1, $2, $3, $4, now(), now() - interval '1 day', 'excepted', 'fresh', 1, 'replay')
+	`, uuid.New(), tenant, ctrl, uuid.New()); err != nil {
+		t.Fatalf("seed replay evaluation: %v", err)
+	}
+
+	_, body := get(t, env, "/v1/frameworks/posture")
+	rows, _ := body["frameworks"].([]any)
+	for _, r := range rows {
+		m := r.(map[string]any)
+		if m["framework_id"].(string) != fw.frameworkID.String() {
+			continue
+		}
+		if cov := m["coverage_pct"].(float64); cov != 100.0 {
+			t.Fatalf("coverage_pct = %v, want 100.0", cov)
+		}
+		if exc := m["covered_by_exception_pct"].(float64); exc != 0.0 {
+			t.Fatalf("covered_by_exception_pct = %v, want 0.0 (the live run passes; the replay is not latest)", exc)
+		}
+		return
+	}
+	t.Fatal("framework posture row missing")
+}
+
+// seedRunRow inserts one control_evaluations row for a scope cell under a
+// caller-chosen eval_run_id, so a test can lay down a whole run.
+func seedRunRow(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID, runID, cellID uuid.UUID, result string, evaluatedAt time.Time) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO control_evaluations (
+			id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at,
+			result, freshness_status, evidence_count_in_window, trigger
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'fresh', 1, 'manual')
+	`, uuid.New(), tenant, ctrlID, cellID, runID, evaluatedAt, result); err != nil {
+		t.Fatalf("seed control_evaluation: %v", err)
+	}
+}
+
+// #1755: an edge a reviewer marked mapping_tier='rejected' (ADR 0018) earns no
+// framework credit, now or in the 90-day trend; restoring the tier brings the
+// credit back.
+
+func TestFrameworkPosture_RejectedEdgeEarnsNoCredit(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	// Two requirements, both covered now (100%). Only ctrl1 was passing 90
+	// days ago (then 50%), so the trend is +50.
+	fw, anchors := seedFramework(t, admin, "fwrejected", "2024", 2)
+	ctrl1 := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	ctrl2 := seedControlOnAnchor(t, admin, tenant, anchors[1])
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", old)
+	seedEvaluation(t, admin, tenant, ctrl2, "fail", old)
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	setTier := func(tier string) {
+		t.Helper()
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE fw_to_scf_edges SET mapping_tier = $1::crosswalk_mapping_tier WHERE scf_anchor_id = $2`,
+			tier, anchors[0]); err != nil {
+			t.Fatalf("set mapping_tier=%s: %v", tier, err)
+		}
+	}
+	posture := func() (coverage, trend float64) {
+		t.Helper()
+		_, body := get(t, env, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			m := r.(map[string]any)
+			if m["framework_id"].(string) == fw.frameworkID.String() {
+				return m["coverage_pct"].(float64), m["trend_delta_90d"].(float64)
+			}
+		}
+		t.Fatal("framework posture row missing")
+		return 0, 0
+	}
+
+	if cov, trend := posture(); cov != 100.0 || trend != 50.0 {
+		t.Fatalf("draft edges: coverage=%v trend=%v, want 100 / +50", cov, trend)
+	}
+
+	// Rejecting ctrl1's only edge drops its requirement now (50%) AND then
+	// (0%): the trend stays +50. A trend that ignored the tier would read
+	// 50 - 50 = 0.
+	setTier("rejected")
+	if cov, trend := posture(); cov != 50.0 || trend != 50.0 {
+		t.Fatalf("rejected edge: coverage=%v trend=%v, want 50 / +50", cov, trend)
+	}
+
+	setTier("draft")
+	if cov, trend := posture(); cov != 100.0 || trend != 50.0 {
+		t.Fatalf("restored edge: coverage=%v trend=%v, want 100 / +50", cov, trend)
+	}
 }
 
 // ===== ISC-19: activity feed paginates newest-first with a stable cursor =====
@@ -547,159 +759,6 @@ func TestActivity_PaginatesNewestFirst(t *testing.T) {
 	}
 }
 
-// ===== ISC-21: upcoming rollup merges all four sources date-sorted =====
-
-func TestUpcoming_MergesAllFourSourcesDateSorted(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	fw, anchors := seedFramework(t, admin, "fwup", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-
-	// One item per source, with deliberately interleaved due dates so a
-	// correct merge interleaves the categories:
-	//   exception     due now+10d
-	//   policy_ack    due now+20d  (ack'd 345 days ago -> +365 = now+20d)
-	//   vendor_review due now+30d  (reviewed today, but annual -> next year;
-	//                               use a monthly cadence reviewed ~now-? )
-	//   audit_period  due now+40d
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-	seedUserAndAck(t, admin, tenant, now.Add(-345*24*time.Hour)) // due ~now+20d
-	// monthly cadence, last reviewed ~now-1d -> due ~now+29d (within window)
-	seedVendor(t, admin, tenant, "Vendor M", now.Add(-1*24*time.Hour), "monthly")
-	seedAuditPeriod(t, admin, tenant, fw.frameworkVersionID, now.Add(40*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming: status %d, want 200", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 4 {
-		t.Fatalf("ISC-21: expected 4 merged rows, got %d", len(rows))
-	}
-	// Row shape.
-	first := rows[0].(map[string]any)
-	for _, field := range []string{"due_date", "category", "title", "resource_type", "resource_id"} {
-		if _, ok := first[field]; !ok {
-			t.Fatalf("ISC-21: upcoming row missing field %q", field)
-		}
-	}
-	// All four categories present.
-	seen := map[string]bool{}
-	for _, r := range rows {
-		seen[r.(map[string]any)["category"].(string)] = true
-	}
-	for _, want := range []string{"exception", "policy_ack", "vendor_review", "audit_period"} {
-		if !seen[want] {
-			t.Fatalf("ISC-21: category %q missing from merged rollup", want)
-		}
-	}
-	// Date-sorted ascending.
-	for i := 1; i < len(rows); i++ {
-		prev := rows[i-1].(map[string]any)["due_date"].(string)
-		cur := rows[i].(map[string]any)["due_date"].(string)
-		if prev > cur {
-			t.Fatalf("ISC-21: rollup not date-sorted ascending: %s > %s", prev, cur)
-		}
-	}
-}
-
-// ISC-21 (category filter arm): ?category= narrows to one source.
-
-func TestUpcoming_CategoryFilter(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	fw, anchors := seedFramework(t, admin, "fwcat", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-	seedAuditPeriod(t, admin, tenant, fw.frameworkVersionID, now.Add(40*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=exception")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming?category=exception: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("ISC-21 filter: expected 1 exception row, got %d", len(rows))
-	}
-	if cat := rows[0].(map[string]any)["category"].(string); cat != "exception" {
-		t.Fatalf("ISC-21 filter: category = %q, want exception", cat)
-	}
-}
-
-func TestUpcoming_IncludesVendorRenewal(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	renewalID := seedVendorRenewal(t, admin, tenant, "Okta", time.Now().UTC().Add(20*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=vendor_renewal")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming vendor_renewal: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 vendor renewal row, got %d; body=%v", len(rows), body)
-	}
-	first := rows[0].(map[string]any)
-	if first["category"] != "vendor_renewal" {
-		t.Fatalf("category=%v want vendor_renewal", first["category"])
-	}
-	if first["resource_id"] != renewalID.String() {
-		t.Fatalf("resource_id=%v want %s", first["resource_id"], renewalID)
-	}
-	if !strings.Contains(first["title"].(string), "Okta") {
-		t.Fatalf("title=%v want vendor name", first["title"])
-	}
-}
-
-// TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID is the slice 732 regression
-// guard for the dashboard "Upcoming" panel: the expiring-exception row's
-// title must resolve the control to its SCF code (here via the control's
-// scf_anchor_id -> scf_anchors.scf_id linkage) + the control name, and must
-// NOT contain the raw control UUID. Mirrors the calendar exception-label fix
-// so the two upcoming-event surfaces read identically (slice 675 vocabulary).
-func TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	_, anchors := seedFramework(t, admin, "fwscf", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=exception")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming?category=exception: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 exception row, got %d", len(rows))
-	}
-	title := rows[0].(map[string]any)["title"].(string)
-
-	if !strings.HasPrefix(title, "Exception on SCF-") {
-		t.Errorf("exception title = %q; want it to start with the resolved SCF code", title)
-	}
-	if !strings.Contains(title, "slice 066 test control") {
-		t.Errorf("exception title = %q; want it to contain the control name", title)
-	}
-	if strings.Contains(title, ctrl.String()) {
-		t.Errorf("exception title leaked the raw control UUID: %q", title)
-	}
-}
-
 // ===== ISC-22: all four endpoints 403 a role without program-read access =====
 
 func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
@@ -711,7 +770,6 @@ func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
 	paths := []string{
 		"/v1/frameworks/posture",
 		"/v1/activity",
-		"/v1/upcoming",
 	}
 	for _, p := range paths {
 		rec := httptest.NewRecorder()
@@ -746,20 +804,35 @@ func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
 	// nothing).
 	envB := testServer(t, app, tenantB)
 
-	// Activity + upcoming are wholly tenant-scoped: tenant B sees zero rows.
+	// Activity is wholly tenant-scoped: tenant B sees zero rows.
 	_, actBody := get(t, envB, "/v1/activity")
 	if rows, _ := actBody["activity"].([]any); len(rows) != 0 {
 		t.Fatalf("ISC-23: /v1/activity leaked %d cross-tenant rows", len(rows))
 	}
-	_, upBody := get(t, envB, "/v1/upcoming")
-	if rows, _ := upBody["upcoming"].([]any); len(rows) != 0 {
-		t.Fatalf("ISC-23: /v1/upcoming leaked %d cross-tenant rows", len(rows))
+	// Framework scope is tenant-scoped too (#2114): tenant A's activated
+	// scope leaves tenant B's row "scope not set".
+	activateScope(t, admin, tenantA, fwA.frameworkVersionID)
+	postureRow := func() map[string]any {
+		t.Helper()
+		_, body := get(t, envB, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			if m := r.(map[string]any); m["framework_id"].(string) == fwA.frameworkID.String() {
+				return m
+			}
+		}
+		t.Fatalf("ISC-23: no posture row for framework A")
+		return nil
 	}
+	if m := postureRow(); m["scope_set"] != false || m["coverage_pct"] != nil {
+		t.Fatalf("ISC-23: tenant A's activated scope leaked into tenant B's posture: %v", m)
+	}
+
 	// Framework posture: the framework + requirements are global catalog
 	// (visible to any tenant), but the COVERAGE must be tenant B's — which
 	// is zero, because tenant B has no controls anchored on fwA's anchors.
-	_, postBody := get(t, envB, "/v1/frameworks/posture")
-	rows, _ := postBody["frameworks"].([]any)
+	activateScope(t, admin, tenantB, fwA.frameworkVersionID)
+	rows := []any{postureRow()}
 	for _, r := range rows {
 		m := r.(map[string]any)
 		if m["framework_id"].(string) != fwA.frameworkID.String() {
@@ -789,9 +862,6 @@ func TestDashboard_RejectsBadInput(t *testing.T) {
 		{"/v1/activity?limit=999", http.StatusBadRequest},
 		{"/v1/activity?limit=abc", http.StatusBadRequest},
 		{"/v1/activity?cursor=@@@", http.StatusBadRequest},
-		{"/v1/upcoming?limit=0", http.StatusBadRequest},
-		{"/v1/upcoming?cursor=not-base64-!!", http.StatusBadRequest},
-		{"/v1/upcoming?category=bogus", http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		resp, _ := get(t, env, c.path)

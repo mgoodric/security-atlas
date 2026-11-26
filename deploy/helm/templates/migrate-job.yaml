@@ -65,7 +65,7 @@ spec:
       containers:
         - name: migrate
           # The bootstrap image bakes migrations/ + controls/ into /repo and
-          # ships psql + a POSIX shell (postgres:16-alpine base). It is
+          # ships psql + a POSIX shell (postgres:18-alpine base). It is
           # self-contained — no repo bind-mount required.
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/bootstrap:{{ $imageTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -96,6 +96,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "security-atlas.configMapName" . }}
                   key: ATLAS_HTTP_URL
+            # #2353: the one http:// host bootstrap.sh may send the client
+            # secret and bearer to: the in-cluster atlas Service, the host
+            # of ATLAS_HTTP_URL in the ConfigMap.
+            - name: ATLAS_BOOTSTRAP_PLAINTEXT_HOST
+              value: {{ printf "%s-atlas" (include "security-atlas.fullname" .) | quote }}
             - name: ATLAS_BOOTSTRAP_TENANT
               valueFrom:
                 configMapKeyRef:

@@ -34,22 +34,34 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler bundles the slice-155 questionnaire routes against the Store, plus
 // the slice-441 AI-suggestion routes against the qaisuggest.Service. The
 // suggestion service is OPTIONAL — when nil (e.g. a deployment that has not
-// wired local inference) the suggest/approve routes return 503 rather than
+// wired local inference) the suggest/approve routes return 409 rather than
 // panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
 	store          *questionnaire.Store
 	suggest        *qaisuggest.Service
 	mappingSuggest *qmapsuggest.Service
 	answerRuns     *questionnaire.AnswerRunService
+	// engine is the OPA engine the answer PATCH asks whether the caller
+	// may read each cited record (#2653). Nil on unit-test servers, which
+	// skip that check as they skip the authz middleware.
+	engine *authz.Engine
+}
+
+// WithAuthz wires the OPA engine for the citation read check and returns h.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -204,11 +216,13 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 	parsed, err := questionnaire.ParseExcel(raw)
 	if err != nil {
 		switch {
-		case errors.Is(err, questionnaire.ErrUploadTooLarge):
+		case errors.Is(err, questionnaire.ErrUploadTooLarge),
+			errors.Is(err, questionnaire.ErrDecompressedTooLarge):
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 		case errors.Is(err, questionnaire.ErrEmptyWorkbook),
 			errors.Is(err, questionnaire.ErrNoHeaderRow),
-			errors.Is(err, questionnaire.ErrTooManyRows):
+			errors.Is(err, questionnaire.ErrTooManyRows),
+			errors.Is(err, questionnaire.ErrTooManyColumns):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
@@ -287,16 +301,25 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
 		return
 	}
+	citations, err := questionnaire.ParseCitations(req.Citations)
+	if err != nil || !h.citationsReadable(r, citations) {
+		httpresp.WriteError(w, http.StatusBadRequest, invalidCitationMsg)
+		return
+	}
 	a, err := h.store.UpsertAnswer(ctx, questionnaire.AnswerParams{
 		QuestionID:      qid,
 		AnswerValue:     req.AnswerValue,
 		Narrative:       req.Narrative,
-		Citations:       req.Citations,
+		Citations:       citations,
 		AuthoredBy:      req.AuthoredBy,
 		SaveToLibrary:   req.SaveToLibrary,
 		SCFAnchorIDHint: req.SCFAnchorID,
 		SourceLabel:     req.SourceLabel,
 	})
+	if errors.Is(err, questionnaire.ErrInvalidCitation) {
+		httpresp.WriteError(w, http.StatusBadRequest, invalidCitationMsg)
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
@@ -304,7 +327,36 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, a)
 }
 
-// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-06&limit=10 =====
+// invalidCitationMsg is the one refusal for a malformed, absent, foreign or
+// unreadable citation (#2653), so the PATCH cannot be used to learn whether
+// an id exists.
+const invalidCitationMsg = "each citation must be a control or evidence record you can read in this tenant"
+
+// citationsReadable asks OPA whether the caller may read each cited record,
+// as GET /v1/<type>/<id> would. Without an engine (unit-test servers) every
+// citation passes, as every request passes the absent authz middleware.
+// The middleware's resource-attribute hydration does not run here, so a
+// rule that needs it (the auditor's assigned-period evidence) denies.
+func (h *Handler) citationsReadable(r *http.Request, cites []questionnaire.Citation) bool {
+	if h.engine == nil {
+		return true
+	}
+	for _, c := range cites {
+		in := authz.BuildInput(r, nil)
+		in.Action = "read"
+		in.Resource.Type = c.Type
+		in.Resource.ID = c.ID
+		in.Request.Method = http.MethodGet
+		in.Request.Path = "/v1/" + c.Type + "/" + c.ID
+		d, err := h.engine.Decide(r.Context(), in)
+		if err != nil || !d.Allow {
+			return false
+		}
+	}
+	return true
+}
+
+// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-37&limit=10 =====
 
 // Suggestions returns prior canonical answers for a given SCF anchor.
 func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
@@ -350,21 +402,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 		QuestionnaireName: q.Name,
 		SourceLabel:       q.SourceLabel,
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
-		Items:             make([]questionnaire.PDFItem, 0, len(items)),
-	}
-	for _, it := range items {
-		pi := questionnaire.PDFItem{
-			Code:         it.Code,
-			Text:         it.Text,
-			Domain:       it.Domain,
-			ScfAnchorID:  it.ScfAnchorID,
-			NeedsMapping: it.NeedsMapping,
-		}
-		if it.Answer != nil {
-			pi.AnswerValue = it.Answer.AnswerValue
-			pi.Narrative = it.Answer.Narrative
-		}
-		in.Items = append(in.Items, pi)
+		Items:             questionnaire.PDFItems(items),
 	}
 
 	// The render budget + concurrency cap live on the shared pdfrender
@@ -372,9 +410,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	// NOT apply a second deadline here — the limiter owns it.
 	buf, err := questionnaire.RenderPDF(r.Context(), in)
 	if err != nil {
-		if status, msg, ok := pdfDegradation(err); ok {
-			logPDFDegradation(r, err)
-			httpresp.WriteError(w, status, msg)
+		if writePDFDegradation(w, r, err) {
 			return
 		}
 		httperr.WriteInternal(w, r, "questionnaires", err)
@@ -391,8 +427,9 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 // customer; not approved). Constitutional invariants (no fabricated coverage,
 // no cross-tenant bleed, local-only) are enforced by the qaisuggest.Service.
 //
-// Role-gated: questionnaire-response is a grc_engineer (IsApprover) / admin
-// capability (AC-9, threat-model S). A bare read role cannot generate a draft
+// Role-gated: questionnaire-response is a tenant admin capability (AC-9,
+// threat-model S; authz.IsTenantAdmin, the role set OPA admits on
+// "questionnaires", #2428). A bare read role cannot generate a draft
 // that will become a customer-facing answer.
 func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCred(r)
@@ -400,12 +437,12 @@ func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate an AI answer suggestion")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to generate an AI answer suggestion")
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
@@ -443,12 +480,12 @@ func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an AI answer")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to approve an AI answer")
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	var req aiApproveRequest
@@ -498,12 +535,12 @@ func (h *Handler) AIReject(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an AI answer")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to reject an AI answer")
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	var req aiRejectRequest
@@ -548,12 +585,12 @@ func (h *Handler) StartAnswerRun(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to start a questionnaire answer run")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to start a questionnaire answer run")
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	qnID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -583,7 +620,7 @@ func (h *Handler) GetAnswerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
@@ -614,12 +651,12 @@ func (h *Handler) CancelAnswerRun(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to cancel a questionnaire answer run")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to cancel a questionnaire answer run")
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
@@ -661,12 +698,12 @@ func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to suggest an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to suggest an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
@@ -677,11 +714,14 @@ func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
 	out, err := h.mappingSuggest.Suggest(ctx, qmapsuggest.SuggestParams{
 		QuestionID: qid,
 		Actor:      cred.ID,
+		SCFRelease: r.URL.Query().Get("scf_release"),
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, qmapsuggest.ErrQuestionNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "needs_mapping question not found")
+		case errors.Is(err, scfrelease.ErrUnknownRelease):
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
 			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
 		default:
@@ -698,12 +738,12 @@ func (h *Handler) MappingApprove(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to approve an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
@@ -734,12 +774,12 @@ func (h *Handler) MappingReject(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to reject an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))

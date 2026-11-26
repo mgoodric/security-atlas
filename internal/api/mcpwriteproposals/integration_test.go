@@ -8,7 +8,7 @@
 //   - POST proposal happy path
 //   - confirm path applies + records human_approver
 //   - reject path is terminal
-//   - non-approver cannot confirm (403)
+//   - non-admin cannot confirm (403)
 //   - cross-tenant isolation (RLS)
 //   - pending-cap enforcement (429)
 
@@ -28,7 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -48,6 +48,9 @@ type harness struct {
 	ts             *httptest.Server
 	bearer         string
 	approverBearer string
+	approverID     uuid.UUID
+	viewerBearer   string
+	grcBearer      string
 }
 
 func setupHTTPServer(t *testing.T, tenant string) harness {
@@ -55,17 +58,22 @@ func setupHTTPServer(t *testing.T, tenant string) harness {
 	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearers via slice 190 path. ViewerFor for the
-	// proposer (no elevation); ApproverFor for the approver gate.
-	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
-	approver := srv.IssueTestJWT(t, testjwt.ApproverFor(uuid.MustParse(tenant)))
+	liveroletest.Attach(t, srv, app)
+	// #3016: seeded people with live user_roles grants, on the real
+	// engine. Only admin decides a proposal; grc_engineer may file one
+	// (#3031), viewer neither. The proposer and the approver here are two
+	// different admins.
+	bearer := liveroletest.Bearer(t, srv, tenant, "admin")
+	approverID, approver := liveroletest.Person(t, srv, tenant, "admin")
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
+	grc := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return harness{ts: ts, bearer: bearer, approverBearer: approver}
+	return harness{ts: ts, bearer: bearer, approverBearer: approver, approverID: approverID, viewerBearer: viewer, grcBearer: grc}
 }
 
 func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []byte) {
@@ -215,8 +223,14 @@ func TestHTTP_RejectProposal(t *testing.T) {
 	}
 }
 
-// ----- ISC-45 + ISC-55: non-approver gets 403 on confirm -----
+// ----- ISC-45 + ISC-55: non-admin gets 403 on confirm -----
 
+// #3016: the engine refuses a viewer both the create and the confirm,
+// with its own {"error":"forbidden"}, and the proposal stays
+// ai_proposed. The handlers' IsTenantAdmin gate ("admin role required")
+// is behind it: the engine admits only a live admin to confirm and
+// reject, and that grant is the one the gate reads. grc_engineer's create
+// admit is TestHTTP_GRCEngineerFilesAdminDecides (#3031).
 func TestHTTP_ConfirmRequiresApprover(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
@@ -227,6 +241,10 @@ func TestHTTP_ConfirmRequiresApprover(t *testing.T) {
 		"tool_input": {"title": "T", "category": "c"},
 		"ai_model_name": "m", "ai_model_version": "v"
 	}`
+	if resp, raw := doJSON(t, http.MethodPost, h.ts.URL+"/v1/mcp/write-proposals", h.viewerBearer, body); resp.StatusCode != http.StatusForbidden || !isEngineForbidden(raw) {
+		t.Fatalf("viewer create: %d %s; want 403 forbidden", resp.StatusCode, raw)
+	}
+
 	resp, raw := doJSON(t, http.MethodPost, h.ts.URL+"/v1/mcp/write-proposals", h.bearer, body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create: %d %s", resp.StatusCode, raw)
@@ -240,10 +258,84 @@ func TestHTTP_ConfirmRequiresApprover(t *testing.T) {
 
 	resp, raw = doJSON(t, http.MethodPost,
 		h.ts.URL+"/v1/mcp/write-proposals/"+env.Proposal.ID+"/confirm",
-		h.bearer, "")
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d %s", resp.StatusCode, raw)
+		h.viewerBearer, "")
+	if resp.StatusCode != http.StatusForbidden || !isEngineForbidden(raw) {
+		t.Fatalf("viewer confirm: %d %s; want 403 forbidden", resp.StatusCode, raw)
 	}
+
+	var state string
+	var proposals int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT (SELECT state FROM mcp_write_proposals WHERE id = $1),
+		        (SELECT count(*) FROM mcp_write_proposals WHERE tenant_id = $2)`,
+		env.Proposal.ID, tenant).Scan(&state, &proposals); err != nil {
+		t.Fatalf("read proposal: %v", err)
+	}
+	if state != "ai_proposed" || proposals != 1 {
+		t.Fatalf("after the viewer's refusals: state %q, %d proposals; want ai_proposed, 1", state, proposals)
+	}
+}
+
+// #3031 (decided on #3022): a live grc_engineer files a proposal (201)
+// and the engine refuses it confirm and reject with its own
+// {"error":"forbidden"}, before the handler's IsTenantAdmin gate ("admin
+// role required"), which TestDecideProposal_403ForGRCEngineerAndApproverFlag
+// pins on its own. An admin then confirms the grc_engineer's proposal.
+func TestHTTP_GRCEngineerFilesAdminDecides(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	h := setupHTTPServer(t, tenant)
+
+	body := `{
+		"tool_name": "create_risk",
+		"tool_input": {"title": "Filed by grc_engineer", "category": "operational"},
+		"ai_model_name": "m", "ai_model_version": "v"
+	}`
+	resp, raw := doJSON(t, http.MethodPost, h.ts.URL+"/v1/mcp/write-proposals", h.grcBearer, body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("grc_engineer create: %d %s; want 201", resp.StatusCode, raw)
+	}
+	var env struct {
+		Proposal struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"proposal"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil || env.Proposal.ID == "" {
+		t.Fatalf("create body %s: %v", raw, err)
+	}
+
+	for _, verb := range []string{"confirm", "reject"} {
+		resp, raw = doJSON(t, http.MethodPost,
+			h.ts.URL+"/v1/mcp/write-proposals/"+env.Proposal.ID+"/"+verb, h.grcBearer, "")
+		if resp.StatusCode != http.StatusForbidden || !isEngineForbidden(raw) {
+			t.Fatalf("grc_engineer %s: %d %s; want the engine's 403 forbidden", verb, resp.StatusCode, raw)
+		}
+	}
+	var state string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT state FROM mcp_write_proposals WHERE id = $1`, env.Proposal.ID).Scan(&state); err != nil {
+		t.Fatalf("read proposal: %v", err)
+	}
+	if state != "ai_proposed" {
+		t.Fatalf("after the grc_engineer's refusals: state %q, want ai_proposed", state)
+	}
+
+	resp, raw = doJSON(t, http.MethodPost,
+		h.ts.URL+"/v1/mcp/write-proposals/"+env.Proposal.ID+"/confirm", h.approverBearer, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin confirm: %d %s; want 200", resp.StatusCode, raw)
+	}
+	if err := json.Unmarshal(raw, &env); err != nil || env.Proposal.State != "applied" {
+		t.Fatalf("admin confirm: body %s, want state applied (%v)", raw, err)
+	}
+}
+
+// isEngineForbidden reports whether raw is the authz middleware's own 403
+// body, which no handler gate returns.
+func isEngineForbidden(raw []byte) bool {
+	var body map[string]any
+	return json.Unmarshal(raw, &body) == nil && body["error"] == "forbidden"
 }
 
 // ----- ISC-53 + RLS: cross-tenant isolation -----

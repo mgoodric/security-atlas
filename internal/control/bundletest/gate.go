@@ -50,7 +50,7 @@ func RunFromFiles(ctx context.Context, bundleID, freshnessClass string, queries 
 		now = time.Now().UTC()
 	}
 
-	report := &Report{BundleID: bundleID, Cases: make([]CaseResult, 0, len(cases))}
+	report := &Report{BundleID: bundleID, Cases: make([]CaseResult, 0, len(cases)), Warnings: KindlessRecordWarnings(queries, cases)}
 	for i := range cases {
 		cr := runCase(ctx, &cases[i], queries, freshnessClass, now, opts.Tx)
 		report.Cases = append(report.Cases, cr)
@@ -73,7 +73,7 @@ func RunFromFiles(ctx context.Context, bundleID, freshnessClass string, queries 
 func QueriesFromManifest(qs []ManifestQuery) []eval.FixtureQuery {
 	out := make([]eval.FixtureQuery, 0, len(qs))
 	for _, q := range qs {
-		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression})
+		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
 	}
 	return out
 }
@@ -83,8 +83,15 @@ func QueriesFromManifest(qs []ManifestQuery) []eval.FixtureQuery {
 // queries without bundletest importing internal/control (which would create an
 // import cycle, since control would then import bundletest for the gate).
 type ManifestQuery struct {
-	Language   string
-	Expression string
+	Language     string
+	Expression   string
+	EvidenceKind string // "" = every kind (#2818)
+}
+
+// LoadTestCasesFromFiles is LoadTestCases for a bundle read from a tarball,
+// whose tests/*.yaml bytes are in control.Bundle.TestFiles.
+func LoadTestCasesFromFiles(testFiles map[string][]byte) ([]TestCase, error) {
+	return loadTestCasesFromBytes(testFiles)
 }
 
 // loadTestCasesFromBytes is the in-memory counterpart of LoadTestCases: it

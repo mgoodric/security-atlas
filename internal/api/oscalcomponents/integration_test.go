@@ -40,6 +40,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -50,8 +51,8 @@ import (
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
 // enableFeatureFlag turns a gating feature flag ON for the test tenant.
-// Slice 660 wrapped the OSCAL component-definition routes in
-// featureflag.Gate("oscal.export"), which DEFAULTS OFF — so without an
+// Vendor claims are a feature of Third-party risk switched by
+// `vendor.claims` (#2171, formerly `oscal.export`), which DEFAULTS OFF — so without an
 // explicit override every OSCAL route returns 404 for a fresh test tenant.
 // We upsert the override via the admin (BYPASSRLS) pool, the same effect as
 // an operator toggling the flag ON. Cleanup removes the row.
@@ -76,10 +77,10 @@ func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
-	// Slice 660: the OSCAL routes are gate-wrapped on oscal.export (default
+	// Slice 660: the OSCAL routes are gated on vendor.claims (default
 	// OFF). Enable it for the test tenant so the pre-slice-660 route tests
 	// reach the real handler instead of the gate's 404.
-	enableFeatureFlag(t, admin, tenant, "oscal.export", "integrations")
+	enableFeatureFlag(t, admin, tenant, "vendor.claims", "vendor")
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, stmt := range []string{
@@ -135,7 +136,7 @@ func seedComponentDef(t *testing.T, admin *pgxpool.Pool, tenant string) (uuid.UU
 		t.Fatalf("seed component: %v", err)
 	}
 
-	anchor := "SCF-IAC-06"
+	anchor := "SCF-IAC-37"
 	claims := []seededClaim{
 		{claimID: uuid.New(), controlID: "ac-2", scfAnchor: &anchor},
 		{claimID: uuid.New(), controlID: "ac-3", scfAnchor: nil},
@@ -156,27 +157,26 @@ func seedComponentDef(t *testing.T, admin *pgxpool.Pool, tenant string) (uuid.UU
 
 // ensureCurrentSCFAnchor guarantees the bundled SCF catalog has at least one
 // anchor in its current framework_version and returns a valid scf_id the
-// mapping endpoint can target (the GetSCFAnchorBySCFID validation joins
-// slug='scf' AND status='current'). If the test DB already carries a current
+// mapping endpoint can target, with the release label it is in (the mapping
+// names it, #1774). If the test DB already carries a current
 // SCF version (the normal case once the catalog is imported), it reuses a real
 // anchor; otherwise it seeds a minimal SCF framework + current version + one
 // anchor. The seeded scf_id is NEUTRAL ('TST-01'), not a real-looking SCF code.
-func ensureCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool) string {
+func ensureCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool) (scfID, release string) {
 	t.Helper()
 	ctx := context.Background()
 
-	var scfID string
 	err := admin.QueryRow(ctx, `
-		SELECT a.scf_id
+		SELECT a.scf_id, fv.version
 		FROM scf_anchors a
 		JOIN framework_versions fv ON fv.id = a.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
 		ORDER BY a.scf_id
 		LIMIT 1
-	`).Scan(&scfID)
+	`).Scan(&scfID, &release)
 	if err == nil && scfID != "" {
-		return scfID
+		return scfID, release
 	}
 
 	// No current SCF anchor present — seed a minimal one. Use the existing SCF
@@ -206,7 +206,7 @@ func ensureCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool) string {
 		uuid.NewString(), verID, scfID); eerr != nil {
 		t.Fatalf("seed scf anchor: %v", eerr)
 	}
-	return scfID
+	return scfID, "test-2026"
 }
 
 type testEnv struct {
@@ -214,10 +214,20 @@ type testEnv struct {
 	bearer string
 }
 
-// ownerServer assembles the router with an owner credential (read-capable,
-// not approver). Used to assert reads work + disposition is forbidden.
-func ownerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+// readerServer assembles the router, OPA attached, with a grc_engineer by
+// live role (liveroletest): read-capable, not a tenant admin. Used to
+// assert reads work + disposition (admin only) is forbidden. OPA reads oscal
+// for admin and grc_engineer only, so a control_owner is not a reader
+// (#2507).
+func readerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
+	t.Helper()
+	srv := api.New(api.Config{})
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+	return testEnv{server: ts, bearer: bearer}
 }
 
 // approverServer assembles the router with an approver (grc_engineer)
@@ -273,7 +283,7 @@ func TestList_ReturnsDefinitions(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedComponentDef(t, admin, tenant)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions", "")
 	if resp.StatusCode != http.StatusOK {
@@ -315,7 +325,7 @@ func TestList_EmptyTenantReturns200EmptyList(t *testing.T) {
 	// tenant shape that 500'd on edge. freshTenant registers the cleanup;
 	// nothing is seeded.
 	tenant := freshTenant(t, admin)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions", "")
 	if resp.StatusCode != http.StatusOK {
@@ -342,7 +352,7 @@ func TestGet_ReturnsClaimsWithUnmappedFlag(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	defID, _ := seedComponentDef(t, admin, tenant)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "")
 	if resp.StatusCode != http.StatusOK {
@@ -473,7 +483,7 @@ func TestRLS_CrossTenantIsolation(t *testing.T) {
 	defA, claimsA := seedComponentDef(t, admin, tenantA)
 
 	// Tenant B cannot READ tenant A's definition (404).
-	envB := ownerServer(t, app, tenantB)
+	envB := readerServer(t, app, tenantB)
 	resp, _ := do(t, envB, http.MethodGet, "/v1/oscal/component-definitions/"+defA.String(), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-tenant get: status = %d, want 404", resp.StatusCode)
@@ -522,8 +532,8 @@ func TestAuthz_NonApproverForbiddenDisposition(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
-	// An owner can READ but cannot DISPOSITION (write needs approver/admin).
-	env := ownerServer(t, app, tenant)
+	// A grc_engineer can READ but cannot DISPOSITION (write needs a tenant admin).
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPost, "/v1/oscal/component-claims/"+claims[0].claimID.String()+":accept", "")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
@@ -534,7 +544,7 @@ func TestGet_UnknownID404(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+uuid.New().String(), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
@@ -553,7 +563,7 @@ func TestMapScfAnchor_MapsClaimAndAudits(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
-	scfID := ensureCurrentSCFAnchor(t, admin)
+	scfID, release := ensureCurrentSCFAnchor(t, admin)
 	// claims[1] (ac-3) was seeded with a NULL scf_anchor_id — the unmapped one.
 	unmapped := claims[1]
 	if unmapped.scfAnchor != nil {
@@ -563,7 +573,7 @@ func TestMapScfAnchor_MapsClaimAndAudits(t *testing.T) {
 
 	resp, body := do(t, env, http.MethodPatch,
 		"/v1/oscal/component-claims/"+unmapped.claimID.String()+"/scf-anchor",
-		`{"scf_anchor_id":"`+scfID+`"}`)
+		`{"scf_anchor_id":"`+scfID+`","scf_release":"`+release+`"}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, body)
 	}
@@ -643,11 +653,12 @@ func TestMapScfAnchor_UnknownAnchor422(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
+	_, release := ensureCurrentSCFAnchor(t, admin)
 	env := approverServer(t, app, tenant)
 
 	resp, _ := do(t, env, http.MethodPatch,
 		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
-		`{"scf_anchor_id":"NO-SUCH-ANCHOR-99"}`)
+		`{"scf_anchor_id":"NO-SUCH-ANCHOR-99","scf_release":"`+release+`"}`)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
@@ -662,32 +673,62 @@ func TestMapScfAnchor_UnknownAnchor422(t *testing.T) {
 	}
 }
 
+// TestMapScfAnchor_NoReleaseRefused asserts a mapping that names no SCF
+// release is refused 422 with the fix in the message, and the claim is left
+// unmapped: the code is never bound in the current release (#1774).
+func TestMapScfAnchor_NoReleaseRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	_, claims := seedComponentDef(t, admin, tenant)
+	scfID, _ := ensureCurrentSCFAnchor(t, admin)
+	env := approverServer(t, app, tenant)
+
+	resp, body := do(t, env, http.MethodPatch,
+		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
+		`{"scf_anchor_id":"`+scfID+`"}`)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "scf_release is required") {
+		t.Fatalf("error = %v, want the scf_release fix", body["error"])
+	}
+	var anchor *string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT scf_anchor_id FROM imported_component_claims WHERE id = $1`, claims[1].claimID).Scan(&anchor); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if anchor != nil {
+		t.Fatalf("claim was mapped with no SCF release: %v", *anchor)
+	}
+}
+
 // TestMapScfAnchor_UnknownClaim404 asserts an unknown claim id 404s.
 func TestMapScfAnchor_UnknownClaim404(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	scfID := ensureCurrentSCFAnchor(t, admin)
+	scfID, release := ensureCurrentSCFAnchor(t, admin)
 	env := approverServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPatch,
 		"/v1/oscal/component-claims/"+uuid.New().String()+"/scf-anchor",
-		`{"scf_anchor_id":"`+scfID+`"}`)
+		`{"scf_anchor_id":"`+scfID+`","scf_release":"`+release+`"}`)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
 
-// TestMapScfAnchor_NonApproverForbidden asserts an owner (read role) cannot map.
+// TestMapScfAnchor_NonApproverForbidden asserts a grc_engineer (read role) cannot map.
 func TestMapScfAnchor_NonApproverForbidden(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
-	scfID := ensureCurrentSCFAnchor(t, admin)
-	env := ownerServer(t, app, tenant)
+	scfID, release := ensureCurrentSCFAnchor(t, admin)
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPatch,
 		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
-		`{"scf_anchor_id":"`+scfID+`"}`)
+		`{"scf_anchor_id":"`+scfID+`","scf_release":"`+release+`"}`)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -702,12 +743,12 @@ func TestMapScfAnchor_RLSCrossTenantDenied(t *testing.T) {
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	_, claimsA := seedComponentDef(t, admin, tenantA)
-	scfID := ensureCurrentSCFAnchor(t, admin)
+	scfID, release := ensureCurrentSCFAnchor(t, admin)
 
 	envB := approverServer(t, app, tenantB)
 	resp, _ := do(t, envB, http.MethodPatch,
 		"/v1/oscal/component-claims/"+claimsA[1].claimID.String()+"/scf-anchor",
-		`{"scf_anchor_id":"`+scfID+`"}`)
+		`{"scf_anchor_id":"`+scfID+`","scf_release":"`+release+`"}`)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-tenant map: status = %d, want 404", resp.StatusCode)
 	}

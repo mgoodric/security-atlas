@@ -7,10 +7,10 @@
 // this BFF just forwards the bearer cookie. Non-admin callers
 // receive 403 from the upstream and the BFF forwards that.
 //
-// IMPORTANT: a 503 from this route would mean "feature disabled",
-// but the upstream Status route returns 200 regardless of env var
-// (the enabled flag IS the response). 5xx here means transient
-// platform error.
+// IMPORTANT: the upstream Status route returns 200 regardless of the
+// env var (the enabled flag IS the response); only /seed and /teardown
+// refuse a disabled feature (409 feature_not_enabled, #2730). 5xx here
+// means transient platform error.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";

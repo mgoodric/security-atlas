@@ -30,6 +30,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -109,12 +110,24 @@ type IssueInput struct {
 	IsApprover     bool
 	OwnerRoles     []string
 	IssuedBy       *uuid.UUID
+	// MintedBy is the users(id) of the admin who minted the key, recorded
+	// in api_keys.minted_by for attribution only (#1947). It is not the
+	// key's owner (IssuedBy is) and nothing authorizes on it: an
+	// admin-minted machine key outlives the admin who minted it.
+	MintedBy *uuid.UUID
+	// Label is the admin-chosen name for the key (api_keys.label, #2384),
+	// shown in place of its id. Empty is an unlabelled key.
+	Label string
+	// Purpose is api_keys.purpose (credstore.PurposePolicySync, #2849).
+	// Empty is an ordinary key. The column's CHECK refuses any other value.
+	Purpose string
 }
 
 // Issue creates a new api_keys row and returns the bearer plaintext exactly
 // once. The plaintext is hashed before persistence — nothing in the DB can
-// recover it.
-func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput) (credstore.Credential, string, error) {
+// recover it. The api_key_issue audit row naming by is written in the same
+// transaction (#2609).
+func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput, by Actor) (credstore.Credential, string, error) {
 	plain, err := bearer.Generate(s.prefix)
 	if err != nil {
 		return credstore.Credential{}, "", err
@@ -132,15 +145,23 @@ func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput) (cred
 	if err != nil {
 		return credstore.Credential{}, "", err
 	}
+	issued := credentialFromRow(row)
+	if err := writeAudit(ctx, q, row.TenantID, by, AuditActionKeyIssue,
+		map[string]any{}, keyAuditOf(issued)); err != nil {
+		return credstore.Credential{}, "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return credstore.Credential{}, "", err
 	}
-	return credentialFromRow(row), plain, nil
+	return issued, plain, nil
 }
 
-// Rotate mints a successor with the same scope/kinds/flags as the predecessor
-// and sets the predecessor's `retires_at` to now()+rotationGrace.
-func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.UUID) (credstore.Credential, string, time.Time, error) {
+// Rotate mints a successor with the same scope/kinds/flags and owner
+// (issued_by) as the predecessor and sets the predecessor's `retires_at` to
+// now()+rotationGrace. The api_key_rotate audit row naming by is written in
+// the same transaction (#2609): before is the predecessor, after is the
+// successor and the predecessor's retirement.
+func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.UUID, by Actor) (credstore.Credential, string, time.Time, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return credstore.Credential{}, "", time.Time{}, err
@@ -174,6 +195,27 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		IsApprover:     pred.IsApprover,
 		OwnerRoles:     pred.OwnerRoles,
 	}
+	// A successor keeps its predecessor's name (#2384) and purpose
+	// (#2849): rotating a policy-sync key must not mint a general one.
+	if pred.Label != nil {
+		in.Label = *pred.Label
+	}
+	if pred.Purpose != nil {
+		in.Purpose = *pred.Purpose
+	}
+	if pred.MintedBy.Valid {
+		if u, uerr := uuidFromPg(pred.MintedBy); uerr == nil {
+			in.MintedBy = &u
+		}
+	}
+	// #2503: the successor stays bound to the predecessor's owner. Dropping
+	// issued_by turned a user's personal token into an unbound machine key,
+	// whose copied owner_roles label then counts as its own grant.
+	if pred.IssuedBy.Valid {
+		if u, uerr := uuidFromPg(pred.IssuedBy); uerr == nil {
+			in.IssuedBy = &u
+		}
+	}
 	predUU, _ := uuidFromPg(pred.ID)
 	plain, err := bearer.Generate(s.prefix)
 	if err != nil {
@@ -193,14 +235,26 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		return credstore.Credential{}, "", time.Time{}, err
 	}
 
+	successor := credentialFromRow(row)
+	predecessor := credentialFromRow(pred)
+	retired := predecessor
+	retired.RetiresAt = retiresAt
+	if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRotate,
+		map[string]any{"predecessor": keyAuditOf(predecessor)},
+		map[string]any{"predecessor": keyAuditOf(retired), "successor": keyAuditOf(successor)}); err != nil {
+		return credstore.Credential{}, "", time.Time{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return credstore.Credential{}, "", time.Time{}, err
 	}
-	return credentialFromRow(row), plain, retiresAt, nil
+	return successor, plain, retiresAt, nil
 }
 
-// Revoke flips revoked_at on the key.
-func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error {
+// Revoke flips revoked_at on the key. The api_key_revoke audit row naming by
+// is written in the same transaction (#2609); revoking a key that is already
+// revoked changes nothing and writes no row.
+func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Actor) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -214,13 +268,24 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error
 	if err != nil {
 		return err
 	}
-	if _, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}}); err != nil {
+	cur, err := q.GetAPIKeyByIDForUpdate(ctx, dbx.GetAPIKeyByIDForUpdateParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnknownKey
 		}
 		return err
 	}
+	if cur.RevokedAt.Valid {
+		// Already revoked: leave revoked_at where the first revoke put it.
+		return nil
+	}
 	if err := q.RevokeAPIKey(ctx, dbx.RevokeAPIKeyParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}}); err != nil {
+		return err
+	}
+	before := keyAuditOf(credentialFromRow(cur))
+	after := before
+	after.Revoked = true
+	if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -258,6 +323,18 @@ func (s *Store) List(ctx context.Context, tenantID string) ([]credstore.Credenti
 // On success, last_used_at is bumped best-effort (failure logged, never
 // blocks the request).
 func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Credential, error) {
+	return s.authenticate(ctx, token, true)
+}
+
+// Identify resolves a plaintext bearer to its credential like Authenticate,
+// but does not bump last_used_at: it is for a caller that only needs to
+// know which key it was shown, such as the HTTP gate that refuses
+// policy-sync keys (#2849) before a request it will not serve.
+func (s *Store) Identify(ctx context.Context, token string) (credstore.Credential, error) {
+	return s.authenticate(ctx, token, false)
+}
+
+func (s *Store) authenticate(ctx context.Context, token string, touch bool) (credstore.Credential, error) {
 	if len(token) == 0 {
 		return credstore.Credential{}, ErrUnknownKey
 	}
@@ -280,6 +357,19 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 	if row.ExpiresAt.Valid && now.After(row.ExpiresAt.Time) {
 		return credstore.Credential{}, ErrUnknownKey
 	}
+	// A key owned by a user dies with the user's access (#1915).
+	if row.IssuedBy.Valid {
+		ok, uerr := userCanAuthenticate(ctx, q, row.TenantID, row.IssuedBy)
+		if uerr != nil {
+			return credstore.Credential{}, uerr
+		}
+		if !ok {
+			return credstore.Credential{}, ErrUnknownKey
+		}
+	}
+	if !touch {
+		return credentialFromRow(row), nil
+	}
 	// Best-effort last_used_at bump; never blocks.
 	go func() {
 		bctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -287,6 +377,103 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 		_ = q.TouchAPIKeyLastUsed(bctx, hash)
 	}()
 	return credentialFromRow(row), nil
+}
+
+// userGateTimeout bounds the per-request owner-status lookup.
+const userGateTimeout = 2 * time.Second
+
+// UserCanAuthenticate implements credstore.UserGate (#1915): the owner of a
+// user-bound key must still be able to sign in (users.SignInAllowed). Runs
+// on the BYPASSRLS authPool, like the hash lookup, because it executes
+// before any tenant context exists; tenant_id is matched explicitly. No
+// cache: every user-bound key auth reads the row, so a deactivation is
+// seen on the next request.
+//
+// A non-empty keyID names the key's api_keys row, which must be live (see
+// keyLive; #1947, #1995). Deactivation revokes the row durably but the
+// credstore's in-memory record only on the replica that ran it; without
+// this read, re-activating the user (a SCIM reprovision) would reopen the
+// key on every other replica until restart.
+func (s *Store) UserCanAuthenticate(tenantID, userID, keyID string) (bool, error) {
+	tid, err := uuidToPg(tenantID)
+	if err != nil {
+		return false, nil
+	}
+	uid, err := uuidToPg(userID)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
+	defer cancel()
+	q := dbx.New(s.authPool)
+	if keyID != "" {
+		ok, kerr := keyLive(ctx, q, tid, keyID, s.clock())
+		if kerr != nil || !ok {
+			return false, kerr
+		}
+	}
+	return userCanAuthenticate(ctx, q, tid, uid)
+}
+
+// KeyCanAuthenticate implements credstore.UserGate for a persisted key with
+// no user (#1964): admin-minted and push keys. The key's api_keys row must
+// exist, not be revoked, and be inside its rotation grace and TTL (#1995).
+// Like UserCanAuthenticate it reads the row on
+// every authentication, uncached, so a revocation committed on any replica
+// is refused here from the next request.
+func (s *Store) KeyCanAuthenticate(tenantID, keyID string) (bool, error) {
+	tid, err := uuidToPg(tenantID)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
+	defer cancel()
+	return keyLive(ctx, dbx.New(s.authPool), tid, keyID, s.clock())
+}
+
+// keyLive reports whether the api_keys row named by keyID exists in
+// tenantID, is not revoked, and at now is neither past its retires_at nor
+// its expires_at. A malformed id or a missing row refuses.
+//
+// The time checks matter across replicas (#1995): a rotation on replica A
+// sets the predecessor's retires_at only in A's memory and in the row, so
+// replica B, which loaded the key at boot, learns of the grace deadline
+// only here. The checks mirror Authenticate's.
+func keyLive(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, keyID string, now time.Time) (bool, error) {
+	kid, err := keyIDToPg(keyID)
+	if err != nil {
+		return false, nil
+	}
+	row, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tenantID, ID: kid})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("apikeystore: key status: %w", err)
+	}
+	if row.RevokedAt.Valid {
+		return false, nil
+	}
+	if row.RetiresAt.Valid && now.After(row.RetiresAt.Time) {
+		return false, nil
+	}
+	if row.ExpiresAt.Valid && now.After(row.ExpiresAt.Time) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// userCanAuthenticate reports whether the users row (tenantID, userID)
+// exists and may sign in. A missing row refuses.
+func userCanAuthenticate(ctx context.Context, q *dbx.Queries, tenantID, userID pgtype.UUID) (bool, error) {
+	u, err := q.GetUserByID(ctx, dbx.GetUserByIDParams{TenantID: tenantID, ID: userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("apikeystore: owner status: %w", err)
+	}
+	return users.SignInAllowed(u.Status, u.Active), nil
 }
 
 // --- helpers ---
@@ -322,6 +509,18 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 	if in.IssuedBy != nil {
 		issuedBy = pgtype.UUID{Bytes: *in.IssuedBy, Valid: true}
 	}
+	var mintedBy pgtype.UUID
+	if in.MintedBy != nil {
+		mintedBy = pgtype.UUID{Bytes: *in.MintedBy, Valid: true}
+	}
+	var label *string
+	if in.Label != "" {
+		label = &in.Label
+	}
+	var purpose *string
+	if in.Purpose != "" {
+		purpose = &in.Purpose
+	}
 	row, err := q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tIDU,
@@ -336,6 +535,9 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 		OwnerRoles:     roles,
 		Last4:          bearer.Last4(plain),
 		TtlSeconds:     int64(in.TTL.Seconds()),
+		MintedBy:       mintedBy,
+		Label:          label,
+		Purpose:        purpose,
 	})
 	return row, err
 }
@@ -370,6 +572,20 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 	}
 	if row.LastUsedAt.Valid {
 		c.LastUsedAt = row.LastUsedAt.Time
+	}
+	if row.Purpose != nil {
+		c.Purpose = *row.Purpose
+	}
+	if row.MintedBy.Valid {
+		if u, err := uuidFromPg(row.MintedBy); err == nil {
+			c.MintedBy = u.String()
+		}
+	}
+	if row.Label != nil {
+		c.Label = *row.Label
+	}
+	if row.RetiresAt.Valid {
+		c.RetiresAt = row.RetiresAt.Time
 	}
 	if row.RotatedFrom.Valid {
 		ruu, _ := uuidFromPg(row.RotatedFrom)

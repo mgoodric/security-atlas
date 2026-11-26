@@ -12,12 +12,24 @@
 // on read for defense-in-depth).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 export type ServerSavedView = {
   id: string;
   name: string;
   filters: Record<string, string>;
 };
+
+/**
+ * The list a view belongs to (#2133). The platform treats a request that
+ * names none as `controls`.
+ */
+export type SavedViewSurface = "controls" | "risks";
+
+// Maximum length of a user-supplied view name, on every surface. Names
+// are display-only labels; the cap bounds the stored payload and the list
+// rendering.
+export const MAX_VIEW_NAME_LENGTH = 60;
 
 type ListResponse = { views: ServerSavedView[] };
 
@@ -37,13 +49,7 @@ async function bffJSON<T>(
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   // DELETE returns 204 with no body.
@@ -51,9 +57,13 @@ async function bffJSON<T>(
   return (await res.json()) as T;
 }
 
-/** List the calling user's saved views (controls surface). */
-export async function listSavedViews(): Promise<ServerSavedView[]> {
-  const out = await bffJSON<ListResponse>("/api/saved-views");
+/** List the calling user's saved views for one list. */
+export async function listSavedViews(
+  surface: SavedViewSurface = "controls",
+): Promise<ServerSavedView[]> {
+  const out = await bffJSON<ListResponse>(
+    `/api/saved-views?surface=${surface}`,
+  );
   return out.views ?? [];
 }
 
@@ -61,10 +71,11 @@ export async function listSavedViews(): Promise<ServerSavedView[]> {
 export async function createSavedView(
   name: string,
   filters: Record<string, string>,
+  surface: SavedViewSurface = "controls",
 ): Promise<ServerSavedView> {
   return bffJSON<ServerSavedView>("/api/saved-views", {
     method: "POST",
-    body: { name, filters },
+    body: { name, filters, surface },
   });
 }
 

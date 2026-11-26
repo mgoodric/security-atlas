@@ -44,7 +44,7 @@ export function PanelCard({
   testid,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   description?: string;
   action?: ReactNode;
   state: PanelState;
@@ -85,46 +85,6 @@ export function PanelCard({
         ) : (
           children
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// MissingEndpointPanel renders a panel whose backing endpoint does not
-// exist on main yet. It names the missing endpoint explicitly and the
-// follow-up backend slice it is tracked under, per the slice 041 / 060
-// precedent. It never fabricates data (anti-criterion P0-1).
-export function MissingEndpointPanel({
-  title,
-  description,
-  endpoint,
-  detail,
-  testid,
-  children,
-}: {
-  title: string;
-  description?: string;
-  endpoint: string;
-  detail: string;
-  testid: string;
-  children?: ReactNode;
-}) {
-  return (
-    <Card data-testid={testid}>
-      <CardHeader className="border-b">
-        <CardTitle>{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <Alert data-testid={`${testid}-placeholder`}>
-          <AlertTitle>Not yet wired</AlertTitle>
-          <AlertDescription>
-            This panel binds to <span className="font-mono">{endpoint}</span>,
-            which does not exist on main yet. {detail} No data is shown until
-            the endpoint ships — the dashboard never fabricates rows.
-          </AlertDescription>
-        </Alert>
-        {children}
       </CardContent>
     </Card>
   );

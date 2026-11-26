@@ -43,6 +43,8 @@ import (
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -81,7 +83,17 @@ var (
 	// that failed to resolve / validate, OR an unresolvable / external
 	// import.href (P0-511-1). Nothing is persisted (AC-5).
 	ErrResolutionFailed = errors.New("profileimport: profile failed to resolve against the supplied catalog(s)")
+	// ErrSCFReleaseConflict is returned when --scf-release and the entry
+	// profile's "scf-release" prop name different SCF releases, or the
+	// profile names two. Nothing is persisted.
+	ErrSCFReleaseConflict = scfbind.ErrConflict
 )
+
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); the profile's resolved control ids are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("profileimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the profile's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import profiles. admin is the
 // superset of grc_engineer in the canvas 5-role model.
@@ -135,6 +147,13 @@ type Request struct {
 	ImportedBy string
 	// Role is the caller's role; must be a catalog-author role (AC-6).
 	Role authz.Role
+	// SCFRelease is the SCF release the resolved control ids are matched
+	// in (#2264), from atlas-oscal --scf-release. The entry profile can
+	// declare it instead with an "scf-release" prop on its metadata; when
+	// both are given they must agree. Intermediate profiles and catalogs
+	// declare nothing. A declared release that is not loaded fails the
+	// import. Neither is ErrSCFReleaseRequired (#1774).
+	SCFRelease string
 }
 
 // Report summarizes a successful profile import.
@@ -148,6 +167,10 @@ type Report struct {
 	// MappedCount is how many resolved controls matched an SCF anchor
 	// deterministically (the rest are flagged NULL for operator mapping).
 	MappedCount int
+	// SCFRelease is the SCF release the control ids were matched in.
+	SCFRelease string
+	// Warnings are non-fatal notes for the operator.
+	Warnings []string
 }
 
 // Import runs the full pipeline. On any resolution or persistence failure it
@@ -194,6 +217,16 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 		}
 	}
 
+	release, err := scfbind.Declared("profileimport", req.SCFRelease, req.ProfileJSON, "profile")
+	if err != nil {
+		return Report{}, err
+	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
+	}
+
 	// --- Go-side chain validation (slice 578) ---
 	// Build the import graph over the supplied documents and prove the two
 	// load-bearing safety properties BEFORE the bytes touch the bridge: no
@@ -235,7 +268,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	}
 
 	// --- Transactional persistence (AC-5) ---
-	report, err := im.persist(ctx, req, sourceSha, resp, chainProvenance(req))
+	report, err := im.persist(ctx, req, release, sourceSha, resp, chainProvenance(req))
 	if err != nil {
 		// A persistence failure rolls the baseline back; record rejection.
 		_ = im.writeAuditRejected(ctx, req, sourceSha, []string{err.Error()})
@@ -248,7 +281,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // ONE transaction under app.current_tenant. RLS scopes every write to the
 // caller's tenant (P0-511-5 / AC-12). The audit row is written in the SAME
 // transaction on success so the success record is atomic with the baseline.
-func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, resp *oscalv1.ImportProfileResponse, chain []chainLink) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportProfileResponse, chain []chainLink) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: begin tx: %w", err)
@@ -283,13 +316,15 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		return Report{}, fmt.Errorf("profileimport: insert profile: %w", err)
 	}
 
-	// Pre-load the SCF anchor scf_ids for the current SCF version so the
-	// deterministic requirement -> SCF-anchor mapping (slice-511 D3, reusing
-	// slice-492's crosswalk) is a single query, not one per control.
-	anchorIDs, err := loadSCFAnchorIDs(ctx, tx)
+	// Pre-load the scf_ids of the release the profile declares (#2264;
+	// required since #1774), so the deterministic
+	// requirement -> SCF-anchor mapping (slice-511 D3, reusing slice-492's
+	// crosswalk) is a single query, not one per control.
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
-		return Report{}, err
+		return Report{}, fmt.Errorf("profileimport: scf release: %w", err)
 	}
+	anchorIDs := b.Anchors
 
 	mapped := 0
 	for _, c := range controls {
@@ -323,6 +358,7 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		"kind":        "profile",
 		"chain":       chain,
 		"chain_depth": chainProfileDepth(chain),
+		"scf_release": b.Release.Version,
 	})
 	if _, err := q.InsertImportedCatalogAuditLog(ctx, dbx.InsertImportedCatalogAuditLogParams{
 		ID:           pgUUID(uuid.New()),
@@ -349,6 +385,8 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		SourceLabel:  req.SourceLabel,
 		ControlCount: len(controls),
 		MappedCount:  mapped,
+		SCFRelease:   b.Release.Version,
+		Warnings:     b.Warnings,
 	}, nil
 }
 
@@ -385,36 +423,6 @@ func (im *Importer) writeAuditRejected(ctx context.Context, req Request, sourceS
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-// loadSCFAnchorIDs returns the set of scf_id strings in the current SCF
-// framework version — the deterministic crosswalk surface (slice-511 D3 /
-// slice-492 D1). A resolved control whose OSCAL control-id matches a key
-// maps TO that SCF anchor. scf_anchors is the read-only bundled spine —
-// never written.
-func loadSCFAnchorIDs(ctx context.Context, tx pgx.Tx) (map[string]struct{}, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT a.scf_id
-		FROM scf_anchors a
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'scf' AND fv.status = 'current'`)
-	if err != nil {
-		return nil, fmt.Errorf("profileimport: load scf anchors: %w", err)
-	}
-	defer rows.Close()
-	out := make(map[string]struct{})
-	for rows.Next() {
-		var scfID string
-		if err := rows.Scan(&scfID); err != nil {
-			return nil, fmt.Errorf("profileimport: scan scf anchor: %w", err)
-		}
-		out[scfID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("profileimport: iterate scf anchors: %w", err)
-	}
-	return out, nil
 }
 
 func tenantUUID(ctx context.Context) (uuid.UUID, error) {

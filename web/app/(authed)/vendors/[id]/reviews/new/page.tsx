@@ -22,12 +22,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { use, useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { VendorReviewOutcome, VendorReviewWrite } from "@/lib/api/vendors";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 const OUTCOMES: { value: VendorReviewOutcome; label: string }[] = [
   { value: "pass", label: "Pass" },
@@ -84,10 +86,7 @@ export default function RecordVendorReviewPage({
         return;
       }
       if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(detail.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
       // Slice 691 — refresh the detail surface the operator returns to.
       // Await the detail + history invalidations so their refetch is in
@@ -107,24 +106,21 @@ export default function RecordVendorReviewPage({
   }
 
   return (
-    <div className="space-y-6" data-testid="vendor-record-review">
-      <div className="text-sm">
+    <PageShell
+      data-testid="vendor-record-review"
+      title="Record review"
+      subtitle="Appends a completed review to this vendor's history. A recorded review is immutable."
+      width="reading"
+      actions={
         <Link
           href={`/vendors/${id}`}
-          className="text-muted-foreground hover:underline"
+          className="text-sm text-muted-foreground hover:underline"
           data-testid="vendor-record-review-back"
         >
           ← Vendor detail
         </Link>
-      </div>
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Record review</h1>
-        <p className="text-sm text-muted-foreground">
-          Appends a completed review to this vendor&apos;s history. A recorded
-          review is immutable.
-        </p>
-      </div>
-
+      }
+    >
       {error ? (
         <Alert variant="destructive" data-testid="vendor-record-review-error">
           <AlertTitle>Could not record review</AlertTitle>
@@ -225,6 +221,6 @@ export default function RecordVendorReviewPage({
           </form>
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

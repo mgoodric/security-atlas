@@ -34,7 +34,10 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -47,24 +50,72 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
         headers: { "Content-Type": "application/pdf" },
       }),
     );
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/q1/export-pdf");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/export-pdf",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
   });
 
-  test("propagates upstream 503 chrome unavailable", async () => {
+  test("passes an upstream 409 chrome-absent refusal through (#2786)", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    const refusal = {
+      error:
+        "PDF export is not enabled on this deployment: chrome is not installed",
+      code: "feature_not_enabled",
+    };
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "PDF export disabled" }), {
-        status: 503,
+      new Response(JSON.stringify(refusal), {
+        status: 409,
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(refusal);
+  });
+
+  test("propagates upstream 503 render busy with its Retry-After", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "PDF export busy" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "15" },
+      }),
+    );
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("15");
+    // #2757: the 5xx body is masked on the wire.
+    expect(await res.json()).toEqual({ error: "platform error" });
+  });
+
+  test("passes an upstream 4xx body through", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "questionnaire not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "questionnaire not found" });
   });
 });

@@ -14,14 +14,22 @@ import (
 const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :one
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($5::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 `
 
 type CountEvidenceRecordsByControlParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ControlID  pgtype.UUID `json:"control_id"`
-	ControlRef string      `json:"control_ref"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ControlID    pgtype.UUID `json:"control_id"`
+	ControlRef   string      `json:"control_ref"`
+	RoutedKinds  []string    `json:"routed_kinds"`
+	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
 // Slice 502: total CURRENT LIVE evidence count for one control, used by the
@@ -29,7 +37,13 @@ type CountEvidenceRecordsByControlParams struct {
 // over the bounded top-N, never the full history — P0-502-8). Resolution
 // mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
 func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl, arg.TenantID, arg.ControlID, arg.ControlRef)
+	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -38,17 +52,31 @@ func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEv
 const countEvidenceRecordsByControlBeforeHorizon = `-- name: CountEvidenceRecordsByControlBeforeHorizon :one
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE($4::timestamptz,
-                              'infinity'::timestamptz)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($5::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND ((observed_at <= COALESCE($6::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($6::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY($7::uuid[])
+           AND observed_at <= COALESCE($6::timestamptz,
+                                       'infinity'::timestamptz)))
 `
 
 type CountEvidenceRecordsByControlBeforeHorizonParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	RoutedKinds  []string           `json:"routed_kinds"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 // Slice 749: total FROZEN-population evidence count for one control bounded by
@@ -61,7 +89,10 @@ func (q *Queries) CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -79,8 +110,61 @@ func (q *Queries) CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgt
 	return count, err
 }
 
+const existsAttestationAfter = `-- name: ExistsAttestationAfter :one
+SELECT EXISTS (
+    SELECT 1
+    FROM evidence_records
+    WHERE tenant_id = $1
+      AND (control_id = $2 OR control_ref = $3::text)
+      AND evidence_kind = $4::text
+      AND id <> $5
+      AND (
+        LEAST(observed_at, ingested_at) > $6::timestamptz
+        OR (LEAST(observed_at, ingested_at) = $6::timestamptz
+            AND ingested_at > $7::timestamptz)
+        OR (LEAST(observed_at, ingested_at) = $6::timestamptz
+            AND ingested_at = $7::timestamptz
+            AND id::text COLLATE "C" > $8::text)
+      )
+) AS newer
+`
+
+type ExistsAttestationAfterParams struct {
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	EvidenceKind string             `json:"evidence_kind"`
+	ID           pgtype.UUID        `json:"id"`
+	AttestedAt   pgtype.Timestamptz `json:"attested_at"`
+	IngestedAt   pgtype.Timestamptz `json:"ingested_at"`
+	IDText       string             `json:"id_text"`
+}
+
+// #2520: is there an attestation for the control later than the given one,
+// under the evaluation engine's latest-attestation order (internal/eval
+// latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+// then id compared bytewise? The attest handler asks this on a dedupe hit
+// for a server-derived key, so a repeat of an older attestation is recorded
+// when a newer one would otherwise stand. Control resolution mirrors
+// ListEvidenceForControlAsOf.
+func (q *Queries) ExistsAttestationAfter(ctx context.Context, arg ExistsAttestationAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsAttestationAfter,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.EvidenceKind,
+		arg.ID,
+		arg.AttestedAt,
+		arg.IngestedAt,
+		arg.IDText,
+	)
+	var newer bool
+	err := row.Scan(&newer)
+	return newer, err
+}
+
 const getEvidenceAuditEntryByReceipt = `-- name: GetEvidenceAuditEntryByReceipt :one
-SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
+SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module, import_batch_id
 FROM evidence_audit_log
 WHERE tenant_id = $1
   AND credential_id = $2
@@ -111,6 +195,7 @@ func (q *Queries) GetEvidenceAuditEntryByReceipt(ctx context.Context, arg GetEvi
 		&i.RecordID,
 		&i.ReceivedAt,
 		&i.SubjectModule,
+		&i.ImportBatchID,
 	)
 	return i, err
 }
@@ -211,11 +296,13 @@ const insertEvidenceAuditEntry = `-- name: InsertEvidenceAuditEntry :one
 INSERT INTO evidence_audit_log (
     id, tenant_id, credential_id,
     decision, reason_code,
-    idempotency_key, evidence_kind, record_id, subject_module
+    idempotency_key, evidence_kind, record_id, subject_module,
+    import_batch_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'core'
+    $1, $2, $3, $4, $5, $6, $7, $8, 'core',
+    $9
 )
-RETURNING id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
+RETURNING id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module, import_batch_id
 `
 
 type InsertEvidenceAuditEntryParams struct {
@@ -227,6 +314,7 @@ type InsertEvidenceAuditEntryParams struct {
 	IdempotencyKey *string     `json:"idempotency_key"`
 	EvidenceKind   *string     `json:"evidence_kind"`
 	RecordID       pgtype.UUID `json:"record_id"`
+	ImportBatchID  pgtype.UUID `json:"import_batch_id"`
 }
 
 // AC-7: every push attempt — accepted or rejected — lands in the audit
@@ -236,6 +324,9 @@ type InsertEvidenceAuditEntryParams struct {
 //
 // Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 // the DB layer; explicit-is-clearer per AC-5).
+//
+// #1742: import_batch_id ties a historical-import attempt to its batch;
+// NULL on every other ingestion path.
 func (q *Queries) InsertEvidenceAuditEntry(ctx context.Context, arg InsertEvidenceAuditEntryParams) (EvidenceAuditLog, error) {
 	row := q.db.QueryRow(ctx, insertEvidenceAuditEntry,
 		arg.ID,
@@ -246,6 +337,7 @@ func (q *Queries) InsertEvidenceAuditEntry(ctx context.Context, arg InsertEviden
 		arg.IdempotencyKey,
 		arg.EvidenceKind,
 		arg.RecordID,
+		arg.ImportBatchID,
 	)
 	var i EvidenceAuditLog
 	err := row.Scan(
@@ -259,6 +351,7 @@ func (q *Queries) InsertEvidenceAuditEntry(ctx context.Context, arg InsertEviden
 		&i.RecordID,
 		&i.ReceivedAt,
 		&i.SubjectModule,
+		&i.ImportBatchID,
 	)
 	return i, err
 }
@@ -379,7 +472,7 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 }
 
 const listEvidenceAuditEntriesByCredential = `-- name: ListEvidenceAuditEntriesByCredential :many
-SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
+SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module, import_batch_id
 FROM evidence_audit_log
 WHERE tenant_id = $1 AND credential_id = $2
 ORDER BY received_at DESC
@@ -418,6 +511,7 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 			&i.RecordID,
 			&i.ReceivedAt,
 			&i.SubjectModule,
+			&i.ImportBatchID,
 		); err != nil {
 			return nil, err
 		}
@@ -432,20 +526,31 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :many
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($7::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
 `
 
 type ListEvidenceRecordsByControlParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ControlID  pgtype.UUID `json:"control_id"`
-	ControlRef string      `json:"control_ref"`
-	Limit      int32       `json:"limit"`
-	Offset     int32       `json:"offset"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ControlID    pgtype.UUID `json:"control_id"`
+	ControlRef   string      `json:"control_ref"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	RoutedKinds  []string    `json:"routed_kinds"`
+	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
+// The same leg is on the three by-control readers below.
 // Replay-friendly read for evaluation (slice 012+). Append-only ordering
 // on observed_at lets the evaluator stream historical state without
 // worrying about UPDATEs since slice 002.
@@ -456,6 +561,8 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
 	)
 	if err != nil {
 		return nil, err
@@ -503,21 +610,35 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 const listEvidenceRecordsByControlBeforeHorizon = `-- name: ListEvidenceRecordsByControlBeforeHorizon :many
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE($6::timestamptz,
-                              'infinity'::timestamptz)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($7::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND ((observed_at <= COALESCE($8::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE($8::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY($9::uuid[])
+           AND observed_at <= COALESCE($8::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
 `
 
 type ListEvidenceRecordsByControlBeforeHorizonParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	Limit      int32              `json:"limit"`
-	Offset     int32              `json:"offset"`
-	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	Limit        int32              `json:"limit"`
+	Offset       int32              `json:"offset"`
+	RoutedKinds  []string           `json:"routed_kinds"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
+	AmendedIds   []pgtype.UUID      `json:"amended_ids"`
 }
 
 // Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
@@ -531,7 +652,11 @@ type ListEvidenceRecordsByControlBeforeHorizonParams struct {
 // never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
 // NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
 // (frozen_at NULL) falls through to live state, but the slice-749 surface only
-// summarizes FROZEN periods, so in practice the horizon is always set.
+// summarizes FROZEN periods, so in practice the horizon is always set. The
+// horizon bounds ingested_at too (#1699): a record written after the freeze
+// with a backdated observed_at is not in the frozen population. amended_ids
+// adds the records a later freeze revision put in the population (#1742);
+// pass an empty array for the original freeze.
 func (q *Queries) ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error) {
 	rows, err := q.db.Query(ctx, listEvidenceRecordsByControlBeforeHorizon,
 		arg.TenantID,
@@ -539,7 +664,10 @@ func (q *Queries) ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context,
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
 		arg.FrozenAt,
+		arg.AmendedIds,
 	)
 	if err != nil {
 		return nil, err

@@ -39,6 +39,7 @@ type stubStore struct {
 
 	gotMapClaimID uuid.UUID
 	gotMapAnchor  string
+	gotMapRelease string
 	gotMapActor   string
 }
 
@@ -58,9 +59,10 @@ func (s *stubStore) Disposition(_ context.Context, claimID uuid.UUID, toStatus, 
 	return s.dispResult, s.dispErr
 }
 
-func (s *stubStore) MapScfAnchor(_ context.Context, claimID uuid.UUID, scfAnchorID, actor string) (dbx.ImportedComponentClaim, error) {
+func (s *stubStore) MapScfAnchor(_ context.Context, claimID uuid.UUID, scfAnchorID, scfRelease, actor string) (dbx.ImportedComponentClaim, error) {
 	s.gotMapClaimID = claimID
 	s.gotMapAnchor = scfAnchorID
+	s.gotMapRelease = scfRelease
 	s.gotMapActor = actor
 	return s.mapResult, s.mapErr
 }
@@ -93,8 +95,14 @@ func ownerCred(tenant string) credstore.Credential {
 	return credstore.Credential{ID: "owner-1", TenantID: tenant, OwnerRoles: []string{"control_owner"}}
 }
 
+// readerCred holds grc_engineer live: OPA reads oscal for admin and
+// grc_engineer only (#2507).
+func readerCred(tenant string) credstore.Credential {
+	return credstore.Credential{ID: "jwt:grc-2", UserID: "grc-2", TenantID: tenant, TenantRoles: []string{"grc_engineer"}}
+}
+
 func approverCred(tenant string) credstore.Credential {
-	return credstore.Credential{ID: "grc-1", TenantID: tenant, IsApprover: true}
+	return credstore.Credential{ID: "grc-1", TenantID: tenant, IsAdmin: true}
 }
 
 func bareCred(tenant string) credstore.Credential {
@@ -149,7 +157,7 @@ func TestListDefinitions_OK(t *testing.T) {
 		ImportedBy: "op", ImportedAt: nowTs(),
 	}}}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions", "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions", "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions", "/v1/oscal/component-definitions", r)
 
 	if rec.Code != http.StatusOK {
@@ -187,7 +195,7 @@ func TestGetDefinition_OK_UnmappedFlag(t *testing.T) {
 	defID := uuid.New()
 	claimID := uuid.New()
 	compID := uuid.New()
-	mapped := "SCF-IAC-06"
+	mapped := "SCF-IAC-37"
 	st := &stubStore{detail: DefinitionWithClaims{
 		Definition: dbx.ImportedCatalog{ID: pgID(defID), SourceLabel: "Acme", ImportedAt: nowTs()},
 		Claims: []dbx.ListImportedComponentClaimsForDefinitionRow{
@@ -199,7 +207,7 @@ func TestGetDefinition_OK_UnmappedFlag(t *testing.T) {
 		},
 	}}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/"+defID.String(), r)
 
 	if rec.Code != http.StatusOK {
@@ -229,7 +237,7 @@ func TestGetDefinition_NotFound(t *testing.T) {
 	defID := uuid.New()
 	st := &stubStore{detailErr: pgx.ErrNoRows}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/"+defID.String(), r)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -239,7 +247,7 @@ func TestGetDefinition_NotFound(t *testing.T) {
 func TestGetDefinition_BadUUID(t *testing.T) {
 	t.Parallel()
 	h := newHandlerWithStore(&stubStore{})
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/not-a-uuid", "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/not-a-uuid", "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/not-a-uuid", r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -344,7 +352,7 @@ func TestDisposition_BadUUID(t *testing.T) {
 
 // ----- map scf-anchor -----
 
-const scfAnchorTarget = "IAC-06"
+const scfAnchorTarget = "IAC-37"
 
 func mapReq(claimID uuid.UUID, body string, cred credstore.Credential) *http.Request {
 	return reqWithCred(http.MethodPatch,
@@ -365,7 +373,7 @@ func TestMapScfAnchor_OK(t *testing.T) {
 		ScfAnchorID: &mapped,
 	}}
 	h := newHandlerWithStore(st)
-	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37","scf_release":" test-2026.3 "}`, approverCred(testTenant))
 	rec := routeMap(h, r, claimID)
 
 	if rec.Code != http.StatusOK {
@@ -374,8 +382,11 @@ func TestMapScfAnchor_OK(t *testing.T) {
 	if st.gotMapClaimID != claimID {
 		t.Fatalf("claimID = %v, want %v", st.gotMapClaimID, claimID)
 	}
-	if st.gotMapAnchor != "IAC-06" {
-		t.Fatalf("anchor = %q, want IAC-06", st.gotMapAnchor)
+	if st.gotMapAnchor != "IAC-37" {
+		t.Fatalf("anchor = %q, want IAC-37", st.gotMapAnchor)
+	}
+	if st.gotMapRelease != "test-2026.3" {
+		t.Fatalf("release = %q, want trimmed test-2026.3", st.gotMapRelease)
 	}
 	if st.gotMapActor != "grc-1" {
 		t.Fatalf("actor = %q, want grc-1", st.gotMapActor)
@@ -384,8 +395,8 @@ func TestMapScfAnchor_OK(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out["scf_anchor_id"] != "IAC-06" {
-		t.Fatalf("scf_anchor_id = %v, want IAC-06", out["scf_anchor_id"])
+	if out["scf_anchor_id"] != "IAC-37" {
+		t.Fatalf("scf_anchor_id = %v, want IAC-37", out["scf_anchor_id"])
 	}
 	if out["unmapped"] != false {
 		t.Fatalf("unmapped = %v, want false (claim now mapped)", out["unmapped"])
@@ -406,13 +417,13 @@ func TestMapScfAnchor_TrimsWhitespace(t *testing.T) {
 	mapped := scfAnchorTarget
 	st := &stubStore{mapResult: dbx.ImportedComponentClaim{ID: pgID(claimID), IsVendorClaim: true, ClaimStatus: "asserted", ScfAnchorID: &mapped}}
 	h := newHandlerWithStore(st)
-	r := mapReq(claimID, `{"scf_anchor_id":"  IAC-06  "}`, approverCred(testTenant))
+	r := mapReq(claimID, `{"scf_anchor_id":"  IAC-37  "}`, approverCred(testTenant))
 	rec := routeMap(h, r, claimID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if st.gotMapAnchor != "IAC-06" {
-		t.Fatalf("anchor = %q, want trimmed IAC-06", st.gotMapAnchor)
+	if st.gotMapAnchor != "IAC-37" {
+		t.Fatalf("anchor = %q, want trimmed IAC-37", st.gotMapAnchor)
 	}
 }
 
@@ -421,7 +432,7 @@ func TestMapScfAnchor_Forbidden_NonApprover(t *testing.T) {
 	claimID := uuid.New()
 	h := newHandlerWithStore(&stubStore{})
 	// An owner (read-capable) cannot map — mapping is a write needing approver/admin.
-	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, ownerCred(testTenant))
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37"}`, ownerCred(testTenant))
 	rec := routeMap(h, r, claimID)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -453,7 +464,7 @@ func TestMapScfAnchor_BadJSON_BadRequest(t *testing.T) {
 func TestMapScfAnchor_BadUUID_BadRequest(t *testing.T) {
 	t.Parallel()
 	h := newHandlerWithStore(&stubStore{})
-	r := reqWithCred(http.MethodPatch, "/v1/oscal/component-claims/nope/scf-anchor", `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	r := reqWithCred(http.MethodPatch, "/v1/oscal/component-claims/nope/scf-anchor", `{"scf_anchor_id":"IAC-37"}`, approverCred(testTenant))
 	rec := route(h, http.MethodPatch, "/v1/oscal/component-claims/{id}/scf-anchor", "/v1/oscal/component-claims/nope/scf-anchor", r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -465,10 +476,27 @@ func TestMapScfAnchor_ClaimNotFound(t *testing.T) {
 	claimID := uuid.New()
 	st := &stubStore{mapErr: ErrClaimNotFound}
 	h := newHandlerWithStore(st)
-	r := mapReq(claimID, `{"scf_anchor_id":"IAC-06"}`, approverCred(testTenant))
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37"}`, approverCred(testTenant))
 	rec := routeMap(h, r, claimID)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestMapScfAnchor_ReleaseRequired_Unprocessable: a mapping with no
+// scf_release is refused with the fix in the message (#1774).
+func TestMapScfAnchor_ReleaseRequired_Unprocessable(t *testing.T) {
+	t.Parallel()
+	claimID := uuid.New()
+	st := &stubStore{mapErr: ErrSCFReleaseRequired}
+	h := newHandlerWithStore(st)
+	r := mapReq(claimID, `{"scf_anchor_id":"IAC-37"}`, approverCred(testTenant))
+	rec := routeMap(h, r, claimID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "scf_release is required") {
+		t.Fatalf("body = %s, want the scf_release fix", rec.Body.String())
 	}
 }
 

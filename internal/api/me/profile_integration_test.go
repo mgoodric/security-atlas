@@ -221,6 +221,49 @@ func TestPatchMe_UpdatesDisplayNameAndTimeZone(t *testing.T) {
 	}
 }
 
+// ===== #2142: PATCH /v1/me persists the theme per user =====
+
+func TestPatchMe_ThemeRoundTrips(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "thea@example.com", "Thea")
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200", resp.StatusCode)
+	}
+	if body["theme"] != nil {
+		t.Fatalf("fresh user theme = %v; want null (never chosen)", body["theme"])
+	}
+	resp, body = do(t, env, http.MethodPatch, "/v1/me", map[string]any{"theme": "dark"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH /v1/me theme: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if body["theme"] != "dark" {
+		t.Fatalf("PATCH response theme = %v; want dark", body["theme"])
+	}
+	_, body = do(t, env, http.MethodGet, "/v1/me", nil)
+	if body["theme"] != "dark" {
+		t.Fatalf("GET after PATCH theme = %v; want dark", body["theme"])
+	}
+	if body["display_name"] != "Thea" {
+		t.Errorf("theme-only PATCH changed display_name to %v", body["display_name"])
+	}
+}
+
+func TestPatchMe_UnknownThemeRejected(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "navy@example.com", "Navy")
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	resp, _ := do(t, env, http.MethodPatch, "/v1/me", map[string]any{"theme": "navy"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PATCH /v1/me theme=navy: status %d, want 400", resp.StatusCode)
+	}
+}
+
 // ===== ISC-A5: empty-diff PATCH skips audit-log write =====
 
 func TestPatchMe_EmptyDiffSkipsAudit(t *testing.T) {
@@ -672,5 +715,48 @@ func TestListSessions_AugmentedFieldsOnWire(t *testing.T) {
 		if v, present := withoutUA[key]; present {
 			t.Errorf("row without metadata leaked %q=%v on wire; want field omitted (P0-162-1)", key, v)
 		}
+	}
+}
+
+// #2494: has_tenant_role is false for a signed-in user with no user_roles
+// row in the tenant, and turns true on the next request once a role is
+// granted, on the same token (live roles, #2442).
+func TestGetMe_HasTenantRoleFollowsLiveGrant(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "no-role2494@example.com", "No Role 2494")
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || v {
+		t.Fatalf("has_tenant_role = %v (%T); want false for a user with no role", body["has_tenant_role"], body["has_tenant_role"])
+	}
+
+	seedUserRoles(t, admin, tenantID, userID, "viewer")
+	resp, body = do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me after grant: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || !v {
+		t.Errorf("has_tenant_role = %v after a viewer grant; want true without re-login", body["has_tenant_role"])
+	}
+}
+
+// #2494: a super-admin with no role row in the tenant still has a role.
+func TestGetMe_HasTenantRoleForSuperAdmin(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "super2494@example.com", "Super 2494")
+	env := testServerForUser(t, app, tenantID, userID, true)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || !v {
+		t.Errorf("has_tenant_role = %v for a super-admin; want true", body["has_tenant_role"])
 	}
 }

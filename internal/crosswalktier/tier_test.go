@@ -71,6 +71,8 @@ func TestValidateTransition_LegalMoves(t *testing.T) {
 		{TierDraft, TierRejected},
 		{TierUnderReview, TierVerified},
 		{TierUnderReview, TierRejected},
+		// Reopen (#1849): a rejected mapping goes back to the start of the ladder.
+		{TierRejected, TierDraft},
 	}
 	for _, m := range legal {
 		m := m
@@ -91,8 +93,8 @@ func TestValidateTransition_IllegalMoves(t *testing.T) {
 	illegal := []struct{ from, to Tier }{
 		// The load-bearing guard: a community draft must NOT skip to verified.
 		{TierDraft, TierVerified},
-		// No move out of the terminal rejected tier.
-		{TierRejected, TierDraft},
+		// Reopening a rejected mapping returns it to draft only; it cannot
+		// re-enter the ladder past the start.
 		{TierRejected, TierUnderReview},
 		{TierRejected, TierVerified},
 		// verified is not demoted via this API.
@@ -132,6 +134,21 @@ func TestValidateTransition_UnknownTier(t *testing.T) {
 	}
 	if CanTransition("bogus", "bogus") {
 		t.Fatal("CanTransition with bogus tiers should be false")
+	}
+}
+
+// Every crosswalk_mapping_tier enum value is a tier the state machine knows
+// (#1849), so a new enum value forces a decision about its transitions.
+func TestTierCoversEveryEnumValue(t *testing.T) {
+	t.Parallel()
+	for _, d := range dbx.AllCrosswalkMappingTierValues() {
+		tr := TierFromDB(d)
+		if !tr.IsValid() {
+			t.Errorf("crosswalk_mapping_tier %q is not a valid Tier", d)
+		}
+		if _, ok := legalTransitions[tr]; !ok {
+			t.Errorf("crosswalk_mapping_tier %q has no entry in legalTransitions", d)
+		}
 	}
 }
 

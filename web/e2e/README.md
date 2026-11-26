@@ -65,6 +65,34 @@ npm run test:e2e
 #  or headed:    npx playwright test --headed
 ```
 
+### The route sweep and its axe gate
+
+`route-sweep.spec.ts` visits every authenticated route (discovered from
+`web/app`, not listed by hand) at 1316px and 1200px. Besides the title,
+overflow and focus-ring checks, it **fails a route on any serious or
+critical axe violation** (#2097). The gate is `axe-gate.ts`;
+`axe-gate.spec.ts` proves it rejects a deliberately broken inline page
+and passes a clean one.
+
+```sh
+cd web
+# With the platform up and auth env set as in steps 2-3 above:
+npx playwright test e2e/route-sweep.spec.ts
+#  one route:      npx playwright test e2e/route-sweep.spec.ts -g '/calendar'
+#  the gate alone: npx playwright test e2e/axe-gate.spec.ts
+#                  (inline HTML, no seed data; the default config's
+#                  global setup still expects the platform up)
+```
+
+A failing route names each rule, its impact, the offending selectors and
+axe's fix summary in the assertion message. Every route also writes
+`web/axe-report/<route>.json` (pass or fail); CI uploads that directory
+as the `route-sweep-axe-report` artifact, so a CI failure can be read
+without a local bring-up. Fix the violation in the component or token
+that owns it. A per-route or per-rule exception needs a comment giving
+the reason and a follow-up issue link at the point of use; there are
+none today.
+
 ## Seed-harness contract for spec authors
 
 A spec's preconditions (the test user, tenant rows, seeded controls/evidence/policies it asserts against) MUST be establishable by the docker-compose bring-up the CI job uses. Concretely:
@@ -77,6 +105,7 @@ A spec's preconditions (the test user, tenant rows, seeded controls/evidence/pol
    - The atlas server is reachable on `http://localhost:8080`; the web app on `http://localhost:3000`.
    - `atlas-bootstrap` has run; `evidence_kind_schemas` (and the other phase-2 tables) exist.
    - A long-lived test JWT is minted at runtime via `POST /v1/test/issue-jwt` (gated by `ATLAS_TEST_MODE=1`) and written into `process.env.TEST_BEARER` by Playwright `globalSetup`. The auth fixture (`e2e/fixtures.ts`) injects it as a `sa_session_token` cookie.
+   - The atlas server has an `ATLAS_OIDC_SECRET_KEY` (CI generates a throwaway one per run with `openssl rand -base64 32`), so the SSO page can save a client secret. A local atlas server needs one too, or `admin-bootstrap.spec.ts`'s SSO save test gets a 503 (#2773).
 
 3. **What the harness does NOT do.**
 
@@ -115,6 +144,16 @@ A spec's preconditions (the test user, tenant rows, seeded controls/evidence/pol
 3. Use `getByTestId("...")` over CSS selectors. The dashboard / control-detail / audit components already carry `data-testid` attributes on every assertable element.
 
 4. Add the spec to CI by doing nothing — `npx playwright test` runs the whole `e2e/` directory.
+
+5. Every test asserts something. `web/lib/e2e-tests-assert.test.ts` (vitest) fails when a `test`, `test.only` or `test.fail` body never reaches an assertion, because Playwright reports such a test as passed. A body counts as asserting when it calls:
+
+   - `expect(...)`, `expect.soft(...)`, `expect.poll(...)`, or the same through an imported alias (`import { expect as anonExpect }`);
+   - a helper whose name starts with `expect`, such as `expectNoRawIds(page)`, wherever it is defined;
+   - a function declared in the same spec file whose body asserts, followed through any depth of local calls.
+
+   **Name an imported assertion helper `expect…`.** The guard cannot read another module, so `await assertRowVisible(page)` imported from a shared file is flagged, and `await expectRowVisible(page)` is not. A test whose feature does not exist yet is `test.fixme("title", ...)` with the reason in a comment, not a body with its assertions commented out.
+
+   To seed data for a list, count or empty-state assertion, give the spec a tenant of its own in `fixtures/e2e/<spec>.sql` and sign in to it with `signInToTenant(page, { tenantId, roles })` from `e2e/tenant-session.ts`. The demo tenant's contents change as other specs add rows.
 
 ## Timing-sensitive assertions
 

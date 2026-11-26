@@ -20,16 +20,28 @@ SELECT *
 FROM action_plans
 WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL;
 
+-- name: GetActionPlanByIDForUpdate :one
+-- GetActionPlanByID under a row lock, for a write that guards on the plan
+-- (#2434). A control link or owner change in flight finishes first, so
+-- the guard and the UPDATE see the same plan. The link tables' FK takes
+-- KEY SHARE on this row, which FOR UPDATE conflicts with.
+SELECT *
+FROM action_plans
+WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL
+FOR UPDATE;
+
 -- name: ListActionPlans :many
 -- Cursor pagination on created_at DESC, id DESC. The cursor is the
 -- (created_at, id) of the last row of the previous page; when the cursor
 -- timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
--- rows are excluded.
+-- rows are excluded. #2618: `q` narrows to titles containing it, ignoring
+-- case; strpos rather than ILIKE, so `%` and `_` in it match literally.
 SELECT *
 FROM action_plans
 WHERE tenant_id = $1
   AND tombstoned_at IS NULL
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
+  AND (sqlc.narg('q')::text IS NULL OR strpos(lower(title), lower(sqlc.narg('q')::text)) > 0)
   AND (
         sqlc.narg('cursor_created_at')::timestamptz IS NULL
         OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
@@ -105,7 +117,9 @@ SELECT EXISTS (
 -- name: ListActionPlanIDsForRisk :many
 -- Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
 -- Joins to action_plans so tombstoned plans are excluded.
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_risks apr
 JOIN action_plans ap ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
 WHERE apr.tenant_id = $1 AND apr.risk_id = $2 AND ap.tombstoned_at IS NULL
@@ -140,7 +154,9 @@ SELECT EXISTS (
 
 -- name: ListActionPlanIDsForControl :many
 -- Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_controls apc
 JOIN action_plans ap ON ap.id = apc.action_plan_id AND ap.tenant_id = apc.tenant_id
 WHERE apc.tenant_id = $1 AND apc.control_id = $2 AND ap.tombstoned_at IS NULL
@@ -162,10 +178,11 @@ SELECT EXISTS (
 );
 
 -- name: ActionPlanOwnerExistsInTenant :one
--- AC-10 tampering guard: owner_id must resolve to a user in the caller's
--- tenant. RLS hides cross-tenant users.
+-- AC-10 tampering guard: owner_id must resolve to an active user in the
+-- caller's tenant (#2108: a disabled user cannot be handed a plan). RLS
+-- hides cross-tenant users.
 SELECT EXISTS (
-    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2
+    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2 AND status = 'active'
 );
 
 -- ===== append-only audit log =====
@@ -184,3 +201,19 @@ SELECT *
 FROM action_plan_audit_log
 WHERE tenant_id = $1 AND action_plan_id = $2
 ORDER BY created_at ASC, id ASC;
+
+-- ===== #2109: verified from evidence =====
+
+-- name: ActionPlanControlsFailing :one
+-- A completed plan whose linked controls do not all pass their latest
+-- evaluation: the plan page's "Completed · linked controls still failing".
+SELECT (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
+FROM action_plans ap
+WHERE ap.tenant_id = $1 AND ap.id = $2;
+
+-- name: ReconcileActionPlanVerification :one
+-- After a control's evaluation, inside the evaluation's transaction: the
+-- system moves completed <-> verified for the plans linked to it. The
+-- function reads the tenant from app.current_tenant and refuses without it.
+SELECT action_plans_reconcile_verification(sqlc.arg(control_id)::uuid)::int AS moved;

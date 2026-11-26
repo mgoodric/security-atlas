@@ -9,9 +9,9 @@ import (
 
 func TestLocalRowKey_Deterministic(t *testing.T) {
 	t.Parallel()
-	ts := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
-	a := LocalRowKey("/data/findings.csv", 42, ts)
-	b := LocalRowKey("/data/findings.csv", 42, ts)
+	row := []byte(`{"col_a":"v1"}`)
+	a := LocalRowKey("/data/findings.csv", 42, row)
+	b := LocalRowKey("/data/findings.csv", 42, row)
 	if a != b {
 		t.Fatalf("LocalRowKey not deterministic: %q vs %q", a, b)
 	}
@@ -20,36 +20,32 @@ func TestLocalRowKey_Deterministic(t *testing.T) {
 	}
 }
 
-func TestLocalRowKey_HourTruncation(t *testing.T) {
+// #2940: the key no longer depends on when the connector runs, only on
+// the row, so a re-run over an unchanged file dedupes instead of
+// re-stamping observed_at.
+func TestLocalRowKey_ContentDistinguishes(t *testing.T) {
 	t.Parallel()
-	t1 := time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 5, 12, 4, 59, 59, 999_000_000, time.UTC)
-	if LocalRowKey("/data/findings.csv", 0, t1) != LocalRowKey("/data/findings.csv", 0, t2) {
-		t.Fatal("same hour must yield same key")
-	}
-	t3 := time.Date(2026, 5, 12, 5, 0, 0, 0, time.UTC)
-	if LocalRowKey("/data/findings.csv", 0, t1) == LocalRowKey("/data/findings.csv", 0, t3) {
-		t.Fatal("next hour must yield different key")
+	if LocalRowKey("/data/findings.csv", 0, []byte(`{"a":"1"}`)) == LocalRowKey("/data/findings.csv", 0, []byte(`{"a":"2"}`)) {
+		t.Fatal("an edited row must yield a different key")
 	}
 }
 
 func TestLocalRowKey_RowDistinguishes(t *testing.T) {
 	t.Parallel()
-	ts := time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC)
-	if LocalRowKey("/data/findings.csv", 0, ts) == LocalRowKey("/data/findings.csv", 1, ts) {
+	row := []byte(`{"a":"1"}`)
+	if LocalRowKey("/data/findings.csv", 0, row) == LocalRowKey("/data/findings.csv", 1, row) {
 		t.Fatal("different rows must yield different keys")
 	}
 }
 
 func TestLocalRowKey_PrefixedWithEvidenceKind(t *testing.T) {
 	t.Parallel()
-	// The contract: sha256("manual.upload|" + file_path + "|" + row + "|" + hour).
+	// The contract: sha256("manual.upload|" + file_path + "|" + row + "|" + sha256(row_json)).
 	// Pin the exact bytes that go into the hash so a future refactor can't
 	// silently change the discriminator.
-	ts := time.Date(2026, 5, 12, 4, 0, 0, 0, time.UTC)
-	hour := ts.UTC().Truncate(time.Hour).Format(time.RFC3339)
-	want := hash("manual.upload|/x.csv|7|" + hour)
-	got := LocalRowKey("/x.csv", 7, ts)
+	row := []byte(`{"a":"1"}`)
+	want := hash("manual.upload|/x.csv|7|" + hash(string(row)))
+	got := LocalRowKey("/x.csv", 7, row)
 	if got != want {
 		t.Fatalf("unexpected key shape:\n got %q\nwant %q", got, want)
 	}
@@ -85,8 +81,8 @@ func TestS3ObjectKey_Shape(t *testing.T) {
 func TestSFTPFileKey_Deterministic(t *testing.T) {
 	t.Parallel()
 	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
-	a := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
-	b := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
+	a := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
+	b := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
 	if a != b {
 		t.Fatal("SFTPFileKey not deterministic")
 	}
@@ -96,18 +92,28 @@ func TestSFTPFileKey_MtimeDistinguishes(t *testing.T) {
 	t.Parallel()
 	m1 := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
 	m2 := time.Date(2026, 5, 12, 4, 17, 34, 0, time.UTC)
-	a := SFTPFileKey("h", "/p", m1)
-	b := SFTPFileKey("h", "/p", m2)
+	a := SFTPFileKey("h", "/p", m1, 1)
+	b := SFTPFileKey("h", "/p", m2, 1)
 	if a == b {
 		t.Fatal("mtime must enter the hash")
+	}
+}
+
+// #2940: a file rewritten within its mtime's resolution, or copied with
+// its mtime kept, still gets a new key when its size changes.
+func TestSFTPFileKey_SizeDistinguishes(t *testing.T) {
+	t.Parallel()
+	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
+	if SFTPFileKey("h", "/p", mtime, 100) == SFTPFileKey("h", "/p", mtime, 101) {
+		t.Fatal("size must enter the hash")
 	}
 }
 
 func TestSFTPFileKey_Shape(t *testing.T) {
 	t.Parallel()
 	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC).UTC()
-	want := hash("manual.upload|sftp.example.com|/inbox/q1.pdf|" + mtime.Format(time.RFC3339Nano))
-	got := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
+	want := hash("manual.upload|sftp.example.com|/inbox/q1.pdf|" + mtime.Format(time.RFC3339Nano) + "|2048")
+	got := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
 	if got != want {
 		t.Fatalf("unexpected key shape:\n got %q\nwant %q", got, want)
 	}

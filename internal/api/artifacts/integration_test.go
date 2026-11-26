@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
@@ -101,6 +101,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 type setup struct {
 	server *httptest.Server
 	bearer string
+	viewer string
 	bucket string
 }
 
@@ -125,16 +126,19 @@ func setupHTTPServer(t *testing.T, tenant string) setup {
 
 	srv := api.New(api.Config{RotationGrace: time.Hour, ArtifactStore: store})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
-	// the legacy IssueBootstrapCredential default (no elevation).
-	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
+	liveroletest.Attach(t, srv, app)
+	// #3016: seeded people with live grants, on the real engine. The
+	// uploader is a grc_engineer ("artifacts" is in its writable set);
+	// the viewer has no artifacts grant at all.
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return setup{server: ts, bearer: bearer, bucket: bucket}
+	return setup{server: ts, bearer: bearer, viewer: viewer, bucket: bucket}
 }
 
 func uploadMultipart(t *testing.T, s setup, body []byte, contentType string) (*http.Response, []byte) {
@@ -325,6 +329,20 @@ func TestHTTP_TTLClampedToOneHour(t *testing.T) {
 			}
 		}
 	}
+
+	// #1914: a ttl that overflows time.Duration clamps to the max instead
+	// of wrapping (2^62 seconds wrapped to 0 and got the 15-minute default).
+	for _, q := range []string{"4611686018427387904", "9223372036854775807"} {
+		resp3, raw3 := getArtifact(t, s, up.Artifact.ID, q)
+		if resp3.StatusCode != http.StatusOK {
+			t.Fatalf("get ttl=%s: %d %s", q, resp3.StatusCode, raw3)
+		}
+		dn.TTLSeconds = 0
+		_ = json.Unmarshal(raw3, &dn)
+		if dn.TTLSeconds != 3600 {
+			t.Fatalf("ttl=%s: got ttl_seconds %d, want 3600", q, dn.TTLSeconds)
+		}
+	}
 }
 
 // AC-6 + ISC-22 + ISC-23 + ISC-A3 — every upload + every download adds
@@ -373,6 +391,44 @@ func TestHTTP_AuditRowsEmitted(t *testing.T) {
 	}
 	if downloads != 1 {
 		t.Fatalf("download audit rows = %d want 1", downloads)
+	}
+}
+
+// #3016: the engine refuses a viewer both the upload and the download,
+// with its own "forbidden" body, and the refused upload writes nothing.
+func TestHTTP_ViewerRefusedByAuthz(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	s := setupHTTPServer(t, tenant)
+	asViewer := s
+	asViewer.bearer = s.viewer
+
+	resp, raw := uploadMultipart(t, asViewer, []byte("viewer upload"), "text/plain")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(raw), `"error":"forbidden"`) {
+		t.Fatalf("viewer upload: %d %s; want 403 forbidden", resp.StatusCode, raw)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM artifacts WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("viewer upload wrote %d artifacts; want 0", n)
+	}
+
+	resp, raw = uploadMultipart(t, s, []byte("engineer upload"), "text/plain")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload: %d %s", resp.StatusCode, raw)
+	}
+	var up struct {
+		Artifact struct {
+			ID string `json:"id"`
+		} `json:"artifact"`
+	}
+	_ = json.Unmarshal(raw, &up)
+	resp, raw = getArtifact(t, asViewer, up.Artifact.ID, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(raw), `"error":"forbidden"`) {
+		t.Fatalf("viewer download: %d %s; want 403 forbidden", resp.StatusCode, raw)
 	}
 }
 

@@ -64,6 +64,19 @@ just lint               # lint-go (golangci-lint, pinned) + errleak + duphelper 
 just ci                 # lint + test + build
 ```
 
+### Toolchain pins
+
+Local and CI read the same pin files, so they cannot drift:
+
+| Tool | Pinned in                                     | CI reads it via                                        |
+| ---- | --------------------------------------------- | ------------------------------------------------------ |
+| Node | `.nvmrc` (root; `web/` inherits it)           | `actions/setup-node` `node-version-file: .nvmrc`       |
+| uv   | `pyproject.toml` `[tool.uv] required-version` | `astral-sh/setup-uv` (reads the root `pyproject.toml`) |
+
+Run `nvm use` at the repo root (or anywhere below it — nvm searches upward)
+before any `npm`/`node` command. To change a version, edit the pin file only;
+never re-add a literal `node-version:` or setup-uv `version:` to a workflow.
+
 ### The integration harness (not a mocked DB)
 
 Integration tests run against a **real Postgres with RLS enforced** — never a
@@ -81,6 +94,16 @@ NATS + MinIO — sharded across runner legs per `scripts/integration-shards.txt`
 (slice 417; guard: `just check-integration-shard-coverage`). Green local
 integration is necessary, not sufficient; the CI check `Go · integration
 (Postgres RLS)` is the gate.
+
+**Concurrent sessions: use `just scratch-pg-up`, not a hand-rolled cluster.**
+`just db-up` binds the fixed port 5432, so two worktrees cannot both use it.
+`scripts/scratch-pg.sh` (`just scratch-pg-up` / `scratch-pg-down`) gives each
+worktree its own cluster on a free port, migrates it, and prints the two URLs
+(`eval "$(scripts/scratch-pg.sh env)"`). It fails closed: a failed `initdb` or
+`pg_ctl start` exits before any SQL, and every destructive statement first
+checks the server's `data_directory` is its own. Ad-hoc scripts on a fixed
+port dropped another job's database twice (security-atlas#2033). Never drop or
+create on a cluster you did not start.
 
 ---
 
@@ -121,7 +144,7 @@ These are the design commitments that bound every decision. Do not propose featu
 3. **The Evidence SDK exposes one canonical inbound API (`IngestEvidence`)** — a single `EvidenceIngestService.Push(record) → Receipt` gRPC RPC. Connectors are first-class peers in the operator's mental model: each is a separate process that holds source-side credentials and emits to the platform via `Push`. The connector's `profiles_supported` registration metadata (`pull`, `subscribe`, `push`) describes how the connector retrieves data **from the source** (scheduled poll, event subscription, or webhook receipt); the **platform-side wire surface is always push**. (canvas §4.1, `EVIDENCE_SDK.md`)
 4. **Scope is multidimensional**, not a tree. Scope cells = tuples over (BU × env × geo × cloud × data_class × product). Controls have `applicability_expr`. (canvas §5.1–5.4)
 5. **FrameworkScope intersects with control applicability.** PCI CDE ≠ HIPAA covered systems ≠ SOC 2 system. `effective_scope(control, framework) = applicability_expr ∩ framework_scope.predicate`. (canvas §5.5)
-6. **Tenant isolation is enforced at the database layer** via PostgreSQL Row-Level Security on every tenant-scoped table. Not application code. RLS denies on missing context. (canvas §5.4)
+6. **Tenant isolation is enforced at the database layer** via PostgreSQL Row-Level Security on every tenant-scoped table. Not application code. RLS denies on missing context. An explicit `tenant_id` predicate in a query is a permitted second leg; it never substitutes for RLS. (canvas §5.4, ADR 0026)
 7. **SCF is the canonical control catalog.** Mappings go requirement → SCF anchor, never requirement → requirement directly. (canvas §3.5)
 8. **OSCAL is the wire format**, not the daily data model. Ingest catalogs/profiles/component-definitions; export SSP/AP/AR/POA&M. (canvas §3.4)
 9. **Manual evidence is first-class.** Manual controls render the same UI surface as automated; lifecycle, ownership, freshness apply equally. (canvas §4.5)
@@ -148,7 +171,7 @@ The platform supports AI assistance for:
 - **Suggesting** SCF mappings for unmapped questionnaire questions (human approves once; mapping is canonical thereafter)
 - **Summarizing** prior responses for similarity matching
 - **Drafting** board-report narrative sections (templated, human-approved per section)
-- **Explaining** gaps ("evidence covers SCF:IAC-06 but freshness is 95 days")
+- **Explaining** gaps ("evidence covers SCF:IAC-37 but freshness is 95 days")
 
 The platform does NOT:
 
@@ -485,9 +508,9 @@ advisory:
 - **An implementer satisfies a claim and never adds, weakens or rewords one.**
   If satisfying a claim requires changing it, that is a finding to report, not
   an edit to make. Propose; the engine appends.
-- **A named probe that does not exist yet is correct.** It reports
-  `unverifiable`, which is a third value and not a pass. Naming the probe is how
-  a machine-checkable claim avoids being misfiled as `manual`.
+- **A named probe that does not exist yet is correct.** `isa/check-probes.sh`
+  reports it as MISSING, which is a third value and not a pass. Naming the
+  probe is how a machine-checkable claim avoids being misfiled as `manual`.
 - **A claim closes on a probe that has been observed failing and then passing.**
   A probe that has only ever passed proves nothing about the claim.
 
@@ -499,6 +522,11 @@ The mechanics:
 - Conventional Commit messages, DCO `Signed-off-by` (`git commit -s`) plus
   `Co-Authored-By` on AI-assisted commits — see "Style" above for the exact
   trailer rules.
+- A user-visible change adds a changelog fragment,
+  `changelog.d/<pr-or-issue>.<type>.md`, and never edits `CHANGELOG.md`.
+  A PR with nothing user-visible takes the `no-changelog` label instead. The
+  `changelog-fragment` check enforces it; `changelog.d/README.md` has the
+  format.
 - Push the branch and open a PR to `main`. Nothing auto-merges past the checks.
 - Merge is squash-merge, gated on the four required checks (see "Testing
   discipline"): `Go · build + test`, `Go · integration (Postgres RLS)`,
@@ -508,6 +536,44 @@ The mechanics:
 
 The engine's own contract — fire lifecycle, authority boundaries, routing,
 handoff — lives in the `engine` repo and is referenced here, not restated.
+
+## ISA probes
+
+`isa/run-probes.sh` runs every probe in `isa/probes/`. CI runs it in the
+`ISA · probes` job against the same migrated Postgres the integration shards
+get, with `$DATABASE_URL` and `$DATABASE_URL_APP` set, so `service`-tier SQL
+probes run for real. NATS and MinIO are not started; the PR that lands the
+first probe needing either adds it to the job. The job has no path filter and is in
+`CI · merge-gate`'s `needs:`, so it gates every PR, docs-only ones included.
+
+It blocks a merge on ONE thing: a probe for a claim ticked `- [x]` reporting
+that claim false. An open claim's probe exiting 1 is the expected state -- the
+falsifier is written before the feature -- and exit 3 means unrunnable (no
+database, no toolchain, no credentials) and is never a failure. Every probe
+follows that contract: exit 0 holds, exit 1 false, exit 3 cannot run. Any
+other non-zero is treated as false, so a probe maps toolchain and network
+failures (a `go run` module download, a missing binary) to exit 3 itself.
+
+`isa/check-probes.sh` runs first and blocks on the probe files and the Test
+Strategy tables disagreeing: two probes answering one claim (COLLISION), a
+probe no row references (ORPHAN), or a probe piping into `grep -q` under
+`pipefail` (SIGPIPE-RACE). A row naming a file that is not there (MISSING) is
+printed but does not block, because naming a not-yet-written probe is correct.
+
+Both scripts are ported from tend with the same semantics; tend's AGENTS.md
+records the failures that shaped them.
+
+**Before writing a probe, check whether the claim already has one.** The Test
+Strategy table in the epic is the authority, not the `isa/probes/` listing.
+
+**Never pipe into `grep -q` in a probe.** `grep -q` exits on its first match
+and closes the pipe, so the writer on the left dies of SIGPIPE, `pipefail` makes
+that the pipeline's status, and the `if` reads a match as no match, depending
+on payload size and machine load. Use `grep -q PAT <<<"$var"`, or drop `-q` and
+redirect to `/dev/null`.
+
+Locally, `bash isa/run-probes.sh` runs everything; SQL probes exit 3 until
+`just db-up`, `just migrate-up` and the two database URLs are in place.
 
 ## How to verify done
 
@@ -529,6 +595,11 @@ Before claiming completion:
    the completion receipt.
 
 ## Gotchas
+
+- **Never edit the top of `CHANGELOG.md`.** Every PR that did conflicted with
+  every other PR in flight, at the cost of a re-merge and a full CI cycle each
+  (#2357). Add `changelog.d/<pr-or-issue>.<type>.md`; the fragments are
+  assembled into `CHANGELOG.md` only at release time.
 
 - **`docs/issues/` is history.** Slice docs, `_STATUS.md`, `_INDEX.md`,
   `_events.jsonl` and `Plans/prompts/` record a retired workflow. They are
@@ -559,6 +630,22 @@ Before claiming completion:
 - **`ai_assisted`/`human_approved` guard:** new AI-assist surfaces adopt the
   shared `ai_assist_human_approver_guard` CHECK function; do not re-author
   the predicate inline (slice 498).
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `mgoodric/security-atlas`, via the `gh` CLI; `isa/` remains the system of record for claims. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its own name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ---
 

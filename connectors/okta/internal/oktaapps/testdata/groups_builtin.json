@@ -1,0 +1,10 @@
+[
+  {
+    "id": "00g1everyone",
+    "type": "BUILT_IN",
+    "profile": {
+      "name": "Everyone",
+      "description": "All users in your organization"
+    }
+  }
+]

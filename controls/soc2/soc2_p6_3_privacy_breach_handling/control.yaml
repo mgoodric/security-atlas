@@ -1,0 +1,44 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p6_3_privacy_breach_handling
+title: "Privacy breaches are recorded and affected parties notified"
+description: |
+  Improper releases of personal information are logged (TSC P6.3), and
+  the people affected, and regulators where the law requires it, are
+  told (TSC P6.6). Each suspected privacy breach is filed as a Jira ticket
+  tagged `privacy-incident` that records the data involved, the
+  notification decision, and when each required notice went out.
+
+scf_anchor_id: IRO-22
+scf_release: test-2026.3
+control_family: IRO
+implementation_type: automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: weekly
+
+evidence_queries:
+  - id: privacy_incidents_record_notification
+    language: rego
+    evidence_kind: jira.ticket_evidence.v1
+    description: "Every closed privacy-incident ticket records a notification decision and its notice dates"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

@@ -87,8 +87,8 @@ func okRunFlags() runFlags {
 	return runFlags{
 		slackToken:         "xoxb-test-token",
 		memberControlID:    "scf:IAC-01",
-		auditControlID:     "scf:MON-01",
-		retentionControlID: "scf:DCH-01",
+		auditControlID:     "scf:MON-02",
+		retentionControlID: "scf:DCH-27",
 	}
 }
 
@@ -238,7 +238,7 @@ func TestDoRun_PushError(t *testing.T) {
 func TestBuildAuditRecord_UsesEventTimestamp(t *testing.T) {
 	t.Parallel()
 	e := slackcollect.AuditEvent{ID: "e9", Action: "role_change", DateCreate: 1700000000}
-	rec, err := buildAuditRecord(e, slackauth.Identity{TeamID: "T1"}, "scf:MON-01")
+	rec, err := buildAuditRecord(e, slackauth.Identity{TeamID: "T1"}, "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditRecord: %v", err)
 	}
@@ -264,5 +264,19 @@ func TestMapResult(t *testing.T) {
 		if got := mapResult(in); got != want {
 			t.Errorf("mapResult(%q) = %v; want %v", in, got, want)
 		}
+	}
+}
+
+// TestRunCmd_RetentionDefaultIsRoutedByKind pins the retention record's
+// default control id to none (#2924): slack.retention_settings.v1 is routed by
+// evidence type, so the record reaches every control that queries the kind.
+func TestRunCmd_RetentionDefaultIsRoutedByKind(t *testing.T) {
+	t.Parallel()
+	fl := newRunCmd().Flags().Lookup("retention-control-id")
+	if fl == nil {
+		t.Fatal("--retention-control-id flag not registered")
+	}
+	if fl.DefValue != "" {
+		t.Errorf("--retention-control-id default = %q, want empty", fl.DefValue)
 	}
 }

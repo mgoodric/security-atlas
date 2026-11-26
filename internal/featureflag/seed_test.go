@@ -54,23 +54,25 @@ func TestSeedKeysAreSnakeCaseNamespaced(t *testing.T) {
 }
 
 // TestSeedCategoriesMatchSchemaEnum asserts every Seed.Category is one
-// of the 9 enum entries CHECKed at the DB layer. Drift between this list
+// of the 11 enum entries CHECKed at the DB layer (the slice-059 nine plus
+// #2170's 'questionnaire' and #2171's 'personnel'). Drift between this list
 // and the migration's CHECK constraint would surface as a constraint
 // violation at first toggle; this unit test catches it pre-migration.
 func TestSeedCategoriesMatchSchemaEnum(t *testing.T) {
 	allowed := map[string]struct{}{
 		"core": {}, "risk": {}, "vendor": {}, "policy": {}, "controls": {},
 		"audit": {}, "evidence": {}, "board": {}, "integrations": {},
+		"questionnaire": {}, "personnel": {},
 	}
 	for _, d := range Seed {
 		if _, ok := allowed[d.Category]; !ok {
-			t.Errorf("seed key %q has invalid category %q (must be one of: core/risk/vendor/policy/controls/audit/evidence/board/integrations)", d.Key, d.Category)
+			t.Errorf("seed key %q has invalid category %q (must be one of: core/risk/vendor/policy/controls/audit/evidence/board/integrations/questionnaire/personnel)", d.Key, d.Category)
 		}
 	}
 }
 
 // TestSeedContainsExpectedKeys is the inverse of the spine-exclusion
-// test: the 12 documented seed keys MUST be present. A missing key
+// test: the documented seed keys MUST be present. A missing key
 // surfaces as a regression before the integration tests catch it.
 func TestSeedContainsExpectedKeys(t *testing.T) {
 	expected := []string{
@@ -79,8 +81,10 @@ func TestSeedContainsExpectedKeys(t *testing.T) {
 		"policy.enabled", "policy.acknowledgments",
 		"controls.bundles", "exceptions.enabled",
 		"audit.workflow",
-		"oscal.export", "board.reporting",
+		"vendor.claims", "board.reporting",
 		"decisions.log",
+		"questionnaires.enabled",
+		"personnel.enabled", "audit.oscal_export",
 	}
 	got := make(map[string]struct{}, len(Seed))
 	for _, d := range Seed {
@@ -97,8 +101,8 @@ func TestSeedContainsExpectedKeys(t *testing.T) {
 // default off, capability defaults on. AC-12 in the PRD.
 func TestSeedDefaults_OSCAL_and_Board_AreOff(t *testing.T) {
 	for _, d := range Seed {
-		if d.Key == "oscal.export" && d.Enabled {
-			t.Errorf("oscal.export must default to disabled (integrations are opt-in)")
+		if d.Key == "vendor.claims" && d.Enabled {
+			t.Errorf("vendor.claims must default to disabled (opt-in pending GA)")
 		}
 		if d.Key == "board.reporting" && d.Enabled {
 			t.Errorf("board.reporting must default to disabled (deferred capability)")
@@ -149,7 +153,7 @@ func TestIsSpineForbidden_NegativeCases(t *testing.T) {
 		"controls.bundles", // bundles is a capability, not spine
 		"exceptions.enabled",
 		"audit.workflow",
-		"oscal.export",
+		"vendor.claims",
 		"board.reporting",
 		"decisions.log",
 		"new.capability.flag",

@@ -141,12 +141,35 @@ func seedUserRole(t *testing.T, tenantID uuid.UUID, userID, role string) {
 	}
 }
 
+// cleanupUsers seeds the tenant row (the last-admin guard locks it and fails
+// closed without it, #2261) and removes the tenant's users and roles at
+// cleanup.
 func cleanupUsers(t *testing.T, tenantID uuid.UUID) {
 	t.Helper()
+	ctx := context.Background()
+	tx, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed tenant begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+		t.Fatalf("seed tenant set_config: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+		tenantID, "test-users-"+tenantID.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed tenant commit: %v", err)
+	}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = appPool.Exec(ctx, "DELETE FROM user_roles WHERE tenant_id = $1", tenantID)
 		_, _ = appPool.Exec(ctx, "DELETE FROM users WHERE tenant_id = $1", tenantID)
+		if adminPool != nil {
+			_, _ = adminPool.Exec(ctx, "DELETE FROM tenants WHERE id = $1", tenantID)
+		}
 	})
 }
 
@@ -257,12 +280,33 @@ func TestPatchRolesRejectsSelfDemotionWithoutConfirm(t *testing.T) {
 	}
 }
 
+// #2183: a local-login admin's cred.UserID is "user:<uuid>". The guard used
+// to string-compare it with the bare target id, never matched, and let the
+// admin drop their own admin role without the confirmation.
+func TestPatchRolesRejectsSelfDemotionWithoutConfirm_UserPrefixedSubject(t *testing.T) {
+	tenant := uuid.New()
+	cleanupUsers(t, tenant)
+	uID := seedUser(t, tenant, "selfdemo-2183@example.com", "Self Demo 2183")
+	seedUserRole(t, tenant, uID.String(), "admin")
+
+	r := newRouter(t, tenant, "user:"+uID.String(), true)
+	body, _ := json.Marshal(adminusers.PatchRolesRequest{Roles: []string{"viewer"}})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/users/"+uID.String()+"/roles", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d; want 400 (self-demotion rejected); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 // AC-5 (counterpart): self-demotion WITH confirm_self_demotion=true succeeds.
 func TestPatchRolesAllowsSelfDemotionWithConfirm(t *testing.T) {
 	tenant := uuid.New()
 	cleanupUsers(t, tenant)
 	uID := seedUser(t, tenant, "selfdemo-ok@example.com", "Self Demo OK")
 	seedUserRole(t, tenant, uID.String(), "admin")
+	// A second active admin, so the demotion does not strand the tenant (#2261).
+	other := seedUser(t, tenant, "selfdemo-ok-other@example.com", "Self Demo Other")
+	seedUserRole(t, tenant, other.String(), "admin")
 
 	r := newRouter(t, tenant, uID.String(), true)
 	body, _ := json.Marshal(adminusers.PatchRolesRequest{

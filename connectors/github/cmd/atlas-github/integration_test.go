@@ -113,8 +113,11 @@ func TestRun_PushesRepoProtectionAndSCIM(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/orgs/example/repos", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode([]githubrepo.Repo{
-			{FullName: "example/web", DefaultBranch: "main"},
+			{ID: 1296269, FullName: "example/web", DefaultBranch: "main"},
 		})
+	})
+	mux.HandleFunc("/repos/example/web/rules/branches/main", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
 	})
 	mux.HandleFunc("/repos/example/web/branches/main/protection", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
@@ -147,7 +150,7 @@ func TestRun_PushesRepoProtectionAndSCIM(t *testing.T) {
 		t.Fatalf("unexpected inspect result: %+v", states)
 	}
 
-	rec, err := buildRepoProtectionRecord(states[0], "example", "prod", "scf:TDA-06")
+	rec, err := buildRepoProtectionRecord(states[0], "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
@@ -195,17 +198,18 @@ func TestRun_RepoProtectionDedupes(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 	state := githubrepo.ProtectionState{
+		RepoID:          1296269,
 		RepoFullName:    "example/web",
 		DefaultBranch:   "main",
-		RequiredReviews: 1,
+		RequiredReviews: intp(1),
 		Result:          githubrepo.ResultPass,
 		ObservedAt:      time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	r1, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+	r1, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
-	r2, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+	r2, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
@@ -229,7 +233,7 @@ func TestWebhook_AcceptsSignedDeliveryAndPushesAuditEvent(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 
-	pusher := &sdkPusher{client: client, env: "prod", controlID: "scf:MON-01"}
+	pusher := &sdkPusher{client: client, env: "prod", controlID: "scf:MON-02"}
 	secret := []byte("integration-test-secret")
 	handler, err := githubwebhook.NewHandler(secret, pusher, func() time.Time {
 		return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
@@ -277,11 +281,11 @@ func TestWebhook_DedupesByDeliveryID(t *testing.T) {
 		CreatedAt:      now(),
 	}
 	r2 := *r
-	rec1, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec1, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	rec2, err := buildAuditEventRecord(&r2, "prod", "scf:MON-01")
+	rec2, err := buildAuditEventRecord(&r2, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

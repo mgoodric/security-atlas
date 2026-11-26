@@ -36,9 +36,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 )
 
@@ -86,6 +89,90 @@ func cleanupTenant(t *testing.T, slug string) {
 		// teardown refuses to touch).
 		_, _ = adminPool.Exec(ctx, `DELETE FROM tenants WHERE slug = $1`, slug)
 	})
+}
+
+// assertFrozenPeriodHoldsEvidence checks the tenant's frozen audit period
+// against the freeze-hash population (ListEvidenceIDsForPeriodHash) and its
+// attached population's draw (ListPopulationEvidenceIDs), both at frozen_at.
+func assertFrozenPeriodHoldsEvidence(t *testing.T, tenantID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var (
+		frozenAt               time.Time
+		popControl             uuid.UUID
+		windowStart, windowEnd time.Time
+		rowCount               int
+	)
+	if err := adminPool.QueryRow(ctx, `
+		SELECT ap.frozen_at, p.control_id, p.time_window_start, p.time_window_end, p.row_count
+		FROM audit_periods ap
+		JOIN populations p ON p.tenant_id = ap.tenant_id AND p.audit_period_id = ap.id
+		WHERE ap.tenant_id = $1 AND ap.status = 'frozen'
+		LIMIT 1`, tenantID,
+	).Scan(&frozenAt, &popControl, &windowStart, &windowEnd, &rowCount); err != nil {
+		t.Fatalf("read frozen period and its population: %v", err)
+	}
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	q := dbx.New(adminPool)
+	ids, err := q.ListEvidenceIDsForPeriodHash(ctx, dbx.ListEvidenceIDsForPeriodHashParams{
+		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true}, ObservedAt: ts(frozenAt),
+	})
+	if err != nil {
+		t.Fatalf("ListEvidenceIDsForPeriodHash: %v", err)
+	}
+	if len(ids) == 0 {
+		t.Errorf("frozen period (frozen_at %s) holds no evidence", frozenAt.Format(time.RFC3339))
+	}
+	drawn, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
+		TenantID:     pgtype.UUID{Bytes: tenantID, Valid: true},
+		ControlID:    pgtype.UUID{Bytes: popControl, Valid: true},
+		ObservedAt:   ts(windowStart),
+		ObservedAt_2: ts(windowEnd),
+		UnboundKinds: []string{},
+		FrozenAt:     ts(frozenAt),
+	})
+	if err != nil {
+		t.Fatalf("ListPopulationEvidenceIDs: %v", err)
+	}
+	// #3040: the seeded row_count is the size of the draw, and the draw is
+	// not empty (0 == 0 would prove nothing).
+	t.Logf("frozen period: %d ledger records at frozen_at; population draws %d, row_count %d", len(ids), len(drawn), rowCount)
+	if len(drawn) == 0 {
+		t.Errorf("frozen period's population (control %s) draws no records", popControl)
+	}
+	if len(drawn) != rowCount {
+		t.Errorf("frozen period's population (control %s) draws %d records, want its row_count %d",
+			popControl, len(drawn), rowCount)
+	}
+
+	// #3047: every record the frozen period's sample links to is a member
+	// of that period's population draw.
+	inDraw := map[uuid.UUID]bool{}
+	for _, id := range drawn {
+		inDraw[uuid.UUID(id.ID.Bytes)] = true
+	}
+	rows, err := adminPool.Query(ctx, `
+		SELECT se.evidence_record_id
+		FROM sample_evidence se
+		JOIN samples s ON s.tenant_id = se.tenant_id AND s.id = se.sample_id
+		JOIN populations p ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+		JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
+		WHERE se.tenant_id = $1 AND ap.status = 'frozen'`, tenantID)
+	if err != nil {
+		t.Fatalf("read frozen period's sample_evidence: %v", err)
+	}
+	sampled, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		t.Fatalf("scan frozen period's sample_evidence: %v", err)
+	}
+	if len(sampled) == 0 {
+		t.Errorf("frozen period's sample links no records")
+	}
+	for _, id := range sampled {
+		if !inDraw[id] {
+			t.Errorf("frozen period's sample links record %s outside its population", id)
+		}
+	}
 }
 
 // rowCount returns the count of rows in `table` for the named tenant.
@@ -178,6 +265,29 @@ func TestApply_Happy(t *testing.T) {
 	if frozen != 1 {
 		t.Errorf("frozen audit_periods: got %d; want 1 (AC-10)", frozen)
 	}
+
+	// #3066: the seed inserts the frozen period directly, so it records
+	// the period's control set itself; without it replay fails closed.
+	var unsnapshotted int
+	if err := adminPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM audit_periods ap
+		WHERE ap.tenant_id = $1 AND ap.status = 'frozen'
+		  AND NOT EXISTS (SELECT 1 FROM audit_period_frozen_controls fc
+		                  WHERE fc.tenant_id = ap.tenant_id AND fc.audit_period_id = ap.id
+		                    AND fc.source = 'seed')`,
+		res.TenantID,
+	).Scan(&unsnapshotted); err != nil {
+		t.Fatalf("count frozen periods without a control snapshot: %v", err)
+	}
+	if unsnapshotted != 0 {
+		t.Errorf("frozen audit_periods without a seed control snapshot: %d; want 0 (#3066)", unsnapshotted)
+	}
+
+	// #1699: the frozen period holds evidence. A frozen horizon bounds
+	// ingested_at as well as observed_at, so a seed that stamped every
+	// record ingested now() would leave the frozen period, and its
+	// population, empty. Read through the queries the product uses.
+	assertFrozenPeriodHoldsEvidence(t, res.TenantID)
 
 	// Slice 680 / ATLAS-033 (AC-1 + AC-4): every seeded audit-period's
 	// quarter label must match the calendar quarter of its own
@@ -804,4 +914,33 @@ func TestApply_RejectsInvalidSlug(t *testing.T) {
 			t.Errorf("slug %q: expected error; got nil", bad)
 		}
 	}
+}
+
+// TestApply_MaxScaleNoFutureEvidence seeds at MaxScale, where the later
+// audit periods open after now, and checks no ledger record is observed
+// after now() and the frozen period's sample stays inside its population
+// (#3047).
+func TestApply_MaxScaleNoFutureEvidence(t *testing.T) {
+	const slug = "demo-it-maxscale"
+	cleanupTenant(t, slug)
+
+	seeder, err := demoseed.NewSeeder(adminPool, demoseed.MaxScale)
+	if err != nil {
+		t.Fatalf("NewSeeder: %v", err)
+	}
+	res, err := seeder.Apply(context.Background(), demoseed.ApplyInput{Slug: slug})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	var future int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1 AND observed_at > now()`,
+		res.TenantID,
+	).Scan(&future); err != nil {
+		t.Fatalf("count future evidence: %v", err)
+	}
+	if future != 0 {
+		t.Errorf("MaxScale seed wrote %d evidence records observed after now()", future)
+	}
+	assertFrozenPeriodHoldsEvidence(t, res.TenantID)
 }

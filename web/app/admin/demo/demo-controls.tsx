@@ -53,6 +53,7 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type SeedResult = {
   tenant_id: string;
@@ -88,6 +89,16 @@ type EnabledState =
 // time for the dialog to mount before the label resets. The dialog
 // itself takes precedence visually once it appears.
 const CLICK_FEEDBACK_MS = 80;
+
+// teardownBusyMessage is the error text for a teardown_busy 503 (#3094,
+// DEMO_TEARDOWN_BUSY in lib/api/admin.ts): the teardown timed out on the
+// audit_periods lock and deleted nothing, so the operator retries (#3096).
+function teardownBusyMessage(retryAfter: string | null): string {
+  const secs = retryAfter && /^\d+$/.test(retryAfter) ? retryAfter : null;
+  return secs
+    ? `Teardown is busy, retry in ${secs} seconds. Nothing was deleted.`
+    : "Teardown is busy, retry shortly. Nothing was deleted.";
+}
 
 type ClickFeedback = "idle" | "seed" | "teardown";
 
@@ -212,20 +223,15 @@ export function DemoControls() {
     setSeedDialog(false);
     try {
       const res = await fetch("/api/admin/demo/seed", { method: "POST" });
-      const body = (await res.json()) as Partial<SeedResult> & {
-        error?: string;
-      };
       if (!res.ok) {
-        warnInDev("seed", res, body);
-        setState({
-          kind: "error",
-          message: body.error ?? `${res.status} ${res.statusText}`,
-        });
+        const message = await upstreamErrorMessage(res.clone());
+        warnInDev("seed", res, await res.json().catch(() => null));
+        setState({ kind: "error", message });
         return;
       }
       setState({
         kind: "success-seed",
-        result: body as SeedResult,
+        result: (await res.json()) as SeedResult,
       });
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
@@ -243,20 +249,22 @@ export function DemoControls() {
     setTeardownDialog(false);
     try {
       const res = await fetch("/api/admin/demo/teardown", { method: "POST" });
-      const body = (await res.json()) as Partial<TeardownResult> & {
-        error?: string;
-      };
       if (!res.ok) {
+        const body = (await res
+          .clone()
+          .json()
+          .catch(() => null)) as { code?: string } | null;
+        const message =
+          body?.code === "teardown_busy"
+            ? teardownBusyMessage(res.headers.get("Retry-After"))
+            : await upstreamErrorMessage(res.clone());
         warnInDev("teardown", res, body);
-        setState({
-          kind: "error",
-          message: body.error ?? `${res.status} ${res.statusText}`,
-        });
+        setState({ kind: "error", message });
         return;
       }
       setState({
         kind: "success-teardown",
-        result: body as TeardownResult,
+        result: (await res.json()) as TeardownResult,
       });
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
@@ -315,7 +323,7 @@ export function DemoControls() {
         <CardFooter>
           <Button
             data-testid="demo-teardown-button"
-            variant="destructive"
+            variant="outline"
             onClick={handleTeardownClick}
             disabled={busy}
           >

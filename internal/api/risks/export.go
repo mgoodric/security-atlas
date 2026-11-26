@@ -6,7 +6,10 @@
 // audit-log reference impl (`internal/api/adminauditlog/export.go`),
 // adapted to the risk register shape:
 //
-//   - Source query is `risk.Store.List(ctx, ListFilter{})` (RLS-scoped).
+//   - Source query is `dbx.ListRisks` read directly under the tenant GUC
+//     (RLS-scoped), not `risk.Store.List`, so roll-ups stay in: the
+//     export is the full register, with `parent_risk_ids` naming each
+//     row's parents (#2060 D4).
 //   - No from/to window filter — the risk register is a small, live
 //     state; the row cap (50K) is the load-bearing DoS mitigation.
 //     Audit-period freezing is not relevant to the v1 export (risks
@@ -62,6 +65,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -116,24 +120,44 @@ type exportSource interface {
 // re-export every field the riskWire shape carries — the canonical
 // column set in `riskExportHeader` is the single source of truth.
 type riskRow struct {
-	ID             uuid.UUID
-	Title          string
-	Description    string
-	Category       string
-	Methodology    string
-	InherentScore  []byte
-	Treatment      string
-	TreatmentOwner string
-	ResidualScore  []byte
-	ReviewDueAt    *time.Time
-	AcceptedUntil  *time.Time
-	Accepter       string
-	InstrumentRef  string
-	OrgUnitID      *uuid.UUID
-	Themes         []string
-	Severity       int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID          uuid.UUID
+	Title       string
+	Description string
+	// Category is the slug and CategoryName the display name of the
+	// tenant's category the risk references (#1814).
+	Category      string
+	CategoryName  string
+	Methodology   string
+	InherentScore []byte
+	Treatment     string
+	// AcceptanceStatus is proposed | approved for treatment=accept, empty
+	// otherwise (#1746).
+	AcceptanceStatus string
+	TreatmentOwner   string
+	ResidualScore    []byte
+	ReviewDueAt      *time.Time
+	AcceptedUntil    *time.Time
+	Accepter         string
+	InstrumentRef    string
+	OrgUnitID        *uuid.UUID
+	Themes           []string
+	Severity         int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	// ParentIDs are the risks this one rolls up to (#1748).
+	ParentIDs []uuid.UUID
+	// Status is open | closed and ClosureReason the closed risk's reason
+	// (#2107). The export carries every risk, closed ones included.
+	Status        string
+	ClosureReason string
+	// OwnerUserID is the risk's owner user (#2129) and OwnerName their
+	// display name (#2450), blank when they have none: the export never
+	// names a user by their email's local-part.
+	OwnerUserID *uuid.UUID
+	OwnerName   string
+	// ExternalRef is the organisation's own risk ID, blank when unset
+	// (#2838).
+	ExternalRef string
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -398,6 +422,25 @@ func riskExportHeader() []string {
 		"accepted_until",
 		"created_at",
 		"updated_at",
+		// #1746: appended, not inserted, so existing column positions hold.
+		"acceptance_status",
+		// #1748: the parent risks this one rolls up to, semicolon-separated;
+		// empty when it has none. Appended for the same reason.
+		"parent_risk_ids",
+		// #1814: the organisation's name for the category whose slug is in
+		// `category`. Appended for the same reason.
+		"category_name",
+		// #2107: open | closed, and a closed risk's closure reason.
+		// Appended for the same reason.
+		"status",
+		"closure_reason",
+		// #2450: the owner user (#2129) and their name, beside the
+		// free-text treatment_owner. Appended for the same reason.
+		"owner_user_id",
+		"owner_name",
+		// #2838: the organisation's own risk ID. Appended for the same
+		// reason.
+		"external_ref",
 	}
 }
 
@@ -411,7 +454,8 @@ func riskExportHeader() []string {
 //
 // themes is rendered as a comma-separated string — XLSX / CSV
 // consumers don't have a natural array primitive. An empty themes
-// list renders as the empty string.
+// list renders as the empty string. parent_risk_ids is joined with
+// semicolons the same way.
 func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, r := range rows {
@@ -435,6 +479,14 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 			if len(r.ResidualScore) > 0 {
 				residual = string(r.ResidualScore)
 			}
+			owner := ""
+			if r.OwnerUserID != nil {
+				owner = r.OwnerUserID.String()
+			}
+			parents := make([]string, len(r.ParentIDs))
+			for i, p := range r.ParentIDs {
+				parents[i] = p.String()
+			}
 			row := []string{
 				r.ID.String(),
 				r.Title,
@@ -454,6 +506,14 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				acceptedUntil,
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
+				r.AcceptanceStatus,
+				strings.Join(parents, ";"),
+				r.CategoryName,
+				r.Status,
+				r.ClosureReason,
+				owner,
+				r.OwnerName,
+				r.ExternalRef,
 			}
 			if !yield(row) {
 				return
@@ -506,6 +566,27 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 	if err != nil {
 		return nil, false, fmt.Errorf("list risks: %w", err)
 	}
+	cats, err := q.ListRiskCategories(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+	if err != nil {
+		return nil, false, fmt.Errorf("list risk categories: %w", err)
+	}
+	categoryOf := make(map[uuid.UUID]dbx.OrgRiskCategory, len(cats))
+	for _, c := range cats {
+		categoryOf[uuid.UUID(c.ID.Bytes)] = c
+	}
+	links, err := q.ListRiskAggregationLinksForTenant(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+	if err != nil {
+		return nil, false, fmt.Errorf("list risk parent links: %w", err)
+	}
+	parentsOf := make(map[uuid.UUID][]uuid.UUID)
+	for _, l := range links {
+		child := uuid.UUID(l.ChildRiskID.Bytes)
+		parentsOf[child] = append(parentsOf[child], uuid.UUID(l.ParentRiskID.Bytes))
+	}
+	ownerNames, err := people.ExportNamesByID(ctx, q, tenantID)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit: %w", err)
 	}
@@ -525,7 +606,6 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			ID:             uuid.UUID(r.ID.Bytes),
 			Title:          r.Title,
 			Description:    r.Description,
-			Category:       string(r.Category),
 			Methodology:    string(r.Methodology),
 			InherentScore:  r.InherentScore,
 			Treatment:      string(r.Treatment),
@@ -535,6 +615,20 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			InstrumentRef:  r.InstrumentReference,
 			Themes:         append([]string(nil), r.Themes...),
 			Severity:       severityOf(r.InherentScore),
+			ParentIDs:      parentsOf[uuid.UUID(r.ID.Bytes)],
+			Status:         string(r.Status),
+		}
+		if r.ClosureReason != nil {
+			out[i].ClosureReason = string(*r.ClosureReason)
+		}
+		if r.ExternalRef != nil {
+			out[i].ExternalRef = *r.ExternalRef
+		}
+		if c, ok := categoryOf[uuid.UUID(r.CategoryID.Bytes)]; ok {
+			out[i].Category, out[i].CategoryName = c.Slug, c.Name
+		}
+		if r.AcceptanceStatus != nil {
+			out[i].AcceptanceStatus = string(*r.AcceptanceStatus)
 		}
 		if r.ReviewDueAt.Valid {
 			t := r.ReviewDueAt.Time
@@ -547,6 +641,11 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 		if r.OrgUnitID.Valid {
 			ou := uuid.UUID(r.OrgUnitID.Bytes)
 			out[i].OrgUnitID = &ou
+		}
+		if r.OwnerUserID.Valid {
+			owner := uuid.UUID(r.OwnerUserID.Bytes)
+			out[i].OwnerUserID = &owner
+			out[i].OwnerName = ownerNames[owner]
 		}
 		if r.CreatedAt.Valid {
 			out[i].CreatedAt = r.CreatedAt.Time

@@ -72,7 +72,7 @@ func newGroupHarness(t *testing.T, tenantName string) *groupHarness {
 	credStore.SetPrefix(bearer.PrefixTest)
 
 	ctx, _ := contextWithTenant(t, tenant)
-	cred, plain, err := credStore.Issue(ctx, tenant.String(), "test-idp", nil)
+	cred, plain, err := credStore.Issue(ctx, tenant.String(), "test-idp", scim.Actor{})
 	if err != nil {
 		t.Fatalf("issue cred: %v", err)
 	}

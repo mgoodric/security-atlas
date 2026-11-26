@@ -60,6 +60,8 @@ import (
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -83,7 +85,21 @@ var (
 	// ErrValidationFailed wraps the bridge's structured errors for a document
 	// that failed OSCAL v1.1.x validation. Nothing is persisted (AC-5).
 	ErrValidationFailed = errors.New("componentimport: component-definition failed OSCAL v1.1.x validation")
+	// ErrSCFReleaseConflict is returned when --scf-release and the
+	// document's "scf-release" prop name different SCF releases, or the
+	// document names two. Nothing is persisted.
+	ErrSCFReleaseConflict = scfbind.ErrConflict
 )
+
+// SCFReleaseProp is the name of the component-definition metadata prop that
+// declares the SCF release its control ids belong to (#1771).
+const SCFReleaseProp = scfbind.Prop
+
+// ErrSCFReleaseRequired is returned for an import that declares no SCF
+// release (#1774); vendor claims are never matched in the current release
+// instead. The import fails before anything is written, and the message
+// is the one-line fix.
+var ErrSCFReleaseRequired = fmt.Errorf("componentimport: %w: no SCF release declared; pass --scf-release <release> (e.g. --scf-release test-2026.3), or add an \"scf-release\" prop to the document's metadata", scfrelease.ErrReleaseRequired)
 
 // authorizedRole reports whether role may import component-definitions. admin
 // is the superset of grc_engineer in the canvas 5-role model.
@@ -127,6 +143,11 @@ type Request struct {
 	ImportedBy string
 	// Role is the caller's role; must be an import-author role (AC-6).
 	Role authz.Role
+	// SCFRelease is the SCF release the claims' control ids are bound in
+	// (#1771), from atlas-oscal --scf-release. The document can declare it
+	// instead with an "scf-release" prop on its metadata; when both are
+	// given they must agree. Neither is ErrSCFReleaseRequired (#1774).
+	SCFRelease string
 }
 
 // Report summarizes a successful component-definition import.
@@ -144,6 +165,10 @@ type Report struct {
 	// anchor deterministically (the rest are flagged NULL for operator
 	// mapping).
 	MappedCount int
+	// SCFRelease is the SCF release the mapped claims were bound in.
+	SCFRelease string
+	// Warnings are non-fatal notes for the operator.
+	Warnings []string
 }
 
 // Import runs the full pipeline. On any validation or persistence failure it
@@ -170,6 +195,16 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	sum := sha256.Sum256(req.OscalJSON)
 	sourceSha := hex.EncodeToString(sum[:])
 
+	release, err := scfbind.Declared("componentimport", req.SCFRelease, req.OscalJSON, "component-definition")
+	if err != nil {
+		return Report{}, err
+	}
+	// No release declared fails here, before the bridge round-trip and
+	// before anything is written, not even a rejection audit row (#1774).
+	if release == "" {
+		return Report{}, ErrSCFReleaseRequired
+	}
+
 	// --- Bridge deserialize + validate ---
 	resp, err := im.bridge.ImportComponentDefinition(ctx, req.OscalJSON, req.SourceLabel)
 	if err != nil {
@@ -183,7 +218,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	}
 
 	// --- Transactional persistence (AC-5) ---
-	report, err := im.persist(ctx, req, sourceSha, resp)
+	report, err := im.persist(ctx, req, release, sourceSha, resp)
 	if err != nil {
 		// A persistence failure rolls everything back; record rejection.
 		_ = im.writeAuditRejected(ctx, req, sourceSha, []string{err.Error()})
@@ -197,7 +232,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // write to the caller's tenant (P0-512-6 / AC-12). The success audit row is
 // written in the SAME transaction so the success record is atomic with the
 // import.
-func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, resp *oscalv1.ImportComponentDefinitionResponse) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportComponentDefinitionResponse) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("componentimport: begin tx: %w", err)
@@ -234,13 +269,20 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		return Report{}, fmt.Errorf("componentimport: insert import row: %w", err)
 	}
 
-	// Pre-load the SCF anchor scf_ids for the current SCF version so the
-	// deterministic requirement -> SCF-anchor mapping (slice-512 D3, reusing
-	// slice-492's crosswalk) is a single query, not one per claim. scf_anchors
-	// is the read-only bundled spine — never written (P0-512-5).
-	anchorIDs, err := loadSCFAnchorIDs(ctx, tx)
+	// Pick the SCF release the claims bind in (#1771): the declared one.
+	// None declared fails the import (ErrSCFReleaseRequired, #1774), and so
+	// does a declared release that is not loaded
+	// (scfrelease.ErrUnknownRelease); neither falls back to the current
+	// release, and the transaction rolls back. A claim whose control id is not in the
+	// release stays unmapped, as any non-SCF control id does (slice 512).
+	b, err := scfbind.Bind(ctx, tx, release, ErrSCFReleaseRequired)
 	if err != nil {
-		return Report{}, err
+		return Report{}, fmt.Errorf("componentimport: scf release: %w", err)
+	}
+	rel, anchorIDs, warnings := b.Release, b.Anchors, b.Warnings
+	var releaseLabel *string
+	if rel.Version != "" {
+		releaseLabel = &rel.Version
 	}
 
 	mapped := 0
@@ -272,6 +314,7 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 				Statement:           claim.GetStatement(),
 				RequirementUuid:     claim.GetRequirementUuid(),
 				ScfAnchorID:         scfAnchor,
+				ScfRelease:          releaseOf(scfAnchor, releaseLabel),
 			}); err != nil {
 				return Report{}, fmt.Errorf("componentimport: insert claim %q: %w", claim.GetControlId(), err)
 			}
@@ -280,11 +323,12 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 
 	// Success audit row, atomic with the import (AC-8).
 	detail, _ := json.Marshal(map[string]any{
-		"components": len(components),
-		"claims":     totalClaims,
-		"mapped":     mapped,
-		"unmapped":   totalClaims - mapped,
-		"kind":       "component_definition",
+		"components":  len(components),
+		"claims":      totalClaims,
+		"mapped":      mapped,
+		"unmapped":    totalClaims - mapped,
+		"scf_release": rel.Version,
+		"kind":        "component_definition",
 	})
 	if _, err := q.InsertImportedCatalogAuditLog(ctx, dbx.InsertImportedCatalogAuditLogParams{
 		ID:           pgUUID(uuid.New()),
@@ -312,6 +356,8 @@ func (im *Importer) persist(ctx context.Context, req Request, sourceSha string, 
 		ComponentCount: len(components),
 		ClaimCount:     totalClaims,
 		MappedCount:    mapped,
+		SCFRelease:     rel.Version,
+		Warnings:       warnings,
 	}, nil
 }
 
@@ -350,34 +396,13 @@ func (im *Importer) writeAuditRejected(ctx context.Context, req Request, sourceS
 	return tx.Commit(ctx)
 }
 
-// loadSCFAnchorIDs returns the set of scf_id strings in the current SCF
-// framework version — the deterministic crosswalk surface (slice-512 D3 /
-// slice-492 D1). A vendor claim whose target OSCAL control-id matches a key
-// maps TO that SCF anchor. scf_anchors is the read-only bundled spine —
-// never written.
-func loadSCFAnchorIDs(ctx context.Context, tx pgx.Tx) (map[string]struct{}, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT a.scf_id
-		FROM scf_anchors a
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'scf' AND fv.status = 'current'`)
-	if err != nil {
-		return nil, fmt.Errorf("componentimport: load scf anchors: %w", err)
+// releaseOf is the scf_release a claim records: the release label when the
+// claim is mapped, NULL when it is not (the column's CHECK pairs them).
+func releaseOf(scfAnchor, release *string) *string {
+	if scfAnchor == nil {
+		return nil
 	}
-	defer rows.Close()
-	out := make(map[string]struct{})
-	for rows.Next() {
-		var scfID string
-		if err := rows.Scan(&scfID); err != nil {
-			return nil, fmt.Errorf("componentimport: scan scf anchor: %w", err)
-		}
-		out[scfID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("componentimport: iterate scf anchors: %w", err)
-	}
-	return out, nil
+	return release
 }
 
 func tenantUUID(ctx context.Context) (uuid.UUID, error) {

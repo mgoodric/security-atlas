@@ -36,17 +36,33 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 
 ## Files
 
-| File                       | Spec                                   |
-| -------------------------- | -------------------------------------- |
-| `dashboard.sql`            | `web/e2e/dashboard.spec.ts`            |
-| `control-detail.sql`       | `web/e2e/control-detail.spec.ts`       |
-| `control-detail-empty.sql` | `web/e2e/control-detail-empty.spec.ts` |
-| `audit-workspace.sql`      | `web/e2e/audit-workspace.spec.ts`      |
-| `audit-log.sql`            | `web/e2e/audit-log.spec.ts`            |
-| `risk-hierarchy.sql`       | `web/e2e/risk-hierarchy.spec.ts`       |
-| `admin-bootstrap.sql`      | `web/e2e/admin-bootstrap.spec.ts`      |
-| `settings.sql`             | `web/e2e/settings.spec.ts`             |
-| `global-search.sql`        | `web/e2e/global-search.spec.ts`        |
+| File                                | Spec                                                            |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `dashboard.sql`                     | `web/e2e/dashboard.spec.ts`                                     |
+| `control-detail.sql`                | `web/e2e/control-detail.spec.ts`                                |
+| `control-detail-empty.sql`          | `web/e2e/control-detail-empty.spec.ts`                          |
+| `audit-workspace.sql`               | `web/e2e/audit-workspace.spec.ts`                               |
+| `risk-hierarchy.sql`                | `web/e2e/risk-hierarchy.spec.ts`                                |
+| `admin-bootstrap.sql`               | `web/e2e/admin-bootstrap.spec.ts`                               |
+| `settings.sql`                      | `web/e2e/settings.spec.ts`                                      |
+| `global-search.sql`                 | `web/e2e/global-search.spec.ts`                                 |
+| `framework-scope-soa.sql`           | `web/e2e/framework-scope-soa.spec.ts`                           |
+| `framework-scope-diff.sql`          | `web/e2e/framework-scope-diff.spec.ts`                          |
+| `attest.sql`                        | `web/e2e/attest.spec.ts`                                        |
+| `attest-result.sql`                 | `web/e2e/attest-result.spec.ts`                                 |
+| `theme.sql`                         | `web/e2e/settings-theme.spec.ts`                                |
+| `sidebar-nav.sql`                   | `web/e2e/sidebar-nav.spec.ts`                                   |
+| `framework-scope-self-approval.sql` | `web/e2e/framework-scope-self-approval.spec.ts`                 |
+| `owner-picker.sql`                  | `web/e2e/risks-create.spec.ts`, `web/e2e/create-toasts.spec.ts` |
+| `audit-periods-vendors-export.sql`  | `web/e2e/audit-periods-vendors-export.spec.ts`                  |
+| `audits-list.sql`                   | `web/e2e/audits-list.spec.ts`                                   |
+| `calendar.sql`                      | `web/e2e/calendar.spec.ts`                                      |
+| `evidence-list.sql`                 | `web/e2e/evidence-list.spec.ts`                                 |
+| `evidence-pagination.sql`           | `web/e2e/evidence-pagination.spec.ts`                           |
+| `exceptions-list.sql`               | `web/e2e/exceptions-list.spec.ts`                               |
+| `metrics-dashboard.sql`             | `web/e2e/metrics-dashboard.spec.ts`                             |
+| `policies-list.sql`                 | `web/e2e/policies-list.spec.ts`                                 |
+| `risks-list.sql`                    | `web/e2e/risks-list.spec.ts`                                    |
 
 Each file builds on `fixtures/walkthroughs/00-seed.sql` (the harness
 applies that file first, then the per-spec file). All inserts use

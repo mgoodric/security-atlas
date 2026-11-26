@@ -13,16 +13,18 @@ import (
 
 const boardBriefExceptionAggregate = `-- name: BoardBriefExceptionAggregate :one
 SELECT
-    COUNT(*) FILTER (WHERE status = 'active')::bigint AS active_count,
+    COUNT(*)::bigint AS active_count,
     COUNT(*) FILTER (
-        WHERE status = 'active' AND expires_at <= $1::timestamptz
+        WHERE expires_at <= $1::timestamptz
     )::bigint AS past_due_count,
     (
         MIN(COALESCE(effective_from, approved_at, requested_at))
-            FILTER (WHERE status = 'active')
     )::timestamptz AS oldest_active_started_at
 FROM exceptions
 WHERE tenant_id = $2::uuid
+  AND activated_at <= $1::timestamptz
+  AND (revoked_at IS NULL OR revoked_at > $1::timestamptz)
+  AND (expired_at IS NULL OR expired_at > $1::timestamptz)
 `
 
 type BoardBriefExceptionAggregateParams struct {
@@ -47,7 +49,7 @@ type BoardBriefExceptionAggregateRow struct {
 //
 // Three numbers, and only three (decisions log D1):
 //
-//	active_count             exceptions in force right now (status='active').
+//	active_count             exceptions whose status was 'active' at as_of.
 //	past_due_count           of those, the ones already past their own
 //	                         expires_at — a waiver outliving its sunset date.
 //	oldest_active_started_at when the longest-standing active waiver began
@@ -64,6 +66,22 @@ type BoardBriefExceptionAggregateRow struct {
 // aggregate, so it can never inflate a board-facing count (invariant #6).
 // The COALESCE start chain mirrors the lifecycle: effective_from is set at
 // activation, approved_at at approval, requested_at always.
+//
+// As-of (#3057): "status was 'active' at as_of" is rebuilt from the lifecycle
+// stamps, not read from the current status column, so a past as_of does not
+// get today's numbers. The way into 'active' stamps activated_at
+// (ActivateException) and each way out stamps revoked_at (RevokeException)
+// or expired_at (ExpireActiveExceptionsBefore). Activated by as_of, not
+// revoked by as_of and not expired by as_of is therefore status = 'active'
+// at as_of; at as_of = now it is today's status = 'active' set, which is
+// what the only caller passes (generator.go, decisions log D2).
+//
+// It deliberately does NOT apply the [effective_from, expires_at) window that
+// the evaluator and oscal/excepted.go apply over ListExceptionsByControlAsOf.
+// That window answers "did the waiver suppress evaluation at t"; this
+// aggregate reports lifecycle status. Under the window past_due_count would
+// always be 0, and a waiver activated with a future effective_from would
+// leave active_count, changing today's brief.
 func (q *Queries) BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error) {
 	row := q.db.QueryRow(ctx, boardBriefExceptionAggregate, arg.AsOf, arg.TenantID)
 	var i BoardBriefExceptionAggregateRow
@@ -227,10 +245,19 @@ func (q *Queries) ListFrameworksForTenant(ctx context.Context, tenantID pgtype.U
 }
 
 const listRisksForBoardBrief = `-- name: ListRisksForBoardBrief :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes FROM risks
-WHERE tenant_id = $1
-  AND created_at <= $2
-ORDER BY updated_at ASC, id ASC
+SELECT r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id, r.acceptance_justification, r.acceptance_proposed_until, r.acceptance_proposed_by, r.acceptance_proposed_at, r.acceptance_approved_at, r.self_approved, r.status, r.closure_reason, r.closure_note, r.closed_at, r.closed_by, r.owner_user_id, r.external_ref FROM risks r
+WHERE r.tenant_id = $1
+  AND r.created_at <= $2
+  AND (r.status = 'open' OR r.closed_at > $2)
+  AND NOT EXISTS (
+    SELECT 1 FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND ra.created_at <= $2
+      AND (c.status = 'open' OR c.closed_at > $2)
+  )
+ORDER BY r.updated_at ASC, r.id ASC
 `
 
 type ListRisksForBoardBriefParams struct {
@@ -249,6 +276,21 @@ type ListRisksForBoardBriefParams struct {
 // extraction is done in Go, not a JSONB-path SQL expression that would trip
 // pgx type inference). `created_at` lower bound is passed explicitly so pgx
 // never has to infer a bare-placeholder type (SQLSTATE 42P08).
+//
+// Roll-up parents are left out (#2060): a parent summarises children that
+// are already ranked here, so counting it too would show the same exposure
+// twice. A risk is a roll-up when it had at least one child linked as of the
+// brief's date.
+//
+// Closed risks are left out (#2107), unless they were closed after the
+// brief's date: as of that date they were still open. A roll-up counts
+// only children open as of that date, so a parent whose children were all
+// closed by then is ranked itself rather than hidden with them.
+//
+// Closure is read from the risk's current state, so a risk closed before
+// the brief's date and reopened since reads as open throughout. A brief
+// generated at the time froze what it showed; this matters only for a
+// brief generated later for an earlier date.
 func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error) {
 	rows, err := q.db.Query(ctx, listRisksForBoardBrief, arg.TenantID, arg.CreatedAt)
 	if err != nil {
@@ -263,7 +305,6 @@ func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBo
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -278,6 +319,21 @@ func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBo
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+			&i.ExternalRef,
 		); err != nil {
 			return nil, err
 		}

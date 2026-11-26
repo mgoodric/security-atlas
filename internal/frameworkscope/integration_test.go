@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -42,6 +42,8 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"framework_scope_workflow_log",
+		"me_audit_log",
 		"framework_scopes",
 		"evidence_records",
 		"scope_cells",
@@ -107,7 +109,7 @@ func seedScopeAndControl(t *testing.T, admin *pgxpool.Pool, app *pgxpool.Pool, t
 		// for pre-existing rows. version defaults to 1.
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+			VALUES ($1, $2, 'IAC-37', 'MFA', 'IAC', 'automated', $3, $4)
 		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
@@ -165,7 +167,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 	}
 
 	// AC-6: draft -> review.
-	reviewed, err := store.Submit(ctx, created.ID)
+	reviewed, err := store.Submit(ctx, created.ID, "key_test", "key_test")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 
 	// AC-8: approved -> activated.
 	effective := time.Now().UTC().Truncate(time.Second)
-	activated, err := store.Activate(ctx, approved.ID, effective)
+	activated, err := store.Activate(ctx, approved.ID, "key_test", effective)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -257,13 +259,13 @@ func mustActivate(t *testing.T, ctx context.Context, store *frameworkscope.Store
 	if err != nil {
 		t.Fatalf("Create %s: %v", name, err)
 	}
-	if _, err := store.Submit(ctx, d.ID); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test", "key_test"); err != nil {
 		t.Fatalf("Submit %s: %v", name, err)
 	}
 	if _, err := store.Approve(ctx, frameworkscope.ApproveRequest{ID: d.ID, ApproverUserID: uuid.NewString()}); err != nil {
 		t.Fatalf("Approve %s: %v", name, err)
 	}
-	a, err := store.Activate(ctx, d.ID, time.Now().UTC())
+	a, err := store.Activate(ctx, d.ID, "key_test", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("Activate %s: %v", name, err)
 	}
@@ -288,7 +290,7 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := store.Submit(ctx, d.ID); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test", "key_test"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	approverID := uuid.NewString()
@@ -304,7 +306,7 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 	}
 
 	// Patch the predicate. The trigger should bounce back to draft.
-	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`))
+	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`), "key_test")
 	if err != nil {
 		t.Fatalf("UpdatePredicate: %v", err)
 	}
@@ -337,7 +339,7 @@ func TestPredicateEditOnDraftDoesNotBounce(t *testing.T) {
 	d, _ := store.Create(ctx, frameworkscope.CreateRequest{
 		FrameworkVersionID: fvID, Name: "x", Predicate: []byte(`{"op":"true"}`),
 	})
-	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`))
+	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`), "key_test")
 	if err != nil {
 		t.Fatalf("UpdatePredicate: %v", err)
 	}
@@ -433,15 +435,29 @@ func TestRLS_OtherTenantCannotSee(t *testing.T) {
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, string) {
 	t.Helper()
+	ts, bearer, approver, _ := setupHTTPServerWithViewer(t, tenant)
+	return ts, bearer, approver
+}
+
+// setupHTTPServerWithViewer is setupHTTPServer plus a viewer bearer, for
+// the end-to-end refusals of a caller who is neither author nor approver.
+func setupHTTPServerWithViewer(t *testing.T, tenant string) (*httptest.Server, string, string, string) {
+	t.Helper()
 	// dbtest.NewAppPool self-closes via its own t.Cleanup; registering it
 	// before the server-teardown cleanup below means LIFO ordering closes
 	// the httptest server first, while the pool is still open.
 	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearers via slice 190 path.
-	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
-	approver := srv.IssueTestJWT(t, testjwt.ApproverFor(uuid.MustParse(tenant)))
+	liveroletest.Attach(t, srv, app)
+	// #3016: seeded people with live grants, on the real engine. The
+	// author creates and submits, which takes admin or grc_engineer
+	// (#2664); a live grc_engineer is an approver by role (#2428), and it
+	// still cannot approve what it submitted (the second-person rule,
+	// #2101). The approver is a second grc_engineer.
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	approver := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")
@@ -450,7 +466,7 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	t.Cleanup(func() {
 		ts.Close()
 	})
-	return ts, bearer, approver
+	return ts, bearer, approver, viewer
 }
 
 func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []byte) {
@@ -485,7 +501,7 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 
-	ts, bearer, approver := setupHTTPServer(t, tenant)
+	ts, bearer, approver, viewer := setupHTTPServerWithViewer(t, tenant)
 
 	// AC-5: create draft.
 	body := fmt.Sprintf(`{"framework_version_id":%q,"name":"SOC 2 system","predicate":{"op":"true"}}`, fvID.String())
@@ -510,10 +526,18 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 		t.Fatalf("PATCH submit: status %d; body %s", resp.StatusCode, payload)
 	}
 
-	// AC-7: approve — bearer (non-approver) should be 403.
-	resp, _ = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", bearer, "")
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("approve with non-approver: status %d; want 403", resp.StatusCode)
+	// AC-7: approve — the author approving its own submission is 403, by
+	// the second-person rule.
+	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", bearer, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), frameworkscope.ErrSelfApproval.Error()) {
+		t.Fatalf("approve by its own submitter: status %d body %s; want 403 naming the second-person rule", resp.StatusCode, payload)
+	}
+	// A viewer is refused by the engine, with its own "forbidden" (#3016).
+	// The handler's "approver role required" sits behind it: the engine
+	// admits only admin and grc_engineer to approve, both approvers.
+	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", viewer, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), `"error":"forbidden"`) {
+		t.Fatalf("approve by a viewer: status %d body %s; want 403 forbidden", resp.StatusCode, payload)
 	}
 	// Approver succeeds.
 	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", approver, "")

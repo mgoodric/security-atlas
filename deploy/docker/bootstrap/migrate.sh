@@ -58,10 +58,16 @@ REPO_ROOT="${REPO_ROOT:-/repo}"
 
 log() { echo "[migrate] $*"; }
 
+# security-atlas#2005: psql gets PSQL_URL (no password) and reads the
+# password from PGPASSWORD, so it never appears in the process list.
+# shellcheck source=deploy/docker/bootstrap/pg-conn.sh
+. "$(dirname "$0")/pg-conn.sh"
+pg_conn_split
+
 # ----- Phase 1: wait for Postgres -----
 log "waiting for Postgres..."
 i=0
-until psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; do
+until psql "$PSQL_URL" -c 'SELECT 1' >/dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -ge 60 ]; then
         log "FATAL: Postgres not reachable after 60 attempts"
@@ -77,7 +83,7 @@ log "Postgres reachable"
 # volume the postgres image's /docker-entrypoint-initdb.d already ran it
 # once as the superuser; this re-run keeps the shared-cluster path warm.
 log "applying bootstrap roles (idempotent)..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/migrations/bootstrap/01-roles.sql"
+psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/migrations/bootstrap/01-roles.sql"
 
 # ----- Phase 2b: schema_migrations ledger -----
 # Forward migrations are tracked filename-by-filename in a plain
@@ -91,7 +97,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/migrations/bootstrap/01-r
 # metadata owned by atlas_migrate, same category as any versioning tool's
 # bookkeeping table.
 log "ensuring schema_migrations ledger..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
     CREATE TABLE IF NOT EXISTS schema_migrations (
         filename    TEXT PRIMARY KEY,
         applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -106,7 +112,7 @@ for f in "$REPO_ROOT"/migrations/sql/*.sql; do
         *.down.sql) ;;  # never auto-run down-migrations (P0-473-2)
         *)
             base="$(basename "$f")"
-            already="$(psql "$DATABASE_URL" -t -A \
+            already="$(psql "$PSQL_URL" -t -A \
                 -c "SELECT 1 FROM schema_migrations WHERE filename = '$base'")"
             if [ "$already" = "1" ]; then
                 log "  skipping $base (already applied)"
@@ -123,7 +129,7 @@ for f in "$REPO_ROOT"/migrations/sql/*.sql; do
             # above), then exit non-zero. The backend is gated on this
             # service via `service_completed_successfully`, so it will NOT
             # start against the partial schema.
-            if ! psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction \
+            if ! psql "$PSQL_URL" -v ON_ERROR_STOP=1 --single-transaction \
                 -f "$f" \
                 -c "INSERT INTO schema_migrations (filename) VALUES ('$base')"; then
                 log "FATAL: migration '$base' failed to apply — see the SQL error above."
@@ -149,10 +155,19 @@ fi
 # DDL-role concern and must complete before the backend tries to connect,
 # so it lives here in the migrate step (gated ahead of the backend), not
 # in the seed one-shot. ALTER ROLE ... PASSWORD is idempotent.
+#
+# security-atlas#1989: the password never reaches psql's argv, where any
+# local user could read it from the process list. The SQL goes in on
+# stdin (a quoted heredoc, so the shell expands nothing) and psql reads
+# the value from the environment with \getenv (psql 15+). `-v pw=...`
+# would put it back in argv, so it is not used.
 if [ -n "${ATLAS_APP_PASSWORD:-}" ]; then
     log "setting atlas_app role password..."
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-        -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+    export ATLAS_APP_PASSWORD
+    psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
+\getenv atlas_app_password ATLAS_APP_PASSWORD
+ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+SQL
 fi
 
 log "migrate complete — schema is current"

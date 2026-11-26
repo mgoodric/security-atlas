@@ -67,8 +67,12 @@ message EvidenceRecord {
   // is slice 014).
   string schema_version = 3;
 
-  // Control or SCF anchor this evidence applies to. Free-form for slice 003;
-  // referential integrity to the controls table lands in slice 013.
+  // The control this evidence applies to: a control UUID, the bundle ID of
+  // the tenant's active control (#2100), or a free-form reference such as an
+  // SCF anchor, which links to no control. Required, except for a kind routed
+  // by evidence type (#2924, internal/evidence/routed): such a record is never
+  // bound to a control, any value here is kept only as provenance, and it
+  // reaches every control whose evidence queries declare its kind.
   string control_id = 4;
 
   // Scope dimensions for this evidence. At least one entry required. Each
@@ -158,4 +162,13 @@ message EvidenceReceipt {
   // the server saw matches the credential I used" without an extra round
   // trip. Empty when the request was unauthenticated (rejected anyway).
   string credential_id = 4;
+
+  // UUID of the control the stored record links to. The server resolves
+  // EvidenceRecord.control_id as a control UUID, then as the bundle ID of
+  // the tenant's active control (#2100). Empty when neither matched and the
+  // record keeps control_id only as a free-form, unlinked reference, so a
+  // pusher can tell a mistyped bundle ID from a linked push (#2165). Always
+  // empty for a kind routed by evidence type (#2924), which links to no one
+  // control by design; that is not a mistyped bundle ID.
+  string linked_control_id = 5;
 }

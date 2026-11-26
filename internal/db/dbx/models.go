@@ -55,6 +55,15 @@ func (ns NullControlImplementationType) Value() (driver.Value, error) {
 	return string(ns.ControlImplementationType), nil
 }
 
+func AllControlImplementationTypeValues() []ControlImplementationType {
+	return []ControlImplementationType{
+		ControlImplementationTypeAutomated,
+		ControlImplementationTypeSemiAutomated,
+		ControlImplementationTypeManualAttested,
+		ControlImplementationTypeManualPeriodic,
+	}
+}
+
 type ControlLifecycleState string
 
 const (
@@ -98,6 +107,16 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ControlLifecycleState), nil
+}
+
+func AllControlLifecycleStateValues() []ControlLifecycleState {
+	return []ControlLifecycleState{
+		ControlLifecycleStateDraft,
+		ControlLifecycleStateProposed,
+		ControlLifecycleStateActive,
+		ControlLifecycleStateDeprecated,
+		ControlLifecycleStateRetired,
+	}
 }
 
 type CrosswalkMappingTier string
@@ -144,6 +163,15 @@ func (ns NullCrosswalkMappingTier) Value() (driver.Value, error) {
 	return string(ns.CrosswalkMappingTier), nil
 }
 
+func AllCrosswalkMappingTierValues() []CrosswalkMappingTier {
+	return []CrosswalkMappingTier{
+		CrosswalkMappingTierDraft,
+		CrosswalkMappingTierUnderReview,
+		CrosswalkMappingTierVerified,
+		CrosswalkMappingTierRejected,
+	}
+}
+
 type CrosswalkSourceAttribution string
 
 const (
@@ -187,6 +215,14 @@ func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
 	return string(ns.CrosswalkSourceAttribution), nil
 }
 
+func AllCrosswalkSourceAttributionValues() []CrosswalkSourceAttribution {
+	return []CrosswalkSourceAttribution{
+		CrosswalkSourceAttributionScfOfficial,
+		CrosswalkSourceAttributionCommunityDraft,
+		CrosswalkSourceAttributionOrgInternal,
+	}
+}
+
 type CsfProfileKind string
 
 const (
@@ -227,6 +263,13 @@ func (ns NullCsfProfileKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CsfProfileKind), nil
+}
+
+func AllCsfProfileKindValues() []CsfProfileKind {
+	return []CsfProfileKind{
+		CsfProfileKindCurrent,
+		CsfProfileKindTarget,
+	}
 }
 
 type CsfTier string
@@ -273,6 +316,15 @@ func (ns NullCsfTier) Value() (driver.Value, error) {
 	return string(ns.CsfTier), nil
 }
 
+func AllCsfTierValues() []CsfTier {
+	return []CsfTier{
+		CsfTierTier1Partial,
+		CsfTierTier2RiskInformed,
+		CsfTierTier3Repeatable,
+		CsfTierTier4Adaptive,
+	}
+}
+
 type DecisionStatus string
 
 const (
@@ -315,6 +367,15 @@ func (ns NullDecisionStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.DecisionStatus), nil
+}
+
+func AllDecisionStatusValues() []DecisionStatus {
+	return []DecisionStatus{
+		DecisionStatusActive,
+		DecisionStatusRevisited,
+		DecisionStatusSuperseded,
+		DecisionStatusExpired,
+	}
 }
 
 type EvidenceFreshnessClass string
@@ -363,6 +424,17 @@ func (ns NullEvidenceFreshnessClass) Value() (driver.Value, error) {
 	return string(ns.EvidenceFreshnessClass), nil
 }
 
+func AllEvidenceFreshnessClassValues() []EvidenceFreshnessClass {
+	return []EvidenceFreshnessClass{
+		EvidenceFreshnessClassRealtime,
+		EvidenceFreshnessClassDaily,
+		EvidenceFreshnessClassWeekly,
+		EvidenceFreshnessClassMonthly,
+		EvidenceFreshnessClassQuarterly,
+		EvidenceFreshnessClassAnnual,
+	}
+}
+
 type EvidenceResult string
 
 const (
@@ -370,6 +442,7 @@ const (
 	EvidenceResultFail         EvidenceResult = "fail"
 	EvidenceResultNa           EvidenceResult = "na"
 	EvidenceResultInconclusive EvidenceResult = "inconclusive"
+	EvidenceResultExcepted     EvidenceResult = "excepted"
 )
 
 func (e *EvidenceResult) Scan(src interface{}) error {
@@ -405,6 +478,16 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.EvidenceResult), nil
+}
+
+func AllEvidenceResultValues() []EvidenceResult {
+	return []EvidenceResult{
+		EvidenceResultPass,
+		EvidenceResultFail,
+		EvidenceResultNa,
+		EvidenceResultInconclusive,
+		EvidenceResultExcepted,
+	}
 }
 
 type FrameworkVersionAuditAction string
@@ -451,6 +534,15 @@ func (ns NullFrameworkVersionAuditAction) Value() (driver.Value, error) {
 	return string(ns.FrameworkVersionAuditAction), nil
 }
 
+func AllFrameworkVersionAuditActionValues() []FrameworkVersionAuditAction {
+	return []FrameworkVersionAuditAction{
+		FrameworkVersionAuditActionPromote,
+		FrameworkVersionAuditActionRevert,
+		FrameworkVersionAuditActionMigrationApprove,
+		FrameworkVersionAuditActionMigrationReject,
+	}
+}
+
 type FrameworkVersionMigrationMatchKind string
 
 const (
@@ -492,6 +584,14 @@ func (ns NullFrameworkVersionMigrationMatchKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.FrameworkVersionMigrationMatchKind), nil
+}
+
+func AllFrameworkVersionMigrationMatchKindValues() []FrameworkVersionMigrationMatchKind {
+	return []FrameworkVersionMigrationMatchKind{
+		FrameworkVersionMigrationMatchKindExactCode,
+		FrameworkVersionMigrationMatchKindAdded,
+		FrameworkVersionMigrationMatchKindRemoved,
+	}
 }
 
 type FrameworkVersionMigrationStatus string
@@ -537,6 +637,14 @@ func (ns NullFrameworkVersionMigrationStatus) Value() (driver.Value, error) {
 	return string(ns.FrameworkVersionMigrationStatus), nil
 }
 
+func AllFrameworkVersionMigrationStatusValues() []FrameworkVersionMigrationStatus {
+	return []FrameworkVersionMigrationStatus{
+		FrameworkVersionMigrationStatusPending,
+		FrameworkVersionMigrationStatusApproved,
+		FrameworkVersionMigrationStatusRejected,
+	}
+}
+
 type FrameworkVersionStatus string
 
 const (
@@ -578,6 +686,14 @@ func (ns NullFrameworkVersionStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.FrameworkVersionStatus), nil
+}
+
+func AllFrameworkVersionStatusValues() []FrameworkVersionStatus {
+	return []FrameworkVersionStatus{
+		FrameworkVersionStatusCurrent,
+		FrameworkVersionStatusLegacy,
+		FrameworkVersionStatusWithdrawn,
+	}
 }
 
 type PolicyStatus string
@@ -625,51 +741,114 @@ func (ns NullPolicyStatus) Value() (driver.Value, error) {
 	return string(ns.PolicyStatus), nil
 }
 
-type RiskCategory string
+func AllPolicyStatusValues() []PolicyStatus {
+	return []PolicyStatus{
+		PolicyStatusDraft,
+		PolicyStatusUnderReview,
+		PolicyStatusApproved,
+		PolicyStatusPublished,
+		PolicyStatusSuperseded,
+	}
+}
+
+type RiskAcceptanceStatus string
 
 const (
-	RiskCategoryConfidentiality RiskCategory = "confidentiality"
-	RiskCategoryIntegrity       RiskCategory = "integrity"
-	RiskCategoryAvailability    RiskCategory = "availability"
-	RiskCategoryPrivacy         RiskCategory = "privacy"
-	RiskCategoryRegulatory      RiskCategory = "regulatory"
-	RiskCategoryOperational     RiskCategory = "operational"
-	RiskCategoryFinancial       RiskCategory = "financial"
+	RiskAcceptanceStatusProposed RiskAcceptanceStatus = "proposed"
+	RiskAcceptanceStatusApproved RiskAcceptanceStatus = "approved"
 )
 
-func (e *RiskCategory) Scan(src interface{}) error {
+func (e *RiskAcceptanceStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = RiskCategory(s)
+		*e = RiskAcceptanceStatus(s)
 	case string:
-		*e = RiskCategory(s)
+		*e = RiskAcceptanceStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for RiskCategory: %T", src)
+		return fmt.Errorf("unsupported scan type for RiskAcceptanceStatus: %T", src)
 	}
 	return nil
 }
 
-type NullRiskCategory struct {
-	RiskCategory RiskCategory `json:"risk_category"`
-	Valid        bool         `json:"valid"` // Valid is true if RiskCategory is not NULL
+type NullRiskAcceptanceStatus struct {
+	RiskAcceptanceStatus RiskAcceptanceStatus `json:"risk_acceptance_status"`
+	Valid                bool                 `json:"valid"` // Valid is true if RiskAcceptanceStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullRiskCategory) Scan(value interface{}) error {
+func (ns *NullRiskAcceptanceStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.RiskCategory, ns.Valid = "", false
+		ns.RiskAcceptanceStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.RiskCategory.Scan(value)
+	return ns.RiskAcceptanceStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullRiskCategory) Value() (driver.Value, error) {
+func (ns NullRiskAcceptanceStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.RiskCategory), nil
+	return string(ns.RiskAcceptanceStatus), nil
+}
+
+func AllRiskAcceptanceStatusValues() []RiskAcceptanceStatus {
+	return []RiskAcceptanceStatus{
+		RiskAcceptanceStatusProposed,
+		RiskAcceptanceStatusApproved,
+	}
+}
+
+type RiskClosureReason string
+
+const (
+	RiskClosureReasonNotApplicable      RiskClosureReason = "not_applicable"
+	RiskClosureReasonMerged             RiskClosureReason = "merged"
+	RiskClosureReasonRealisedAndHandled RiskClosureReason = "realised_and_handled"
+)
+
+func (e *RiskClosureReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskClosureReason(s)
+	case string:
+		*e = RiskClosureReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskClosureReason: %T", src)
+	}
+	return nil
+}
+
+type NullRiskClosureReason struct {
+	RiskClosureReason RiskClosureReason `json:"risk_closure_reason"`
+	Valid             bool              `json:"valid"` // Valid is true if RiskClosureReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskClosureReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskClosureReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskClosureReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskClosureReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskClosureReason), nil
+}
+
+func AllRiskClosureReasonValues() []RiskClosureReason {
+	return []RiskClosureReason{
+		RiskClosureReasonNotApplicable,
+		RiskClosureReasonMerged,
+		RiskClosureReasonRealisedAndHandled,
+	}
 }
 
 type RiskLevel string
@@ -713,6 +892,14 @@ func (ns NullRiskLevel) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskLevel), nil
+}
+
+func AllRiskLevelValues() []RiskLevel {
+	return []RiskLevel{
+		RiskLevelTeam,
+		RiskLevelOrg,
+		RiskLevelCompany,
+	}
 }
 
 type RiskMethodology string
@@ -760,13 +947,73 @@ func (ns NullRiskMethodology) Value() (driver.Value, error) {
 	return string(ns.RiskMethodology), nil
 }
 
+func AllRiskMethodologyValues() []RiskMethodology {
+	return []RiskMethodology{
+		RiskMethodologyNist80030,
+		RiskMethodologyFair,
+		RiskMethodologyCisRam,
+		RiskMethodologyIso27005,
+		RiskMethodologyQualitative5x5,
+	}
+}
+
+type RiskStatus string
+
+const (
+	RiskStatusOpen   RiskStatus = "open"
+	RiskStatusClosed RiskStatus = "closed"
+)
+
+func (e *RiskStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskStatus(s)
+	case string:
+		*e = RiskStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskStatus: %T", src)
+	}
+	return nil
+}
+
+type NullRiskStatus struct {
+	RiskStatus RiskStatus `json:"risk_status"`
+	Valid      bool       `json:"valid"` // Valid is true if RiskStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskStatus), nil
+}
+
+func AllRiskStatusValues() []RiskStatus {
+	return []RiskStatus{
+		RiskStatusOpen,
+		RiskStatusClosed,
+	}
+}
+
 type RiskTreatment string
 
 const (
-	RiskTreatmentAccept   RiskTreatment = "accept"
-	RiskTreatmentMitigate RiskTreatment = "mitigate"
-	RiskTreatmentTransfer RiskTreatment = "transfer"
-	RiskTreatmentAvoid    RiskTreatment = "avoid"
+	RiskTreatmentAccept    RiskTreatment = "accept"
+	RiskTreatmentMitigate  RiskTreatment = "mitigate"
+	RiskTreatmentTransfer  RiskTreatment = "transfer"
+	RiskTreatmentAvoid     RiskTreatment = "avoid"
+	RiskTreatmentUntreated RiskTreatment = "untreated"
 )
 
 func (e *RiskTreatment) Scan(src interface{}) error {
@@ -802,6 +1049,16 @@ func (ns NullRiskTreatment) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskTreatment), nil
+}
+
+func AllRiskTreatmentValues() []RiskTreatment {
+	return []RiskTreatment{
+		RiskTreatmentAccept,
+		RiskTreatmentMitigate,
+		RiskTreatmentTransfer,
+		RiskTreatmentAvoid,
+		RiskTreatmentUntreated,
+	}
 }
 
 type ScopeDataClassification string
@@ -848,6 +1105,15 @@ func (ns NullScopeDataClassification) Value() (driver.Value, error) {
 	return string(ns.ScopeDataClassification), nil
 }
 
+func AllScopeDataClassificationValues() []ScopeDataClassification {
+	return []ScopeDataClassification{
+		ScopeDataClassificationRestricted,
+		ScopeDataClassificationConfidential,
+		ScopeDataClassificationInternal,
+		ScopeDataClassificationPublic,
+	}
+}
+
 type ScopeEnvironment string
 
 const (
@@ -890,6 +1156,15 @@ func (ns NullScopeEnvironment) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ScopeEnvironment), nil
+}
+
+func AllScopeEnvironmentValues() []ScopeEnvironment {
+	return []ScopeEnvironment{
+		ScopeEnvironmentProd,
+		ScopeEnvironmentStaging,
+		ScopeEnvironmentDev,
+		ScopeEnvironmentSandbox,
+	}
 }
 
 type StrmRelationshipType string
@@ -937,6 +1212,16 @@ func (ns NullStrmRelationshipType) Value() (driver.Value, error) {
 	return string(ns.StrmRelationshipType), nil
 }
 
+func AllStrmRelationshipTypeValues() []StrmRelationshipType {
+	return []StrmRelationshipType{
+		StrmRelationshipTypeEqual,
+		StrmRelationshipTypeSubsetOf,
+		StrmRelationshipTypeSupersetOf,
+		StrmRelationshipTypeIntersectsWith,
+		StrmRelationshipTypeNoRelationship,
+	}
+}
+
 type VendorBillingCadence string
 
 const (
@@ -982,6 +1267,16 @@ func (ns NullVendorBillingCadence) Value() (driver.Value, error) {
 	return string(ns.VendorBillingCadence), nil
 }
 
+func AllVendorBillingCadenceValues() []VendorBillingCadence {
+	return []VendorBillingCadence{
+		VendorBillingCadenceMonthly,
+		VendorBillingCadenceQuarterly,
+		VendorBillingCadenceAnnual,
+		VendorBillingCadenceMultiYear,
+		VendorBillingCadenceOneTime,
+	}
+}
+
 type VendorCommercialStatus string
 
 const (
@@ -1025,6 +1320,14 @@ func (ns NullVendorCommercialStatus) Value() (driver.Value, error) {
 	return string(ns.VendorCommercialStatus), nil
 }
 
+func AllVendorCommercialStatusValues() []VendorCommercialStatus {
+	return []VendorCommercialStatus{
+		VendorCommercialStatusActive,
+		VendorCommercialStatusTrialing,
+		VendorCommercialStatusChurned,
+	}
+}
+
 type VendorCriticality string
 
 const (
@@ -1066,6 +1369,14 @@ func (ns NullVendorCriticality) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorCriticality), nil
+}
+
+func AllVendorCriticalityValues() []VendorCriticality {
+	return []VendorCriticality{
+		VendorCriticalityLow,
+		VendorCriticalityMedium,
+		VendorCriticalityHigh,
+	}
 }
 
 type VendorReviewCadence string
@@ -1112,6 +1423,15 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+func AllVendorReviewCadenceValues() []VendorReviewCadence {
+	return []VendorReviewCadence{
+		VendorReviewCadenceMonthly,
+		VendorReviewCadenceQuarterly,
+		VendorReviewCadenceBiannual,
+		VendorReviewCadenceAnnual,
+	}
+}
+
 type VendorReviewOutcome string
 
 const (
@@ -1154,6 +1474,15 @@ func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorReviewOutcome), nil
+}
+
+func AllVendorReviewOutcomeValues() []VendorReviewOutcome {
+	return []VendorReviewOutcome{
+		VendorReviewOutcomePass,
+		VendorReviewOutcomePassWithFindings,
+		VendorReviewOutcomeFail,
+		VendorReviewOutcomeWaived,
+	}
 }
 
 type VendorToolCategory string
@@ -1203,6 +1532,20 @@ func (ns NullVendorToolCategory) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorToolCategory), nil
+}
+
+func AllVendorToolCategoryValues() []VendorToolCategory {
+	return []VendorToolCategory{
+		VendorToolCategoryEdr,
+		VendorToolCategorySiem,
+		VendorToolCategoryIam,
+		VendorToolCategoryVulnMgmt,
+		VendorToolCategoryCloudSecurity,
+		VendorToolCategoryAppsec,
+		VendorToolCategoryGrc,
+		VendorToolCategoryMonitoring,
+		VendorToolCategoryOther,
+	}
 }
 
 type AccessReviewCampaign struct {
@@ -1274,6 +1617,7 @@ type ActionPlanAuditLog struct {
 	BeforeState  []byte             `json:"before_state"`
 	AfterState   []byte             `json:"after_state"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	SystemActor  *string            `json:"system_actor"`
 }
 
 type ActionPlanControl struct {
@@ -1391,6 +1735,12 @@ type ApiKey struct {
 	OwnerRoles     []string           `json:"owner_roles"`
 	Last4          string             `json:"last4"`
 	TtlSeconds     int64              `json:"ttl_seconds"`
+	// Why the key exists, when it is not an ordinary issued key. 'bootstrap-recovery' marks the admin key reset-bootstrap minted (#1892). 'policy-sync' marks a key that may only sync policies (#2849).
+	Purpose *string `json:"purpose"`
+	// users(id) of whoever minted the key, for attribution only (#1892). Not the key's owner: that is issued_by. Never read for identity or authorization.
+	MintedBy pgtype.UUID `json:"minted_by"`
+	// Admin-chosen name for the key, shown in place of its id (#2384). Never the token, its prefix or last4.
+	Label *string `json:"label"`
 }
 
 type Artifact struct {
@@ -1452,6 +1802,29 @@ type AuditPeriodAuditLog struct {
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	SubjectModule string             `json:"subject_module"`
+}
+
+type AuditPeriodFreezeRevision struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID     pgtype.UUID        `json:"audit_period_id"`
+	Revision          int32              `json:"revision"`
+	FrozenHash        []byte             `json:"frozen_hash"`
+	PreviousHash      []byte             `json:"previous_hash"`
+	FrozenAt          pgtype.Timestamptz `json:"frozen_at"`
+	Reason            string             `json:"reason"`
+	Justification     string             `json:"justification"`
+	Actor             string             `json:"actor"`
+	ImportBatchID     pgtype.UUID        `json:"import_batch_id"`
+	EvidenceRecordIds []pgtype.UUID      `json:"evidence_record_ids"`
+}
+
+type AuditPeriodFrozenControl struct {
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID        `json:"audit_period_id"`
+	ControlIds    []pgtype.UUID      `json:"control_ids"`
+	Source        string             `json:"source"`
+	RecordedAt    pgtype.Timestamptz `json:"recorded_at"`
 }
 
 type AuditSinkFailure struct {
@@ -1640,6 +2013,10 @@ type Control struct {
 	FreshnessClass       *string                   `json:"freshness_class"`
 	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
+	// control.yaml external_refs[]: [{system, kind, id, note?}], kind in (reference, tested_under). Validated by the bundle parser (#1737).
+	ExternalRefs  []byte  `json:"external_refs"`
+	AnchorFit     string  `json:"anchor_fit"`
+	AnchorFitNote *string `json:"anchor_fit_note"`
 }
 
 type ControlDriftSnapshot struct {
@@ -1667,6 +2044,117 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	TriggeredBy           *string            `json:"triggered_by"`
+	EvaluatedAsOf         pgtype.Timestamptz `json:"evaluated_as_of"`
+}
+
+type ControlImportAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	RowNumber     int32              `json:"row_number"`
+	OrgControlID  string             `json:"org_control_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         *string            `json:"scf_id"`
+	ScfRelease    *string            `json:"scf_release"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	BundleID      *string            `json:"bundle_id"`
+	Reason        *string            `json:"reason"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
+type ControlImportBatch struct {
+	ID                    pgtype.UUID        `json:"id"`
+	TenantID              pgtype.UUID        `json:"tenant_id"`
+	FrameworkSlug         string             `json:"framework_slug"`
+	FrameworkVersionID    pgtype.UUID        `json:"framework_version_id"`
+	FrameworkVersion      string             `json:"framework_version"`
+	SourceFilename        string             `json:"source_filename"`
+	SourceFormat          string             `json:"source_format"`
+	UploadedBy            string             `json:"uploaded_by"`
+	Status                string             `json:"status"`
+	TotalRows             int32              `json:"total_rows"`
+	StagedCount           int32              `json:"staged_count"`
+	RejectedCount         int32              `json:"rejected_count"`
+	UnmappedColumns       []byte             `json:"unmapped_columns"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ScfFrameworkVersionID pgtype.UUID        `json:"scf_framework_version_id"`
+	ScfRelease            *string            `json:"scf_release"`
+	SuggestionsStatus     string             `json:"suggestions_status"`
+}
+
+type ControlImportCandidate struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	Rank          int32              `json:"rank"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         string             `json:"scf_id"`
+	Title         string             `json:"title"`
+	Source        string             `json:"source"`
+	Reaches       []byte             `json:"reaches"`
+	Strength      float64            `json:"strength"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Rationale     *string            `json:"rationale"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+}
+
+type ControlImportRejectedRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	BatchID      pgtype.UUID        `json:"batch_id"`
+	RowNumber    int32              `json:"row_number"`
+	OrgControlID string             `json:"org_control_id"`
+	Reason       string             `json:"reason"`
+	Detail       string             `json:"detail"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlImportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	BatchID            pgtype.UUID        `json:"batch_id"`
+	RowNumber          int32              `json:"row_number"`
+	OrgControlID       string             `json:"org_control_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	TestedUnder        []byte             `json:"tested_under"`
+	ImplementationType *string            `json:"implementation_type"`
+	Applicability      *string            `json:"applicability"`
+	Status             string             `json:"status"`
+	RejectionReason    *string            `json:"rejection_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	NoCandidateReaches bool               `json:"no_candidate_reaches"`
+	LlmRerank          string             `json:"llm_rerank"`
+	DecidedBy          *string            `json:"decided_by"`
+	DecidedAt          pgtype.Timestamptz `json:"decided_at"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	BundleID           *string            `json:"bundle_id"`
+	ScfAnchorID        pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID              *string            `json:"scf_id"`
+	AiAssisted         bool               `json:"ai_assisted"`
+	HumanApproved      bool               `json:"human_approved"`
+	HumanApprover      *string            `json:"human_approver"`
+}
+
+type ControlManifestRevision struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	BundleManifestYaml string             `json:"bundle_manifest_yaml"`
+	BundleManifestHash string             `json:"bundle_manifest_hash"`
+	BundleUploadedBy   *string            `json:"bundle_uploaded_by"`
+	BundleUploadedAt   pgtype.Timestamptz `json:"bundle_uploaded_at"`
+	ReplacedAt         pgtype.Timestamptz `json:"replaced_at"`
 }
 
 type ControlOwnerAssignment struct {
@@ -1807,6 +2295,28 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type DemoSeedRow struct {
+	ID        int64              `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TableName string             `json:"table_name"`
+	RowKey    []byte             `json:"row_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type EffectiveFwToScfEdge struct {
+	ID                     pgtype.UUID                `json:"id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID                `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
+	Strength               float64                    `json:"strength"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	Rationale              string                     `json:"rationale"`
+	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
+}
+
 type EmailChannelOptin struct {
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	UserID    pgtype.UUID        `json:"user_id"`
@@ -1837,6 +2347,7 @@ type EvidenceAuditLog struct {
 	RecordID       pgtype.UUID        `json:"record_id"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
 	SubjectModule  string             `json:"subject_module"`
+	ImportBatchID  pgtype.UUID        `json:"import_batch_id"`
 }
 
 type EvidenceFreshness struct {
@@ -1900,6 +2411,16 @@ type EvidenceRecord struct {
 	ObservedAtNanos *int64 `json:"observed_at_nanos"`
 }
 
+type EvidenceRoutingCutover struct {
+	Singleton bool               `json:"singleton"`
+	CutAt     pgtype.Timestamptz `json:"cut_at"`
+}
+
+type EvidenceRoutingKindCutover struct {
+	EvidenceKind string             `json:"evidence_kind"`
+	CutAt        pgtype.Timestamptz `json:"cut_at"`
+}
+
 type Exception struct {
 	ID                   pgtype.UUID        `json:"id"`
 	TenantID             pgtype.UUID        `json:"tenant_id"`
@@ -1921,6 +2442,9 @@ type Exception struct {
 	Status               string             `json:"status"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	SelfApproved         bool               `json:"self_approved"`
+	RevokedBy            *string            `json:"revoked_by"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type ExceptionAuditLog struct {
@@ -1934,6 +2458,16 @@ type ExceptionAuditLog struct {
 	Reason        string             `json:"reason"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	SubjectModule string             `json:"subject_module"`
+}
+
+// Idempotency-Key -> exception for POST /v1/exceptions (#2618). A repeat inside the window replays the recorded exception.
+type ExceptionIdempotencyKey struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	ExceptionID    pgtype.UUID        `json:"exception_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type FeatureFlag struct {
@@ -1970,6 +2504,30 @@ type Framework struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type FrameworkPostureTarget struct {
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	TargetValue        pgtype.Numeric     `json:"target_value"`
+	WarningThreshold   pgtype.Numeric     `json:"warning_threshold"`
+	CriticalThreshold  pgtype.Numeric     `json:"critical_threshold"`
+	Direction          string             `json:"direction"`
+	UpdatedBy          string             `json:"updated_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FrameworkPostureTargetAuditLog struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Action             string             `json:"action"`
+	Before             []byte             `json:"before"`
+	After              []byte             `json:"after"`
+	Actor              string             `json:"actor"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule      string             `json:"subject_module"`
+}
+
 type FrameworkRequirement struct {
 	ID                 pgtype.UUID        `json:"id"`
 	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
@@ -1978,6 +2536,7 @@ type FrameworkRequirement struct {
 	Body               string             `json:"body"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	PointsOfFocus      []byte             `json:"points_of_focus"`
 }
 
 type FrameworkScope struct {
@@ -1998,6 +2557,36 @@ type FrameworkScope struct {
 	EffectiveFrom            pgtype.Timestamptz `json:"effective_from"`
 	SupersededBy             pgtype.UUID        `json:"superseded_by"`
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
+	SelfApproved             bool               `json:"self_approved"`
+	SubmittedBy              *string            `json:"submitted_by"`
+	ActivatedAt              pgtype.Timestamptz `json:"activated_at"`
+}
+
+type FrameworkScopeApplicability struct {
+	ID                     pgtype.UUID        `json:"id"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	FrameworkScopeID       pgtype.UUID        `json:"framework_scope_id"`
+	FrameworkRequirementID pgtype.UUID        `json:"framework_requirement_id"`
+	Decision               string             `json:"decision"`
+	Justification          string             `json:"justification"`
+	ImplementationRef      string             `json:"implementation_ref"`
+	UpdatedBy              string             `json:"updated_by"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type FrameworkScopeWorkflowLog struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID        `json:"framework_scope_id"`
+	Action           string             `json:"action"`
+	FromState        *string            `json:"from_state"`
+	ToState          string             `json:"to_state"`
+	Before           []byte             `json:"before"`
+	After            []byte             `json:"after"`
+	Actor            string             `json:"actor"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule    string             `json:"subject_module"`
 }
 
 type FrameworkVersion struct {
@@ -2027,19 +2616,20 @@ type FrameworkVersionAudit struct {
 }
 
 type FrameworkVersionMigration struct {
-	ID                pgtype.UUID                        `json:"id"`
-	FrameworkID       pgtype.UUID                        `json:"framework_id"`
-	FromVersionID     pgtype.UUID                        `json:"from_version_id"`
-	ToVersionID       pgtype.UUID                        `json:"to_version_id"`
-	FromRequirementID pgtype.UUID                        `json:"from_requirement_id"`
-	ToRequirementID   pgtype.UUID                        `json:"to_requirement_id"`
-	RequirementCode   string                             `json:"requirement_code"`
-	MatchKind         FrameworkVersionMigrationMatchKind `json:"match_kind"`
-	Status            FrameworkVersionMigrationStatus    `json:"status"`
-	ReviewerID        pgtype.UUID                        `json:"reviewer_id"`
-	Note              string                             `json:"note"`
-	CreatedAt         pgtype.Timestamptz                 `json:"created_at"`
-	DecidedAt         pgtype.Timestamptz                 `json:"decided_at"`
+	ID                   pgtype.UUID                        `json:"id"`
+	FrameworkID          pgtype.UUID                        `json:"framework_id"`
+	FromVersionID        pgtype.UUID                        `json:"from_version_id"`
+	ToVersionID          pgtype.UUID                        `json:"to_version_id"`
+	FromRequirementID    pgtype.UUID                        `json:"from_requirement_id"`
+	ToRequirementID      pgtype.UUID                        `json:"to_requirement_id"`
+	RequirementCode      string                             `json:"requirement_code"`
+	MatchKind            FrameworkVersionMigrationMatchKind `json:"match_kind"`
+	Status               FrameworkVersionMigrationStatus    `json:"status"`
+	ReviewerID           pgtype.UUID                        `json:"reviewer_id"`
+	Note                 string                             `json:"note"`
+	CreatedAt            pgtype.Timestamptz                 `json:"created_at"`
+	DecidedAt            pgtype.Timestamptz                 `json:"decided_at"`
+	OverlayCarriedOverAt pgtype.Timestamptz                 `json:"overlay_carried_over_at"`
 }
 
 type FwToScfEdge struct {
@@ -2053,6 +2643,10 @@ type FwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	// Crosswalk source that wrote this edge (yaml:<file>, scf-workbook:<columns>, scf-olir:<sheet>); NULL = predates #1971. The importer retires only its own source's edges.
+	CrosswalkSource *string `json:"crosswalk_source"`
+	// Set when the crosswalk that wrote this edge stopped listing it (#1971); cleared when it lists it again. Retired edges are excluded from effective_fw_to_scf_edges.
+	RetiredAt pgtype.Timestamptz `json:"retired_at"`
 }
 
 type FwToScfEdgeTierTransition struct {
@@ -2063,6 +2657,36 @@ type FwToScfEdgeTierTransition struct {
 	ToTier     CrosswalkMappingTier `json:"to_tier"`
 	Note       string               `json:"note"`
 	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
+}
+
+type FwToScfOverlayEdge struct {
+	ID                     pgtype.UUID          `json:"id"`
+	TenantID               pgtype.UUID          `json:"tenant_id"`
+	FrameworkRequirementID pgtype.UUID          `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID          `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType `json:"relationship_type"`
+	Strength               float64              `json:"strength"`
+	Rationale              string               `json:"rationale"`
+	SourceRef              string               `json:"source_ref"`
+	Status                 string               `json:"status"`
+	RetirementReason       *string              `json:"retirement_reason"`
+	CreatedBy              string               `json:"created_by"`
+	CreatedAt              pgtype.Timestamptz   `json:"created_at"`
+	RetiredBy              *string              `json:"retired_by"`
+	RetiredAt              pgtype.Timestamptz   `json:"retired_at"`
+	UpdatedAt              pgtype.Timestamptz   `json:"updated_at"`
+}
+
+type FwToScfOverlayEdgeAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	OverlayEdgeID pgtype.UUID        `json:"overlay_edge_id"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type GroupRoleAuditLog struct {
@@ -2143,6 +2767,7 @@ type ImportedComponentClaim struct {
 	DispositionedBy     *string            `json:"dispositioned_by"`
 	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
 	DispositionNote     string             `json:"disposition_note"`
+	ScfRelease          *string            `json:"scf_release"`
 }
 
 type ImportedComponentClaimDisposition struct {
@@ -2241,13 +2866,34 @@ type LocalCredential struct {
 }
 
 type MeAuditLog struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Action         string             `json:"action"`
+	Before         []byte             `json:"before"`
+	After          []byte             `json:"after"`
+	SubjectModule  string             `json:"subject_module"`
+	ActorPrincipal *string            `json:"actor_principal"`
+}
+
+type MemberModuleAccess struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    string             `json:"user_id"`
+	Modules   []string           `json:"modules"`
+	UpdatedBy string             `json:"updated_by"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemberModuleAccessAuditLog struct {
 	ID            pgtype.UUID        `json:"id"`
 	TenantID      pgtype.UUID        `json:"tenant_id"`
-	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
-	UserID        pgtype.UUID        `json:"user_id"`
+	UserID        string             `json:"user_id"`
 	Action        string             `json:"action"`
-	Before        []byte             `json:"before"`
-	After         []byte             `json:"after"`
+	Before        []string           `json:"before"`
+	After         []string           `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	SubjectModule string             `json:"subject_module"`
 }
 
@@ -2324,16 +2970,17 @@ type Notification struct {
 }
 
 type OidcIdpConfig struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	ClientSecretEnc     []byte             `json:"client_secret_enc"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	ClientSecretEnc             []byte             `json:"client_secret_enc"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
 }
 
 type OidcIdpGroupMapping struct {
@@ -2344,6 +2991,18 @@ type OidcIdpGroupMapping struct {
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
+}
+
+type OrgRiskCategory struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Slug        string             `json:"slug"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Archived    bool               `json:"archived"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OrgTheme struct {
@@ -2426,6 +3085,26 @@ type Policy struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	ImportedBy                  *string            `json:"imported_by"`
+	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
+	SelfApproved                bool               `json:"self_approved"`
+	DraftEditors                []string           `json:"draft_editors"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+	SyncedBy                    *string            `json:"synced_by"`
+	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
+	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
+	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
+	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
+	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
+	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
 }
 
 type PolicyAcknowledgment struct {
@@ -2438,6 +3117,34 @@ type PolicyAcknowledgment struct {
 	AckToken         string             `json:"ack_token"`
 	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type PolicyAuditLog struct {
+	ID                        pgtype.UUID        `json:"id"`
+	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	PolicyID                  pgtype.UUID        `json:"policy_id"`
+	Action                    string             `json:"action"`
+	Actor                     string             `json:"actor"`
+	SourceFile                string             `json:"source_file"`
+	HistoricalApproverName    *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt      pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                 *string            `json:"source_url"`
+	SubjectModule             string             `json:"subject_module"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	PreviousNextReviewAt      pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt           pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle               *string            `json:"policy_title"`
+	PolicyVersion             *string            `json:"policy_version"`
+	PreviousState             *string            `json:"previous_state"`
+	NewState                  *string            `json:"new_state"`
+	BodySha256                *string            `json:"body_sha256"`
+	Editors                   []string           `json:"editors"`
+	PreviousAudience          []string           `json:"previous_audience"`
+	NewAudience               []string           `json:"new_audience"`
+	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
+	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
+	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
+	SyncDriftBodySha256       *string            `json:"sync_drift_body_sha256"`
 }
 
 type Population struct {
@@ -2500,25 +3207,39 @@ type QuestionnaireQuestion struct {
 }
 
 type Risk struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Title               string             `json:"title"`
-	Description         string             `json:"description"`
-	Category            RiskCategory       `json:"category"`
-	Methodology         RiskMethodology    `json:"methodology"`
-	InherentScore       []byte             `json:"inherent_score"`
-	Treatment           RiskTreatment      `json:"treatment"`
-	TreatmentOwner      string             `json:"treatment_owner"`
-	ResidualScore       []byte             `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz `json:"review_due_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
-	Accepter            string             `json:"accepter"`
-	InstrumentReference string             `json:"instrument_reference"`
-	Level               RiskLevel          `json:"level"`
-	OrgUnitID           pgtype.UUID        `json:"org_unit_id"`
-	Themes              []string           `json:"themes"`
+	ID                      pgtype.UUID           `json:"id"`
+	TenantID                pgtype.UUID           `json:"tenant_id"`
+	Title                   string                `json:"title"`
+	Description             string                `json:"description"`
+	Methodology             RiskMethodology       `json:"methodology"`
+	InherentScore           []byte                `json:"inherent_score"`
+	Treatment               RiskTreatment         `json:"treatment"`
+	TreatmentOwner          string                `json:"treatment_owner"`
+	ResidualScore           []byte                `json:"residual_score"`
+	ReviewDueAt             pgtype.Timestamptz    `json:"review_due_at"`
+	CreatedAt               pgtype.Timestamptz    `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz    `json:"updated_at"`
+	AcceptedUntil           pgtype.Date           `json:"accepted_until"`
+	Accepter                string                `json:"accepter"`
+	InstrumentReference     string                `json:"instrument_reference"`
+	Level                   RiskLevel             `json:"level"`
+	OrgUnitID               pgtype.UUID           `json:"org_unit_id"`
+	Themes                  []string              `json:"themes"`
+	AcceptanceStatus        *RiskAcceptanceStatus `json:"acceptance_status"`
+	CategoryID              pgtype.UUID           `json:"category_id"`
+	AcceptanceJustification string                `json:"acceptance_justification"`
+	AcceptanceProposedUntil pgtype.Date           `json:"acceptance_proposed_until"`
+	AcceptanceProposedBy    string                `json:"acceptance_proposed_by"`
+	AcceptanceProposedAt    pgtype.Timestamptz    `json:"acceptance_proposed_at"`
+	AcceptanceApprovedAt    pgtype.Timestamptz    `json:"acceptance_approved_at"`
+	SelfApproved            bool                  `json:"self_approved"`
+	Status                  RiskStatus            `json:"status"`
+	ClosureReason           *RiskClosureReason    `json:"closure_reason"`
+	ClosureNote             string                `json:"closure_note"`
+	ClosedAt                pgtype.Timestamptz    `json:"closed_at"`
+	ClosedBy                string                `json:"closed_by"`
+	OwnerUserID             pgtype.UUID           `json:"owner_user_id"`
+	ExternalRef             *string               `json:"external_ref"`
 }
 
 type RiskAggregation struct {
@@ -2527,6 +3248,18 @@ type RiskAggregation struct {
 	RuleID       pgtype.UUID        `json:"rule_id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type RiskAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	RiskID        pgtype.UUID        `json:"risk_id"`
+	Actor         string             `json:"actor"`
+	ActionType    string             `json:"action_type"`
+	BeforeState   []byte             `json:"before_state"`
+	AfterState    []byte             `json:"after_state"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type RiskControlLink struct {
@@ -2541,13 +3274,14 @@ type RiskControlLink struct {
 }
 
 type Sample struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	PopulationID pgtype.UUID        `json:"population_id"`
-	N            int32              `json:"n"`
-	Seed         string             `json:"seed"`
-	CreatedBy    string             `json:"created_by"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	PopulationID   pgtype.UUID        `json:"population_id"`
+	N              int32              `json:"n"`
+	Seed           string             `json:"seed"`
+	CreatedBy      string             `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	FreezeRevision *int32             `json:"freeze_revision"`
 }
 
 type SampleAnnotation struct {
@@ -2562,18 +3296,19 @@ type SampleAnnotation struct {
 }
 
 type SampleAuditLog struct {
-	ID            pgtype.UUID        `json:"id"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
-	Action        string             `json:"action"`
-	Actor         string             `json:"actor"`
-	PopulationID  pgtype.UUID        `json:"population_id"`
-	SampleID      pgtype.UUID        `json:"sample_id"`
-	Seed          *string            `json:"seed"`
-	NRequested    *int32             `json:"n_requested"`
-	NReturned     *int32             `json:"n_returned"`
-	ReasonCode    string             `json:"reason_code"`
-	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
-	SubjectModule string             `json:"subject_module"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Action         string             `json:"action"`
+	Actor          string             `json:"actor"`
+	PopulationID   pgtype.UUID        `json:"population_id"`
+	SampleID       pgtype.UUID        `json:"sample_id"`
+	Seed           *string            `json:"seed"`
+	NRequested     *int32             `json:"n_requested"`
+	NReturned      *int32             `json:"n_returned"`
+	ReasonCode     string             `json:"reason_code"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule  string             `json:"subject_module"`
+	FreezeRevision *int32             `json:"freeze_revision"`
 }
 
 type SampleEvidence struct {
@@ -2604,6 +3339,44 @@ type ScfAnchor struct {
 	Subtopics          []byte             `json:"subtopics"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID        *string            `json:"legacy_scf_id"`
+}
+
+type ScfRemapDecision struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ProposalID      pgtype.UUID        `json:"proposal_id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyAnchorID  pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewAnchorID     pgtype.UUID        `json:"new_anchor_id"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
+type ScfRemapProposal struct {
+	ID                       pgtype.UUID        `json:"id"`
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	ControlID                pgtype.UUID        `json:"control_id"`
+	BundleID                 string             `json:"bundle_id"`
+	LegacyAnchorID           pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID              string             `json:"legacy_scf_id"`
+	LegacyRelease            string             `json:"legacy_release"`
+	TargetFrameworkVersionID pgtype.UUID        `json:"target_framework_version_id"`
+	TargetRelease            string             `json:"target_release"`
+	Class                    string             `json:"class"`
+	Status                   string             `json:"status"`
+	SuccessorScfIds          []string           `json:"successor_scf_ids"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetAnchorID           pgtype.UUID        `json:"target_anchor_id"`
+	Source                   string             `json:"source"`
 }
 
 type ScimAuditLog struct {
@@ -2781,6 +3554,49 @@ type StalenessRollupLog struct {
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
 }
 
+type StockControlHoldback struct {
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	BundleID            string             `json:"bundle_id"`
+	ApprovedControlID   pgtype.UUID        `json:"approved_control_id"`
+	ShippedManifestHash string             `json:"shipped_manifest_hash"`
+	FirstHeldAt         pgtype.Timestamptz `json:"first_held_at"`
+	LastHeldAt          pgtype.Timestamptz `json:"last_held_at"`
+}
+
+// Slice 198: platform-global super_admin identity rows. NOT tenant-scoped (no RLS). The DBUserResolver (slice 192) consults this table when populating the `atlas:super_admin` JWT claim. Write surface: exactly one — the bootstrap branch in users.Store.BootstrapFirstInstallOrUpsert (slice 198), which writes via the BYPASSRLS atlas_migrate pool during first install.
+type SuperAdmin struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+	// Slice 198: provenance of the grant. v2 admits only 'bootstrap_first_install'. Future slices extending the source of grants (e.g., maintainer-CLI 'cli_grant') extend the CHECK constraint in their own migration.
+	GrantedVia string `json:"granted_via"`
+}
+
+// Slice 142: append-only forensic record of super_admin grant + demote events. Platform-global (no tenant_id, no RLS) because super_admin itself is platform-global. The grant + demote handlers dual-write a tenant-scoped me_audit_log row anchored to the actor's session tenant so the unified slice-124 aggregator surfaces the event to that tenant's admins/auditors without breaching RLS.
+type SuperAdminAuditLog struct {
+	AuditID      pgtype.UUID `json:"audit_id"`
+	Action       string      `json:"action"`
+	TargetUserID pgtype.UUID `json:"target_user_id"`
+	ActorUserID  pgtype.UUID `json:"actor_user_id"`
+	// Slice 142: the actor's session tenant at grant/demote time. Captured as data, not FK — the audit row survives tenant deletion.
+	ActorTenantID pgtype.UUID        `json:"actor_tenant_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	PayloadJson   []byte             `json:"payload_json"`
+}
+
+type TaxonomyAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SubjectKind   string             `json:"subject_kind"`
+	SubjectID     pgtype.UUID        `json:"subject_id"`
+	SubjectSlug   string             `json:"subject_slug"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
@@ -2792,6 +3608,12 @@ type Tenant struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	// Slice 608: per-tenant control-bundle upload test-gate policy. strict (default, = slice-574 global behaviour) | advisory (red tests warn, not block) | mandatory_tests (a bundle with no tests/ is rejected). Set via PATCH /v1/tenants/{id}.
 	BundleGateMode string `json:"bundle_gate_mode"`
+	// #2059: days between a risk's creation and its default review_due_at. Default 365, range 1..3650. Set via PATCH /v1/tenants/{id}; a change affects new risks only.
+	RiskReviewCadenceDays int32 `json:"risk_review_cadence_days"`
+	// #2061: days after a vendor's creation (UTC date) that its first review is due. A never-reviewed vendor is overdue only after that day. Default 30.
+	VendorInitialReviewDays int32 `json:"vendor_initial_review_days"`
+	// #2101: when true, the requester of a policy, framework-scope or exception approval may approve it themselves. Such approvals are flagged self_approved. Default false; admin-only; changes are written to me_audit_log.
+	AllowSelfApproval bool `json:"allow_self_approval"`
 }
 
 // Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.
@@ -2817,6 +3639,7 @@ type User struct {
 	Active         bool               `json:"active"`
 	ScimExternalID *string            `json:"scim_external_id"`
 	ScimManaged    bool               `json:"scim_managed"`
+	Theme          string             `json:"theme"`
 }
 
 type UserNotificationPreference struct {
@@ -2828,6 +3651,13 @@ type UserNotificationPreference struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserOnboardingHintDismissal struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Module      string             `json:"module"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
+}
+
 type UserRole struct {
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	UserID    string             `json:"user_id"`
@@ -2835,6 +3665,14 @@ type UserRole struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 	GrantedBy string             `json:"granted_by"`
 	Origin    string             `json:"origin"`
+}
+
+type UserRoleGroupSource struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	UserID      string             `json:"user_id"`
+	Role        string             `json:"role"`
+	IdpConfigID pgtype.UUID        `json:"idp_config_id"`
+	GrantedAt   pgtype.Timestamptz `json:"granted_at"`
 }
 
 type Vendor struct {
@@ -2863,6 +3701,19 @@ type Vendor struct {
 	CostOwner        string                 `json:"cost_owner"`
 	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
 	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
+	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
+}
+
+type VendorAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	VendorID      pgtype.UUID        `json:"vendor_id"`
+	Actor         string             `json:"actor"`
+	ActionType    string             `json:"action_type"`
+	BeforeState   []byte             `json:"before_state"`
+	AfterState    []byte             `json:"after_state"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type VendorReview struct {

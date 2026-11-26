@@ -11,10 +11,12 @@
 //
 // Auth + role cut (threat-model E, slice 515 decisions-log D4): the existing
 // httpAuthMiddleware mounts the credential; READ routes require any
-// authenticated tenant credential, WRITE routes require the grc_engineer role
-// OR admin (a viewer / auditor / control_owner cannot edit the assessment).
-// The role gate uses cred.HasOwnerRole("grc_engineer") (admin is a wildcard
-// inside HasOwnerRole), matching the canvas §9.5 role model.
+// tenant role, WRITE routes require the grc_engineer role OR admin (a
+// viewer / auditor / control_owner cannot edit the assessment). OPA admits
+// the same cut (internal/authz/rego_bundle/csf.rego, #2540); the write gate
+// here checks it again with authz.IsTenantApprover (the live tenant admin or
+// grc_engineer role, or the super-admin flag), matching the canvas §9.5
+// role model.
 package csfassessment
 
 import (
@@ -30,13 +32,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
-
-// editRole is the role permitted to edit the CSF assessment. admin is a
-// wildcard inside Credential.HasOwnerRole, so an admin also passes.
-const editRole = "grc_engineer"
 
 // Handler bundles the slice-515 routes over the domain store.
 type Handler struct {
@@ -313,7 +312,7 @@ func (h *Handler) Gap(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fvID, ok := h.frameworkVersion(w, r)
+	fvID, label, ok := h.csfFrameworkVersion(w, r)
 	if !ok {
 		return
 	}
@@ -332,6 +331,8 @@ func (h *Handler) Gap(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"framework_version_id": fvID.String(),
+		"framework_name":       label.Name,
+		"framework_version":    label.Version,
 		"gap":                  rows,
 		"gap_count":            len(rows),
 	}
@@ -388,8 +389,11 @@ func (h *Handler) editContext(w http.ResponseWriter, r *http.Request) (context.C
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return nil, "", false
 	}
-	if !cred.HasOwnerRole(editRole) {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer or admin role required to edit the CSF assessment")
+	// #2540: IsTenantApprover is the live tenant admin or grc_engineer role,
+	// the cut OPA admits here (csf.rego + admin.rego). HasOwnerRole (#2530)
+	// refused a tenant admin: its admin wildcard is the super-admin flag.
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "the grc_engineer or admin role (a tenant admin or a super-admin) is required to edit the CSF assessment")
 		return nil, "", false
 	}
 	actor := cred.UserID
@@ -399,19 +403,39 @@ func (h *Handler) editContext(w http.ResponseWriter, r *http.Request) (context.C
 	return r.Context(), actor, true
 }
 
-// frameworkVersion parses the required ?framework_version=<uuid> query param.
+// frameworkVersion parses the required ?framework_version=<uuid> query param
+// and refuses any version that is not NIST CSF (#2065).
 func (h *Handler) frameworkVersion(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	fvID, _, ok := h.csfFrameworkVersion(w, r)
+	return fvID, ok
+}
+
+// csfFrameworkVersion parses ?framework_version=<uuid> and resolves it to its
+// framework label. An unknown version is a 404; a version of any framework
+// other than NIST CSF is a 400, on reads and writes alike.
+func (h *Handler) csfFrameworkVersion(w http.ResponseWriter, r *http.Request) (uuid.UUID, csfassessment.FrameworkLabel, bool) {
 	v := strings.TrimSpace(r.URL.Query().Get("framework_version"))
 	if v == "" {
 		httpresp.WriteError(w, http.StatusBadRequest, "framework_version query parameter is required")
-		return uuid.UUID{}, false
+		return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 	}
 	fvID, err := uuid.Parse(v)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "framework_version must be a UUID")
-		return uuid.UUID{}, false
+		return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 	}
-	return fvID, true
+	label, err := h.store.CSFVersion(r.Context(), fvID)
+	switch {
+	case err == nil:
+		return fvID, label, true
+	case errors.Is(err, csfassessment.ErrNotFound):
+		httpresp.WriteError(w, http.StatusNotFound, "framework version not found")
+	case errors.Is(err, csfassessment.ErrNotCSF):
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version is not a NIST CSF version; the CSF assessment applies only to NIST CSF")
+	default:
+		httperr.WriteInternal(w, r, "resolve csf framework version", err)
+	}
+	return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 }
 
 // profileKind parses + validates the {kind} path param.

@@ -11,6 +11,7 @@
 // upstream 404 (no cross-tenant roster leakage).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 /** Workflow kind. Mirrors internal/personnelsecurity WorkflowKind. */
 export type ChecklistKind = "onboarding" | "offboarding";
@@ -69,13 +70,7 @@ export type ChecklistsListFilters = {
 
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;

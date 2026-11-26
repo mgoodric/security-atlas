@@ -118,24 +118,43 @@ ORDER BY occurred_at DESC, id ASC;
 -- name: ListEvidenceIDsForPeriodHash :many
 -- Hash-input ingredient #1 (ADR 0003): the sorted UUIDs of evidence records
 -- visible at the period's horizon. The frozen-at filter is parameterized so
--- a verifier can replay the hash for any horizon.
+-- a verifier can replay the hash for any horizon. The horizon bounds
+-- ingested_at as well as observed_at (#1699): a record written after the
+-- freeze with a backdated observed_at is not in the frozen population, so it
+-- can neither join the period's evidence nor change a replay of frozen_hash.
 -- Returns evidence_records.id only; the order is ASC by id so the SHA-256
 -- input is canonical without an extra sort pass in Go.
 SELECT id
 FROM evidence_records
 WHERE tenant_id   = $1
   AND observed_at <= $2
+  AND ingested_at <= $2
 ORDER BY id;
 
 -- name: ListControlIDsForPeriodHash :many
 -- Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 -- tenant's catalog. v1 takes the full tenant catalog; a future slice may
 -- narrow to controls satisfied by the period's framework_version_id once
--- canvas §8 audit-scope-narrowing lands.
+-- canvas §8 audit-scope-narrowing lands. Only Freeze reads it: the list is
+-- recorded in audit_period_frozen_controls and every replay reads that
+-- (#3066), never the live catalog.
 SELECT id
 FROM controls
 WHERE tenant_id = $1
 ORDER BY id;
+
+-- name: InsertFrozenControls :exec
+-- #3066: record the control set a freeze hashed, in the freeze's own
+-- transaction. Write-once (trigger audit_period_frozen_controls_immutable).
+INSERT INTO audit_period_frozen_controls (tenant_id, audit_period_id, control_ids, source)
+VALUES ($1, $2, sqlc.arg(control_ids)::uuid[], 'freeze');
+
+-- name: GetFrozenControlIDs :one
+-- #3066: the control set recorded for a frozen period. No row means the
+-- period cannot be replayed (period.ErrNoControlSnapshot).
+SELECT control_ids
+FROM audit_period_frozen_controls
+WHERE tenant_id = $1 AND audit_period_id = $2;
 
 -- name: ListEvidenceForPeriodControl :many
 -- AC-3: control-state read for a period. Returns evidence records for one
@@ -143,13 +162,30 @@ ORDER BY id;
 -- period is still 'open', in which case the caller passes NULL and the
 -- COALESCE-to-infinity short-circuits to live state). Ordered by
 -- observed_at DESC so the caller can pick the most-recent record as the
--- pass/fail-driving observation.
+-- pass/fail-driving observation. The horizon bounds ingested_at too (#1699).
+-- amended_ids adds the records a freeze revision put in the frozen
+-- population (#1742); pass an empty array for none.
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
+-- The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
+-- cannot change it.
 SELECT id, observed_at, result, hash
 FROM evidence_records
-WHERE tenant_id  = $1
-  AND control_id = $2
-  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
-                              'infinity'::timestamptz)
+WHERE evidence_records.tenant_id  = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND ((observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                               'infinity'::timestamptz)
+        AND ingested_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                    'infinity'::timestamptz))
+       OR (id = ANY(sqlc.arg(amended_ids)::uuid[])
+           AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                                       'infinity'::timestamptz)))
 ORDER BY observed_at DESC, id ASC;
 
 -- name: AttachPopulationToPeriod :exec
@@ -175,3 +211,110 @@ SET frozen_at = $3
 WHERE tenant_id       = $1
   AND audit_period_id = $2
   AND frozen_at IS NULL;
+
+-- name: LockAuditPeriodsOverlapping :many
+-- #1742: the periods whose window holds a date in [first_day, last_day],
+-- locked FOR UPDATE so a historical import and a freeze of the same period
+-- serialise: the import decides "open or frozen" on a row no freeze can
+-- change until the import commits.
+SELECT *
+FROM audit_periods
+WHERE tenant_id    = $1
+  AND period_start <= sqlc.arg(last_day)::date
+  AND period_end   >= sqlc.arg(first_day)::date
+ORDER BY id
+FOR UPDATE;
+
+-- name: InsertAuditPeriodFreezeRevision :one
+-- #1742: append freeze revision N (N >= 2) of a frozen period. The original
+-- freeze (revision 1) stays on the audit_periods row and is never rewritten.
+INSERT INTO audit_period_freeze_revisions (
+    id, tenant_id, audit_period_id, revision,
+    frozen_hash, previous_hash, frozen_at,
+    reason, justification, actor, import_batch_id, evidence_record_ids
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+RETURNING *;
+
+-- name: ListAuditPeriodFreezeRevisions :many
+-- #1742: every revision after the original freeze, oldest first.
+SELECT *
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1 AND audit_period_id = $2
+ORDER BY revision;
+
+-- name: ListAmendedEvidenceIDsForPeriod :many
+-- #1742: the evidence records freeze revisions 2..max_revision added to a
+-- frozen period's population. Pass max_revision = 2147483647 for the latest
+-- revision. Sorted, so the result feeds the ADR 0003 hash directly.
+SELECT DISTINCT unnest(evidence_record_ids)::uuid AS id
+FROM audit_period_freeze_revisions
+WHERE tenant_id       = $1
+  AND audit_period_id = $2
+  AND revision       <= sqlc.arg(max_revision)::int
+ORDER BY id;
+
+-- name: ListPeriodsAmendedWithEvidence :many
+-- #1742: the frozen periods a freeze revision added evidence record
+-- evidence_record_id to. The auditor authz hydrator reads it: such a record
+-- is in the period's population although it was ingested after the freeze.
+SELECT DISTINCT audit_period_id
+FROM audit_period_freeze_revisions
+WHERE tenant_id = $1
+  AND sqlc.arg(evidence_record_id)::uuid = ANY(evidence_record_ids)
+ORDER BY audit_period_id;
+
+-- name: LockTenantEvidenceFreeze :exec
+-- #1742: serialises Freeze against a historical evidence import in one
+-- tenant for the rest of the transaction. Freeze takes it before hashing;
+-- the import takes it as its first statement. Namespace 14 is
+-- advisorylock.TenantEvidenceFreeze.
+SELECT pg_advisory_xact_lock(14, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
+-- name: LockTenantEvidenceFreezeShared :exec
+-- #3038: the shared mode of LockTenantEvidenceFreeze, which every live
+-- ingest takes just before it inserts a ledger row and holds to commit.
+-- Ingests do not block each other; a freeze waits until every ingest that
+-- holds it has committed, so it hashes with their rows in view. Run
+-- CountPeriodsFrozenSinceTxStart after it, as its own statement.
+SELECT pg_advisory_xact_lock_shared(14, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
+-- name: CountPeriodsFrozenSinceTxStart :one
+-- #1742: the tenant's periods frozen at or after this transaction began.
+-- An import's rows carry ingested_at = its transaction start, so a freeze
+-- that committed after that start but before the import took
+-- LockTenantEvidenceFreeze would admit them to its frozen population
+-- without having hashed them. The import refuses (and retries) when this
+-- is non-zero.
+--
+-- #3060: the check is sound only under READ COMMITTED, where this
+-- statement takes a fresh snapshot after the lock is granted. Under
+-- REPEATABLE READ or SERIALIZABLE the snapshot is the transaction's first
+-- statement's, which can predate a freeze that committed before the lock,
+-- so the count would read zero. isolation is returned so the caller fails
+-- closed on any other level.
+SELECT (SELECT count(*)
+        FROM audit_periods
+        WHERE tenant_id = $1
+          AND frozen_at >= transaction_timestamp())::bigint AS frozen_since,
+       current_setting('transaction_isolation')::text AS isolation;
+
+-- name: GetPopulationFreezeRevision :one
+-- #1742: the period a population is attached to, its status, and its
+-- latest freeze revision (1 for the original freeze), recorded on each
+-- sample drawn from it. No row when the population has no period; the
+-- revision means nothing while the status is open.
+SELECT ap.status,
+       COALESCE((SELECT max(r.revision) FROM audit_period_freeze_revisions r
+                 WHERE r.tenant_id = ap.tenant_id AND r.audit_period_id = ap.id), 1)::int AS freeze_revision
+FROM populations p
+JOIN audit_periods ap ON ap.tenant_id = p.tenant_id AND ap.id = p.audit_period_id
+WHERE p.tenant_id = $1
+  AND p.id        = $2;
+
+-- name: DBClockNow :one
+-- #1742: the database's current time (clock_timestamp, not the transaction
+-- start), which Freeze stamps as frozen_at once it holds
+-- LockTenantEvidenceFreeze, so frozen_at and ingested_at share one clock.
+SELECT clock_timestamp()::timestamptz AS now;

@@ -6,6 +6,9 @@
 //	PUT    /v1/admin/llm-routing   set/replace provider + (encrypted) key
 //	DELETE /v1/admin/llm-routing   clear config -> revert to local-ollama
 //
+// Every PUT, and every DELETE that removes a config, writes one me_audit_log
+// row in the same transaction (#2224); see cloud.Store.Set and Clear.
+//
 // All routes are TENANT-ADMIN gated (P0-499 threat-model S): a non-admin
 // credential is 403. The provider is a CLOSED ENUM (no operator URL, P0-499-3).
 // The provider API key is WRITE-ONLY: it is accepted on PUT, encrypted, and
@@ -23,8 +26,10 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/llm/cloud"
@@ -109,7 +114,8 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "provider must be one of: local-ollama, anthropic, openai, bedrock")
 		return
 	}
-	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey))
+	user, principal := actor(r)
+	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey), user, principal)
 	if err != nil {
 		writeSetError(w, err)
 		return
@@ -122,7 +128,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireTenantAdmin(w, r) {
 		return
 	}
-	if _, err := h.store.Clear(r.Context()); err != nil {
+	user, principal := actor(r)
+	if _, err := h.store.Clear(r.Context(), user, principal); err != nil {
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to clear routing config")
 		return
 	}
@@ -144,10 +151,22 @@ func writeSetError(w http.ResponseWriter, err error) {
 		// The deployment has no cloud master key, so it cannot protect a stored
 		// key. 409: the request is well-formed but the deployment cannot honor
 		// it. The operator must configure ATLAS_LLM_CLOUD_KEY(_FILE) first.
-		httpresp.WriteError(w, http.StatusConflict, "cloud routing is not enabled on this deployment (no cloud key configured)")
+		httpresp.WriteFeatureNotEnabled(w, "cloud routing is not enabled on this deployment (no cloud key configured)")
 	default:
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to set routing config")
 	}
+}
+
+// actor is the user the audit row names (#2224), uuid.Nil for a caller that
+// is not a user (a bootstrap key), and the acting credential's principal
+// (#2329), which names that caller either way. Empty with no credential.
+func actor(r *http.Request) (uuid.UUID, string) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		return uuid.Nil, ""
+	}
+	u, _ := credstore.CallerUserID(cred)
+	return u, credstore.PrincipalOf(cred)
 }
 
 // requireTenantAdmin enforces the tenant-admin gate (P0-499 threat-model S): a
@@ -160,20 +179,9 @@ func requireTenantAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if cred.IsAdmin || hasTenantAdminRole(cred.OwnerRoles) {
+	if authz.IsTenantAdmin(cred) {
 		return true
 	}
 	httpresp.WriteError(w, http.StatusForbidden, "tenant-admin role required")
-	return false
-}
-
-// hasTenantAdminRole reports whether the per-tenant role list grants the
-// admin role (the slice-056 RoleAdmin string).
-func hasTenantAdminRole(roles []string) bool {
-	for _, role := range roles {
-		if role == string(authz.RoleAdmin) {
-			return true
-		}
-	}
 	return false
 }

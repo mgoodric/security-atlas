@@ -140,6 +140,14 @@ $COMPOSE run --rm atlas-migrate
 $COMPOSE up -d atlas web
 ```
 
+Run steps 3 and 4 back to back, and freeze no audit period between them.
+Some migrations record a cutover instant that later reads pin against, such
+as evidence routing (`evidence_routing_cutover`, #2924, and
+`evidence_routing_kind_cutover`, #2973). A period frozen after the migration
+but before the new binary serves is read as frozen after the cutover, so it
+can gain records the old binary never showed it. Stopping `atlas` in step 2
+keeps the window closed.
+
 <!-- prettier-ignore-start -->
 !!! note "Migration mechanism — reconciling the guidance"
     The migration runner for the bundle is the dedicated, always-run
@@ -153,7 +161,7 @@ $COMPOSE up -d atlas web
     expose a `migrate` subcommand (this reconciles the slice-464
     SELF_HOSTING migrate-command drift). If you drive a bare Postgres
     outside the bundle, `just migrate-up` runs the same
-    `migrations/sql/*.sql` set via `psql`.
+    `deploy/docker/bootstrap/migrate.sh` ledgered runner.
 <!-- prettier-ignore-end -->
 
 ---
@@ -177,7 +185,117 @@ $COMPOSE exec -T postgres psql -U atlas_migrate -d security_atlas \
 # export survived the migration intact (see Backup and restore, drill).
 atlas oscal-export --period <frozen-period-id> --out ./post-upgrade-bundle
 atlas oscal verify ./post-upgrade-bundle       # expect: signature OK
+
+# Controls left on a previous SCF release's anchors (see below).
+$COMPOSE logs atlas-bootstrap | grep -e 'controls rebound=' -e 'control needs re-anchoring'
 ```
+
+**When the release ships a new SCF catalog.** An imported SCF release is
+frozen, so a changed catalog arrives under a new release label with new
+anchor rows. The SCF import then moves each control to the new release's
+anchor only if that anchor has the same code and the same title.
+
+Every other control stays on its old anchor and earns no framework credit
+until you re-anchor it. Each one is logged as
+`control needs re-anchoring ... anchor=<code>@<old release>: <note>`. The note
+says where the concept went, for example
+`IAC-21 -> IAC-10 in test-2026.3 (concept)`. Re-anchor each listed control:
+edit its bundle's `scf_anchor_id` and re-upload it, or re-anchor it in the
+app.
+
+**Connector control-id defaults follow the catalog (#1976).** The SCF 2026.3
+remap changed the default `control_id` five connectors stamp on their records:
+
+| Connector | Flag                  | Old default  | New default  |
+| --------- | --------------------- | ------------ | ------------ |
+| AWS       | `--control-id`        | `scf:CRY-04` | `scf:CRY-07` |
+| Azure     | `--storage-control`   | `scf:CRY-04` | `scf:CRY-07` |
+| Azure     | `--keyvault-control`  | `scf:CRY-09` | `scf:CRY-10` |
+| GCP       | `--bucket-control-id` | `scf:CRY-04` | `scf:CRY-07` |
+| k8s       | `--secret-control`    | `scf:CRY-01` | `scf:CRY-02` |
+
+The follow-up to the SCF 2026.3 DCH remap (#2387) moved one more default:
+
+| Connector | Flag                     | Old default  | New default  |
+| --------- | ------------------------ | ------------ | ------------ |
+| Slack     | `--retention-control-id` | `scf:DCH-04` | `scf:DCH-27` |
+
+`DCH-04` still names a real control in 2026.3 (Data & Asset Classification),
+but a retention record belongs on `DCH-27` Media & Data Retention. The
+`slack.retention_settings.v1` default SCF anchors are now `DCH-27` only. An
+install that already registered that schema keeps its stored anchors, because
+the boot import skips a kind and version that is already present.
+
+The SCF NET anchor review (#2396) moved one more default:
+
+| Connector | Flag               | Old default  | New default  |
+| --------- | ------------------ | ------------ | ------------ |
+| k8s       | `--netpol-control` | `scf:NET-03` | `scf:NET-06` |
+
+A NetworkPolicy coverage record is evidence of segmentation between workloads,
+which is `NET-06` Network Segmentation (macrosegmentation), not `NET-03`
+Boundary Protection. The `k8s.networkpolicy_coverage.v1` default SCF anchors
+are now `NET-06`, `NET-02`. The Azure `--nsg-control` and `--firewall-control`
+defaults stay `scf:NET-03`; the `azure.nsg_rules.v1` default anchors gain
+`NET-06` (`NET-03`, `NET-06`, `NET-02`). As above, an install that already
+registered either schema keeps its stored anchors. To keep NetworkPolicy
+records on the old code, pass `--netpol-control scf:NET-03`.
+
+ISO A.8.22 no longer maps to the stock `soc2_cc6_6_boundary_protection` (NET-03) control. It reports as uncovered until a control is anchored on NET-06.
+
+The stock `network_segmentation_default_deny` control (#2648) is anchored on
+`NET-06`, so ISO A.8.22 and PCI 1.4.1 are covered again once the bootstrap
+has uploaded it. Since #2745 the k8s `--netpol-control` default is that
+control's bundle id, so NetworkPolicy records link to it on default flags. An
+install that passes `--netpol-control scf:NET-06` explicitly keeps storing a
+free-form reference; drop the flag to link the stock control.
+
+#2745 also changes the per-namespace NetworkPolicy verdict: a namespace now
+passes only when it has default-deny for both ingress and egress. A namespace
+with default-deny in one direction only, which passed before, now fails with a
+reason naming the open direction.
+
+A connector run on its defaults picks up the new code when you upgrade it. If
+you pass one of these flags with the old value, by hand or in a scheduler or
+manifest, change it to the new code: in SCF 2026.3 the old code names a
+different control. Evidence keeps the `control_id` it was pushed with, because
+the ledger is append-only, so records from before and after the change sit
+under different codes. Nothing joins the two histories for you; carrying
+evidence across the change is a manual step.
+
+**Bundled crosswalks converge on boot.** On every bring-up the bootstrap
+re-imports the bundled SOC 2 crosswalk, then every other bundled crosswalk
+under `data/crosswalks/` (HIPAA, ISO 27001, PCI DSS, NIST CSF) whose framework
+this install already imported. A framework you never imported is skipped, so
+boot never adds one you did not choose. Each re-import is the same
+`catalog import-crosswalk` you would run by hand. A frozen framework version
+keeps its stored requirement text, and an edge the bundled file no longer
+lists is retired, which is how edges move off a retired SCF anchor after a
+remap. Boot prints one line per framework and one line per retired edge:
+
+```sh
+$COMPOSE logs atlas-bootstrap | grep -e 'converge framework=' -e 'warning: converge'
+```
+
+A crosswalk that fails to converge prints a warning and boot carries on. Fix
+the cause, then re-run `catalog import-crosswalk` on that file.
+
+The re-import keeps edges another source wrote: approved SCF remaps, a
+crosswalk imported from a file with a different name, workbook imports, and
+every tenant's overlay edges. Two kinds of hand-made edge are retired when the
+bundled file does not list them:
+
+- **Edges written before #1971**, which recorded no source. They include the
+  stale bundled anchors this convergence exists to move. They also include
+  edges from your own crosswalk if you imported it before that release.
+- **Edges from a bundled file you edited in place**, such as a changed
+  `data/crosswalks/iso27001-2022.yaml`. Its edges share the bundled file's
+  source, so the shipped file replaces them on the next boot.
+
+Import your custom crosswalk under its own filename (for example
+`data/crosswalks/iso27001-2022-acme.yaml`, or a path outside that directory)
+so boot never retires its edges. A retired edge keeps its row and its tier
+history, and re-importing your file restores it.
 
 If `/health` reports `db` not-ok, or the version is wrong, or a verify
 fails, treat the upgrade as failed and roll back.

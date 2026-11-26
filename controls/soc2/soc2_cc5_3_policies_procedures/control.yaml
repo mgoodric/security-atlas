@@ -2,15 +2,42 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc5_3_policies_procedures
 title: "Core security policies acknowledged in current version"
 description: |
-  The entity deploys control activities through policies that establish
-  what is expected and procedures that put policies into action (TSC
-  CC5.3). Operationally this resolves to: the v1 policy library is
-  current (each policy has been reviewed within its review cadence),
-  and active users have acknowledged the current version. The evidence
-  query reads the `policy.acknowledgment` ledger and asserts the
-  population of acknowledgments matches active users for each policy.
+  Expectations are set in written policy and carried out through
+  documented procedures (TSC CC5.3). The intended test is that each policy
+  in the library is within its review cadence and every active user has
+  acknowledged the version in force.
 
-scf_anchor_id: GOV-01
+  What runs today: a SQL query over the tenant's `policy.acknowledgment.v1`
+  records in the weekly window of 30 days. Only the acknowledgement
+  handler writes the kind (#2873), and it refuses an acknowledgement of a
+  version that is not published, so each record it writes names the
+  version in force when it was recorded. The query checks what the
+  records themselves can show of that. Each record is keyed by its
+  `policy_title` and `policy_version_id`, snapshotted into the payload
+  (#2832). Within a title, versions are ordered by their first
+  acknowledgement in the window. A record fails when it acknowledges a
+  version after a later version of the same title had already been
+  acknowledged: an acknowledgement of a superseded version. A record
+  passes when it names a `policy_version` and is not superseded. Any
+  failing record fails the control; it passes only when every record
+  passes.
+
+  A record is unread, and the control inconclusive unless another record
+  fails, when it names no `policy_version`, its `result` is not pass, or
+  its `observed_at` is more than an hour after the evaluation instant.
+  Records without a `policy_title` or `policy_version_id` are left out
+  (acknowledgements recorded before #2832 carry no title), and no keyed
+  record leaves the control inconclusive.
+
+  Not checked: titles are matched exactly, so two policies with the same
+  title are read as versions of one policy, and a renamed policy as a
+  different one. Version order is the order the window's acknowledgements
+  show, not the policies' publish history. Review cadence is not checked.
+  Every active user having acknowledged the version in force needs a user
+  inventory (#2834).
+
+scf_anchor_id: GOV-02
+scf_release: test-2026.3
 control_family: GOV
 implementation_type: automated
 owner_role: ciso
@@ -19,22 +46,61 @@ freshness_class: weekly
 
 evidence_queries:
   - id: current_policy_versions_acknowledged
-    language: rego
+    language: sql
     evidence_kind: policy.acknowledgment.v1
-    description: "Every active user has acknowledged the current version of each in-scope policy"
+    description: "No in-window acknowledgement names a version its policy title had already moved past"
     expression: |
-      package atlas.controls.soc2.cc5_3
-
-      default allow := false
-
-      allow if {
-        every p in input.policies {
-          p.in_scope == true
-          every u in input.active_users {
-            some a in input.acknowledgments
-            a.user_id == u.id
-            a.policy_id == p.id
-            a.policy_version_id == p.current_version_id
-          }
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 2 THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT CASE
+                 WHEN future OR result <> 'pass' OR version = '' THEN 1
+                 WHEN EXISTS (
+                   SELECT 1
+                   FROM (
+                     SELECT payload->>'policy_title' AS other_title,
+                            payload->>'policy_version_id' AS other_version_id,
+                            min(observed_at) AS other_first_seen
+                     FROM evidence
+                     WHERE jsonb_typeof(payload->'policy_title') = 'string'
+                       AND payload->>'policy_title' <> ''
+                       AND jsonb_typeof(payload->'policy_version_id') = 'string'
+                       AND payload->>'policy_version_id' <> ''
+                       AND observed_at <= evaluated_at + interval '1 hour'
+                     GROUP BY 1, 2
+                   ) AS other_versions
+                   WHERE other_title = title
+                     AND other_version_id <> version_id
+                     AND other_first_seen > first_seen
+                     AND other_first_seen < observed_at
+                 ) THEN 0
+                 ELSE 2
+               END AS verdict
+        FROM (
+          SELECT title, version_id, version, result, observed_at, future,
+                 min(observed_at) FILTER (WHERE NOT future) OVER (
+                   PARTITION BY title, version_id
+                 ) AS first_seen
+          FROM (
+            SELECT payload->>'policy_title' AS title,
+                   payload->>'policy_version_id' AS version_id,
+                   CASE
+                     WHEN jsonb_typeof(payload->'policy_version') = 'string'
+                       THEN payload->>'policy_version'
+                     ELSE ''
+                   END AS version,
+                   result,
+                   observed_at,
+                   observed_at > evaluated_at + interval '1 hour' AS future
+            FROM evidence
+            WHERE jsonb_typeof(payload->'policy_title') = 'string'
+              AND payload->>'policy_title' <> ''
+              AND jsonb_typeof(payload->'policy_version_id') = 'string'
+              AND payload->>'policy_version_id' <> ''
+          ) AS keyed
+        ) AS per_version
+      ) AS per_record

@@ -48,15 +48,25 @@
 // single useEffect is the 401 -> /login redirect, matching the
 // `catalog/scf/[id]` precedent exactly.
 
-import { useQuery } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  type UseInfiniteQueryResult,
+  useQuery,
+} from "@tanstack/react-query";
 import Link from "next/link";
 
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 
 import {
+  type ControlAnchorDecision,
+  type ControlAnchorHistoryResponse,
   type ControlCoverage,
   type ControlHistoryResponse,
   type ControlLinkedPoliciesResponse,
@@ -64,8 +74,15 @@ import {
   type EffectiveScopeResponse,
 } from "@/lib/api/control-detail";
 import { type EvidenceListResponse } from "@/lib/api/evidence";
+import { type ExceptionsListResponse } from "@/lib/api/exceptions";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { frameworkLabel } from "@/lib/labels/framework-label";
+import { normaliseUserId } from "@/lib/person";
 
+import { statusPillClass } from "@/app/(authed)/exceptions/lifecycle";
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
+
+import { exceptionsForControl } from "../strip";
 
 export function EvidenceStreamBody({
   id,
@@ -99,6 +116,7 @@ export function EvidenceStreamBody({
             kind={rec.evidence_kind}
             source={rec.source}
             result={rec.result}
+            demo={rec.demo === true}
           />
         ))}
         {evidenceQ.data.next_cursor ? (
@@ -154,7 +172,7 @@ export function EffectiveScopeRows({
           (r) => r.framework_version_id === fvId,
         );
         const label = reqForFv
-          ? `${reqForFv.framework_name} ${reqForFv.framework_version}`
+          ? frameworkLabel(reqForFv.framework_name, reqForFv.framework_version)
           : fvId;
         return (
           <div key={fvId} data-testid="effective-scope-row">
@@ -219,8 +237,8 @@ export function PoliciesBody({
                 {p.version}
               </div>
             </div>
-            <Badge variant="secondary" className="capitalize">
-              {p.status}
+            <Badge variant="secondary">
+              {enumLabel("PolicyStatus", p.status)}
             </Badge>
           </li>
         ))}
@@ -260,7 +278,7 @@ export function RisksBody({
                 {r.title}
               </Link>
               <span className="font-mono text-xs text-muted-foreground">
-                {formatResidualScore(r.residual_score)} residual
+                {formatResidualScore(r.residual_score, r.methodology)} residual
               </span>
             </div>
             {typeof r.link_weight === "number" ? (
@@ -302,17 +320,29 @@ export function HistoryBody({
             className="text-muted-foreground"
             data-testid="audit-log-entry"
           >
-            <span className="font-mono text-muted-foreground">
-              {formatHistoryDate(h.evaluated_at)}
-            </span>{" "}
+            <Timestamp
+              value={h.evaluated_at}
+              className="text-muted-foreground"
+            />{" "}
             ·{" "}
             <span className="text-foreground">
-              evaluated <span className="font-mono">{h.computed_state}</span>
+              evaluated {enumLabel("EvaluationState", h.computed_state)}
             </span>{" "}
             <span className="text-muted-foreground">
               ({h.evidence_count} evidence ·{" "}
-              <span className="font-mono">{h.freshness_status}</span>)
+              {enumLabel("FreshnessState", h.freshness_status)})
             </span>
+            {h.trigger === "manual" && h.triggered_by ? (
+              <>
+                {" "}
+                · run by{" "}
+                <Person
+                  id={h.triggered_by}
+                  className="text-foreground"
+                  testId="audit-log-triggered-by"
+                />
+              </>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -322,6 +352,115 @@ export function HistoryBody({
     <p className="text-sm text-muted-foreground" data-testid="audit-log-empty">
       No evaluation history yet for this control.
     </p>
+  );
+}
+
+// #2392 — how a remap decision reads on the History tab.
+const ANCHOR_DECISION_LABELS: Record<
+  ControlAnchorDecision["decision"],
+  string
+> = {
+  approved: "Re-anchored",
+  rejected: "Remap rejected",
+  kept_legacy: "Kept legacy anchor",
+};
+
+/** An SCF code with its release, as `code@release`. */
+function anchorAt(code: string, release: string): string {
+  return `${code}@${release}`;
+}
+
+// #2392 — the control's SCF anchor history: every remap decision on any
+// revision of its bundle, newest first. Codes read as code@release and the
+// decider through <Person> (a system principal reads "System"); no ids.
+export type AnchorHistoryQuery = UseInfiniteQueryResult<
+  InfiniteData<ControlAnchorHistoryResponse, unknown>
+>;
+
+export function AnchorHistoryBody({
+  anchorHistoryQ,
+}: {
+  anchorHistoryQ: AnchorHistoryQuery;
+}) {
+  if (anchorHistoryQ.isLoading) return <Skeleton className="h-16 w-full" />;
+  if (anchorHistoryQ.error) {
+    return (
+      <p
+        className="text-sm text-destructive"
+        data-testid="anchor-history-error"
+      >
+        Could not load anchor history: {(anchorHistoryQ.error as Error).message}
+      </p>
+    );
+  }
+  const decisions =
+    anchorHistoryQ.data?.pages.flatMap((p) => p.decisions ?? []) ?? [];
+  if (decisions.length === 0) {
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="anchor-history-empty"
+      >
+        No SCF remap decisions for this control yet.
+      </p>
+    );
+  }
+  return (
+    <>
+      <ul className="space-y-2 text-xs" data-testid="anchor-history-list">
+        {decisions.map((d) => (
+          <li
+            key={d.id}
+            className="text-muted-foreground"
+            data-testid="anchor-history-entry"
+            data-decision={d.decision}
+          >
+            <Timestamp value={d.decided_at} className="text-muted-foreground" />{" "}
+            ·{" "}
+            <span className="text-foreground">
+              {ANCHOR_DECISION_LABELS[d.decision] ?? d.decision}
+            </span>{" "}
+            <span className="font-mono" data-testid="anchor-history-legacy">
+              {anchorAt(d.legacy_scf_id, d.legacy_release)}
+            </span>
+            {d.new_scf_id && d.new_release ? (
+              <>
+                {" → "}
+                <span className="font-mono" data-testid="anchor-history-new">
+                  {anchorAt(d.new_scf_id, d.new_release)}
+                </span>
+                {d.new_version !== null ? ` (revision ${d.new_version})` : null}
+              </>
+            ) : null}
+            {d.bulk ? " · bulk approval" : null} · by{" "}
+            <Person
+              id={d.decided_by}
+              className="text-foreground"
+              testId="anchor-history-decided-by"
+            />
+            {d.reason ? (
+              <span className="block pl-4" data-testid="anchor-history-reason">
+                {d.reason}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {anchorHistoryQ.hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          data-testid="anchor-history-more"
+          disabled={anchorHistoryQ.isFetchingNextPage}
+          onClick={() => anchorHistoryQ.fetchNextPage()}
+        >
+          {anchorHistoryQ.isFetchingNextPage
+            ? "Loading…"
+            : "Show older decisions"}
+        </Button>
+      ) : null}
+    </>
   );
 }
 
@@ -337,12 +476,15 @@ export function EvidenceStreamRow({
   kind,
   source,
   result,
+  demo = false,
 }: {
   evidenceID: string;
   observedAt: string;
   kind: string | null;
   source: Record<string, unknown> | null;
   result: "pass" | "fail" | "na" | "inconclusive";
+  /** #2043 — the in-place demo seed added this record. */
+  demo?: boolean;
 }) {
   const dotClass =
     result === "pass"
@@ -356,29 +498,35 @@ export function EvidenceStreamRow({
       : result === "fail"
         ? "text-rose-600"
         : "text-muted-foreground";
+  // #2137 — the row opens the evidence detail page.
   return (
-    <div
-      className="grid grid-cols-12 items-center gap-3 py-2.5"
+    <Link
+      href={`/evidence/${encodeURIComponent(evidenceID)}`}
+      className="grid grid-cols-12 items-center gap-3 py-2.5 hover:bg-muted/50"
       data-testid="evidence-stream-row"
     >
       <div className="col-span-1">
         <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
       </div>
       <div className="col-span-3 font-mono text-[11px] text-muted-foreground">
-        {observedAt}
+        <Timestamp value={observedAt} />
       </div>
       <div className="col-span-6 min-w-0">
         <div className="truncate text-sm text-foreground">
           {kind ?? evidenceID}
+          {demo ? <DemoBadge testId="evidence-stream-row-demo" /> : null}
         </div>
-        <div className="truncate font-mono text-[11px] text-muted-foreground">
-          {formatEvidenceSource(source)}
+        <div className="truncate text-[11px] text-muted-foreground">
+          <EvidenceSource source={source} />
         </div>
       </div>
-      <div className={`col-span-2 text-right font-mono text-xs ${resultClass}`}>
-        {result}
+      <div
+        className={`col-span-2 text-right text-xs ${resultClass}`}
+        data-testid="evidence-stream-row-result"
+      >
+        {enumLabel("EvidenceResult", result)}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -400,12 +548,98 @@ export function formatEvidenceSource(
   return "—";
 }
 
-// formatHistoryDate renders the RFC3339 evaluated_at as the YYYY-MM-DD
-// prefix used in the mockup's audit-log entries (lines 552-557). Falls
-// back to the raw string when parsing fails so a backend-shape change
-// surfaces as a visible date, not a silent error.
-export function formatHistoryDate(iso: string): string {
-  if (!iso) return "—";
-  const t = iso.indexOf("T");
-  return t > 0 ? iso.slice(0, t) : iso;
+// EvidenceSource (#2140) names who or what observed a record: a person or
+// key by name through <Person>, never their id, and a connector's own
+// actor tag as written.
+function EvidenceSource({
+  source,
+}: {
+  source: Record<string, unknown> | null;
+}) {
+  const actorID =
+    source && typeof source.actor_id === "string" ? source.actor_id : "";
+  if (actorID && (normaliseUserId(actorID) || actorID.startsWith("system"))) {
+    return <Person id={actorID} testId="evidence-stream-row-source" />;
+  }
+  return (
+    <span data-testid="evidence-stream-row-source">
+      {formatEvidenceSource(source)}
+    </span>
+  );
+}
+
+// EXCEPTION_STATUS_LABEL is each exception status in words (#2140).
+const EXCEPTION_STATUS_LABEL: Record<string, string> = {
+  requested: "Requested",
+  approved: "Approved",
+  denied: "Denied",
+  active: "Active",
+  expired: "Expired",
+  revoked: "Revoked",
+};
+
+// ExceptionsBody (#2140) lists the exceptions filed against the control,
+// read through GET /v1/exceptions?control_id=. Each row opens the
+// exception; the justification is shown as a one-line preview, as the
+// exceptions list shows it (slice 138 P0-A-Ledger-3). Rows on any other
+// control are dropped as well, so a list the server did not narrow never
+// shows another control's exception.
+export function ExceptionsBody({
+  controlId,
+  exceptionsQ,
+}: {
+  controlId: string;
+  exceptionsQ: ReturnType<typeof useQuery<ExceptionsListResponse>>;
+}) {
+  if (exceptionsQ.isLoading) return <Skeleton className="h-16 w-full" />;
+  if (exceptionsQ.error) {
+    return (
+      <p className="text-sm text-destructive" data-testid="exceptions-error">
+        Could not load exceptions: {(exceptionsQ.error as Error).message}
+      </p>
+    );
+  }
+  const rows = exceptionsForControl(exceptionsQ.data?.exceptions, controlId);
+  if (rows.length === 0) {
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="exceptions-empty"
+      >
+        No exceptions have been filed against this control.
+      </p>
+    );
+  }
+  return (
+    <ul
+      className="divide-y divide-border text-sm"
+      data-testid="exceptions-list"
+    >
+      {rows.map((e) => (
+        <li key={e.id} className="py-2" data-testid="exception-row">
+          <div className="flex items-center justify-between gap-3">
+            <Link
+              href={`/exceptions/${encodeURIComponent(e.id)}`}
+              className="min-w-0 truncate text-foreground hover:underline"
+              title={e.justification}
+              data-testid="exception-row-link"
+            >
+              {e.justification.trim() || "Exception"}
+            </Link>
+            <span
+              className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusPillClass(
+                e.status,
+              )}`}
+              data-testid="exception-row-status"
+            >
+              {EXCEPTION_STATUS_LABEL[e.status] ?? "Unknown"}
+            </span>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            Expires <Timestamp value={e.expires_at} style="date" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }

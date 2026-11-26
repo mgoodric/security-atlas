@@ -146,14 +146,16 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 		want   bool
 	}{
 		// Present anchors (sanity that the helper resolves real ones).
-		{"present_MON-01", "MON-01", true},
-		{"present_IRO-09", "IRO-09", true},
-		{"present_CFG-02", "CFG-02", true},
+		{"present_MON-02", "MON-02", true},
+		{"present_IRO-16", "IRO-16", true},
+		{"present_IRO-02", "IRO-02", true},
+		{"present_CFG-04", "CFG-04", true},
 		// Deliberately-dangling fake anchor — MUST be rejected.
 		{"dangling_ZZZ-99", "ZZZ-99", false},
-		// The historical real-but-absent anchors this slice remapped away.
-		{"dangling_MON-02", "MON-02", false},
-		{"dangling_IRO-02", "IRO-02", false},
+		// Real SCF codes absent from the sample. IRO-02 was in this list
+		// until #2413 added it; IRO-04 left the sample in #1980.
+		{"dangling_MON-01", "MON-01", false},
+		{"dangling_IRO-04", "IRO-04", false},
 		{"empty", "", false},
 	}
 	for _, tc := range cases {
@@ -167,7 +169,7 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 
 	// The guard must FAIL when fed a dangling anchor: assert danglingAnchors
 	// flags the fake one in a mixed list (the negative-fixture proof).
-	mixed := []string{"MON-01", "ZZZ-99", "IRO-09"}
+	mixed := []string{"MON-02", "ZZZ-99", "IRO-16"}
 	bad := danglingAnchors(mixed, catalog)
 	if len(bad) != 1 || bad[0] != "ZZZ-99" {
 		t.Fatalf("danglingAnchors(%v) = %v; want exactly [ZZZ-99] — the guard must catch a deliberately-dangling anchor", mixed, bad)

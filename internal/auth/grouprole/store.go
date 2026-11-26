@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -16,6 +17,11 @@ import (
 
 // ErrMappingNotFound is returned when a mapping id is not present in the tenant.
 var ErrMappingNotFound = errors.New("grouprole: mapping not found")
+
+// ErrUnknownIDPConfig is returned by Create when idp_config_id is not one of
+// the tenant's own oidc_idp_configs (#2643). A nonexistent id and another
+// tenant's id return the same error, so the create is no existence oracle.
+var ErrUnknownIDPConfig = errors.New("grouprole: unknown idp config")
 
 // Mapping is the admin-facing view of one oidc_idp_group_mappings row.
 type Mapping struct {
@@ -45,7 +51,12 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // Create inserts a (group -> role) mapping. The role MUST be an existing
 // canonical atlas role (P0-509-4) — callers validate via ValidateMappingRole
 // first; the DB CHECK is the backstop. Idempotent on the unique index.
-func (s *Store) Create(ctx context.Context, in CreateMappingInput) (Mapping, error) {
+//
+// The group_role_mapping_create audit row naming by is written in the same
+// transaction (#2609). A create that matches an existing mapping writes one
+// too: the insert returns the existing row and cannot tell the two apart,
+// and the admin did ask for the mapping.
+func (s *Store) Create(ctx context.Context, in CreateMappingInput, by Actor) (Mapping, error) {
 	if err := ValidateMappingRole(in.Role); err != nil {
 		return Mapping{}, err
 	}
@@ -58,6 +69,17 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput) (Mapping, err
 	}
 	var out Mapping
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if cfg := ptrUUIDToPg(in.IDPConfigID); cfg.Valid {
+			exists, eErr := q.GroupRoleMappingIdpConfigExists(ctx, dbx.GroupRoleMappingIdpConfigExistsParams{
+				TenantID: tID, ID: cfg,
+			})
+			if eErr != nil {
+				return fmt.Errorf("grouprole: look up idp config: %w", eErr)
+			}
+			if !exists {
+				return ErrUnknownIDPConfig
+			}
+		}
 		row, cErr := q.InsertGroupRoleMapping(ctx, dbx.InsertGroupRoleMappingParams{
 			TenantID:    tID,
 			IdpConfigID: ptrUUIDToPg(in.IDPConfigID),
@@ -65,11 +87,15 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput) (Mapping, err
 			Role:        in.Role,
 			CreatedBy:   ptrUUIDToPg(in.CreatedBy),
 		})
+		if isIDPConfigFKViolation(cErr) {
+			// The config was deleted between the lookup and the insert.
+			return ErrUnknownIDPConfig
+		}
 		if cErr != nil {
 			return fmt.Errorf("grouprole: insert mapping: %w", cErr)
 		}
 		out = mappingFromRow(row)
-		return nil
+		return s.audit(ctx, q, tID, by, AuditActionMappingCreate, map[string]any{}, mappingAuditOf(out))
 	})
 	if err != nil {
 		return Mapping{}, err
@@ -102,13 +128,23 @@ func (s *Store) List(ctx context.Context) ([]Mapping, error) {
 }
 
 // Delete removes a mapping by id within the tenant (AC-8). Returns
-// ErrMappingNotFound when the id is absent.
-func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+// ErrMappingNotFound when the id is absent. The group_role_mapping_delete
+// audit row naming by is written in the same transaction (#2609).
+func (s *Store) Delete(ctx context.Context, id uuid.UUID, by Actor) error {
 	tID, err := tenantPg(ctx)
 	if err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		cur, gErr := q.GetGroupRoleMapping(ctx, dbx.GetGroupRoleMappingParams{
+			TenantID: tID, ID: pgtype.UUID{Bytes: id, Valid: true},
+		})
+		if errors.Is(gErr, pgx.ErrNoRows) {
+			return ErrMappingNotFound
+		}
+		if gErr != nil {
+			return fmt.Errorf("grouprole: get mapping: %w", gErr)
+		}
 		n, dErr := q.DeleteGroupRoleMapping(ctx, dbx.DeleteGroupRoleMappingParams{
 			TenantID: tID, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -118,7 +154,7 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		if n == 0 {
 			return ErrMappingNotFound
 		}
-		return nil
+		return s.audit(ctx, q, tID, by, AuditActionMappingDelete, mappingAuditOf(mappingFromRow(cur)), map[string]any{})
 	})
 }
 
@@ -162,6 +198,18 @@ func mappingFromRow(r dbx.OidcIdpGroupMapping) Mapping {
 		m.IDPConfigID = &cfg
 	}
 	return m
+}
+
+// idpConfigFKConstraint is the mapping -> IdP config FK from migration
+// 20261271000000_group_mapping_idp_config_fk.sql.
+const idpConfigFKConstraint = "oidc_idp_group_mappings_idp_config_fk"
+
+// isIDPConfigFKViolation reports a foreign-key violation (SQLSTATE 23503) on
+// the IdP config FK only (#2731), so an unrelated FK failure on the insert
+// surfaces as itself rather than as ErrUnknownIDPConfig.
+func isIDPConfigFKViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == idpConfigFKConstraint
 }
 
 func ptrUUIDToPg(u *uuid.UUID) pgtype.UUID {

@@ -30,8 +30,21 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPortal,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import type { AdminSSOConfig } from "@/lib/api/admin";
+import type { AdminSSOConfig, AdminSSODeleteResult } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type Preflight =
   | { state: "idle" }
@@ -54,6 +67,7 @@ type FormState = {
   client_secret: string;
   redirect_url: string;
   allowed_email_domains: string;
+  trust_unverified_email_for_link: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -62,6 +76,7 @@ const EMPTY_FORM: FormState = {
   client_secret: "",
   redirect_url: "",
   allowed_email_domains: "",
+  trust_unverified_email_for_link: false,
 };
 
 function configToForm(c: AdminSSOConfig | null): FormState {
@@ -72,6 +87,7 @@ function configToForm(c: AdminSSOConfig | null): FormState {
     client_secret: "", // never re-populated from server
     redirect_url: c.redirect_url ?? "",
     allowed_email_domains: (c.allowed_email_domains ?? []).join(", "),
+    trust_unverified_email_for_link: c.trust_unverified_email_for_link ?? false,
   };
 }
 
@@ -81,6 +97,11 @@ export default function SSOConfigPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [issuerURL, setIssuerURL] = useState("");
   const [preflight, setPreflight] = useState<Preflight>({ state: "idle" });
+  // #2760: the last delete's counts. Held here, not in the delete card,
+  // because the card unmounts once the config is gone.
+  const [deleteResult, setDeleteResult] = useState<AdminSSODeleteResult | null>(
+    null,
+  );
   // Tracks the last server payload we synced into local form state.
   // When this differs from the current query data the next render
   // re-seeds the form. This is the React 19 "store the previous value
@@ -127,6 +148,7 @@ export default function SSOConfigPage() {
         client_id: body.client_id,
         redirect_url: body.redirect_url,
         allowed_email_domains: allowed,
+        trust_unverified_email_for_link: body.trust_unverified_email_for_link,
       };
       if (body.client_secret) {
         payload.client_secret = body.client_secret;
@@ -137,13 +159,7 @@ export default function SSOConfigPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          /* not JSON; fall back to status line */
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
       return (await res.json()) as { config: AdminSSOConfig };
@@ -223,15 +239,16 @@ export default function SSOConfigPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SSO</h1>
-        <p className="text-sm text-muted-foreground">
-          Configure a per-tenant OIDC identity provider. The platform is a
-          relying party only — it never issues identity itself.
-        </p>
-      </div>
-
+    <PageShell
+      title="SSO"
+      subtitle={
+        <>
+          Configure a per-tenant <Term id="sso">OIDC identity provider</Term>.
+          The platform is a relying party only — it never issues identity
+          itself.
+        </>
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Discovery preflight</CardTitle>
@@ -349,6 +366,42 @@ export default function SSOConfigPage() {
                   disabled={isLoading || mutation.isPending}
                 />
               </Field>
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="sso-trust-unverified-email"
+                    data-testid="sso-trust-unverified-email"
+                    checked={form.trust_unverified_email_for_link}
+                    onCheckedChange={(checked) =>
+                      setForm({
+                        ...form,
+                        trust_unverified_email_for_link: checked === true,
+                      })
+                    }
+                    disabled={isLoading || mutation.isPending}
+                    aria-describedby="sso-trust-unverified-email-help"
+                  />
+                  <label
+                    htmlFor="sso-trust-unverified-email"
+                    className="text-sm font-medium"
+                  >
+                    Link SCIM users when the IdP does not report email_verified
+                  </label>
+                </div>
+                <p
+                  id="sso-trust-unverified-email-help"
+                  className="text-xs text-muted-foreground"
+                >
+                  A first sign-in claims a SCIM-provisioned user by email only
+                  when the IdP marks the email verified. Turn this on for IdPs
+                  that never send <code>email_verified</code>, such as Microsoft
+                  Entra ID. An IdP that reports the email unverified is still
+                  refused. With this on, an email with no{" "}
+                  <code>email_verified</code> claim also counts as verified for
+                  the allowed email domains above, so turn it on only for an IdP
+                  you trust to send real addresses.
+                </p>
+              </div>
             </div>
 
             {submitState === "success" ? (
@@ -383,7 +436,139 @@ export default function SSOConfigPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+
+      {deleteResult ? (
+        <Alert data-testid="sso-delete-success">
+          <AlertTitle>SSO configuration deleted</AlertTitle>
+          <AlertDescription>
+            Removed {plural(deleteResult.mapping_count, "mapping", "mappings")}{" "}
+            and revoked{" "}
+            {plural(deleteResult.revoked_role_count, "role", "roles")} from{" "}
+            {plural(deleteResult.affected_user_count, "user", "users")}.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {data ? (
+        <DeleteSSOCard config={data} onDeleted={setDeleteResult} />
+      ) : null}
+    </PageShell>
+  );
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+// #2760: delete the tenant's IdP config. The confirm shows what goes with it:
+// the group-role mappings scoped to it, and the group-derived roles only it
+// derived (a role another source also derives, or the user holds manually,
+// stays). The DELETE fires only from the dialog's confirm button.
+function DeleteSSOCard({
+  config,
+  onDeleted,
+}: {
+  config: AdminSSOConfig;
+  onDeleted: (r: AdminSSODeleteResult) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const mappings = config.mapping_count ?? 0;
+  const roles = config.derived_role_count ?? 0;
+
+  const del = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/sso", { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(await upstreamErrorMessage(res));
+      }
+      return (await res.json()) as AdminSSODeleteResult;
+    },
+    onSuccess: (r) => {
+      setOpen(false);
+      onDeleted(r);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "sso"] });
+    },
+  });
+
+  return (
+    <Card data-testid="sso-delete-card">
+      <CardHeader>
+        <CardTitle>Delete SSO configuration</CardTitle>
+        <CardDescription>
+          Users can no longer sign in through this identity provider. Its
+          group-role mappings are deleted, and roles granted only through them
+          are revoked. Roles a user also gets from SCIM, another provider, or a
+          manual assignment stay.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            del.reset();
+            setOpen(true);
+          }}
+          data-testid="sso-delete-trigger"
+        >
+          Delete SSO configuration
+        </Button>
+      </CardContent>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPortal>
+          <DialogContent data-testid="sso-delete-dialog">
+            <DialogHeader>
+              <DialogTitle>Delete the SSO configuration?</DialogTitle>
+              <DialogDescription>
+                This deletes the configuration for{" "}
+                <span className="font-medium">{config.issuer_url}</span>. This
+                cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              <li data-testid="sso-delete-mapping-count">
+                {plural(mappings, "group-role mapping", "group-role mappings")}{" "}
+                will be deleted.
+              </li>
+              <li data-testid="sso-delete-role-count">
+                {plural(roles, "group-derived role", "group-derived roles")}{" "}
+                will be revoked.
+              </li>
+            </ul>
+            {del.isError ? (
+              <Alert variant="destructive" data-testid="sso-delete-error">
+                <AlertTitle>Could not delete</AlertTitle>
+                <AlertDescription>
+                  {del.error instanceof Error
+                    ? del.error.message
+                    : "unknown error"}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={del.isPending}
+                onClick={() => setOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={del.isPending}
+                onClick={() => del.mutate()}
+                data-testid="sso-delete-confirm"
+              >
+                {del.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>
+    </Card>
   );
 }
 

@@ -8,6 +8,7 @@ package anchors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -115,6 +117,19 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Issue #1741: optional `?has_control=true|false` filter, applied in
+	// SQL ahead of LIMIT/OFFSET. Tenant controls only exist on the
+	// with-state read of the current SCF version, so the filter is
+	// refused elsewhere rather than silently ignored.
+	hasControl, ok := h.hasControl(w, r)
+	if !ok {
+		return
+	}
+	if hasControl != nil && (!withState || r.URL.Query().Get("framework_version_id") != "") {
+		httpresp.WriteError(w, http.StatusBadRequest, "has_control requires include=state on the current SCF version")
+		return
+	}
+
 	if fvID := r.URL.Query().Get("framework_version_id"); fvID != "" {
 		uid, err := uuid.Parse(fvID)
 		if err != nil {
@@ -123,13 +138,14 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		}
 		if withState {
 			var rows []dbx.ListSCFAnchorsForVersionWithStateRow
-			err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+			err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
 				var inner error
 				rows, inner = q.ListSCFAnchorsForVersionWithState(ctx, dbx.ListSCFAnchorsForVersionWithStateParams{
 					FrameworkVersionID: pgtype.UUID{Bytes: uid, Valid: true},
 					Limit:              limit,
 					Offset:             offset,
 					ScopeCellID:        scopeCell,
+					TenantID:           tenantID,
 				})
 				return inner
 			})
@@ -154,21 +170,35 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if withState {
-		var rows []dbx.ListSCFAnchorsLatestWithStateRow
-		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		var (
+			rows   []dbx.ListSCFAnchorsLatestWithStateRow
+			counts dbx.CountSCFAnchorsLatestRow
+		)
+		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
 			var inner error
 			rows, inner = q.ListSCFAnchorsLatestWithState(ctx, dbx.ListSCFAnchorsLatestWithStateParams{
 				Limit:       limit,
 				Offset:      offset,
+				HasControl:  hasControl,
 				ScopeCellID: scopeCell,
+				TenantID:    tenantID,
 			})
+			if inner != nil {
+				return inner
+			}
+			counts, inner = q.CountSCFAnchorsLatest(ctx, tenantID)
 			return inner
 		})
 		if err != nil {
 			httperr.WriteInternal(w, r, "list anchors latest (with state)", err)
 			return
 		}
-		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": latestRowsToStateWire(rows)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+			"anchors":            latestRowsToStateWire(rows),
+			"total":              filteredAnchorTotal(counts, hasControl),
+			"catalog_total":      counts.CatalogTotal,
+			"with_control_total": counts.WithControlTotal,
+		})
 		return
 	}
 
@@ -180,21 +210,40 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list anchors latest", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": rowsToWire(rows)})
+	resp := map[string]any{"anchors": rowsToWire(rows)}
+	// #1774: say which SCF release these anchors are in, so a caller that
+	// binds one of their codes (a vendor-claim mapping) can name it. Read
+	// from the listed rows, so it is the release actually served.
+	if len(rows) > 0 {
+		v, err := h.q.GetFrameworkVersionByID(ctx, rows[0].FrameworkVersionID)
+		if err != nil {
+			httperr.WriteInternal(w, r, "list anchors latest: release", err)
+			return
+		}
+		resp["scf_release"] = v.Version
+	}
+	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
 
 // inTenantTx opens a tx on the pool, sets the `app.current_tenant` GUC
 // from the request context's tenant binding (slice-033 middleware
-// wired this), runs fn, and commits. Mirrors the ucfcoverage pattern.
+// wired this), runs fn with the tenant id, and commits. Mirrors the
+// ucfcoverage pattern. The tenant id feeds the queries' explicit
+// `c.tenant_id` predicates (issue #1832), which back up RLS.
 // Required for the slice-104 `?include=state` join — control_evaluations
 // + controls are tenant-scoped under FORCE ROW LEVEL SECURITY, so RLS
 // denies on unset GUC.
-func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {
+func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.Queries, pgtype.UUID) error) error {
 	if h.pool == nil {
 		return fmt.Errorf("anchors: pool not wired; ?include=state requires NewWithPool")
 	}
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+	tid, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
 		return err
+	}
+	tenantUUID, err := uuid.Parse(tid)
+	if err != nil {
+		return fmt.Errorf("anchors: tenant id: %w", err)
 	}
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -204,7 +253,7 @@ func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx)); err != nil {
+	if err := fn(ctx, dbx.New(tx), pgtype.UUID{Bytes: tenantUUID, Valid: true}); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -232,6 +281,35 @@ func (h *Handler) scopeCell(w http.ResponseWriter, r *http.Request) (pgtype.UUID
 	return pgtype.UUID{Bytes: uid, Valid: true}, true
 }
 
+// hasControl parses the optional `?has_control=` query parameter (issue
+// #1741). Unset or empty is the no-filter sentinel (nil); anything other
+// than a strconv boolean is a 400.
+func (h *Handler) hasControl(w http.ResponseWriter, r *http.Request) (*bool, bool) {
+	v := r.URL.Query().Get("has_control")
+	if v == "" {
+		return nil, true
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "has_control must be true or false")
+		return nil, false
+	}
+	return &b, true
+}
+
+// filteredAnchorTotal is the row total that matches the request's
+// has_control filter, so a pager can size itself without a second call.
+func filteredAnchorTotal(c dbx.CountSCFAnchorsLatestRow, hasControl *bool) int64 {
+	switch {
+	case hasControl == nil:
+		return c.CatalogTotal
+	case *hasControl:
+		return c.WithControlTotal
+	default:
+		return c.CatalogTotal - c.WithControlTotal
+	}
+}
+
 // includesState returns true when the request asked for the joined state
 // column via `?include=state`. The query string accepts a CSV list per
 // the OpenAPI `?include=` convention (e.g. `?include=state,coverage`),
@@ -239,9 +317,15 @@ func (h *Handler) scopeCell(w http.ResponseWriter, r *http.Request) (pgtype.UUID
 // ignored — they are NOT errors (slice 094 calendar precedent: additive
 // query params don't break the caller).
 func includesState(r *http.Request) bool {
+	return includes(r, "state")
+}
+
+// includes reports whether `?include=` names token, as a repeated param
+// or in a comma-separated list.
+func includes(r *http.Request, token string) bool {
 	for _, v := range r.URL.Query()["include"] {
 		for _, tok := range strings.Split(v, ",") {
-			if strings.TrimSpace(tok) == "state" {
+			if strings.TrimSpace(tok) == token {
 				return true
 			}
 		}
@@ -250,23 +334,48 @@ func includesState(r *http.Request) bool {
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
-// (e.g., "IAC-06"); scf_id resolves against the current SCF version.
+// (e.g., "IAC-37").
+//
+// #1770: `?scf_release=<label>` resolves the scf_id within that SCF
+// release; without it the scf_id resolves in the current release (a UUID
+// resolves in whichever release holds it). The response's `scf_release`
+// names the release the anchor was read from. An unknown release and a
+// code missing from the release are both 404, with messages naming which.
 func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	anchor, ok, err := h.lookupAnchor(r.Context(), id)
-	if err != nil {
+	row, rel, err := scfrelease.Resolve(r.Context(), h.q, r.URL.Query().Get("scf_release"), id)
+	switch {
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, scfrelease.ErrNoCurrentRelease):
+		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
+		return
+	case err != nil:
 		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
-	if !ok {
-		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
-		return
-	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"anchor":      anchorWireFromRow(row),
+		"scf_release": rel.Version,
+	})
 }
 
 // listFrameworks returns the framework catalog (global only).
+//
+// #2086: `?include=versions` (additive) adds each framework's versions,
+// newest first, so a picker can label a framework version by name and
+// version.
+//
+// #2414: with `?include=versions` the list also carries the caller's own
+// tenant-private frameworks and versions (custom or imported catalogs),
+// read in a tenant transaction so RLS binds. Another tenant's private
+// rows never appear. The plain list stays catalog-only.
 func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
+	if includes(r, "versions") {
+		h.listFrameworksWithVersions(w, r)
+		return
+	}
 	rows, err := h.q.ListFrameworks(r.Context())
 	if err != nil {
 		httperr.WriteInternal(w, r, "list frameworks", err)
@@ -274,15 +383,59 @@ func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]frameworkWire, 0, len(rows))
 	for _, f := range rows {
-		out = append(out, frameworkWire{
-			ID:              uuidStr(f.ID),
-			Name:            f.Name,
-			Slug:            f.Slug,
-			Issuer:          f.Issuer,
-			LatestVersionID: uuidStr(f.LatestVersionID),
-		})
+		out = append(out, frameworkFromRow(f))
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
+}
+
+// listFrameworksWithVersions serves `?include=versions`: the catalog plus
+// the caller's own frameworks and versions, two queries in one tenant tx.
+func (h *Handler) listFrameworksWithVersions(w http.ResponseWriter, r *http.Request) {
+	var (
+		fws []dbx.Framework
+		vs  []dbx.FrameworkVersion
+	)
+	err := h.inTenantTx(r.Context(), func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
+		var err error
+		if fws, err = q.ListFrameworksForTenant(ctx, tenantID); err != nil {
+			return err
+		}
+		vs, err = q.ListFrameworkVersionsForTenant(ctx, tenantID)
+		return err
+	})
+	if err != nil {
+		httperr.WriteInternal(w, r, "list frameworks with versions", err)
+		return
+	}
+	byFramework := make(map[[16]byte][]frameworkVersionWire, len(fws))
+	for _, v := range vs {
+		byFramework[v.FrameworkID.Bytes] = append(byFramework[v.FrameworkID.Bytes], frameworkVersionWire{
+			ID:            uuidStr(v.ID),
+			Version:       v.Version,
+			Status:        string(v.Status),
+			EffectiveFrom: dateStr(v.EffectiveFrom),
+		})
+	}
+	out := make([]frameworkWire, 0, len(fws))
+	for _, f := range fws {
+		fw := frameworkFromRow(f)
+		fw.Versions = byFramework[f.ID.Bytes]
+		if fw.Versions == nil {
+			fw.Versions = []frameworkVersionWire{}
+		}
+		out = append(out, fw)
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
+}
+
+func frameworkFromRow(f dbx.Framework) frameworkWire {
+	return frameworkWire{
+		ID:              uuidStr(f.ID),
+		Name:            f.Name,
+		Slug:            f.Slug,
+		Issuer:          f.Issuer,
+		LatestVersionID: uuidStr(f.LatestVersionID),
+	}
 }
 
 // listSCFVersions returns every SCF framework_version for the slice's
@@ -355,6 +508,8 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 			Code:  req.Code,
 			Title: req.Title,
 			Body:  req.Body,
+
+			PointsOfFocus: pointsOfFocusWire(req.PointsOfFocus),
 		},
 		"anchors": out,
 	})
@@ -403,27 +558,6 @@ func (h *Handler) lookupRequirement(ctx context.Context, idOrCode string) (dbx.F
 	return row, err == nil, err
 }
 
-func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (anchorWire, bool, error) {
-	if uid, err := uuid.Parse(idOrSCFID); err == nil {
-		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return anchorWire{}, false, nil
-		}
-		if err != nil {
-			return anchorWire{}, false, err
-		}
-		return anchorWireFromRow(row), true, nil
-	}
-	row, err := h.q.GetSCFAnchorBySCFID(ctx, idOrSCFID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return anchorWire{}, false, nil
-	}
-	if err != nil {
-		return anchorWire{}, false, err
-	}
-	return anchorWireFromRow(row), true, nil
-}
-
 func (h *Handler) pagination(r *http.Request) (int32, int32) {
 	limit := h.defaultLimit
 	offset := int32(0)
@@ -451,6 +585,9 @@ type anchorWire struct {
 	Family      string `json:"family"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// LegacySCFID is the anchor's code in the previous SCF release
+	// (#1769); absent when the imported catalog did not give one.
+	LegacySCFID *string `json:"legacy_scf_id,omitempty"`
 }
 
 type frameworkWire struct {
@@ -459,6 +596,8 @@ type frameworkWire struct {
 	Slug            string `json:"slug"`
 	Issuer          string `json:"issuer"`
 	LatestVersionID string `json:"latest_version_id,omitempty"`
+	// Set only for `?include=versions` (#2086).
+	Versions []frameworkVersionWire `json:"versions,omitempty"`
 }
 
 type frameworkVersionWire struct {
@@ -474,6 +613,21 @@ type requirementWire struct {
 	Code  string `json:"code"`
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+	// PointsOfFocus is the requirement's rolled-up SOC 2 points of focus
+	// (#1731): [{code, scf_anchors[]}]. Omitted when there are none, so the
+	// requirement object keeps its all-string shape for every other
+	// framework. Metadata only; points of focus are never requirements.
+	PointsOfFocus json.RawMessage `json:"points_of_focus,omitempty"`
+}
+
+// pointsOfFocusWire passes the stored points_of_focus JSONB through, or nil
+// (omitted) when the requirement has none.
+func pointsOfFocusWire(stored []byte) json.RawMessage {
+	var pofs []json.RawMessage
+	if err := json.Unmarshal(stored, &pofs); err != nil || len(pofs) == 0 {
+		return nil
+	}
+	return json.RawMessage(stored)
 }
 
 // requirementEdgeWire is one row of "anchors for a requirement" — the
@@ -530,10 +684,17 @@ type anchorStateCellWire struct {
 // the bare anchor list (no `?include=state`); it MAY be an empty array
 // when an anchor has no satisfaction edges yet (e.g. SCF anchor in a
 // family no framework has crosswalked).
+//
+// Issue #1741: on the current-version read, `control_id` is the tenant
+// control behind the anchor (the id the control detail page resolves)
+// and `control_count` how many active controls anchor to it. Both are
+// absent on the framework-version read, which does not join controls.
 type anchorWithStateWire struct {
 	anchorWire
-	State      *anchorStateCellWire `json:"state"`
-	Frameworks []string             `json:"frameworks"`
+	State        *anchorStateCellWire `json:"state"`
+	Frameworks   []string             `json:"frameworks"`
+	ControlID    *string              `json:"control_id,omitempty"`
+	ControlCount *int64               `json:"control_count,omitempty"`
 }
 
 // stateRowMeta is the subset of fields the wire-encoding step needs from
@@ -642,9 +803,16 @@ func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchor
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(latestStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
+		}
+		count := r.ControlCount
+		out[i].ControlCount = &count
+		if r.ControlID.Valid {
+			id := uuidStr(r.ControlID)
+			out[i].ControlID = &id
 		}
 	}
 	return out
@@ -660,6 +828,7 @@ func forVersionRowsToStateWire(rows []dbx.ListSCFAnchorsForVersionWithStateRow) 
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(forVersionStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
@@ -693,6 +862,7 @@ func anchorWireFromRow[R anchorRow](r R) anchorWire {
 		Family:      a.Family,
 		Name:        a.Title,
 		Description: a.Description,
+		LegacySCFID: a.LegacyScfID,
 	}
 }
 

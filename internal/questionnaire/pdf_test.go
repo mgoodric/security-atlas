@@ -4,10 +4,10 @@
 //   - buildHTML — every branch of the per-item rendering ladder
 //     (needs-mapping vs anchor present, answer present vs unanswered,
 //     domain present vs blank, answer_value present vs narrative-only).
-//   - encodeForDataURL — every replacement pair in the replacer.
-//   - isChromeUnavailable — nil-error, "exec:" prefix, "executable file
-//     not found" prefix, "no chrome found" prefix, and unrelated errors
-//     (negative case).
+//
+// The data-URL encoder and the chrome-unavailable classifier moved to
+// internal/pdfrender with the shared render helper (#1847); their tests
+// live in internal/pdfrender/print_test.go.
 //
 // RenderPDF itself is exercised end-to-end by the existing
 // internal/api/questionnaires/integration_test.go (AC-A5) when Chrome is
@@ -17,8 +17,6 @@
 package questionnaire
 
 import (
-	"errors"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -52,7 +50,7 @@ func TestBuildHTML_EscapesHTMLSpecialChars(t *testing.T) {
 				Code:        "Q&A-01",
 				Text:        "Does <vendor> require 'MFA'?",
 				Domain:      "Identity & Access",
-				ScfAnchorID: "IAC-06",
+				ScfAnchorID: "IAC-37",
 				AnswerValue: "yes",
 				Narrative:   "Configured at <provider>.",
 			},
@@ -107,7 +105,7 @@ func TestBuildHTML_AnchorBranch(t *testing.T) {
 			{
 				Code:         "X-02",
 				Text:         "mapped question",
-				ScfAnchorID:  "IAC-06",
+				ScfAnchorID:  "IAC-37",
 				NeedsMapping: false,
 			},
 		},
@@ -116,7 +114,7 @@ func TestBuildHTML_AnchorBranch(t *testing.T) {
 	if !strings.Contains(got, "SCF anchor:") {
 		t.Fatalf("expected SCF anchor line; got: %s", excerpt(got))
 	}
-	if !strings.Contains(got, "IAC-06") {
+	if !strings.Contains(got, "IAC-37") {
 		t.Fatal("expected anchor id in output")
 	}
 	if strings.Contains(got, "needs manual SCF mapping") {
@@ -186,63 +184,6 @@ func TestBuildHTML_EmptyItemsRendersHeaderOnly(t *testing.T) {
 	}
 }
 
-func TestEncodeForDataURL_ReplacesEveryControlChar(t *testing.T) {
-	// One assertion per replacement pair in the replacer.
-	cases := []struct {
-		raw  string
-		want string
-	}{
-		{"%", "%25"},
-		{"#", "%23"},
-		{"&", "%26"},
-		{"?", "%3F"},
-		{"\n", "%0A"},
-		{"\r", ""},
-	}
-	for _, tc := range cases {
-		t.Run(fmt.Sprintf("%q", tc.raw), func(t *testing.T) {
-			got := encodeForDataURL(tc.raw)
-			if got != tc.want {
-				t.Fatalf("encodeForDataURL(%q) = %q; want %q", tc.raw, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestEncodeForDataURL_PreservesSafeChars(t *testing.T) {
-	in := "<!doctype html><html><body><div>plain text 123 ABC</div></body></html>"
-	got := encodeForDataURL(in)
-	// Angle brackets and ASCII alpha/numerics are untouched.
-	if !strings.Contains(got, "<!doctype html>") {
-		t.Fatalf("unexpected mangling of safe chars: %s", got)
-	}
-}
-
-func TestIsChromeUnavailable_NilErrorIsFalse(t *testing.T) {
-	if isChromeUnavailable(nil) {
-		t.Fatal("nil error must report false")
-	}
-}
-
-func TestIsChromeUnavailable_RecognizesPatterns(t *testing.T) {
-	patterns := []string{
-		"exec: \"chrome\": executable file not found in $PATH",
-		"chromedp: executable file not found",
-		"chromedp: no chrome found in standard locations",
-	}
-	for _, p := range patterns {
-		if !isChromeUnavailable(errors.New(p)) {
-			t.Fatalf("expected pattern %q to be recognized as Chrome-unavailable", p)
-		}
-	}
-}
-
-func TestIsChromeUnavailable_UnrelatedErrorIsFalse(t *testing.T) {
-	if isChromeUnavailable(errors.New("network: i/o timeout")) {
-		t.Fatal("unrelated error must report false")
-	}
-}
-
 func TestRenderPDF_NilContextRejected(t *testing.T) {
 	_, err := RenderPDF(nil, PDFInput{QuestionnaireName: "Q"}) //nolint:staticcheck // explicit nil
 	if err == nil {
@@ -259,4 +200,29 @@ func excerpt(s string) string {
 		return s
 	}
 	return s[:240] + "...(truncated)"
+}
+
+func TestPDFItems_ProjectsQuestionsAndAnswers(t *testing.T) {
+	t.Parallel()
+	got := PDFItems([]Question{
+		{Code: "Q1", Text: "MFA?", Domain: "IAM", ScfAnchorID: "anchor-1",
+			Answer: &Answer{AnswerValue: "Yes", Narrative: "Enforced by the IdP."}},
+		{Code: "Q2", Text: "Unmapped", NeedsMapping: true},
+	})
+	want := []PDFItem{
+		{Code: "Q1", Text: "MFA?", Domain: "IAM", ScfAnchorID: "anchor-1",
+			AnswerValue: "Yes", Narrative: "Enforced by the IdP."},
+		{Code: "Q2", Text: "Unmapped", NeedsMapping: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d items, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("item %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if empty := PDFItems(nil); len(empty) != 0 {
+		t.Fatalf("PDFItems(nil) = %d items, want 0", len(empty))
+	}
 }

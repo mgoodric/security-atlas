@@ -19,13 +19,39 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/identity"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
 // is not present, has been revoked, or is past its rotation grace.
 var ErrUnknownKey = errors.New("credstore: unknown key")
+
+// KindCalendarRead is the AllowedKinds entry of an ICS feed token: a
+// credential minted by POST /v1/calendar/subscription that may only fetch
+// the feed (slice 094 decision D3).
+const KindCalendarRead = "calendar.read.v1"
+
+// CalendarOnly reports whether c is an ICS feed token: its kinds are
+// the set {KindCalendarRead} (a repeated entry is still that set). A key
+// whose kinds include KindCalendarRead among others is a general key and
+// is not one.
+func (c Credential) CalendarOnly() bool {
+	if len(c.Kinds) == 0 {
+		return false
+	}
+	for _, k := range c.Kinds {
+		if k != KindCalendarRead {
+			return false
+		}
+	}
+	return true
+}
 
 // Credential is the metadata view of an API key. Never includes the bearer
 // token plaintext.
@@ -57,6 +83,9 @@ type Credential struct {
 	// scopes for tenant B. IsAdmin implies IsApprover (admins can do
 	// anything an approver can) but the converse is not true.
 	//
+	// Policy approval also requires a person (#1807): a credential bound
+	// to no user (MinterUserID == "") holding IsApprover is refused there.
+	//
 	// In v1 the approver role is minted via IssueApprover. Slice 035
 	// will graduate this to full OPA-driven RBAC; until then the
 	// flag-on-credential pattern matches slice 014's IsAdmin shape.
@@ -67,32 +96,72 @@ type Credential struct {
 	// users) will replace this with a real user id from the IdP claims.
 	UserID string
 	// OwnerRoles is the list of control-owner roles this credential
-	// holds. Slice 011 introduces this as the gate for
-	// POST /v1/controls/{id}/attestations — the caller's OwnerRoles must
-	// include the control's `owner_role` (declared in the slice-009
-	// bundle manifest). IsAdmin acts as a wildcard: an admin holds every
-	// owner role implicitly. Slice 035 graduates this to OPA-driven RBAC.
+	// holds: an API key's admin-set label, or a JWT's role claim. Gates
+	// read it through authz (authz.HasOwnerRole for attestation, #2523),
+	// which drops a user session's claim: it outlives a revoke (#2381).
 	OwnerRoles []string
+	// TenantRoles is the caller's live user_roles for the current tenant,
+	// as authzmw resolved them for this request's decision (#2428). It is
+	// in memory only: never persisted, never set by authentication, and
+	// empty for a request that did not pass authzmw. Handler gates read it
+	// through authz.IsTenantAdmin / authz.IsTenantApprover, never directly.
+	TenantRoles []string
+	// Purpose marks a key minted for a specific job rather than an
+	// ordinary issue: PurposeBootstrapRecovery (the admin key
+	// reset-bootstrap mints) or PurposePolicySync. Persisted in
+	// api_keys.purpose, so the marker survives a restart; a Rotate
+	// successor inherits it.
+	Purpose string
+	// MintedBy is the users(id) uuid of whoever minted the key, for
+	// attribution only (api_keys.minted_by). It is NOT the key's identity:
+	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
+	// a Rotate successor inherits it.
+	MintedBy string
+	// Label is the admin-chosen name for an API key (api_keys.label,
+	// #2384). Display only; a Rotate successor inherits it.
+	Label string
+	// RetiresAt is api_keys.retires_at: non-zero on a rotated-out
+	// predecessor, which stops authenticating after it. Set by the
+	// DB-backed list (#1953); the in-memory maps track retirement apart.
+	RetiresAt time.Time
+	// System marks an in-process platform credential, not an API key:
+	// the identity a domain writer ingests its evidence under
+	// (ingest.SystemCredential). Never persisted and never authenticated;
+	// ingest records it as credential_type "system" in provenance.
+	System bool
 }
 
-// HasOwnerRole reports whether c can attest a control whose `owner_role`
-// equals role. Admin is a wildcard; otherwise c must list the role
-// verbatim in OwnerRoles. Empty role argument returns false so a control
-// bundle that forgot to declare an owner_role cannot be attested by
-// anyone but an admin.
-func (c Credential) HasOwnerRole(role string) bool {
-	if role == "" {
-		return c.IsAdmin
+// PurposeBootstrapRecovery marks the admin key POST
+// /v1/admin/install/reset-bootstrap mints (#1892). RevokePurpose finds
+// these by the marker and id, never by bearer.
+const PurposeBootstrapRecovery = "bootstrap-recovery"
+
+// PurposePolicySync marks a key that may only sync policies (#2849): the
+// Confluence policy connector's key. Every API surface refuses it
+// (PolicySyncOnly); only the policy sync endpoint will accept it.
+const PurposePolicySync = "policy-sync"
+
+// PolicySyncOnly reports whether c is a policy-sync key, which every route
+// but the policy sync endpoint refuses.
+func (c Credential) PolicySyncOnly() bool {
+	return c.Purpose == PurposePolicySync
+}
+
+// ExpiresAt is IssuedAt + TTL, or the zero time for a credential with no
+// TTL (it never expires).
+func (c Credential) ExpiresAt() time.Time {
+	if c.TTL <= 0 {
+		return time.Time{}
 	}
-	if c.IsAdmin {
-		return true
-	}
-	for _, r := range c.OwnerRoles {
-		if r == role {
-			return true
-		}
-	}
-	return false
+	return c.IssuedAt.Add(c.TTL)
+}
+
+// expired reports whether c's TTL has run out at now. The api_keys
+// expires_at column is the same IssuedAt + TTL, so a key expires in memory
+// at the moment LoadActive would stop reloading it (#1892).
+func (c Credential) expired(now time.Time) bool {
+	exp := c.ExpiresAt()
+	return !exp.IsZero() && now.After(exp)
 }
 
 // Persister is the optional durability backend for a Store (OE-435). When
@@ -162,6 +231,59 @@ type Store struct {
 	byTokenHash   map[string]*record
 	rotationGrace time.Duration
 	persist       Persister
+	gate          UserGate
+}
+
+// UserGate is the per-request durable check Authenticate runs on top of the
+// in-memory record.
+//
+// UserCanAuthenticate reports whether the user a credential belongs to may
+// still use it (#1915). Authenticate consults it for every credential owned
+// by a user, including ones served from memory, so a deactivated user's key
+// is refused even if its in-memory record outlived the revocation. keyID is
+// the credential's id when the store holds an api_keys row for it, and empty
+// for a memory-only credential. With a keyID the gate also refuses a key
+// whose row is revoked (#1947): RevokeUserInMemory reaches only the replica
+// that ran the deactivation, so on every other replica the durable
+// revoked_at is what keeps the key dead once the user is re-activated.
+//
+// KeyCanAuthenticate covers a persisted credential with no user (#1964):
+// admin-minted and push keys, rehydrated into every replica's memory at
+// boot. Revoke reaches only the replica that ran it, so the key's api_keys
+// row must exist and not be revoked. Memory-only credentials with no user
+// (the env bootstrap key, IssueFixedAdmin) have no row and skip the gate.
+type UserGate interface {
+	UserCanAuthenticate(tenantID, userID, keyID string) (bool, error)
+	KeyCanAuthenticate(tenantID, keyID string) (bool, error)
+}
+
+// SetUserGate wires the user-status check. Nil disables it.
+func (s *Store) SetUserGate(g UserGate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gate = g
+}
+
+// RevokeUserInMemory marks every in-memory credential owned by userID in
+// tenantID revoked, WITHOUT writing through to the Persister. It is the
+// after-commit step of deactivation (#1915): the durable revocation already
+// committed in the transaction that disabled the user. Returns the number of
+// records revoked.
+func (s *Store) RevokeUserInMemory(tenantID, userID string) int {
+	if userID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, r := range s.byID {
+		if r.state != stateActive || r.cred.TenantID != tenantID || r.cred.UserID != userID {
+			continue
+		}
+		r.state = stateRevoked
+		n++
+	}
+	return n
 }
 
 // New returns a Store. rotationGrace controls how long a rotated-out
@@ -253,6 +375,49 @@ func (s *Store) Issue(tenantID, scope string, kinds []string, ttl time.Duration)
 	return s.issueLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
 }
 
+// IssueMinted is Issue with the minting admin recorded in MintedBy, the
+// gRPC AdminCredentialsService.Issue path (#1947). mintedBy is a users(id)
+// uuid or empty, and is attribution only: the key stays a machine key whose
+// UserID is its own id, so it never acts as the minter and keeps working
+// after the minter is disabled. Operators revoke such keys deliberately.
+func (s *Store) IssueMinted(tenantID, scope string, kinds []string, ttl time.Duration, mintedBy string) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	cred.MintedBy = mintedBy
+	r.cred = cred
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
+// IssueOwned is Issue for a key that belongs to a person: its UserID is
+// userID, a users(id) uuid, persisted as api_keys.issued_by. The key is
+// that person's own: Authenticate refuses it once they are deactivated,
+// and deactivation revokes it. The calendar subscription mints its ICS
+// token this way, so the feed can show its owner only the modules they
+// may see (#2173). An empty userID mints an ordinary unowned key, as Issue.
+func (s *Store) IssueOwned(tenantID string, kinds []string, ttl time.Duration, userID string) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, "", kinds, ttl, "", false, false, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	if userID != "" {
+		cred.UserID = userID
+		r.cred = cred
+	}
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
 // IssueAdmin mints an admin-flagged credential for tenantID. Admin
 // credentials are still tenant-scoped — they unlock admin-only actions
 // (e.g. POST /v1/schemas) for THIS tenant only. There is no global admin
@@ -262,6 +427,32 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.issueLocked(tenantID, "", nil, ttl, "", true, true, nil)
+}
+
+// IssueRecoveryAdmin mints the admin key reset-bootstrap writes to the
+// bootstrap-token file (#1892): IssueAdmin, marked
+// PurposeBootstrapRecovery, with the minting user recorded in MintedBy.
+// mintedBy is a users(id) uuid or empty. It is attribution only: the
+// key's UserID stays its own credential id, so the key never acts as, or
+// counts as a key of, the user who minted it. ttl must be positive: a
+// recovery key always expires.
+func (s *Store) IssueRecoveryAdmin(tenantID string, ttl time.Duration, mintedBy string) (Credential, string, error) {
+	if ttl <= 0 {
+		return Credential{}, "", errors.New("credstore: recovery admin key needs a positive ttl")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, "", nil, ttl, "", true, true, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	cred.Purpose = PurposeBootstrapRecovery
+	cred.MintedBy = mintedBy
+	r.cred = cred
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
 }
 
 // IssueFixedAdmin mints an admin-flagged credential for tenantID whose
@@ -341,7 +532,24 @@ func (s *Store) IssueOwner(tenantID string, roles []string, ttl time.Duration) (
 func (s *Store) Rotate(id string) (successor Credential, bearer string, predecessorExpiresAt time.Time, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.rotateLocked(id, func(pc PersistedCredential, pred *record, retiresAt time.Time) error {
+		if pred.persisted {
+			if perr := s.persist.Rotate(pc, id, pred.cred.TenantID, retiresAt); perr != nil {
+				return fmt.Errorf("credstore: persist rotate: %w", perr)
+			}
+			return nil
+		}
+		if perr := s.persist.Insert(pc); perr != nil {
+			return fmt.Errorf("credstore: persist rotate successor: %w", perr)
+		}
+		return nil
+	})
+}
 
+// rotateLocked builds the successor of id and, when a Persister is
+// attached, hands it to persist before either key changes in memory.
+// Caller must hold s.mu.
+func (s *Store) rotateLocked(id string, persist func(pc PersistedCredential, pred *record, retiresAt time.Time) error) (successor Credential, bearer string, predecessorExpiresAt time.Time, err error) {
 	pred, ok := s.byID[id]
 	if !ok || pred.state != stateActive {
 		err = ErrUnknownKey
@@ -357,25 +565,27 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 	if err != nil {
 		return
 	}
+	// A rotated recovery key stays a recovery key, so rotation cannot
+	// strip the marker the next reset and sign-in revoke by.
+	successor.Purpose = pred.cred.Purpose
+	rec.cred.Purpose = pred.cred.Purpose
+	successor.MintedBy = pred.cred.MintedBy
+	rec.cred.MintedBy = pred.cred.MintedBy
+	successor.Label = pred.cred.Label
+	rec.cred.Label = pred.cred.Label
 
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
 	if s.persist != nil {
 		pc := PersistedCredential{Cred: successor, TokenHashHex: rec.tokenHash}
-		if pred.persisted {
-			if perr := s.persist.Rotate(pc, id, pred.cred.TenantID, predecessorExpiresAt); perr != nil {
-				err = fmt.Errorf("credstore: persist rotate: %w", perr)
-				return
-			}
-		} else {
+		if !pred.persisted {
 			// The predecessor has no api_keys row (memory-only bootstrap
 			// credential), so its retirement is memory-only too and the
 			// successor's rotated_from must be cleared — the FK it names
 			// does not exist.
 			pc.Cred.RotatedFrom = ""
-			if perr := s.persist.Insert(pc); perr != nil {
-				err = fmt.Errorf("credstore: persist rotate successor: %w", perr)
-				return
-			}
+		}
+		if err = persist(pc, pred, predecessorExpiresAt); err != nil {
+			return
 		}
 		rec.persisted = true
 	}
@@ -405,6 +615,46 @@ func (s *Store) Revoke(id string) error {
 	return nil
 }
 
+// TenantOf reports the tenant of the credential with id, in any state.
+// The gRPC admin service uses it to keep Rotate and Revoke inside the
+// caller's tenant (#2167).
+func (s *Store) TenantOf(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byID[id]
+	if !ok {
+		return "", false
+	}
+	return r.cred.TenantID, true
+}
+
+// RevokePurpose revokes every live credential, in any tenant, marked with
+// purpose, except the one whose id is except (empty spares none). It
+// matches on the marker and the id only, never on a bearer. Returns the
+// revoked ids. Stops at the first durable-revoke failure and returns the
+// ids revoked so far with the error.
+func (s *Store) RevokePurpose(purpose, except string) ([]string, error) {
+	if purpose == "" {
+		return nil, errors.New("credstore: RevokePurpose needs a purpose")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var revoked []string
+	for id, r := range s.byID {
+		if r.state != stateActive || r.cred.Purpose != purpose || id == except {
+			continue
+		}
+		if s.persist != nil && r.persisted {
+			if err := s.persist.Revoke(id, r.cred.TenantID); err != nil {
+				return revoked, fmt.Errorf("credstore: persist revoke: %w", err)
+			}
+		}
+		r.state = stateRevoked
+		revoked = append(revoked, id)
+	}
+	return revoked, nil
+}
+
 // List returns active credentials for a tenant. Metadata only.
 func (s *Store) List(tenantID string) []Credential {
 	s.mu.Lock()
@@ -415,6 +665,9 @@ func (s *Store) List(tenantID string) []Credential {
 			continue
 		}
 		if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
+			continue
+		}
+		if r.cred.expired(time.Now().UTC()) {
 			continue
 		}
 		out = append(out, r.cred)
@@ -447,18 +700,123 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 // Authenticate resolves a plaintext bearer to its credential. Updates
 // LastUsedAt on success (in-memory only — the durable last_used_at column
 // is a cosmetic mirror the auth hot path deliberately does not touch).
+//
+// A credential owned by a user, and any persisted credential, is also
+// checked against the UserGate, outside the lock so a slow DB never stalls
+// other lookups. A deactivated owner or a durably revoked key refuses with
+// ErrUnknownKey; a gate error fails closed. The gate reads the database on
+// every such request, uncached, so a revocation committed on any replica
+// holds here from the next request (#1964).
 func (s *Store) Authenticate(token string) (Credential, error) {
+	cred, gate, persisted, err := s.authenticateLocked(token)
+	if err != nil {
+		return Credential{}, err
+	}
+	if gate == nil {
+		return cred, nil
+	}
+	var ok bool
+	var gerr error
+	switch {
+	case OwnedByUser(cred):
+		keyID := ""
+		if persisted {
+			keyID = cred.ID
+		}
+		ok, gerr = gate.UserCanAuthenticate(cred.TenantID, cred.UserID, keyID)
+	case persisted:
+		ok, gerr = gate.KeyCanAuthenticate(cred.TenantID, cred.ID)
+	default:
+		return cred, nil
+	}
+	if gerr != nil {
+		return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
+	}
+	if !ok {
+		return Credential{}, ErrUnknownKey
+	}
+	return cred, nil
+}
+
+func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
-		return Credential{}, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
-		return Credential{}, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
+	}
+	if r.cred.expired(time.Now().UTC()) {
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	r.cred.LastUsedAt = time.Now().UTC()
-	return r.cred, nil
+	return r.cred, s.gate, r.persisted, nil
+}
+
+// MinterUserID returns the users(id) uuid behind the caller c, for
+// api_keys.minted_by (attribution only, never the new key's identity), or
+// "" when the caller is not a user. A JWT carries "user:<uuid>"; a key
+// issued by a user carries the bare uuid; a bootstrap or machine
+// credential carries neither and records no minter.
+func MinterUserID(c Credential) string {
+	u, ok := CallerUserID(c)
+	if !ok {
+		return ""
+	}
+	return u.String()
+}
+
+// PrincipalOf names who is behind the caller c, stably across sessions:
+// the bare users(id) uuid for a person, else c.UserID (an unbound key's own
+// "key_..." id, "oauth_client:<id>", "bootstrap-admin"), else c.ID. It is
+// what approval records as the requester and compares against (#2101).
+// Never the JWT credential id when anything better exists: that is per
+// token ("jwt:<jti>"), and approval reads that prefix as a pre-#1807
+// session requester it cannot compare.
+func PrincipalOf(c Credential) string {
+	if u := MinterUserID(c); u != "" {
+		return u
+	}
+	if c.UserID != "" {
+		return c.UserID
+	}
+	return c.ID
+}
+
+// CallerUserID returns the users(id) behind the caller c, and false when c
+// is not a user. It is the one place code turns cred.UserID into a users(id)
+// (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).
+//
+//   - A JWT session (local login, PKCE, device grant) carries "user:<uuid>":
+//     the prefix is stripped and the uuid resolves.
+//   - A key issued to a user carries that user's bare uuid: it resolves.
+//   - An unbound key (UserID == its own "key_..." ID), the bootstrap admin
+//     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
+//     users and never resolve, even when the remainder happens to parse.
+//
+// authz.BuildInput keeps the raw cred.UserID. /v1/me's resolveRoles keys
+// user_roles by this value for a user caller (#2216). The prefix rule itself
+// lives in identity.UserID, shared with the auditor attrs resolver.
+func CallerUserID(c Credential) (uuid.UUID, bool) {
+	if c.UserID == "" || c.UserID == c.ID {
+		return uuid.Nil, false
+	}
+	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
+		return uuid.Nil, false
+	}
+	return identity.UserID(c.UserID)
+}
+
+// OwnedByUser reports whether c belongs to a user: its UserID is a users(id)
+// uuid rather than its own "key_..." credential id.
+func OwnedByUser(c Credential) bool {
+	if c.UserID == "" || c.UserID == c.ID {
+		return false
+	}
+	_, err := uuid.Parse(c.UserID)
+	return err == nil
 }
 
 // issueLocked inserts a new credential, writing through to the Persister
@@ -468,15 +826,24 @@ func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Dur
 	if err != nil {
 		return Credential{}, "", err
 	}
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
+// commitLocked writes a built credential through to the Persister (when
+// attached) and then makes it visible in the maps. Caller must hold s.mu.
+func (s *Store) commitLocked(cred Credential, r *record) error {
 	if s.persist != nil {
 		if err := s.persist.Insert(PersistedCredential{Cred: cred, TokenHashHex: r.tokenHash}); err != nil {
-			return Credential{}, "", fmt.Errorf("credstore: persist issue: %w", err)
+			return fmt.Errorf("credstore: persist issue: %w", err)
 		}
 		r.persisted = true
 	}
 	s.byID[cred.ID] = r
 	s.byTokenHash[r.tokenHash] = r
-	return cred, token, nil
+	return nil
 }
 
 // buildLocked constructs a credential + record WITHOUT inserting it into

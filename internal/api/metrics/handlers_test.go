@@ -320,6 +320,39 @@ func TestUpsertTarget_RequiresAdmin(t *testing.T) {
 	}
 }
 
+// #2572: the target gate is IsTenantApprover over the live tenant roles,
+// the same as a framework posture target. admin and grc_engineer pass it
+// (and fall through to the next pre-DB check, the malformed body); every
+// other role is refused.
+func TestUpsertTarget_ApproverGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		role string
+		want int
+	}{
+		{"admin", http.StatusBadRequest},
+		{"grc_engineer", http.StatusBadRequest},
+		{"control_owner", http.StatusForbidden},
+		{"auditor", http.StatusForbidden},
+		{"viewer", http.StatusForbidden},
+	} {
+		t.Run(c.role, func(t *testing.T) {
+			t.Parallel()
+			cred := nonAdminCred()
+			cred.TenantRoles = []string{c.role}
+			h := New(nil)
+			rr := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPut, "/v1/metrics/x/target", strings.NewReader(`{not-json`))
+			r = withURLParam(r, "id", "x")
+			r = r.WithContext(withAuthAndTenant(r.Context(), cred))
+			h.UpsertTarget(rr, r)
+			if rr.Code != c.want {
+				t.Fatalf("%s: status %d; want %d (body=%s)", c.role, rr.Code, c.want, rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestUpsertTarget_MissingID(t *testing.T) {
 	t.Parallel()
 	h := New(nil)

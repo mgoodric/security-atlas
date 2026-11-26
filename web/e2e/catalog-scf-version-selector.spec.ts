@@ -9,36 +9,42 @@
 // hermetic-mock convention). The mock returns DIFFERENT requirement sets for
 // the unpinned (current) read and the pinned (legacy version) read, proving the
 // selector drives a version-pinned re-fetch with no cross-version bleed.
+//
+// #1800: the mock rows are the platform's flat requirementForAnchorWire
+// shape (the shape GET /v1/anchors/{id}/requirements serves), which the page
+// now reads; the option value is the row's framework_slug:version.
 
 import { expect, test } from "./fixtures";
 
-const ANCHOR_ID = "IAC-06";
+const ANCHOR_ID = "IAC-37";
 
 // The unpinned (current-versions) payload: SOC 2 2017 (current) carries CC6.1.
 function currentPayload() {
   return {
     anchor: {
       id: "00000000-0000-4000-8000-0000000000a1",
-      scf_id: "IAC-06",
+      scf_id: "IAC-37",
       family: "IAC",
       name: "Multi-Factor Authentication",
       description: "Mock anchor for slice 484 e2e.",
     },
     requirements: [
       {
-        requirement: {
-          id: "00000000-0000-4000-8000-000000000011",
-          framework_version_id: "fv-soc2-2017",
-          code: "CC6.1",
-          text: "Logical access controls — current version row.",
-        },
-        framework_version: {
-          id: "fv-soc2-2017",
-          framework: "SOC2",
-          version: "2017",
-        },
-        strm_type: "equal",
+        edge_id: "00000000-0000-4000-8000-000000000011-edge",
+        requirement_id: "00000000-0000-4000-8000-000000000011",
+        code: "CC6.1",
+        title: "Logical access controls — current version row.",
+        framework_slug: "soc2",
+        framework_name: "SOC2",
+        framework_version: "2017",
+        framework_version_id: "fv-soc2-2017",
+        framework_version_status: "current",
+        relationship_type: "equal",
         strength: 0.9,
+        coverage: null,
+        source_attribution: "scf-strm",
+        mapping_tier: "verified",
+        origin: "catalog",
       },
     ],
   };
@@ -51,19 +57,21 @@ function pinnedPayload() {
     anchor: currentPayload().anchor,
     requirements: [
       {
-        requirement: {
-          id: "00000000-0000-4000-8000-000000000022",
-          framework_version_id: "fv-soc2-rev",
-          code: "CC6.1b",
-          text: "Logical access controls — synthetic adjacent revision row.",
-        },
-        framework_version: {
-          id: "fv-soc2-rev",
-          framework: "SOC2",
-          version: "2017-synthetic-rev",
-        },
-        strm_type: "equal",
+        edge_id: "00000000-0000-4000-8000-000000000022-edge",
+        requirement_id: "00000000-0000-4000-8000-000000000022",
+        code: "CC6.1b",
+        title: "Logical access controls — synthetic adjacent revision row.",
+        framework_slug: "soc2",
+        framework_name: "SOC2",
+        framework_version: "2017-synthetic-rev",
+        framework_version_id: "fv-soc2-rev",
+        framework_version_status: "current",
+        relationship_type: "equal",
         strength: 0.9,
+        coverage: null,
+        source_attribution: "scf-strm",
+        mapping_tier: "verified",
+        origin: "catalog",
       },
     ],
   };

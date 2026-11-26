@@ -1,36 +1,205 @@
 bundle_schema_version: "1"
 bundle_id: soc2_a1_1_capacity_monitoring
-title: "Production endpoints reporting performance posture"
+title: "Production endpoints reporting posture have capacity headroom"
 description: |
-  The entity maintains, monitors, and evaluates current processing
-  capacity and use of system components to manage capacity demand and
-  to enable the implementation of additional capacity (TSC A1.1).
-  Endpoint posture from osquery surfaces CPU / memory / disk
-  saturation for the in-scope production hosts; the query asserts each
-  reports values within healthy thresholds on the most recent sample.
+  Production capacity is tracked against demand so headroom can be added
+  before load outgrows it (TSC A1.1). The test is that every production
+  host is under 85% disk use, under 90% memory use and under 90% CPU at
+  the 5-minute p95.
 
-scf_anchor_id: MON-01
+  What runs today: two SQL queries, one per source, each checking all
+  three readings on its own. Both take each host's latest in-window
+  record and count only hosts whose latest record has `host_role`
+  `production`. A production host fails when its `disk_used_percent` is
+  85 or more, its `memory_used_percent` 90 or more, or its
+  `cpu_p95_5m_percent` 90 or more; any failing production host fails that
+  query. A query passes only when every production host it sees has all
+  three readings and all three are under their bounds. It is inconclusive
+  when any production host is missing a reading, when no host is
+  production, or when it has no in-window record. A reading that is
+  present but not a number counts as over.
+
+  The control fails when either query fails, and otherwise passes when
+  either query passes. That is how the engine rolls up a control's
+  queries (any fail, then any pass). It is why neither query checks one
+  reading and leaves the others to the second source: a disk-only query
+  would pass on disk alone while the memory and CPU query had no record,
+  and a missing reading must never be a pass. A production host one
+  source sees and the other does not is therefore checked only by the
+  source that sees it: a host in Fleet but not in Datadog is unchecked
+  when the Datadog query passes, the same gap as a host that never
+  reported (#2834).
+
+  Datadog (`monitoring.host_capacity.v1`): the Datadog connector run with
+  `--capacity-production-scope`, which pushes one record per host in that
+  tag scope (e.g. `env:production`), so every record is production
+  (`host_role_source` names the scope). Over the last 5 minutes it reads
+  `memory_used_percent` as (1 - `system.mem.pct_usable`) * 100 at the
+  latest point, `cpu_p95_5m_percent` as the nearest-rank 95th percentile
+  of 100 - `system.cpu.idle` at a 15-second rollup (left out under 10
+  points), and `disk_used_percent` as the fullest device's
+  `system.disk.used` / `system.disk.total` (left out when any device has
+  no usable total). Hosts are keyed by `host_name` and ordered by
+  `window_end`, then `observed_at`. Records without a `host_name` are left
+  out.
+
+  osquery (`osquery.host_posture.v1`): the osquery connector supplies
+  `disk_used_percent` from Fleet's `percent_disk_space_available`, and
+  `host_role` `production` when the host carries the Fleet label the
+  operator names with `--production-label` (`host_role_source` names it).
+  Fleet's host API has no memory-use or CPU-use field, so the connector
+  never emits `memory_used_percent` or `cpu_p95_5m_percent`, and this
+  query fails on disk use or is inconclusive unless another pusher
+  supplies them. Hosts are keyed by `host_uuid` and ordered by the host's
+  own `last_seen_at`, then `observed_at`. Records without a `host_uuid`
+  are left out, and records before schema 1.3.0 carry none of these
+  fields, so their hosts are not production. The connector's per-record
+  verdict, which is disk encryption plus screen lock, is not used.
+
+  The two sources are not joined: Datadog has no host UUID, and a host's
+  name in Datadog is not checked against Fleet. When a host's latest
+  records tie, the host is production if any tied record says so, fails
+  if any tied record is over a bound, and passes only if every tied record
+  has all three readings under.
+
+  A `last_seen_at` or `window_end` that is not a full RFC 3339
+  timestamp, or is more than an hour after the evaluation instant
+  (`evaluated_at`), ranks as a missing one does: below every readable
+  value. It never errors the query, so the other hosts still decide.
+
+  Not checked: hosts outside the production label or scope, capacity
+  trends or forecasts, and anything but the latest reading. Only the
+  records the control receives are checked: a production host that never
+  reported is not seen, which waits on an endpoint inventory (#2834).
+
+scf_anchor_id: MON-02
+scf_release: test-2026.3
 control_family: MON
 implementation_type: automated
 owner_role: it-operations
 lifecycle_state: active
-freshness_class: hourly
+freshness_class: realtime
 
 evidence_queries:
   - id: production_capacity_healthy
-    language: rego
+    language: sql
     evidence_kind: osquery.host_posture.v1
-    description: "Every production host reports capacity headroom on the most recent sample"
+    description: "Every production host's latest posture record is under 85% disk, 90% memory and 90% p95 CPU"
     expression: |
-      package atlas.controls.soc2.a1_1
-
-      default allow := false
-
-      allow if {
-        every p in input.posture_records {
-          p.host_role == "production"
-          p.capacity.disk_pct_used < 85
-          p.capacity.memory_pct_used < 90
-          p.capacity.cpu_pct_used_p95_5m < 90
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(host_state = 'fail') THEN 'fail'
+               WHEN bool_and(host_state = 'pass') THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT host,
+               CASE
+                 WHEN bool_or(disk = 'over' OR mem = 'over' OR cpu = 'over') THEN 'fail'
+                 WHEN bool_and(disk = 'ok' AND mem = 'ok' AND cpu = 'ok') THEN 'pass'
+                 ELSE 'unread'
+               END AS host_state
+        FROM (
+          SELECT host, role,
+                 CASE
+                   WHEN d IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(d) = 'number' AND d::numeric < 85 THEN 'ok'
+                   ELSE 'over'
+                 END AS disk,
+                 CASE
+                   WHEN m IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(m) = 'number' AND m::numeric < 90 THEN 'ok'
+                   ELSE 'over'
+                 END AS mem,
+                 CASE
+                   WHEN c IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(c) = 'number' AND c::numeric < 90 THEN 'ok'
+                   ELSE 'over'
+                 END AS cpu
+          FROM (
+            SELECT payload->>'host_uuid' AS host,
+                   payload->>'host_role' AS role,
+                   payload->'disk_used_percent' AS d,
+                   payload->'memory_used_percent' AS m,
+                   payload->'cpu_p95_5m_percent' AS c,
+                   rank() OVER (
+                     PARTITION BY payload->>'host_uuid'
+                     ORDER BY CASE
+                                WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                                     AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                                  THEN CASE
+                                         WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+                                           THEN (payload->>'last_seen_at')::timestamptz
+                                       END
+                              END DESC NULLS LAST,
+                              observed_at DESC
+                   ) AS recency
+            FROM evidence
+            WHERE coalesce(payload->>'host_uuid', '') <> ''
+          ) AS ranked
+          WHERE recency = 1
+        ) AS latest
+        GROUP BY host
+        HAVING bool_or(role = 'production')
+      ) AS per_host
+  - id: production_capacity_healthy_monitoring
+    language: sql
+    evidence_kind: monitoring.host_capacity.v1
+    description: "Every production host's latest monitoring capacity record is under 85% disk, 90% memory and 90% p95 CPU"
+    expression: |
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(host_state = 'fail') THEN 'fail'
+               WHEN bool_and(host_state = 'pass') THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT host,
+               CASE
+                 WHEN bool_or(disk = 'over' OR mem = 'over' OR cpu = 'over') THEN 'fail'
+                 WHEN bool_and(disk = 'ok' AND mem = 'ok' AND cpu = 'ok') THEN 'pass'
+                 ELSE 'unread'
+               END AS host_state
+        FROM (
+          SELECT host, role,
+                 CASE
+                   WHEN d IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(d) = 'number' AND d::numeric < 85 THEN 'ok'
+                   ELSE 'over'
+                 END AS disk,
+                 CASE
+                   WHEN m IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(m) = 'number' AND m::numeric < 90 THEN 'ok'
+                   ELSE 'over'
+                 END AS mem,
+                 CASE
+                   WHEN c IS NULL THEN 'unread'
+                   WHEN jsonb_typeof(c) = 'number' AND c::numeric < 90 THEN 'ok'
+                   ELSE 'over'
+                 END AS cpu
+          FROM (
+            SELECT payload->>'host_name' AS host,
+                   payload->>'host_role' AS role,
+                   payload->'disk_used_percent' AS d,
+                   payload->'memory_used_percent' AS m,
+                   payload->'cpu_p95_5m_percent' AS c,
+                   rank() OVER (
+                     PARTITION BY payload->>'host_name'
+                     ORDER BY CASE
+                                WHEN payload->>'window_end' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                                     AND pg_input_is_valid(payload->>'window_end', 'timestamptz')
+                                  THEN CASE
+                                         WHEN (payload->>'window_end')::timestamptz <= evaluated_at + interval '1 hour'
+                                           THEN (payload->>'window_end')::timestamptz
+                                       END
+                              END DESC NULLS LAST,
+                              observed_at DESC
+                   ) AS recency
+            FROM evidence
+            WHERE coalesce(payload->>'host_name', '') <> ''
+          ) AS ranked
+          WHERE recency = 1
+        ) AS latest
+        GROUP BY host
+        HAVING bool_or(role = 'production')
+      ) AS per_host

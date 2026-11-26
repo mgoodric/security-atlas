@@ -361,11 +361,11 @@ atlas-k8s permissions
 | `--environment`                   | `run`       | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                    |
 | `--api-server`                    | `run`       | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                                  |
 | `--auth-mode`                     | `run`       | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                            |
-| `--rbac-control`                  | `run`       | no       | `scf:IAC-21`                  | control id attached to RBAC records                                                                           |
-| `--workload-control`              | `run`       | no       | `scf:CFG-02`                  | control id attached to workload records                                                                       |
-| `--netpol-control`                | `run`       | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                         |
-| `--pss-control`                   | `run`       | no       | `scf:CFG-02`                  | control id attached to PSS admission records                                                                  |
-| `--secret-control`                | `run`       | no       | `scf:CRY-01`                  | control id attached to Secret-inventory records                                                               |
+| `--rbac-control`                  | `run`       | no       | `scf:IAC-10`                  | control id attached to RBAC records                                                                           |
+| `--workload-control`              | `run`       | no       | `scf:CFG-04`                  | control id attached to workload records                                                                       |
+| `--netpol-control`                | `run`       | no       | (empty)                       | control id for NetworkPolicy records; empty routes each record to every control that queries the kind (#2924) |
+| `--pss-control`                   | `run`       | no       | `scf:CFG-04`                  | control id attached to PSS admission records                                                                  |
+| `--secret-control`                | `run`       | no       | `scf:CRY-02`                  | control id attached to Secret-inventory records                                                               |
 | `--skip-rbac`                     | `run`       | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                           |
 | `--skip-workload`                 | `run`       | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull                                                              |
 | `--skip-netpol`                   | `run`       | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull                                                                 |
@@ -449,10 +449,9 @@ run that crosses an hour boundary writes a fresh record.
   **default-deny** in a direction when it has at least one policy that selects
   every pod (empty `podSelector`) **and** governs that direction with **zero**
   allow rules — the Kubernetes canonical default-deny shape. `PASS` when
-  default-deny holds for at least one direction; `FAIL` when the namespace has no
-  default-deny (unprotected, or only per-pod allow rules); `INCONCLUSIVE` when a
-  per-namespace read errored. The platform evaluator owns the final
-  (control, namespace) call (e.g. whether default-deny ingress alone suffices).
+  default-deny holds for both ingress and egress; `FAIL` when either direction is
+  open (no policy, only per-pod allow rules, or default-deny in one direction
+  only, #2745); `INCONCLUSIVE` when a per-namespace read errored.
 - **`k8s.pod_security_admission.v1` → `PASS` / `FAIL`.** The connector verdicts
   the per-namespace admission posture from the `enforce` label: `PASS` when the
   namespace **enforces** a hardened level (`baseline` or `restricted`); `FAIL`

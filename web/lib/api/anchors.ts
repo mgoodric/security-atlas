@@ -4,6 +4,7 @@
 // `AnchorWithState` from here, decision D6).
 
 import { apiFetch } from "./_shared";
+import type { CoverageRequirement } from "./control-detail";
 
 export type Anchor = {
   id: string;
@@ -19,29 +20,35 @@ export type FrameworkVersion = {
   version: string;
 };
 
-export type Requirement = {
-  id: string;
-  framework_version_id: string;
-  code: string;
-  text: string;
-};
-
-export type RequirementWithMapping = {
-  requirement: Requirement;
-  framework_version: FrameworkVersion;
-  strm_type: "equal" | "subset_of" | "intersects";
-  strength: number;
-};
+// AnchorRequirement is one row of GET /v1/anchors/{id}/requirements. The
+// platform serves the same `requirementForAnchorWire` shape on that route and
+// on GET /v1/controls/{id}/coverage (internal/api/ucfcoverage/handlers.go), so
+// it is the control-coverage row type. `coverage` is always null here (not
+// computed on this surface).
+//
+// #1800 — this replaced a nested `{requirement, framework_version,
+// strm_type}` shape the platform never served: the anchor detail page now
+// reads the real fields, including `origin` and the overlay provenance.
+export type AnchorRequirement = CoverageRequirement;
 
 export type AnchorDetail = {
   anchor: Anchor;
-  requirements: RequirementWithMapping[];
+  requirements: AnchorRequirement[];
+  scf_release?: string;
 };
 
-export async function listAnchors(bearer: string): Promise<Anchor[]> {
+// listAnchors reads the current SCF release's anchors. `scf_release` is the
+// release they are in (#1774), absent for an empty catalog; a caller that
+// binds one of their codes names it.
+export async function listAnchors(
+  bearer: string,
+): Promise<{ anchors: Anchor[]; scf_release?: string }> {
   const res = await apiFetch("/v1/anchors", bearer);
-  const body = (await res.json()) as { anchors: Anchor[] };
-  return body.anchors;
+  const body = (await res.json()) as {
+    anchors: Anchor[];
+    scf_release?: string;
+  };
+  return { anchors: body.anchors, scf_release: body.scf_release };
 }
 
 // ----- Slice 104: anchors with optional joined state -----
@@ -66,9 +73,16 @@ export type AnchorState = {
 // backend (`internal/catalog/framework_codes.go`), and the frontend is
 // a pure renderer (P0-226-2). Empty array means the anchor has no
 // satisfaction edges yet; the page renders `—` in that case (AC-6).
+//
+// Issue #1741 — on the current-version read, `control_id` is the tenant
+// control behind the anchor (absent when there is none) and
+// `control_count` how many active controls anchor to it. The control
+// detail page resolves `control_id`, never the anchor `id`.
 export type AnchorWithState = Anchor & {
   state: AnchorState | null;
   frameworks: string[];
+  control_id?: string;
+  control_count?: number;
 };
 
 // Slice 224 — accepts an optional `scopeCellID` that, when set, is
@@ -76,15 +90,34 @@ export type AnchorWithState = Anchor & {
 // rollup narrows to evaluations recorded against that scope cell.
 // Server-side filtering only (P0-224-2): the applicability_expr never
 // reaches the browser.
+//
+// Issue #1741 — `hasControl` forwards `?has_control=true|false` (filtered
+// in SQL ahead of paging), and the totals the platform returns alongside
+// the page are passed through for the header count. Issue #1832 —
+// `limit` caps the page, so a caller after the totals can ask for one row.
+// Issue #1740 — `offset` skips that many rows, so the catalog can be walked
+// page by page past the platform's 500-row cap.
+export type AnchorsWithStatePage = {
+  anchors: AnchorWithState[];
+  total?: number;
+  catalog_total?: number;
+  with_control_total?: number;
+};
+
 export async function listAnchorsWithState(
   bearer: string,
   scopeCellID?: string,
-): Promise<AnchorWithState[]> {
+  hasControl?: boolean,
+  limit?: number,
+  offset?: number,
+): Promise<AnchorsWithStatePage> {
   const qs = new URLSearchParams({ include: "state" });
   if (scopeCellID) qs.set("scope", scopeCellID);
+  if (hasControl !== undefined) qs.set("has_control", String(hasControl));
+  if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
   const res = await apiFetch(`/v1/anchors?${qs.toString()}`, bearer);
-  const body = (await res.json()) as { anchors: AnchorWithState[] };
-  return body.anchors;
+  return (await res.json()) as AnchorsWithStatePage;
 }
 
 // Slice 484 — `frameworkVersion` pins the reverse traversal to one framework

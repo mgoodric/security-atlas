@@ -117,7 +117,7 @@ func TestRun_PushesMonitorRecords(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	rec, err := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	rec, err := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -142,8 +142,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 	api := &fakeMonitorsAPI{monitors: []monitors.RawMonitor{{ID: "1", Name: "n", Type: "t", Enabled: true}}}
 	raw, _ := monitors.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	r1, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
-	r2, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	r1, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
+	r2, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -168,7 +168,7 @@ func TestEmittedRecords_NoSecretsOrPII(t *testing.T) {
 	}}
 	raw, _ := monitors.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	rec, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	rec, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"source_vendor": true, "rule_id": true, "rule_name": true, "rule_type": true,
@@ -203,7 +203,7 @@ func TestRun_PushesSIEMRuleRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	rec, err := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+	rec, err := siemrules.Build(rules[0], "scf:THR-02", actorID("siemrules"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestSIEMEmittedRecords_NoSecretsOrPII(t *testing.T) {
 			Handles: []string{"@oncall@fixture.invalid", "@slack-ops"}},
 	}}
 	rules, _ := siemrules.Collect(context.Background(), api, fixed)
-	rec, _ := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+	rec, _ := siemrules.Build(rules[0], "scf:THR-02", actorID("siemrules"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"rule_id": true, "rule_name": true, "detection_class": true,
@@ -269,7 +269,7 @@ func TestRun_PushesSIEMSignalRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	rec, err := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+	rec, err := siemsignals.Build(signals[0], "scf:IRO-06", actorID("siemsignals"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestSIEMSignalEmittedRecords_NoBodyOrPII(t *testing.T) {
 			TriagerHandle: "victim@fixture.invalid"}, // email-shaped triager: dropped
 	}}
 	signals, _ := siemsignals.Collect(context.Background(), api, time.Hour, fixed)
-	rec, _ := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+	rec, _ := siemsignals.Build(signals[0], "scf:IRO-06", actorID("siemsignals"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"signal_id": true, "rule_id": true, "rule_name": true, "severity": true,

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { mapClaimScfAnchor } from "@/lib/api/oscal-components";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 620 — server-side proxy for mapping an unmapped vendor claim to a
 // canonical SCF anchor. The request body carries `{scf_anchor_id}` (the SCF
@@ -14,15 +15,20 @@ export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
-  let body: { scf_anchor_id?: string };
+  let body: { scf_anchor_id?: string; scf_release?: string };
   try {
-    body = (await req.json()) as { scf_anchor_id?: string };
+    body = (await req.json()) as {
+      scf_anchor_id?: string;
+      scf_release?: string;
+    };
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
@@ -34,7 +40,14 @@ export async function PATCH(
     );
   }
   try {
-    const result = await mapClaimScfAnchor(bearer, id, scfAnchorID);
+    // scf_release is forwarded as given; the platform refuses a mapping
+    // without one (#1774).
+    const result = await mapClaimScfAnchor(
+      bearer,
+      id,
+      scfAnchorID,
+      (body.scf_release ?? "").trim(),
+    );
     return NextResponse.json(result);
   } catch (err) {
     const e = err as { status?: number; message?: string };

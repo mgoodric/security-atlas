@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
@@ -11,7 +12,7 @@ import (
 )
 
 // Input is the canonical decision input passed to OPA. The schema is
-// documented in policies/authz/helpers.rego and must stay in sync with
+// documented in internal/authz/rego_bundle/helpers.rego and must stay in sync with
 // it.
 type Input struct {
 	User     UserInput     `json:"user"`
@@ -19,6 +20,10 @@ type Input struct {
 	Action   string        `json:"action"`
 	Resource ResourceInput `json:"resource"`
 	Request  RequestInput  `json:"request"`
+
+	// roleCeiling caps the live user_roles Decide merges for a labelled key
+	// bound to a user (#2431). nil means no cap. It never reaches OPA.
+	roleCeiling []Role
 }
 
 // UserInput is the user half of Input.
@@ -44,7 +49,7 @@ type RequestInput struct {
 
 // transitionActions enumerates the path-terminal segments that the
 // middleware promotes from action="write" to a more specific action
-// (e.g. action="approve"). Matches the policies/authz/helpers.rego
+// (e.g. action="approve"). Matches the internal/authz/rego_bundle/helpers.rego
 // transition_actions set.
 var transitionActions = map[string]bool{
 	"submit":        true,
@@ -86,17 +91,26 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 			strings.HasPrefix(cred.UserID, "oauth_client:"),
 		// is_super_admin: slice 142. Surfaces the platform-global
 		// super_admin bit from the verified JWT's `atlas:super_admin`
-		// claim. The policies/authz/super_admin.rego rule keys on this
+		// claim. The internal/authz/rego_bundle/super_admin.rego rule keys on this
 		// attribute. Falls back to false when no JWT is on the context
 		// (legacy bearer path; super_admin is JWT-only at v1).
 		"is_super_admin": jwtmw.FromContext(r.Context()) != nil &&
 			jwtmw.FromContext(r.Context()).SuperAdmin,
+		// is_admin_credential: #2503. The cred.IsAdmin flag (the
+		// super_admin claim on a JWT, or an admin-flagged API key), as
+		// distinct from a tenant admin by role. admin.rego admits only an
+		// admin credential to the platform /v1/admin/* segments.
+		"is_admin_credential": cred.IsAdmin,
+		// is_policy_sync_key: #2850. The credential is a policy-sync API
+		// key, which system.rego admits to the policy sync endpoint only.
+		"is_policy_sync_key": cred.PolicySyncOnly(),
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v
 	}
 
 	return Input{
+		roleCeiling: boundKeyCeiling(cred),
 		User: UserInput{
 			ID:    cred.UserID,
 			Roles: roles,
@@ -128,12 +142,52 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 // in-memory credstore.
 func derivedRolesFor(cred credstore.Credential) []Role {
 	switch {
+	case cred.PolicySyncOnly():
+		// #2850: a policy-sync key holds no role. system.rego admits it to
+		// POST /v1/policies:sync by its is_policy_sync_key attribute, and
+		// nothing else admits it; without this case it would take the
+		// grc_engineer default below.
+		return nil
 	case cred.IsAdmin:
 		return []Role{RoleAdmin}
 	case cred.IsApprover:
 		return []Role{RoleGRCEngineer}
+	case jwtSession(cred) && !machineJWT(cred):
+		// #2496: a user's session derives nothing from its role claim,
+		// whatever the claim says. jwtmw copies the claim into OwnerRoles,
+		// and the claim outlives a revoke until the token expires. A viewer
+		// or auditor claim used to derive control_owner (#2381), an empty
+		// one grc_engineer (#2401: every login path mints a session for a
+		// user with no role rather than refusing), and an admin or
+		// grc_engineer claim control_owner (#2496). The session's roles are
+		// the live user_roles rows the resolver merges in Decide before OPA
+		// evaluates, and nothing else. IsAdmin and IsApprover above are the
+		// super-admin bit, which jwtmw takes from the re-checked
+		// atlas:super_admin claim, not a tenant role.
+		//
+		// This is an allow-list: only a client_credentials machine token
+		// reaches the cases below, because it names no user and has no
+		// user_roles to fall back on. Every other subject shape, known or
+		// not, derives nothing.
+		return nil
+	case boundKey(cred):
+		// #2431: a key bound to a user derives nothing from its label. Its
+		// roles are its owner's live user_roles rows, capped by the label
+		// (boundKeyCeiling), which Decide applies after the resolver. An
+		// unlabelled bound key has no cap and does not take the grc_engineer
+		// default below (Matt, 2026-11-18). The flags were handled above.
+		return nil
 	case len(cred.OwnerRoles) > 0:
-		return []Role{RoleControlOwner}
+		// #2596 (Matt, 2026-11-17): what is left is a credential whose label
+		// is its grant (roleLabelIsGrant): an unbound API key, a
+		// client_credentials machine token, a legacy credstore credential. It
+		// derives exactly the canonical roles its label names, as the handler
+		// gates count them (TenantRoleLabels, IsTenantAdmin, ...). A free-text
+		// label derives nothing, and does not fall through to the grc_engineer
+		// default below. Before #2596 any label that was not viewer/auditor
+		// only derived control_owner, and a viewer/auditor-only label on a
+		// machine token derived nothing (#2381, #2402).
+		return labelRoles(cred.OwnerRoles)
 	case cred.TenantID == "":
 		// No credential in context -- exempt path. Return empty so
 		// authz.Decide hits default-deny.
@@ -146,6 +200,83 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// admin UI will populate them.
 		return []Role{RoleGRCEngineer}
 	}
+}
+
+// boundKeyCeiling returns the most a labelled API key bound to a user may
+// hold (#2431), or nil when cred is not one. A canonical role entry gives
+// itself, and a free-text owner-role label (slice 011, e.g. "platform-eng")
+// gives control_owner. Mixed labels union their entries. Unlike an unbound
+// key's label (#2596), free text keeps its control_owner entry here: the
+// ceiling only narrows the owner's live roles, it grants nothing (Matt,
+// 2026-11-20).
+//
+// Decide intersects the ceiling with the owner's live roles, so a {viewer}
+// key minted for an admin acts as a viewer, not an admin. An owner holding
+// live admin gets the whole ceiling: admin.rego admits everything, so that is
+// still a narrowing.
+//
+// An empty label means no cap (Matt, 2026-11-18): an unlabelled bound key
+// acts as its user, with exactly the owner's live roles (derivedRolesFor
+// gives it nothing of its own). The is_admin and is_approver flags keep their own
+// cases in derivedRolesFor and are not capped here.
+func boundKeyCeiling(cred credstore.Credential) []Role {
+	if cred.IsAdmin || cred.IsApprover || !boundKey(cred) || len(cred.OwnerRoles) == 0 {
+		return nil
+	}
+	var out []Role
+	for _, l := range cred.OwnerRoles {
+		r := Role(l)
+		if !IsCanonical(r) {
+			r = RoleControlOwner
+		}
+		out = mergeRoles(out, []Role{r})
+	}
+	return out
+}
+
+// capRoles is the part of live inside ceiling, in ceiling order. A live admin
+// gets the whole ceiling (#2431).
+func capRoles(ceiling, live []Role) []Role {
+	out := []Role{}
+	for _, r := range ceiling {
+		for _, l := range live {
+			if l == r || l == RoleAdmin {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// jwtSession reports whether cred was synthesized by jwtmw from a verified
+// atlas JWT. jwtmw stamps the credential ID "jwt:" + jti.
+func jwtSession(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.ID, "jwt:")
+}
+
+// machineJWT reports whether cred is a client_credentials JWT: the token
+// endpoint stamps its subject oauth.MachineSubjectPrefix + client_id.
+func machineJWT(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.UserID, "oauth_client:")
+}
+
+// apiKey reports whether cred is a slice-014/034 api_keys credential.
+// apikeystore stamps the credential ID "key_" + the row id.
+func apiKey(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.ID, "key_")
+}
+
+// labelRoles is the canonical roles a label names, in label order, each
+// once, or nil when it names none. Free-text entries are dropped (#2596).
+func labelRoles(labels []string) []Role {
+	var out []Role
+	for _, l := range labels {
+		if r := Role(l); IsCanonical(r) && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // actionFromMethodAndPath derives the canonical action name. GET is

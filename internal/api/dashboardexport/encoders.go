@@ -372,8 +372,8 @@ func xlsxSheetName(panel string) string {
 //
 // The freshness + drift panels are structured (not list-shaped) —
 // freshness collapses to one row per class bucket, drift to one row
-// per flipped-out control PLUS a summary row at the top giving the
-// since/through/delta/count metadata. This matches the dashboard's
+// per control that started or stopped passing PLUS a summary row at
+// the top giving the since/through/net-change/count metadata. This matches the dashboard's
 // visual rendering: the user sees a metadata header and a list
 // underneath.
 func panelTable(name string, s Snapshot) (header []string, rows [][]string) {
@@ -399,7 +399,10 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 	header := []string{
 		"framework_id",
 		"framework_version",
+		"framework_version_id",
+		"scope_set",
 		"coverage_pct",
+		"covered_by_exception_pct",
 		"freshness_composite",
 		"trend_delta_90d",
 	}
@@ -408,12 +411,24 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 		out[i] = []string{
 			r.FrameworkID,
 			r.FrameworkVersion,
-			strconv.FormatFloat(r.CoveragePct, 'f', -1, 64),
-			strconv.FormatFloat(r.FreshnessComposite, 'f', -1, 64),
-			strconv.FormatFloat(r.TrendDelta90d, 'f', -1, 64),
+			r.FrameworkVersionID,
+			strconv.FormatBool(r.ScopeSet),
+			formatOptionalPct(r.CoveragePct),
+			formatOptionalPct(r.CoveredByExceptionPct),
+			formatOptionalPct(r.FreshnessComposite),
+			formatOptionalPct(r.TrendDelta90d),
 		}
 	}
 	return header, out
+}
+
+// formatOptionalPct renders a posture percentage, or an empty cell when
+// the version's scope is not set (#2114).
+func formatOptionalPct(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 func risksTable(rows []RiskPanelRow) ([]string, [][]string) {
@@ -425,6 +440,8 @@ func risksTable(rows []RiskPanelRow) ([]string, [][]string) {
 		"methodology",
 		"residual_score",
 		"created_at",
+		// #1814: appended so existing column positions hold.
+		"category_name",
 	}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
@@ -436,6 +453,7 @@ func risksTable(rows []RiskPanelRow) ([]string, [][]string) {
 			r.Methodology,
 			r.ResidualScore,
 			r.CreatedAt,
+			r.CategoryName,
 		}
 	}
 	return header, out
@@ -465,23 +483,30 @@ func freshnessTable(p FreshnessPanel) ([]string, [][]string) {
 	return header, out
 }
 
-// driftTable flattens the flipped-out rows PLUS a summary row at
-// the top carrying the since/through/delta/count window metadata.
-// Same sentinel-row pattern as freshnessTable.
+// driftTable flattens the window's control movement PLUS a summary row at
+// the top carrying the since/through window, the net change in passing
+// controls and both counts. Same sentinel-row pattern as freshnessTable.
+// Each control row names its direction in the trailing `change` column
+// (#2195), so a net gain never sits beside only the losses.
 func driftTable(p DriftPanel) ([]string, [][]string) {
-	header := []string{"control_id", "last_passing", "current_result"}
-	out := make([][]string, 0, len(p.FlippedOut)+1)
+	header := []string{"control_id", "last_passing", "current_result", "change"}
+	out := make([][]string, 0, len(p.FlippedOut)+len(p.StartedPassing)+1)
 	out = append(out, []string{
-		fmt.Sprintf("__window__ since=%s through=%s delta=%d flipped_out_count=%d",
-			p.Since, p.Through, p.Delta, p.FlippedOutCount),
+		fmt.Sprintf("__window__ since=%s through=%s net_change_in_passing=%d started_passing_count=%d flipped_out_count=%d",
+			p.Since, p.Through, p.Delta, p.StartedPassingCount, p.FlippedOutCount),
+		"",
 		"",
 		"",
 	})
+	for _, g := range p.StartedPassing {
+		out = append(out, []string{g.ControlID, "", "pass", "started_passing"})
+	}
 	for _, fr := range p.FlippedOut {
 		out = append(out, []string{
 			fr.ControlID,
 			fr.LastPassing,
 			fr.CurrentResult,
+			"stopped_passing",
 		})
 	}
 	return header, out

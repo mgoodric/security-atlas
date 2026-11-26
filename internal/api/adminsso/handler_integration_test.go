@@ -25,7 +25,20 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
+
+// testCrypter seals client secrets the way the deployment's
+// ATLAS_OIDC_SECRET_KEY does (#2034).
+func testCrypter(t *testing.T) *idpconfig.SecretCrypter {
+	t.Helper()
+	c, err := idpconfig.NewSecretCrypter(bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 var appPool *pgxpool.Pool
 
@@ -52,9 +65,19 @@ func TestMain(m *testing.M) {
 // mimics the production middleware stack: bearer auth -> tenancymw -> handler.
 func newRouter(t *testing.T, tenantID uuid.UUID, isAdmin bool, opts *adminsso.PreflightOptions) http.Handler {
 	t.Helper()
+	return newRouterWith(t, tenantID, isAdmin, opts, testCrypter(t))
+}
+
+// newRouterWith is newRouter with an explicit secret crypter; nil is a
+// deployment with no ATLAS_OIDC_SECRET_KEY.
+func newRouterWith(t *testing.T, tenantID uuid.UUID, isAdmin bool, opts *adminsso.PreflightOptions, c *idpconfig.SecretCrypter) http.Handler {
+	t.Helper()
 	h := adminsso.New(appPool)
 	if opts != nil {
 		h = h.WithPreflightOptions(*opts)
+	}
+	if c != nil {
+		h = h.WithSecretCrypter(c)
 	}
 
 	r := chi.NewRouter()
@@ -72,6 +95,7 @@ func newRouter(t *testing.T, tenantID uuid.UUID, isAdmin bool, opts *adminsso.Pr
 	r.Use(tenancymw.Middleware)
 	r.Get("/v1/admin/sso", h.Get)
 	r.Patch("/v1/admin/sso", h.Patch)
+	r.Delete("/v1/admin/sso", h.Delete)
 	r.Post("/v1/admin/sso/preflight", h.Preflight)
 	return r
 }
@@ -132,6 +156,58 @@ func TestPatchThenGetSSOOmitsClientSecret(t *testing.T) {
 	if len(resp.AllowedEmailDomains) != 1 || resp.AllowedEmailDomains[0] != "example.com" {
 		t.Errorf("allowed_email_domains = %v; want [example.com]", resp.AllowedEmailDomains)
 	}
+	if resp.TrustUnverifiedEmailForLink {
+		t.Errorf("trust_unverified_email_for_link = true on a PATCH that omitted it; want the strict default false")
+	}
+}
+
+// #1944 D3: PATCH sets trust_unverified_email_for_link, GET returns it, and
+// a later PATCH that omits it writes the strict default back.
+func TestPatchTrustUnverifiedEmailForLinkRoundTrips(t *testing.T) {
+	tenant := uuid.New()
+	cleanupSSO(t, tenant)
+	r := newRouter(t, tenant, true, nil)
+
+	patch := func(fields map[string]any) {
+		t.Helper()
+		body := map[string]any{
+			"issuer_url":    "https://login.microsoftonline.example/v2.0",
+			"client_id":     "client-entra",
+			"client_secret": "s",
+			"redirect_url":  "https://atlas.example.com/auth/oidc/callback",
+		}
+		for k, v := range fields {
+			body[k] = v
+		}
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/sso", bytes.NewReader(raw)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PATCH status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+	}
+	get := func() bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/sso", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+		var resp adminsso.GetResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp.TrustUnverifiedEmailForLink
+	}
+
+	patch(map[string]any{"trust_unverified_email_for_link": true})
+	if !get() {
+		t.Fatalf("trust_unverified_email_for_link = false after PATCH true")
+	}
+	patch(nil)
+	if get() {
+		t.Errorf("trust_unverified_email_for_link = true after a PATCH that omitted it; want false")
+	}
 }
 
 // AC-1 (2/2): PATCH a second time with empty client_secret leaves the
@@ -180,15 +256,19 @@ func TestPatchEmptySecretPreservesExisting(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenant.String()); err != nil {
 		t.Fatalf("set_config: %v", err)
 	}
-	var nbytes int
+	var stored []byte
 	if err := tx.QueryRow(ctx,
-		`SELECT octet_length(client_secret_enc) FROM oidc_idp_configs WHERE tenant_id = $1`,
-		tenant).Scan(&nbytes); err != nil {
-		t.Fatalf("scan secret len: %v", err)
+		`SELECT client_secret_enc FROM oidc_idp_configs WHERE tenant_id = $1`,
+		tenant).Scan(&stored); err != nil {
+		t.Fatalf("scan secret: %v", err)
 	}
-	if nbytes != len("first-secret-value") {
-		t.Errorf("client_secret_enc length = %d; want %d (secret should be unchanged after empty PATCH)",
-			nbytes, len("first-secret-value"))
+	// #2034: the stored value is sealed, and still opens to the first
+	// secret after the empty PATCH.
+	if bytes.Contains(stored, []byte("first-secret-value")) {
+		t.Error("client_secret_enc stores the plaintext secret")
+	}
+	if got, err := testCrypter(t).Open(tenant, "primary", stored); err != nil || got != "first-secret-value" {
+		t.Errorf("stored secret opens to %q, %v; want the first secret unchanged", got, err)
 	}
 }
 
@@ -231,7 +311,7 @@ func TestGetSSOReturns404WhenAbsent(t *testing.T) {
 
 // AC-2: POST /v1/admin/sso/preflight fetches discovery doc and returns
 // parsed endpoints. Drives a local httptest server as the fake IdP; the
-// handler is configured with AllowPrivateIPs so 127.0.0.1 isn't blocked
+// handler is configured with the private-issuer policy so 127.0.0.1 isn't blocked
 // by the SSRF guard.
 func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 	// Spin up a fake IdP exposing /.well-known/openid-configuration.
@@ -250,9 +330,9 @@ func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 
 	tenant := uuid.New()
 	r := newRouter(t, tenant, true, &adminsso.PreflightOptions{
-		AllowPrivateIPs: true,
-		Timeout:         3 * time.Second,
-		MaxBodyBytes:    64 * 1024,
+		IssuerPolicy: netguard.Policy{AllowLoopback: true, AllowPrivate: true},
+		Timeout:      3 * time.Second,
+		MaxBodyBytes: 64 * 1024,
 	})
 
 	body, _ := json.Marshal(map[string]any{"issuer_url": srv.URL})
@@ -277,10 +357,10 @@ func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 }
 
 // Preflight rejects an issuer_url that's http (not https) in production
-// (no AllowPrivateIPs).
+// (the strict issuer policy).
 func TestPreflightRejectsHTTP(t *testing.T) {
 	tenant := uuid.New()
-	r := newRouter(t, tenant, true, nil) // default opts: AllowPrivateIPs=false
+	r := newRouter(t, tenant, true, nil) // default opts: the strict issuer policy
 
 	body, _ := json.Marshal(map[string]any{"issuer_url": "http://example.com"})
 	rec := httptest.NewRecorder()
@@ -297,9 +377,9 @@ func TestPreflightRejectsHTTP(t *testing.T) {
 func TestPreflightRejectsPrivateIP(t *testing.T) {
 	tenant := uuid.New()
 	r := newRouter(t, tenant, true, &adminsso.PreflightOptions{
-		AllowPrivateIPs: false,
-		Timeout:         3 * time.Second,
-		MaxBodyBytes:    64 * 1024,
+		IssuerPolicy: netguard.Policy{},
+		Timeout:      3 * time.Second,
+		MaxBodyBytes: 64 * 1024,
 		LookupHost: func(_ context.Context, _ string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("10.0.0.5")}, nil
 		},
@@ -313,5 +393,52 @@ func TestPreflightRejectsPrivateIP(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "non-routable") {
 		t.Errorf("expected non-routable error; got: %s", rec.Body.String())
+	}
+}
+
+// #2034: a deployment with no ATLAS_OIDC_SECRET_KEY refuses to store a
+// secret it could not protect, and stores nothing.
+func TestPatchSSORefusesSecretWithoutKey(t *testing.T) {
+	tenant := uuid.New()
+	cleanupSSO(t, tenant)
+	r := newRouterWith(t, tenant, true, nil, nil)
+	body, _ := json.Marshal(map[string]any{
+		"issuer_url":    "https://idp.example.com",
+		"client_id":     "client-x",
+		"client_secret": "never-stored",
+		"redirect_url":  "https://atlas.example.com/cb",
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/sso", bytes.NewReader(body)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("PATCH status = %d, want 409; body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "never-stored") {
+		t.Errorf("refusal echoes the secret: %s", rec.Body.String())
+	}
+	get := httptest.NewRecorder()
+	r.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/admin/sso", nil))
+	if get.Code != http.StatusNotFound {
+		t.Errorf("GET after refused PATCH = %d, want 404", get.Code)
+	}
+}
+
+// #2034: PATCH refuses an issuer the sign-in path would refuse.
+func TestPatchSSORejectsNonHTTPSIssuer(t *testing.T) {
+	tenant := uuid.New()
+	cleanupSSO(t, tenant)
+	for _, issuer := range []string{"http://idp.example.com", "https://idp.example.com?tenant=x", "idp.example.com"} {
+		r := newRouter(t, tenant, true, nil)
+		body, _ := json.Marshal(map[string]any{
+			"issuer_url":    issuer,
+			"client_id":     "client-x",
+			"client_secret": "s",
+			"redirect_url":  "https://atlas.example.com/cb",
+		})
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/sso", bytes.NewReader(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("issuer %q: PATCH status = %d, want 400", issuer, rec.Code)
+		}
 	}
 }

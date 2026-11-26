@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
 	dashboardexportapi "github.com/mgoodric/security-atlas/internal/api/dashboardexport"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
@@ -34,13 +35,14 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	freshnessDriftH := freshnessdriftapi.New(freshnessStore, driftStore)
 	root.Get("/v1/evidence/freshness", freshnessDriftH.Freshness)
 	root.Get("/v1/controls/drift", freshnessDriftH.Drift)
-	// Slice 066: dashboard backend read endpoints. Three pure reads that
-	// fill three of the four binding placeholders slice 040's program
-	// dashboard view shipped (per-framework posture, the evidence-ingest
-	// activity feed, the unified upcoming-items rollup; the fourth,
+	// Slice 066: dashboard backend read endpoints. Pure reads that fill
+	// the binding placeholders slice 040's program dashboard view shipped
+	// (per-framework posture, the evidence-ingest activity feed; a third,
 	// sort=residual,age on /v1/risks, extends the risks routes below).
+	// The fourth, the upcoming rollup, was retired by #2130: the
+	// compliance calendar is the one list of what is due.
 	// Routes appended per the parallel-batch convention (chi rejects two
-	// Mounts at "/"). /v1/frameworks/posture, /v1/activity, /v1/upcoming are
+	// Mounts at "/"). /v1/frameworks/posture and /v1/activity are
 	// fresh top-level paths -- no shadowing of any existing route. The Store
 	// is a pure read surface over existing tables + the slice-062
 	// admin_audit_log_v view -- this slice adds no migration and no write
@@ -49,19 +51,20 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	dashboardH := dashboardapi.New(dashboardStoreForExport)
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
-	root.Get("/v1/upcoming", dashboardH.Upcoming)
 	// Slice 269: dashboard snapshot export (`GET /v1/dashboard/export
 	// ?format=json|csv|xlsx`). Composes the six per-panel reads
 	// (framework posture + risks + freshness + drift + upcoming +
-	// activity) into a single artifact in three formats — single
+	// activity; upcoming reads the calendar's next 14 days, #2130)
+	// into a single artifact in three formats — single
 	// JSON document, ZIP of one CSV per panel, or XLSX workbook with
 	// one sheet per panel. Reuses the already-wired
 	// dashboardStoreForExport (shared with the per-panel reads
 	// above), the risks store, and the freshness + drift stores
 	// declared above. The handler runs the slice 035 OPA admit
-	// (`dashboard_export` action — added by the slice 269 OPA admit
-	// extension) PLUS a handler-level `hasDashboardExportAccess`
-	// predicate; admin + approver only (slice 269 D3). Every
+	// (`read` on the `dashboard` resource — added by the slice 269 OPA
+	// admit extension), which the handler asks again itself, PLUS a
+	// handler-level `hasDashboardExportAccess` twin; admin,
+	// grc_engineer and auditor (#2350). Every
 	// terminal outcome writes one `me_audit_log` row with
 	// action='dashboard_export' (migration
 	// 20260524000000_dashboard_export_meta_audit.sql extends the
@@ -73,8 +76,9 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 		risksStore,
 		freshnessStore,
 		driftStore,
+		calendarapi.NewStore(s.dbPool),
 	)
-	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource)
+	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource).WithAuthz(s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/dashboard/export", dashboardExportH.ExportDashboard)
 	// Slice 268: unified cross-domain search (`/v1/search`). Aggregates
 	// lexical ILIKE matches across controls, risks, and evidence into a
@@ -84,6 +88,6 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	// reads tenant-scoped (constitutional invariant #6); no new schema
 	// migration ships with this slice (P0-A1). Closes the slice-228
 	// dashboard ⌘K bar's prerequisite gap.
-	searchH := searchapi.New(s.dbPool, s.authzEngine)
+	searchH := searchapi.New(s.dbPool, s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/search", searchH.Handle)
 }

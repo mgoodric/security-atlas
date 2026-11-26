@@ -38,6 +38,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
@@ -51,6 +53,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
 		"evidence_audit_log",
+		"control_evaluations",
 		"evidence_records",
 		"controls",
 	)
@@ -120,9 +123,9 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 	// Best-effort advisory lock; we don't strictly need to block
 	// parallel test packages because the registry seed is idempotent
 	// (ON CONFLICT DO NOTHING). The lock keeps log output clean.
-	_, _ = conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781140)")
+	_ = advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyControlAttest)
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781140)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyControlAttest)
 	}()
 
 	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())
@@ -158,8 +161,10 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 	if err := reg.LoadFromDB(ctx); err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
-	if !reg.IsRegistered("manual.attestation.v1", "1.1.0") {
-		t.Fatalf("boot: manual.attestation.v1/1.1.0 missing from cache")
+	for _, v := range []string{"1.1.0", "1.2.0"} {
+		if !reg.IsRegistered("manual.attestation.v1", v) {
+			t.Fatalf("boot: manual.attestation.v1/%s missing from cache", v)
+		}
 	}
 	return reg
 }
@@ -231,23 +236,70 @@ type setupResult struct {
 	adminBear string
 	ownerBear string
 	plainBear string
-	tenant    string
+	// viewerBear is a live viewer's session (#2523).
+	viewerBear string
+	tenant     string
+	// admin is the migrate pool; ownerUser is the user behind ownerBear,
+	// whose live user_roles a test may change mid-session (#2523).
+	admin     *pgxpool.Pool
+	ownerUser uuid.UUID
 	registry  *schemaregistry.Service
 	hasMinIO  bool
 	bucket    string
+	// scfRelease is the SCF release the seeded IAC-37 anchor is in; every
+	// fixture bundle declares it (#1774).
+	scfRelease string
+}
+
+// scfReleaseOf returns the label of the current SCF release that holds
+// code, where seedSCFAnchor put it.
+func scfReleaseOf(t *testing.T, admin *pgxpool.Pool, code string) string {
+	t.Helper()
+	var label string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT fv.version FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current' AND a.scf_id = $1`,
+		code).Scan(&label); err != nil {
+		t.Fatalf("SCF release of %s: %v", code, err)
+	}
+	return label
+}
+
+// withSCFRelease adds `scf_release: release` after a manifest's
+// scf_anchor_id line: upload requires it for a code (#1774).
+func withSCFRelease(manifest, release string) string {
+	i := strings.Index(manifest, "scf_anchor_id: ")
+	if i < 0 {
+		return manifest
+	}
+	eol := strings.IndexByte(manifest[i:], '\n')
+	if eol < 0 {
+		return manifest + "\nscf_release: " + release + "\n"
+	}
+	at := i + eol + 1
+	return manifest[:at] + "scf_release: " + release + "\n" + manifest[at:]
 }
 
 const ownerRole = "control_owner"
 
-// setupHTTP builds an HTTP test server with auth, ingest, registry,
-// optional artifact store. Three pre-issued credentials are returned:
-// admin, owner (holding control_owner role), and plain (no role).
+// setupHTTP builds an HTTP test server with auth, authz, ingest, registry,
+// optional artifact store. Four pre-issued credentials are returned:
+// admin, owner (a user session holding live control_owner), plain (a user
+// session holding live grc_engineer, which OPA lets write but which is not
+// the control's owner_role) and viewer (live viewer, which OPA refuses).
+//
+// #2523: the attest gate counts a user session's live user_roles, which the
+// authz middleware resolves, so the server runs it with a DB roles resolver.
+// Each session's role claim matches its live roles at mint time.
 func setupHTTP(t *testing.T) setupResult {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	seedSCFAnchor(t, admin, "IAC-37", "IAC")
+	scfRelease := scfReleaseOf(t, admin, "IAC-37")
 	tenant := freshTenant(t, admin)
 
 	ingester := ingest.New(app, reg)
@@ -264,12 +316,24 @@ func setupHTTP(t *testing.T) setupResult {
 		ArtifactStore:  store,
 	})
 	srv.AttachDB(app)
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
 
 	// Slice 197: JWT bearers via slice 190 path.
 	tenantUUID := uuid.MustParse(tenant)
+	session := func(roles ...string) (uuid.UUID, string) {
+		u := seedRoleUser(t, admin, tenant, roles...)
+		c := testjwt.OwnerFor(tenantUUID, roles)
+		c.Subject = "user:" + u.String()
+		return u, srv.IssueTestJWT(t, c)
+	}
 	adminBear := srv.IssueTestJWT(t, testjwt.AdminFor(tenantUUID))
-	ownerBear := srv.IssueTestJWT(t, testjwt.OwnerFor(tenantUUID, []string{ownerRole}))
-	plainBear := srv.IssueTestJWT(t, testjwt.ViewerFor(tenantUUID))
+	ownerUser, ownerBear := session(ownerRole)
+	_, plainBear := session("grc_engineer")
+	_, viewerBear := session("viewer")
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -280,27 +344,77 @@ func setupHTTP(t *testing.T) setupResult {
 		ts.Close()
 	})
 	return setupResult{
-		server:    ts,
-		adminBear: adminBear,
-		ownerBear: ownerBear,
-		plainBear: plainBear,
-		tenant:    tenant,
-		registry:  reg,
-		hasMinIO:  store != nil,
-		bucket:    bucket,
+		server:     ts,
+		adminBear:  adminBear,
+		ownerBear:  ownerBear,
+		plainBear:  plainBear,
+		viewerBear: viewerBear,
+		tenant:     tenant,
+		admin:      admin,
+		ownerUser:  ownerUser,
+		registry:   reg,
+		hasMinIO:   store != nil,
+		bucket:     bucket,
+		scfRelease: scfRelease,
 	}
 }
 
-// uploadBundle posts a manual control bundle and returns the new
-// control id.
+// seedRoleUser inserts an active user in tenant holding roles in user_roles,
+// removed at cleanup.
+func seedRoleUser(t *testing.T, admin *pgxpool.Pool, tenant string, roles ...string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status) VALUES ($1, $2, $3, 'attest user', 'active')`,
+		id, tenant, "attest-"+id.String()+"@example.invalid"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`, tenant, id.String())
+		_, _ = admin.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id)
+	})
+	for _, r := range roles {
+		grantRole(t, admin, tenant, id, r)
+	}
+	return id
+}
+
+func grantRole(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, role string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-attest')`,
+		tenant, user.String(), role); err != nil {
+		t.Fatalf("grant %s: %v", role, err)
+	}
+}
+
+func revokeRole(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, role string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(),
+		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2 AND role = $3`,
+		tenant, user.String(), role); err != nil {
+		t.Fatalf("revoke %s: %v", role, err)
+	}
+}
+
+// uploadBundle posts a manual control bundle owned by ownerRole and returns
+// the new control id.
 func uploadBundle(t *testing.T, s setupResult, bundleID string) string {
+	t.Helper()
+	return uploadBundleOwnedBy(t, s, bundleID, ownerRole)
+}
+
+// uploadBundleOwnedBy posts a manual control bundle whose owner_role is role
+// and returns the new control id.
+func uploadBundleOwnedBy(t *testing.T, s setupResult, bundleID, role string) string {
 	t.Helper()
 	yaml := `bundle_schema_version: "1"
 bundle_id: ` + bundleID + `
 title: "Manual review of access list"
 implementation_type: manual_attested
-scf_anchor_id: IAC-06
-owner_role: ` + ownerRole + `
+scf_anchor_id: IAC-37
+scf_release: ` + s.scfRelease + `
+owner_role: ` + role + `
 freshness_class: quarterly
 manual_evidence_schema:
   type: object
@@ -706,5 +820,452 @@ func TestAttest_Rejects_MissingRequiredAttestationData(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "reviewer") {
 		t.Fatalf("error must mention reviewer; got %s", raw)
+	}
+}
+
+// ----- #2111: attestation pass / fail -----
+
+// attestWire is the slice of the submit response the #2111 tests read.
+type attestWire struct {
+	RecordID  string `json:"record_id"`
+	Result    string `json:"result"`
+	Evaluated bool   `json:"evaluated"`
+}
+
+func attestBody(statement string, extra map[string]any) map[string]any {
+	body := map[string]any{
+		"statement":        statement,
+		"attestation_data": map[string]any{"reviewer": "sample-user@example.com"},
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	return body
+}
+
+// ledgerResult reads one record's result column, payload.result and
+// schema_version.
+func ledgerResult(t *testing.T, recordID string) (column string, payloadResult *string, schemaVersion string) {
+	t.Helper()
+	admin := dbtest.NewMigratePool(t)
+	if err := admin.QueryRow(context.Background(), `
+		SELECT result::text, payload->>'result', schema_version
+		FROM evidence_records WHERE id = $1
+	`, recordID).Scan(&column, &payloadResult, &schemaVersion); err != nil {
+		t.Fatalf("read ledger row: %v", err)
+	}
+	return column, payloadResult, schemaVersion
+}
+
+// latestControlResult reads the control's most recent evaluation result.
+func latestControlResult(t *testing.T, controlID string) string {
+	t.Helper()
+	admin := dbtest.NewMigratePool(t)
+	var result string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT result::text FROM control_evaluations
+		WHERE control_id = $1
+		ORDER BY evaluated_at DESC, created_at DESC
+		LIMIT 1
+	`, controlID).Scan(&result); err != nil {
+		t.Fatalf("read control evaluation: %v", err)
+	}
+	return result
+}
+
+// A 1.2.0 fail without a fail_reason is refused, and nothing is written.
+func TestAttest_FailWithoutReason_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_fail_no_reason")
+	for _, extra := range []map[string]any{
+		{"result": "fail"},
+		{"result": "fail", "fail_reason": "  "},
+	} {
+		status, raw := httpJSON(t, s, http.MethodPost,
+			"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody("Review found a gap.", extra))
+		if status != http.StatusBadRequest {
+			t.Fatalf("%v: expected 400; got %d body=%s", extra, status, raw)
+		}
+		if !strings.Contains(string(raw), "fail_reason") {
+			t.Fatalf("error must mention fail_reason; got %s", raw)
+		}
+	}
+	admin := dbtest.NewMigratePool(t)
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE control_id = $1`, controlID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("refused attestation wrote %d ledger rows", n)
+	}
+}
+
+// The schema refuses the same payload on the ledger side, so a pusher that
+// skips the attest handler cannot record a fail without a reason.
+func TestAttestSchema_120_FailWithoutReason_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	bad := []byte(`{"attestor":"u","statement":"s","result":"fail"}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.2.0", bad); err == nil {
+		t.Fatalf("1.2.0 fail without fail_reason validated")
+	}
+	ok := []byte(`{"attestor":"u","statement":"s","result":"fail","fail_reason":"r"}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.2.0", ok); err != nil {
+		t.Fatalf("1.2.0 fail with fail_reason: %v", err)
+	}
+}
+
+// A 1.1.0 payload (no result) still validates, and the attest handler
+// records a body without result as a pass.
+func TestAttest_Payload110_AcceptedAsPass(t *testing.T) {
+	s := setupHTTP(t)
+	v110 := []byte(`{"attestor":"u","statement":"s","attestation_data":{"reviewer":"r"}}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.1.0", v110); err != nil {
+		t.Fatalf("1.1.0 payload: %v", err)
+	}
+
+	controlID := uploadBundle(t, s, "attest_110_pass")
+	status, raw := httpJSON(t, s, http.MethodPost,
+		"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody("Review complete.", nil))
+	if status != http.StatusCreated {
+		t.Fatalf("expected 201; got %d body=%s", status, raw)
+	}
+	var resp attestWire
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if resp.Result != "pass" {
+		t.Fatalf("response result: got %q want pass", resp.Result)
+	}
+	column, payloadResult, version := ledgerResult(t, resp.RecordID)
+	if column != "pass" || payloadResult == nil || *payloadResult != "pass" {
+		t.Fatalf("ledger: result=%q payload.result=%v; want pass", column, payloadResult)
+	}
+	if version != "1.2.0" {
+		t.Fatalf("schema_version: got %q want 1.2.0", version)
+	}
+}
+
+// Fail then pass then fail: the record carries the submitted result, the
+// control is evaluated right after each attestation, and the latest one
+// decides.
+func TestAttest_LatestAttestationDecidesControlState(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_latest_decides")
+	base := time.Now().UTC().Add(-time.Hour)
+
+	post := func(statement string, extra map[string]any) attestWire {
+		t.Helper()
+		status, raw := httpJSON(t, s, http.MethodPost,
+			"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody(statement, extra))
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201; got %d body=%s", status, raw)
+		}
+		var resp attestWire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		if !resp.Evaluated {
+			t.Fatalf("control was not evaluated after the attestation: %s", raw)
+		}
+		return resp
+	}
+
+	failed := post("Review found two stale accounts.", map[string]any{
+		"result":      "fail",
+		"fail_reason": "two leavers still had console access",
+		"observed_at": base.Format(time.RFC3339Nano),
+	})
+	if failed.Result != "fail" {
+		t.Fatalf("response result: got %q want fail", failed.Result)
+	}
+	column, payloadResult, _ := ledgerResult(t, failed.RecordID)
+	if column != "fail" || payloadResult == nil || *payloadResult != "fail" {
+		t.Fatalf("ledger: result=%q payload.result=%v; want fail", column, payloadResult)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after fail: control result %q, want fail", got)
+	}
+
+	post("Stale accounts removed; review clean.", map[string]any{
+		"result":      "pass",
+		"observed_at": base.Add(30 * time.Minute).Format(time.RFC3339Nano),
+	})
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("fail then pass: control result %q, want pass", got)
+	}
+
+	post("Re-check found a new gap.", map[string]any{
+		"result":      "fail",
+		"fail_reason": "a contractor account was re-enabled",
+		"observed_at": base.Add(45 * time.Minute).Format(time.RFC3339Nano),
+	})
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("pass then fail: control result %q, want fail", got)
+	}
+}
+
+// #2509: a retry of the same body, with no idempotency_key and no
+// observed_at, returns the first receipt instead of a 409, and does not
+// evaluate the control again.
+func TestAttest_RetryWithoutKeyOrObservedAt_Dedupes(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_retry_dedupes")
+	body := attestBody("Quarterly review complete.", map[string]any{})
+	path := "/v1/controls/" + controlID + "/attestations"
+
+	// The server key covers a fixed 5-minute window; two posts straddling
+	// its boundary are two attestations by design. Start clear of one.
+	const window = 5 * time.Minute
+	if left := window - time.Duration(time.Now().UnixNano())%window; left < 5*time.Second {
+		time.Sleep(left + time.Second)
+	}
+
+	status1, raw1 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+	if status1 != http.StatusCreated {
+		t.Fatalf("first: expected 201; got %d body=%s", status1, raw1)
+	}
+	status2, raw2 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+	if status2 != http.StatusOK {
+		t.Fatalf("retry: expected 200 (dedup); got %d body=%s", status2, raw2)
+	}
+	var r1, r2 struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+		Evaluated    bool   `json:"evaluated"`
+	}
+	_ = json.Unmarshal(raw1, &r1)
+	_ = json.Unmarshal(raw2, &r2)
+	if !r2.Deduplicated || r2.RecordID != r1.RecordID {
+		t.Fatalf("retry must return the first receipt: first=%+v retry=%+v", r1, r2)
+	}
+	if r2.Evaluated {
+		t.Fatalf("a replay must not evaluate the control again: %s", raw2)
+	}
+}
+
+// #2509: attesting the same text again after a different attestation is a
+// new attestation (the web form sends a fresh key per submission), so a
+// pass, a fail and the same pass again leave the control passing.
+func TestAttest_SameTextAgain_IsRecorded(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_same_text_again")
+	path := "/v1/controls/" + controlID + "/attestations"
+	post := func(statement string, extra map[string]any) attestWire {
+		t.Helper()
+		extra["idempotency_key"] = "attest-web-" + uuid.NewString()
+		status, raw := httpJSON(t, s, http.MethodPost, path, s.ownerBear, attestBody(statement, extra))
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201; got %d body=%s", status, raw)
+		}
+		var resp attestWire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		return resp
+	}
+
+	first := post("Review clean.", map[string]any{"result": "pass"})
+	post("Found a stale account.", map[string]any{"result": "fail", "fail_reason": "leaver still active"})
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after fail: control result %q, want fail", got)
+	}
+	again := post("Review clean.", map[string]any{"result": "pass"})
+	if again.RecordID == first.RecordID {
+		t.Fatalf("the same text again must be a new record, got the first one back")
+	}
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("same pass again: control result %q, want pass", got)
+	}
+}
+
+// #2509: observed_at more than five minutes ahead of server time is refused
+// with 422 and nothing is written.
+func TestAttest_FutureObservedAt_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_future_refused")
+	status, raw := httpJSON(t, s, http.MethodPost,
+		"/v1/controls/"+controlID+"/attestations", s.ownerBear,
+		attestBody("Dated tomorrow.", map[string]any{
+			"observed_at": time.Now().UTC().Add(20 * time.Hour).Format(time.RFC3339Nano),
+		}))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422; got %d body=%s", status, raw)
+	}
+	admin := dbtest.NewMigratePool(t)
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE control_id = $1`, controlID).Scan(&n); err != nil {
+		t.Fatalf("count records: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("a refused attestation must write nothing; got %d records", n)
+	}
+}
+
+// #2523: the attest route through the real authz middleware, per role. A
+// user whose only role is control_owner attests a control whose owner_role
+// is control_owner (OPA's narrow control_owner attestations rule). A viewer
+// is refused by OPA. A control_owner on a control owned by another role
+// passes OPA and is refused by the handler's owner_role gate.
+func TestAttest2523_RoleMatrix(t *testing.T) {
+	s := setupHTTP(t)
+	owned := uploadBundle(t, s, "attest_2523_matrix_owned")
+	other := uploadBundleOwnedBy(t, s, "attest_2523_matrix_other", "security-engineering")
+	post := func(controlID, bearer, stmt string) (int, []byte) {
+		return httpJSON(t, s, http.MethodPost, "/v1/controls/"+controlID+"/attestations", bearer, attestBody(stmt, nil))
+	}
+
+	if status, raw := post(owned, s.ownerBear, "2523 control_owner, owner_role matches."); status != http.StatusCreated {
+		t.Fatalf("control_owner on its control: %d body=%s; want 201", status, raw)
+	}
+	if status, raw := post(owned, s.viewerBear, "2523 viewer."); status != http.StatusForbidden || !strings.Contains(string(raw), `"forbidden"`) {
+		t.Fatalf("viewer: %d body=%s; want 403 forbidden from authz", status, raw)
+	}
+	status, raw := post(other, s.ownerBear, "2523 control_owner, owner_role differs.")
+	if status != http.StatusForbidden || !strings.Contains(string(raw), "security-engineering") {
+		t.Fatalf("control_owner on another role's control: %d body=%s; want 403 from the owner_role gate", status, raw)
+	}
+}
+
+// #2523: the attest gate reads the caller's live user_roles, not the role
+// claim in its session. One session, minted while the user held
+// control_owner, is held across a revoke and a re-grant; its claim says
+// control_owner throughout. With control_owner revoked (the user also holds
+// grc_engineer, so the authz middleware lets the write through to the handler)
+// the owner_role gate refuses the attest with no re-login. Granted back, it
+// is allowed.
+func TestAttest2523_RevokedOwnerRole_RefusedWithoutRelogin(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_2523_revoke")
+	path := "/v1/controls/" + controlID + "/attestations"
+	attest := func(stmt string) (int, []byte) {
+		return httpJSON(t, s, http.MethodPost, path, s.ownerBear, attestBody(stmt, nil))
+	}
+
+	// A second live role, so OPA still admits the write after control_owner
+	// is revoked and the refusal is the handler's owner_role gate.
+	grantRole(t, s.admin, s.tenant, s.ownerUser, "grc_engineer")
+	if status, raw := attest("2523 live control_owner."); status != http.StatusCreated {
+		t.Fatalf("live control_owner: %d body=%s; want 201", status, raw)
+	}
+
+	revokeRole(t, s.admin, s.tenant, s.ownerUser, ownerRole)
+	status, raw := attest("2523 control_owner revoked.")
+	if status != http.StatusForbidden {
+		t.Fatalf("control_owner revoked, claim still holds it: %d body=%s; want 403", status, raw)
+	}
+	if !strings.Contains(string(raw), ownerRole) {
+		t.Fatalf("the 403 should come from the owner_role gate, naming %q; got %s", ownerRole, raw)
+	}
+
+	grantRole(t, s.admin, s.tenant, s.ownerUser, ownerRole)
+	if status, raw := attest("2523 control_owner granted back."); status != http.StatusCreated {
+		t.Fatalf("control_owner granted back: %d body=%s; want 201", status, raw)
+	}
+}
+
+// waitClearOfAttestWindowEdge sleeps past the server key's 5-minute window
+// boundary when fewer than 10s of the current window remain, so a test's
+// keyless posts all land in one window.
+func waitClearOfAttestWindowEdge() {
+	const window = 5 * time.Minute
+	if left := window - time.Duration(time.Now().UnixNano())%window; left < 10*time.Second {
+		time.Sleep(left + time.Second)
+	}
+}
+
+// #2520: keyless fail, pass, fail inside one window. The second fail has
+// the first fail's server key, but the pass overtook that record, so the
+// second fail is recorded and evaluated and the control ends failing. A
+// plain retry of the second fail still dedupes, onto the second fail.
+func TestAttest_KeylessRepeatAfterNewer_IsRecorded(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_keyless_repeat_after_newer")
+	path := "/v1/controls/" + controlID + "/attestations"
+	failBody := attestBody("Found a stale account.", map[string]any{
+		"result": "fail", "fail_reason": "leaver still active",
+	})
+	passBody := attestBody("Review clean.", map[string]any{"result": "pass"})
+	type wire struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+		Evaluated    bool   `json:"evaluated"`
+	}
+	post := func(body map[string]any, want int) wire {
+		t.Helper()
+		status, raw := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+		if status != want {
+			t.Fatalf("expected %d; got %d body=%s", want, status, raw)
+		}
+		var resp wire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		return resp
+	}
+
+	waitClearOfAttestWindowEdge()
+	fail1 := post(failBody, http.StatusCreated)
+	post(passBody, http.StatusCreated)
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("fail then pass: control result %q, want pass", got)
+	}
+	fail2 := post(failBody, http.StatusCreated)
+	if fail2.Deduplicated || fail2.RecordID == fail1.RecordID {
+		t.Fatalf("a fail overtaken by a pass must not dedupe onto it: first=%+v again=%+v", fail1, fail2)
+	}
+	if !fail2.Evaluated {
+		t.Fatalf("the repeated fail must be evaluated: %+v", fail2)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("fail, pass, fail: control result %q, want fail", got)
+	}
+
+	retry := post(failBody, http.StatusOK)
+	if !retry.Deduplicated || retry.RecordID != fail2.RecordID {
+		t.Fatalf("a retry of the repeated fail must return its receipt: fail2=%+v retry=%+v", fail2, retry)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after retry: control result %q, want fail", got)
+	}
+}
+
+// #2520: a client-supplied idempotency_key keeps strict dedupe. Reusing it
+// after a newer attestation returns the first receipt, records nothing, and
+// leaves the newer attestation standing.
+func TestAttest_ClientKeyRepeatAfterNewer_StillDedupes(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_client_key_strict")
+	path := "/v1/controls/" + controlID + "/attestations"
+	key := "attest-client-" + uuid.NewString()
+	failBody := attestBody("Found a stale account.", map[string]any{
+		"result": "fail", "fail_reason": "leaver still active", "idempotency_key": key,
+	})
+
+	status1, raw1 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, failBody)
+	if status1 != http.StatusCreated {
+		t.Fatalf("first: expected 201; got %d body=%s", status1, raw1)
+	}
+	status2, raw2 := httpJSON(t, s, http.MethodPost, path, s.ownerBear,
+		attestBody("Review clean.", map[string]any{"result": "pass"}))
+	if status2 != http.StatusCreated {
+		t.Fatalf("pass: expected 201; got %d body=%s", status2, raw2)
+	}
+	status3, raw3 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, failBody)
+	if status3 != http.StatusOK {
+		t.Fatalf("client-key repeat: expected 200 (dedup); got %d body=%s", status3, raw3)
+	}
+	var r1, r3 struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+	}
+	_ = json.Unmarshal(raw1, &r1)
+	_ = json.Unmarshal(raw3, &r3)
+	if !r3.Deduplicated || r3.RecordID != r1.RecordID {
+		t.Fatalf("client key must dedupe strictly: first=%+v repeat=%+v", r1, r3)
+	}
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("client-key repeat: control result %q, want pass", got)
 	}
 }

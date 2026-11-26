@@ -10,6 +10,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/decision"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/incident"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
@@ -31,7 +32,13 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// routes (/expiring) are declared before /{id} so chi's
 	// declaration-order match keeps the calendar route ahead of the
 	// generic UUID-id route.
-	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool))
+	// #2269: activating or revoking an exception re-evaluates its control
+	// once the change commits, so the control's state follows at once.
+	// #2688: the re-evaluation is tracked in s.background, which RunHTTP
+	// drains on shutdown.
+	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool).WithReevaluate(
+		eval.ExceptionChangeReevaluator(eval.NewEngineFactory(s.dbPool), s.installLogger())).
+		WithWaitGroup(&s.background))
 	root.Post("/v1/exceptions", exceptionsH.CreateException)
 	root.Get("/v1/exceptions", exceptionsH.ListExceptions)
 	root.Get("/v1/exceptions/expiring", exceptionsH.Expiring)
@@ -40,10 +47,11 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	root.Patch("/v1/exceptions/{id}/revoke", exceptionsH.Revoke)
 
 	// OE-631: incident register backend. Minimal writer/reader routes for
 	// log, list, detail, lifecycle transition, and post-mortem closure.
-	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool))
+	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool).WithIngest(s.ingestService)).WithModules(s.moduleViews)
 	root.Post("/v1/incidents", incidentsH.Create)
 	root.Get("/v1/incidents", incidentsH.List)
 	root.Get("/v1/incidents/{id}", incidentsH.Get)
@@ -58,7 +66,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// update_risk_treatment) registered; on confirm, the Applier executes
 	// inside the same transaction as the state flip so a downstream-write
 	// failure rolls the proposal back to state=ai_proposed.
-	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool))
+	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool), s.ingestService).WithSwitches(s.moduleViews)
 	mcpWriteH := mcpwriteproposalsapi.New(mcpWriteStore)
 	root.Post("/v1/mcp/write-proposals", mcpWriteH.CreateProposal)
 	root.Get("/v1/mcp/write-proposals", mcpWriteH.ListProposals)
@@ -73,7 +81,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// route ahead of the generic UUID-id route. The link sub-resource
 	// routes are declared after the bare /{id} routes but use distinct path
 	// shapes (/{id}/links/{kind}[/{targetID}]) so there is no shadowing.
-	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool))
+	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool)).WithModules(s.moduleViews)
 	root.Post("/v1/decisions", decisionsH.CreateDecision)
 	root.Get("/v1/decisions", decisionsH.ListDecisions)
 	root.Get("/v1/decisions/overdue", decisionsH.Overdue)
@@ -96,11 +104,22 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	policiesH := policiesapi.NewWithPool(policy.NewStore(s.dbPool), s.dbPool)
 	root.Post("/v1/policies", policiesH.CreatePolicy)
 	root.Get("/v1/policies", policiesH.ListPolicies)
+	// #2850: the Confluence policy connector's full-set push. Only a
+	// policy-sync key reaches it (refusePolicySyncKeys, which matches the
+	// same path as policySyncPath; the literal is what the OpenAPI drift
+	// check reads).
+	root.Post("/v1/policies:sync", policiesH.SyncPolicies)
 	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)
 	root.Patch("/v1/policies/{id}/approve", policiesH.Approve)
 	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
+	root.Patch("/v1/policies/{id}/review-date", policiesH.SetReviewDate)
+	// #2852: a synced policy's control links, the one in-tool change it
+	// accepts.
+	root.Patch("/v1/policies/{id}/controls", policiesH.SetControls)
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
+	root.Delete("/v1/policies/{id}", policiesH.DiscardDraft)
+	root.Patch("/v1/policies/{id}", policiesH.UpdateDraft)
 	// Slice 023: policy acknowledgment workflow. Three routes appended
 	// per the parallel-batch convention (chi rejects two Mounts at "/").
 	// The literal-segment route /v1/policies/{id}/acknowledgment-rate is

@@ -12,7 +12,15 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
+
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
+// loopbackIdP lets an Authenticator reach an httptest fake IdP on
+// 127.0.0.1, which the strict issuer policy denies (#2534).
+var loopbackIdP = oidc.WithIssuerPolicy(netguard.Policy{AllowLoopback: true})
 
 type oidcLoginTestResolver struct {
 	cfg oidc.IdpConfig
@@ -43,7 +51,7 @@ func TestOIDCLoginProviderUnavailableReturnsDesign503(t *testing.T) {
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, 25*time.Millisecond)
+	}}, testStateKey, 25*time.Millisecond, loopbackIdP)
 	handler := New(authenticator, nil, nil, false, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login?tenant_id="+tenantID.String()+"&idp=primary", nil)
@@ -77,7 +85,7 @@ func TestOIDCLoginProviderUnavailableReturnsDesign503(t *testing.T) {
 
 func TestOIDCLoginUnknownIdpStillReturnsExisting4xx(t *testing.T) {
 	tenantID := uuid.New()
-	handler := New(oidc.New(oidcLoginTestResolver{err: oidc.ErrUnknownIdp}), nil, nil, false, nil)
+	handler := New(oidc.New(oidcLoginTestResolver{err: oidc.ErrUnknownIdp}, testStateKey), nil, nil, false, nil)
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login?tenant_id="+tenantID.String()+"&idp=missing", nil)
 	rec := httptest.NewRecorder()
 
@@ -105,5 +113,34 @@ func assertNoInternalLeak(t *testing.T, body string) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("response body leaked internal detail %q: %s", forbidden, body)
 		}
+	}
+}
+
+// #1761: idp stays required; without an implicit-tenant resolver,
+// tenant_id stays required too, and each 400 names its parameter.
+func TestOIDCLoginRequiredParams(t *testing.T) {
+	handler := New(oidc.New(oidcLoginTestResolver{err: oidc.ErrUnknownIdp}, testStateKey), nil, nil, false, nil)
+	for query, want := range map[string]string{
+		"tenant_id=" + uuid.NewString():              "idp query parameter is required",
+		"idp=primary":                                ErrMsgTenantIDRequired,
+		"idp=primary&tenant_id=nope":                 "invalid tenant_id",
+		"idp=primary&tenant_id=" + uuid.Nil.String(): "invalid tenant_id",
+	} {
+		rec := httptest.NewRecorder()
+		handler.OIDCLogin(rec, httptest.NewRequest(http.MethodGet, "/auth/oidc/login?"+query, nil))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("%s: got %d %s, want 400 %q", query, rec.Code, rec.Body.String(), want)
+		}
+	}
+}
+
+// #1761: the callback without tenant_id and without a resolver is a 400
+// naming tenant_id, before any flow-cookie or IdP work.
+func TestOIDCCallbackRequiresTenantWithoutResolver(t *testing.T) {
+	handler := New(oidc.New(oidcLoginTestResolver{err: oidc.ErrUnknownIdp}, testStateKey), nil, nil, false, nil)
+	rec := httptest.NewRecorder()
+	handler.OIDCCallback(rec, httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=c&state=s", nil))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), ErrMsgTenantIDRequired) {
+		t.Errorf("got %d %s, want 400 %q", rec.Code, rec.Body.String(), ErrMsgTenantIDRequired)
 	}
 }

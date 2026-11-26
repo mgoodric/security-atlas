@@ -16,6 +16,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -34,6 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CsfGapView, CsfTier } from "@/lib/api/csf";
+import { pageTitle } from "@/lib/page-titles";
 
 const TIER_LABEL: Record<CsfTier, string> = {
   tier1_partial: "Tier 1 — Partial",
@@ -49,10 +52,17 @@ const OUTCOME_LABEL: Record<string, string> = {
   fully: "Fully",
 };
 
+// NotCsfVersion marks a framework version the API refused: unknown (404) or
+// not a NIST CSF version (400, #2065). The page renders a not-found state.
+class NotCsfVersion extends Error {}
+
 async function fetchGap(fv: string): Promise<CsfGapView> {
   const res = await fetch(
     `/api/csf/gap?framework_version=${encodeURIComponent(fv)}`,
   );
+  if (res.status === 400 || res.status === 404) {
+    throw new NotCsfVersion(`not a CSF framework version: ${res.status}`);
+  }
   if (!res.ok) {
     throw new Error(`gap fetch failed: ${res.status}`);
   }
@@ -63,21 +73,44 @@ export default function CsfAssessmentPage() {
   const params = useParams<{ framework_version_id: string }>();
   const fv = params.framework_version_id;
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["csf-gap", fv],
     queryFn: () => fetchGap(fv),
     enabled: !!fv,
+    retry: (count, err) => !(err instanceof NotCsfVersion) && count < 3,
   });
 
-  return (
-    <div className="space-y-6" data-testid="csf-assessment">
-      <div>
-        <h1 className="text-2xl font-semibold">CSF 2.0 Assessment</h1>
-        <p className="text-muted-foreground text-sm">
-          Tier rating and Current-vs-Target profile gap for this CSF version.
-        </p>
-      </div>
+  if (error instanceof NotCsfVersion) {
+    return (
+      <PageShell
+        title="Assessment not found"
+        subtitle="This framework version is not a NIST CSF version, so it has no CSF assessment."
+        data-testid="csf-not-found"
+      />
+    );
+  }
 
+  return (
+    <PageShell
+      // #2081 — the H1 is the sidebar entry's label; the framework name
+      // and version that titled the page before move into the subtitle.
+      title={pageTitle("/csf")}
+      subtitle={
+        <>
+          {data ? (
+            <span data-testid="csf-title">
+              {data.framework_name} {data.framework_version}
+            </span>
+          ) : isLoading ? (
+            <Skeleton className="inline-block h-4 w-32 align-middle" />
+          ) : null}
+          {data || isLoading ? " — " : null}
+          <Term id="csf-tier">Tier rating</Term> and Current-vs-Target{" "}
+          <Term id="csf-profile">profile</Term> gap for this CSF version.
+        </>
+      }
+      data-testid="csf-assessment"
+    >
       <Card data-testid="csf-tier-card">
         <CardHeader>
           <CardTitle>Tier rating</CardTitle>
@@ -172,6 +205,6 @@ export default function CsfAssessmentPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

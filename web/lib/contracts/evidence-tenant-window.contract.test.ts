@@ -44,6 +44,7 @@ interface EvidenceRow {
   evidence_kind: string | null;
   observed_at: string;
   source: unknown;
+  source_attribution: unknown;
   content_hash: string;
   scope_cell: string | null;
   result: string;
@@ -163,6 +164,12 @@ describe("contract: GET /api/evidence (tenant-wide) <-> atlas GET /v1/evidence",
         }
         // source is opaque JSON — object or null, never absent.
         expect("source" in row, `${name}[${i}].source`).toBe(true);
+        // #2771: source_attribution is the actor claim the Source column
+        // and pill read — object or null, never absent.
+        expect(
+          "source_attribution" in row,
+          `${name}[${i}].source_attribution`,
+        ).toBe(true);
       }
     }
   });

@@ -53,9 +53,10 @@ If this PR is AI-assisted, include a `Co-authored-by:` trailer naming the assist
 
 ## Documentation
 
-- [ ] `CHANGELOG.md` updated under `## [Unreleased]`
-- [ ] `CONTEXT.md` updated if domain vocabulary changed
+- [ ] Changelog fragment added at `changelog.d/<pr-or-issue>.<type>.md`, or the `no-changelog` label applied (see `changelog.d/README.md`)
+- [ ] `GLOSSARY.md` updated if domain vocabulary changed
 - [ ] `Plans/` updated if architecture changed
+- [ ] Changed a module's behaviour or a lifecycle? Updated its help (`web/help/modules/`) and diagram
 - [ ] Slice status flipped in `docs/issues/_STATUS.md` (when opening as `in-review`)
 
 ## Docs impact

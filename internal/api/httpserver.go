@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
+	auditnotesapi "github.com/mgoodric/security-atlas/internal/api/auditnotes"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
@@ -22,6 +26,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	atlasaudit "github.com/mgoodric/security-atlas/internal/audit"
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -30,7 +36,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -41,10 +49,15 @@ func (s *Server) AttachDB(pool *pgxpool.Pool) { s.dbPool = pool }
 
 // HTTPHandlerForTests exposes the assembled HTTP handler so tests can
 // drive it via httptest.NewServer. Production callers should use RunHTTP.
-// Returns nil when no DB pool has been attached (handlers need one).
+// Returns nil when no DB pool has been attached (handlers need one). It
+// panics when New could not parse the deployment config RunHTTP refuses
+// (#2549), so a test cannot serve what production would not.
 func (s *Server) HTTPHandlerForTests() http.Handler {
 	if s.dbPool == nil {
 		return nil
+	}
+	if err := s.configErr(); err != nil {
+		panic(err)
 	}
 	return s.httpHandler()
 }
@@ -122,6 +135,12 @@ func (s *Server) buildRouter() *chi.Mux {
 	// via `Server.IssueTestJWT` and pass nil for the revocation store
 	// (the middleware short-circuits revocation lookup on a nil store
 	// per `jwtmw.Middleware`).
+	// #2849: a policy-sync API key is refused with 403 on every route,
+	// ahead of the JWT middleware so a session cookie on the same request
+	// does not let it through.
+	if s.apikeyStore != nil {
+		root.Use(refusePolicySyncKeys(s.apikeyStore))
+	}
 	if s.jwtSigner != nil {
 		// Slice 191 narrowing: the JWT bypass list previously included
 		// the entire `/oauth/` prefix. Slice 191 adds two routes —
@@ -138,10 +157,16 @@ func (s *Server) buildRouter() *chi.Mux {
 			ExpectedIssuer:   s.jwtIssuer,
 			ExpectedAudience: s.jwtAudience,
 			CookieName:       jwtmw.DefaultCookieName,
+			SuperAdmins:      s.jwtSuperAdmins,
 		}), "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/",
+			// #2850: refusePolicySyncKeys authenticates this path's
+			// policy-sync key; a session cookie must not replace it.
+			// requireCredential still runs, so without the gate (no
+			// apikeyStore) the path answers 401.
+			policySyncPath))
 		// Slice 197: fail-closed credential requirement. The slice 190
 		// JWT middleware passes through requests with NO JWT shape
 		// (e.g. malformed bearers or no Authorization header); without
@@ -175,6 +200,46 @@ func (s *Server) buildRouter() *chi.Mux {
 	// no-op when no credential is in context (bearer-exempt paths like
 	// /auth/* keep their own request-supplied tenant resolution).
 	root.Use(tenancymw.Middleware)
+	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
+	// tenancy so the cache lives inside the same request-context every
+	// downstream step sees, the module gate included. Anti-criterion P0:
+	// no cross-request cache -- the cache is created fresh per request and
+	// dies when the request ends.
+	root.Use(featureflag.CacheMiddleware)
+	// Slice 660: one shared feature-flag Store, reused by the module gate,
+	// the admin features handler, and the caller's effective-modules read.
+	// Tenant scope comes from RLS on each per-request transaction
+	// (invariant #6).
+	featureFlagStore := featureflag.NewStore(s.dbPool)
+	// #2170: the module gate step of the authorization chain. A route that
+	// belongs to a switched-off module (featureflag.Modules) answers 404
+	// with the switched-off marker before the OPA role decision; core
+	// routes and switched-on modules fall through to it. It replaces the
+	// per-route featureflag.Gate groups board and OSCAL vendor claims used.
+	// #2339: a refused request writes a decision_audit_log row (deduped per
+	// tenant, actor and switch), since the OPA step that audits every
+	// other decision never sees it; a failed module-state read answers 503.
+	var gateOpts []featureflag.GateOption
+	var accessOpts []moduleaccess.GateOption
+	if s.authzAudit != nil {
+		gated := newGatedAttemptAuditor(s.authzAudit)
+		gateOpts = append(gateOpts, featureflag.WithAttemptRecorder(gated.Record))
+		accessOpts = append(accessOpts, moduleaccess.WithDenyRecorder(gated.RecordNoAccess))
+	}
+	root.Use(featureflag.ModuleGate(featureFlagStore, gateOpts...))
+	// #2172: the module access step. A switched-on optional module outside
+	// the caller's module access answers 403 naming the module, before the
+	// OPA role decision; admins, auditors and members with "all" fall
+	// through. After the module gate, so switched off (404) wins.
+	// #2466: a refused request writes a decision_audit_log row too, the
+	// same shape and dedupe as the module gate's (reason
+	// "module_no_access").
+	moduleAccessStore := moduleaccess.NewStore(s.dbPool)
+	root.Use(moduleaccess.Gate(moduleAccessStore, accessOpts...))
+	// #2173: the combined views (Upcoming, Calendar and ICS, Activity,
+	// search, the dashboard export, Metrics, Approvals) show only the
+	// modules the viewer may see, from the same two stores the gates read.
+	s.moduleViews = moduleaccess.NewViews(moduleAccessStore, featureFlagStore)
 	// Slice 035: RBAC + ABAC via embedded OPA. Every non-exempt
 	// request reaches authz.Decide; every decision (allow or deny)
 	// writes one row to decision_audit_log. Attaches AFTER tenancymw
@@ -191,21 +256,21 @@ func (s *Server) buildRouter() *chi.Mux {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
+		// #2193: POST /v1/audit-notes carries its audit_period_id in the
+		// body; the hydrator puts it on input.resource.attrs (after checking
+		// the period is in the caller's tenant) for the auditor.rego write
+		// rule. #2157: the population, sample and evidence routes get the
+		// audit period(s) they belong to, for the auditor rules in
+		// audit_periods.rego.
+		var resourceAttrs authzmw.ResourceAttrsFunc
+		if s.dbPool != nil {
+			resourceAttrs = authzmw.ChainResourceAttrs(
+				auditnotesapi.PeriodResourceAttrs(auditperiod.NewStore(s.dbPool)),
+				auditapi.ResourceAttrs(atlasaudit.NewStore(s.dbPool)),
+			)
+		}
+		root.Use(authzmw.MiddlewareWithResourceAttrs(s.authzEngine, s.authzAudit, resourceAttrs, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
-	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
-	// tenancy / authz so the cache lives inside the same request-context
-	// every downstream handler sees. Anti-criterion P0: no cross-request
-	// cache -- the cache is created fresh per request and dies when the
-	// request ends.
-	root.Use(featureflag.CacheMiddleware)
-
-	// Slice 660: one shared feature-flag Store, reused by the route-gate
-	// middleware (OSCAL + board), the admin features handler, and the
-	// non-admin enabled-modules read. Tenant scope comes from RLS on each
-	// per-request transaction (invariant #6).
-	featureFlagStore := featureflag.NewStore(s.dbPool)
-
 	queries := dbx.New(s.dbPool)
 
 	// Slice 436: shared stores reused across more than one per-domain
@@ -215,7 +280,11 @@ func (s *Server) buildRouter() *chi.Mux {
 	// backs both the vendor routes and the board-pack burndown adapter; the
 	// freshness+drift read-model stores back the freshness/drift, dashboard,
 	// and board reads). Identical to the former inline construction.
-	risksStore := risk.NewStore(s.dbPool)
+	// #1750: the slice 054 aggregation engine runs inside every risk
+	// write's transaction (canvas §6.6 "on each risk write").
+	risksStore := risk.NewStore(s.dbPool).
+		WithBeforeRiskWrite(aggrule.LockOnRiskWrite).
+		WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
 	vendorStore := vendor.NewStore(s.dbPool)
 	freshnessStore := freshness.NewStore(s.dbPool)
 	driftStore := drift.NewStore(s.dbPool)
@@ -230,13 +299,13 @@ func (s *Server) buildRouter() *chi.Mux {
 	s.registerMe(root)
 	s.registerGovernance(root)
 	s.registerControlState(root)
-	s.registerOSCAL(root, featureFlagStore)
+	s.registerOSCAL(root)
 	s.registerDashboard(root, risksStore, freshnessStore, driftStore)
 	s.registerCalendar(root)
-	s.registerBoard(root, featureFlagStore, freshnessStore, driftStore, vendorStore)
+	s.registerBoard(root, freshnessStore, driftStore, vendorStore)
 	s.registerQuestionnaire(root)
 	s.registerLLMRouting(root)
-	s.registerAdmin(root, featureFlagStore)
+	s.registerAdmin(root, featureFlagStore, moduleAccessStore)
 	s.registerMetrics(root)
 	s.registerPersonnelSecurity(root)
 	return root
@@ -282,8 +351,8 @@ type walkthroughArtifactAdapter struct {
 	store *artifact.Store
 }
 
-func (a *walkthroughArtifactAdapter) Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error) {
-	return a.store.Put(ctx, in)
+func (a *walkthroughArtifactAdapter) PutReader(ctx context.Context, in artifact.PutInput, body io.ReadSeeker) (artifact.Artifact, error) {
+	return a.store.PutReader(ctx, in, body)
 }
 
 type storeArtifactAdapter struct {
@@ -309,24 +378,56 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	if s.dbPool == nil {
 		return errors.New("api: HTTP server requires a DB pool (call Server.AttachDB before RunHTTP)")
 	}
+	if err := s.configErr(); err != nil {
+		return err
+	}
+	// #2555: without the OPA engine the authz middleware is skipped and the
+	// combined views (calendar.ReadableTypes, needs-attention) admit every
+	// item type. That is the unit-server shape; a served binary refuses it.
+	if s.authzEngine == nil {
+		return errors.New("api: HTTP server requires an authz engine (call Server.AttachAuthz before RunHTTP)")
+	}
+	s.background.logger = s.installLogger()
+	handler := s.httpHandler()
+	// #2555: an unwired Views admits every module (moduleaccess.Views.For).
+	if !s.moduleViews.Wired() {
+		return errors.New("api: HTTP server built without module views; the combined views would show every module")
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.httpHandler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		err := srv.Shutdown(shutdownCtx)
+		// A Shutdown that hit its deadline leaves handlers running. wait
+		// closes s.background before it waits, so a late Activate or
+		// Revoke runs its re-evaluation untracked instead of adding to the
+		// group mid-Wait (#2688, #2748).
+		if werr := s.background.wait(shutdownCtx); err == nil {
+			err = werr
+		}
+		return err
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
+}
+
+// configErr is the deployment config New could not parse; the HTTP
+// server refuses to start on it rather than fall back (#2549).
+func (s *Server) configErr() error {
+	if s.issuerPolicyErr != nil {
+		return fmt.Errorf("api: %w", s.issuerPolicyErr)
+	}
+	return nil
 }
 
 // corsMiddleware allows the Next.js dev origin to call the API with the

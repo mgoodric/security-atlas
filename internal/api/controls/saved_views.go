@@ -1,4 +1,7 @@
 // Slice 468 — server-backed saved filter-views for the /controls list.
+// #2133 widened them to the risk register: the list a view belongs to is
+// its surface (`?surface=` on GET, `surface` in the POST body), and
+// `controls` stays the default so the controls page is unchanged.
 //
 // Backend half of slice 448's client-side saved-views (which persisted to
 // localStorage). The seam slice 448 built (the injected SavedViewStore in
@@ -44,15 +47,16 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 const (
-	// savedViewSurface is the only surface v1 ships (controls list). The
-	// DB CHECK pins it; slice 448 P0-448-7 keeps this slice controls-only.
-	savedViewSurface = "controls"
+	// The lists a view can belong to; the DB CHECK pins the same set
+	// (#2133). controls is the default when a request names none.
+	surfaceControls = "controls"
+	surfaceRisks    = "risks"
 	// MaxSavedViews caps a user's saved views per surface. Mirrors the
 	// client MAX_SAVED_VIEWS (web .../saved-views.ts = 20).
 	MaxSavedViews = 20
@@ -67,7 +71,10 @@ const (
 // controlFilterKeys is the slice-224 controls-filter allow-list. A persisted
 // view's filter payload is narrowed to EXACTLY these keys (threat-model T).
 // MUST stay in sync with web/app/(authed)/controls/filters.ts ControlFilters.
-var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope"}
+// anchor_fit is issue #1736; owner and sort are #2131 (the sort rides with
+// the filters so a saved view keeps its order). Each key is also a
+// `GET /v1/controls?include=state` parameter of the same name.
+var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope", "anchor_fit", "owner", "sort"}
 
 // SavedViewsHandler binds the saved-views routes. pool may be nil in
 // unit-only servers (the route gates return 503).
@@ -94,6 +101,7 @@ type listSavedViewsResponse struct {
 
 type createSavedViewRequest struct {
 	Name    string            `json:"name"`
+	Surface string            `json:"surface"`
 	Filters map[string]string `json:"filters"`
 }
 
@@ -110,13 +118,18 @@ func (h *SavedViewsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	surface, serr := parseSurface(r.URL.Query().Get("surface"))
+	if serr != nil {
+		writeSavedViewError(w, http.StatusBadRequest, serr.Error())
+		return
+	}
 	var views []dbx.SavedView
 	err := h.inTenantTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		var lerr error
 		views, lerr = q.ListSavedViews(ctx, dbx.ListSavedViewsParams{
 			TenantID: pgUUID(tenantUUID),
 			UserID:   pgUUID(userUUID),
-			Surface:  savedViewSurface,
+			Surface:  surface,
 		})
 		return lerr
 	})
@@ -159,8 +172,13 @@ func (h *SavedViewsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeSavedViewError(w, http.StatusBadRequest, "name exceeds the 60-character cap")
 		return
 	}
+	surface, serr := parseSurface(req.Surface)
+	if serr != nil {
+		writeSavedViewError(w, http.StatusBadRequest, serr.Error())
+		return
+	}
 	// Validate the filter payload to the allow-list (threat-model T).
-	filtersBlob, ferr := sanitizeControlFilters(req.Filters)
+	filtersBlob, ferr := sanitizeFiltersForSave(surface, req.Filters)
 	if ferr != nil {
 		writeSavedViewError(w, http.StatusBadRequest, ferr.Error())
 		return
@@ -173,7 +191,7 @@ func (h *SavedViewsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		count, cerr := q.CountSavedViews(ctx, dbx.CountSavedViewsParams{
 			TenantID: pgUUID(tenantUUID),
 			UserID:   pgUUID(userUUID),
-			Surface:  savedViewSurface,
+			Surface:  surface,
 		})
 		if cerr != nil {
 			return cerr
@@ -184,7 +202,7 @@ func (h *SavedViewsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		row, ierr := q.InsertSavedView(ctx, dbx.InsertSavedViewParams{
 			TenantID: pgUUID(tenantUUID),
 			UserID:   pgUUID(userUUID),
-			Surface:  savedViewSurface,
+			Surface:  surface,
 			Name:     name,
 			Filters:  filtersBlob,
 		})
@@ -264,8 +282,8 @@ func (h *SavedViewsHandler) identity(w http.ResponseWriter, r *http.Request) (cr
 		writeSavedViewError(w, http.StatusInternalServerError, "tenant context: invalid tenant id")
 		return cred, uuid.Nil, uuid.Nil, false
 	}
-	userUUID, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		writeSavedViewError(w, http.StatusForbidden, "saved views require a user credential")
 		return cred, uuid.Nil, uuid.Nil, false
 	}
@@ -301,6 +319,38 @@ func (h *SavedViewsHandler) writeCreateError(w http.ResponseWriter, err error) {
 	writeSavedViewError(w, http.StatusInternalServerError, "create saved view: "+err.Error())
 }
 
+var errUnknownSurface = errors.New("surface must be one of controls|risks")
+
+// parseSurface reads the list a request names; empty is controls.
+func parseSurface(raw string) (string, error) {
+	switch raw {
+	case "", surfaceControls:
+		return surfaceControls, nil
+	case surfaceRisks:
+		return surfaceRisks, nil
+	}
+	return "", errUnknownSurface
+}
+
+// sanitizeFiltersForSave validates a view's payload for its surface and
+// returns the JSON to store. A risks view is checked strictly: an unknown
+// key or a value GET /v1/risks would refuse is an error (#2133). A
+// controls view keeps its slice-468 rule of dropping unknown keys.
+func sanitizeFiltersForSave(surface string, raw map[string]string) ([]byte, error) {
+	if surface != surfaceRisks {
+		return sanitizeControlFilters(raw)
+	}
+	valid, err := risksapi.ValidateSavedView(raw)
+	if err != nil {
+		return nil, err
+	}
+	blob, err := json.Marshal(valid)
+	if err != nil {
+		return nil, errors.New("filters payload is not serializable")
+	}
+	return blob, nil
+}
+
 // sanitizeControlFilters narrows an arbitrary filter map to EXACTLY the
 // slice-224 controls-filter keys (threat-model T). Unknown keys are dropped;
 // only non-empty string values survive. Returns the canonical JSON blob to
@@ -332,9 +382,18 @@ func sanitizeControlFilters(raw map[string]string) ([]byte, error) {
 // toWire converts a stored row to the wire shape, re-sanitizing the stored
 // filters on read (defense in depth — a row written before a key-set change
 // degrades to the known keys rather than leaking an unknown key to the UI).
+//
+// A risks view keeps only the entries that still validate (#2133), so a
+// value retired since it was saved drops out instead of failing the
+// register.
 func toWire(v dbx.SavedView) savedViewWire {
 	filters := map[string]string{}
-	if len(v.Filters) > 0 {
+	if len(v.Filters) > 0 && v.Surface == surfaceRisks {
+		var stored map[string]string
+		if err := json.Unmarshal(v.Filters, &stored); err == nil {
+			filters = risksapi.SanitizeSavedView(stored)
+		}
+	} else if len(v.Filters) > 0 {
 		var stored map[string]any
 		if err := json.Unmarshal(v.Filters, &stored); err == nil {
 			allowed := make(map[string]struct{}, len(controlFilterKeys))

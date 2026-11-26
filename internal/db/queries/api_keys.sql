@@ -5,12 +5,14 @@
 INSERT INTO api_keys (
     id, tenant_id, token_hash, scope_predicate, allowed_kinds,
     issued_by, expires_at, rotated_from,
-    is_admin, is_approver, owner_roles, last4, ttl_seconds
+    is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose,
+    minted_by, label
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10, $11, $12, $13
+    $9, $10, $11, $12, $13, $14,
+    $15, $16
 )
 RETURNING *;
 
@@ -26,6 +28,15 @@ WHERE token_hash = $1;
 SELECT *
 FROM api_keys
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: GetAPIKeyByIDForUpdate :one
+-- GetAPIKeyByID with a row lock, for the audited revoke paths (#2740): two
+-- replicas revoking one key serialize here, so the second sees revoked_at
+-- set and writes no second api_key_revoke row.
+SELECT *
+FROM api_keys
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
 
 -- name: ListAPIKeysByTenant :many
 -- Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
@@ -66,3 +77,12 @@ WHERE tenant_id = $1 AND id = $2;
 UPDATE api_keys
 SET retires_at = $3
 WHERE tenant_id = $1 AND id = $2 AND revoked_at IS NULL;
+
+-- name: RevokeUserAPIKeys :many
+-- Deactivation (#1915): revoke every live key owned by the user (issued_by).
+-- Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
+-- keys, admin-issued push keys) never match. Returns the revoked ids.
+UPDATE api_keys
+SET revoked_at = now()
+WHERE tenant_id = $1 AND issued_by = $2 AND revoked_at IS NULL
+RETURNING id;

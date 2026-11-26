@@ -46,6 +46,11 @@ const (
 	BandPartial ConfidenceBand = "partial"
 	// BandStrong: the requirement is well covered.
 	BandStrong ConfidenceBand = "strong"
+	// BandExcluded: the tenant's activated framework-scope revision
+	// excludes the requirement (Statement of Applicability, #1788). It is
+	// not a coverage bucket, so classifyBand never returns it; the
+	// requirement coverage read sets it in place of the computed band.
+	BandExcluded ConfidenceBand = "excluded"
 )
 
 // Band threshold cut points (JUDGMENT — decisions log, low confidence).

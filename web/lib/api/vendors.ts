@@ -39,8 +39,20 @@ export type Vendor = {
   dpa_signed_at?: string | null;
   review_cadence: VendorReviewCadence;
   last_review_date?: string | null;
+  // Set only while the vendor has never been reviewed: its creation date
+  // (UTC) plus the tenant's initial-review window. Overdue stays false until
+  // that day has passed (#2061).
+  first_review_due?: string | null;
   overdue: boolean;
+  // #2129: the owner, a user id, or null. owner_unlinked is the free-text
+  // owner no user matched ("Owner (unlinked)"), "" whenever owner_user_id
+  // is set. owner_user is the stored free text, kept for older clients.
+  owner_user_id?: string | null;
+  owner_unlinked?: string;
   owner_user: string;
+  // #2174: present and true when the owner can no longer work in
+  // Third-party risk. Computed at read time; the owner stays assigned.
+  owner_lacks_access?: boolean;
   linked_sow_uri?: string | null;
   notes: string;
   annual_cost?: number | null;
@@ -67,7 +79,11 @@ export type VendorWrite = {
   dpa_signed_at?: string | null;
   review_cadence: VendorReviewCadence;
   last_review_date?: string | null;
+  // The unlinked free text, sent back unchanged so an edit loses nothing;
+  // the platform drops it once owner_user_id is set.
   owner_user: string;
+  // #2129: the owner, a user id; "" or absent for none.
+  owner_user_id?: string;
   linked_sow_uri?: string | null;
   notes: string;
   annual_cost?: number | null;

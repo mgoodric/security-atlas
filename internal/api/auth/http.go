@@ -14,12 +14,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
@@ -71,6 +73,14 @@ type Handler struct {
 	// groupDeriver, when set, reconciles group-derived roles on OIDC login
 	// (slice 733 AC-1). nil leaves the pre-733 behavior (no derivation).
 	groupDeriver OIDCGroupDeriver
+
+	// implicitTenant, when set, supplies the tenant for a local login that
+	// omits tenant_id (#1727). nil keeps tenant_id required.
+	implicitTenant ImplicitTenantResolver
+
+	// loginThrottle rate-limits /auth/local/login per IP and per account
+	// before the argon2id work (#1913).
+	loginThrottle *loginThrottle
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
@@ -93,6 +103,7 @@ func New(
 		sessions:      s,
 		secureCookies: secureCookies,
 		localAS:       localAS,
+		loginThrottle: newLoginThrottle(time.Now),
 	}
 }
 
@@ -102,24 +113,95 @@ func New(
 // its pre-733 behavior. Set once at startup from cmd/atlas.
 func (h *Handler) AttachGroupDeriver(d OIDCGroupDeriver) { h.groupDeriver = d }
 
-// LocalLoginRequest is the JSON body for POST /auth/local/login.
+// LocalLoginRequest is the JSON body for POST /auth/local/login. TenantID
+// may be empty on a single-tenant install; see LocalLogin.
 type LocalLoginRequest struct {
 	TenantID string `json:"tenant_id"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// ImplicitTenantResolver answers which tenant a login that names none
+// means (#1727): the only tenant on a single-tenant install. It returns
+// tenancy.ErrNoTenants or a *tenancy.AmbiguousTenantError when no tenant is
+// implied, and never the all-zeros tenant.
+type ImplicitTenantResolver interface {
+	ImplicitTenant(ctx context.Context) (uuid.UUID, error)
+}
+
+// PoolImplicitTenantResolver resolves the implicit tenant with
+// tenancy.ResolveImplicitTenantID, the bounded id-only query (#1913). Q must
+// be a BYPASSRLS connection: the question is asked before any tenant
+// context exists.
+type PoolImplicitTenantResolver struct{ Q tenancy.Querier }
+
+// ImplicitTenant implements ImplicitTenantResolver.
+func (p PoolImplicitTenantResolver) ImplicitTenant(ctx context.Context) (uuid.UUID, error) {
+	return tenancy.ResolveImplicitTenantID(ctx, p.Q)
+}
+
+// AttachImplicitTenantResolver lets POST /auth/local/login and the
+// /auth/oidc/login + callback routes omit tenant_id on a single-tenant
+// install. Without it, tenant_id stays required.
+func (h *Handler) AttachImplicitTenantResolver(r ImplicitTenantResolver) { h.implicitTenant = r }
+
+// ErrMsgTenantIDRequired is the 400 body for a login without tenant_id when
+// no tenant is implied. It is the same whether the install has no tenant or
+// several, and names none: the caller is unauthenticated.
+const ErrMsgTenantIDRequired = "tenant_id is required"
+
+// loginTenant picks the tenant for a local or OIDC login. An explicit tenant_id
+// wins; the all-zeros id is never accepted. An empty tenant_id falls back
+// to the implicit tenant. On failure it returns the HTTP status and message
+// to answer with.
+func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolver) (uuid.UUID, int, string) {
+	if raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			return uuid.Nil, http.StatusBadRequest, "invalid tenant_id"
+		}
+		return id, 0, ""
+	}
+	if resolver == nil {
+		return uuid.Nil, http.StatusBadRequest, ErrMsgTenantIDRequired
+	}
+	id, err := resolver.ImplicitTenant(ctx)
+	var ambiguous *tenancy.AmbiguousTenantError
+	switch {
+	case err == nil && id != uuid.Nil:
+		return id, 0, ""
+	case err == nil, errors.Is(err, tenancy.ErrNoTenants), errors.As(err, &ambiguous):
+		return uuid.Nil, http.StatusBadRequest, ErrMsgTenantIDRequired
+	default:
+		slog.ErrorContext(ctx, "login: resolve implicit tenant", "err", err)
+		return uuid.Nil, http.StatusInternalServerError, "login failed"
+	}
+}
+
 // LocalLogin verifies (tenant, email, password) and on success establishes
-// a session cookie. Returns 401 on any failure (no oracle).
+// a session cookie. Returns 401 on any failure (no oracle). tenant_id may be
+// omitted on a single-tenant install when an ImplicitTenantResolver is
+// attached (#1727).
 func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	// #1913: the per-IP bucket runs first, before the body is read.
+	if ok, retry := h.loginThrottle.ip.Allow(ratekey.IP(clientIP(r))); !ok {
+		writeLoginThrottled(w, retry)
+		return
+	}
 	var req LocalLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	tenantID, err := uuid.Parse(req.TenantID)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
+	tenantID, status, msg := loginTenant(r.Context(), req.TenantID, h.implicitTenant)
+	if status != 0 {
+		writeAuthError(w, status, msg)
+		return
+	}
+	// The per-account key comes from the request alone, so an unknown
+	// email is throttled the same as a known one (no existence oracle).
+	if ok, retry := h.loginThrottle.account.Allow(loginAccountKey(tenantID, req.Email)); !ok {
+		writeLoginThrottled(w, retry)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
@@ -193,17 +275,18 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 
 // OIDCLogin handles GET /auth/oidc/login?tenant_id=...&idp=...
 // It generates state + PKCE, looks up the IdP, and 302-redirects to the
-// IdP's authorize endpoint.
+// IdP's authorize endpoint. tenant_id may be omitted on a single-tenant
+// install, where the sole tenant's IdP config is used (#1761); on a
+// multi-tenant install its absence is a 400 naming tenant_id.
 func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
-	tenantIDStr := r.URL.Query().Get("tenant_id")
 	idpName := r.URL.Query().Get("idp")
-	if tenantIDStr == "" || idpName == "" {
-		writeAuthError(w, http.StatusBadRequest, "tenant_id and idp query parameters are required")
+	if idpName == "" {
+		writeAuthError(w, http.StatusBadRequest, "idp query parameter is required")
 		return
 	}
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
+	tenantID, code, msg := loginTenant(r.Context(), r.URL.Query().Get("tenant_id"), h.implicitTenant)
+	if code != 0 {
+		writeAuthError(w, code, msg)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
@@ -220,6 +303,12 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 			writeOIDCProviderUnavailable(w)
 			return
 		}
+		// #2609: the reason is in the server log (idpconfig.Resolver); the
+		// caller is not signed in, so the wire gets a generic message.
+		if errors.Is(err, oidc.ErrIdpConfigUnusable) {
+			writeAuthError(w, http.StatusServiceUnavailable, ErrMsgSSOConfigUnusable)
+			return
+		}
 		writeAuthError(w, http.StatusBadRequest, "OIDC begin: "+err.Error())
 		return
 	}
@@ -229,31 +318,46 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, result.AuthURL, http.StatusFound)
 }
 
+// ErrMsgSSOConfigUnusable is the 503 body when the tenant's saved SSO config
+// cannot be used (#2609). Why it cannot (a non-https issuer, a secret that
+// does not decrypt) goes to the server log only: the caller has not signed
+// in, and the reason describes the organisation's configuration.
+const ErrMsgSSOConfigUnusable = "single sign-on is not available for this organisation; " +
+	"ask an administrator to check its SSO settings"
+
+// ErrMsgBootstrapAmbiguousTenant is the 409 body for an OIDC first login on
+// an install with several tenants and no user. It names no tenant: the
+// caller has only proven an IdP login.
+const ErrMsgBootstrapAmbiguousTenant = "several organisations exist and no user is provisioned; " +
+	"provision the first admin with atlas-cli"
+
 // OIDCCallback handles GET /auth/oidc/callback?code=...&state=...
 // It verifies state (CSRF), exchanges code, upserts user, and sets the
-// session cookie. The tenant_id is bound to the flow via the IdP cookie's
-// preceding /auth/oidc/login resolution.
+// session cookie. The tenant is bound to the flow: /auth/oidc/login sets
+// the oidc.TenantCookie, and the callback refuses (400) a resolved tenant
+// that differs from it (#1968).
 //
 // Slice 198 — OIDC-first-install bootstrap branch:
 //
 // AFTER the OIDC callback succeeds but BEFORE the standard UpsertOIDC
-// call, the handler invokes BootstrapFirstInstallOrUpsert. When the
-// tenants table is empty, the bootstrap branch atomically creates the
-// Default Tenant + the OIDC user + the admin role + the super_admin
-// grant + the audit-log row, and the handler establishes the session
-// against the newly-synthesized tenant_id (the URL query parameter is
-// ignored on this branch — the operator's browser hit /auth/oidc/login
-// with no tenants yet, so any tenant_id they supplied is a placeholder).
+// call, the handler invokes BootstrapFirstInstallOrUpsert. When no user and
+// no super_admin exists yet, the bootstrap branch atomically attaches the OIDC user to
+// the bootstrap tenant (creating it only when no tenant exists) with the
+// admin role + the super_admin grant + the audit-log row, and the handler
+// establishes the session against that tenant (the URL query parameter
+// is ignored on this branch). With several tenants and no user, no
+// tenant is implied: the handler logs the tenant list server-side, clears
+// the flow cookies and answers a generic 409 that names no tenant.
 //
-// On the established-install branch (count(*) > 0), the bootstrap call
+// On the established-install branch (a user or super_admin exists), the bootstrap call
 // returns Bootstrapped=false and the handler falls through to the
 // existing UpsertOIDC + session-create path unchanged.
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
-	// Tenant is recovered from the flow cookies by the resolver.
-	tenantIDStr := r.URL.Query().Get("tenant_id")
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid or missing tenant_id")
+	// tenant_id may be omitted on a single-tenant install, as at
+	// /auth/oidc/login (#1761).
+	tenantID, code, msg := loginTenant(r.Context(), r.URL.Query().Get("tenant_id"), h.implicitTenant)
+	if code != 0 {
+		writeAuthError(w, code, msg)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
@@ -261,10 +365,30 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
 		return
 	}
-	result, err := h.oidc.HandleCallback(ctx, r, tenantID)
+	result, err := h.oidc.HandleCallback(ctx, r, tenantID, h.secureCookies)
 	if err != nil {
+		// #2177: a refused flow is over, so its cookies go with the 400.
 		if errors.Is(err, oidc.ErrStateMismatch) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
 			writeAuthError(w, http.StatusBadRequest, "state mismatch (CSRF guard tripped)")
+			return
+		}
+		if errors.Is(err, oidc.ErrTenantMismatch) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusBadRequest, "tenant does not match the login flow")
+			return
+		}
+		// #2034: the IdP authenticated someone the saved config does not
+		// admit. The email stays out of the response.
+		if errors.Is(err, oidc.ErrEmailDomainNotAllowed) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusForbidden, "email domain not allowed for this organisation")
+			return
+		}
+		// #2609: as at /auth/oidc/login, the reason stays in the server log.
+		if errors.Is(err, oidc.ErrIdpConfigUnusable) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusServiceUnavailable, ErrMsgSSOConfigUnusable)
 			return
 		}
 		writeAuthError(w, http.StatusBadGateway, "OIDC callback: "+err.Error())
@@ -273,8 +397,8 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Slice 198 bootstrap branch. The call is a no-op (returns
 	// Bootstrapped=false) when the Store has no auth pool wired OR
-	// when count(*) FROM tenants > 0 — i.e., on every login after the
-	// first install. The branch returns ErrBootstrapUnavailable when
+	// when any user or super_admin exists — i.e., on every login after the first
+	// user. The branch returns ErrBootstrapUnavailable when
 	// the auth pool isn't wired; on that path we fall through to the
 	// existing UpsertOIDC code (which itself enforces the
 	// pre-slice-198 "tenant_id required" guarantee).
@@ -285,6 +409,16 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		Subject:     result.Subject,
 	})
 	if bootErr != nil && !errors.Is(bootErr, users.ErrBootstrapUnavailable) {
+		var ambiguous *tenancy.AmbiguousTenantError
+		if errors.As(bootErr, &ambiguous) {
+			// Reaching this needs only an IdP login, so the tenant list
+			// stays in the server log; the browser gets a generic 409.
+			slog.WarnContext(r.Context(), "oidc first login refused: several tenants and no user provisioned",
+				"idp_issuer", result.Issuer, "tenants", ambiguous.Error())
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusConflict, ErrMsgBootstrapAmbiguousTenant)
+			return
+		}
 		writeAuthError(w, http.StatusInternalServerError, "bootstrap: "+bootErr.Error())
 		return
 	}
@@ -309,16 +443,39 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ctx = bootCtx
 	} else {
 		usr, err = h.users.UpsertOIDC(ctx, users.UpsertOIDCInput{
-			TenantID:    result.TenantID,
-			Email:       result.Email,
-			DisplayName: result.DisplayName,
-			Issuer:      result.Issuer,
-			Subject:     result.Subject,
+			TenantID:      result.TenantID,
+			Email:         result.Email,
+			DisplayName:   result.DisplayName,
+			Issuer:        result.Issuer,
+			Subject:       result.Subject,
+			EmailVerified: result.EmailVerified,
+			IDPConfigID:   result.IDPConfigID,
+
+			TrustUnverifiedEmail: result.TrustUnverifiedEmailForLink,
 		})
+		if errors.Is(err, users.ErrIdentityConflict) {
+			// #1944: the email is held by a user this sign-in may not link
+			// to (another IdP principal, a local password, a super_admin),
+			// or the IdP says it is unverified. Refuse like a deactivated
+			// user; the reason stays in the server log, without the email.
+			slog.WarnContext(r.Context(), "oidc sign-in refused: email held by another identity",
+				"idp_issuer", result.Issuer, "idp_config_id", result.IDPConfigID)
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
 		if err != nil {
 			writeAuthError(w, http.StatusInternalServerError, "user upsert: "+err.Error())
 			return
 		}
+	}
+	// #1912: the IdP still authenticates a user whose membership an admin
+	// revoked (status='disabled') or whom SCIM deprovisioned (active=false).
+	// Refuse before any role derivation or session, with the local-login 401.
+	if !usr.CanSignIn() {
+		oidc.ClearFlowCookies(w, h.secureCookies)
+		writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
+		return
 	}
 	// Slice 733 AC-1: reconcile the user's group-derived roles from the
 	// VALIDATED OIDC groups claim BEFORE minting the session, so the session

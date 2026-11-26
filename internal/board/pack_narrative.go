@@ -26,17 +26,23 @@ import (
 	"text/template"
 )
 
+// pluralize picks the singular noun when n is 1 and the plural otherwise.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
 // packSectionFuncs are the per-section template helpers.
 var packSectionFuncs = template.FuncMap{
-	"arrow":  arrowGlyph,
-	"signed": signedInt,
-	"add1":   func(i int) int { return i + 1 },
-	"pluralize": func(n int, singular, plural string) string {
-		if n == 1 {
-			return singular
-		}
-		return plural
-	},
+	"arrow":      arrowGlyph,
+	"signed":     signedInt,
+	"pts":        signedPts,
+	"pct":        formatPct,
+	"noBaseline": func() string { return noBaselineText },
+	"add1":       func(i int) int { return i + 1 },
+	"pluralize":  pluralize,
 	// pluralize64 mirrors pluralize for int64 counts (slice 273 — the
 	// vendor-burndown totals are int64 from the slice-122 surface).
 	"pluralize64": func(n int64, singular, plural string) string {
@@ -76,18 +82,33 @@ type sectionRenderContext struct {
 // against a sectionRenderContext (the Section fields plus .PeriodEnd).
 var sectionSources = map[string]string{
 	SectionPosture: `Program posture as of {{ .PeriodEnd }}. ` +
-		`{{ if .Data.Frameworks }}The program runs against {{ len .Data.Frameworks }} registered {{ pluralize (len .Data.Frameworks) "framework" "frameworks" }}: ` +
-		`{{ range $i, $f := .Data.Frameworks }}{{ if $i }}; {{ end }}{{ $f.Name }} at {{ $f.CoveragePct }}% coverage ({{ $f.State }}, {{ arrow $f.TrendArrow }} {{ signed $f.Delta }} pts over the window){{ end }}.` +
+		`{{ if .Data.Frameworks }}The program runs against {{ len .Data.Frameworks }} {{ pluralize (len .Data.Frameworks) "framework" "frameworks" }}: ` +
+		`{{ range $i, $f := .Data.Frameworks }}{{ if $i }}; {{ end }}{{ $f.Name }}{{ if $f.Version }} {{ $f.Version }}{{ end }} ` +
+		`{{ if $f.ScopeNotSet }}has no activated framework scope (scope not set), so no coverage is reported` +
+		`{{ else }}at {{ pct $f.CoveragePct }}% coverage ({{ if gt $f.CoveredByExceptionPct 0.0 }}{{ pct $f.CoveredByExceptionPct }}% of requirements covered by exception, {{ end }}{{ $f.State }}, ` +
+		`{{ if $f.NoTrendHistory }}{{ noBaseline }}{{ else }}{{ arrow $f.TrendArrow }} {{ pts $f.Delta }} pts over 90 days, from {{ pct $f.BaselinePct }}%{{ end }}){{ end }}{{ end }}.` +
 		`{{ else }}No frameworks are registered yet — register a framework to populate per-framework posture.{{ end }}`,
 
 	SectionTopRisks: `{{ if .Data.TopRisks }}The {{ len .Data.TopRisks }} highest-severity open {{ pluralize (len .Data.TopRisks) "risk" "risks" }} aging in the register: ` +
-		`{{ range $i, $r := .Data.TopRisks }}{{ add1 $i }}) {{ $r.Title }} ({{ $r.Category }}, treatment: {{ $r.Treatment }}, residual severity {{ printf "%.1f" $r.ResidualSeverity }}, open {{ $r.AgeDays }} {{ pluralize $r.AgeDays "day" "days" }}){{ end }}.` +
+		`{{ range $i, $r := .Data.TopRisks }}{{ add1 $i }}) {{ $r.Title }} ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}, {{ if $r.Unscored }}unscored{{ else if $r.Monetary }}FAIR residual annualized loss exposure {{ $r.ResidualLabel }}{{ else }}residual severity {{ printf "%.1f" $r.ResidualSeverity }} of 25, {{ $r.Band }}{{ end }}, open {{ $r.AgeDays }} {{ pluralize $r.AgeDays "day" "days" }}){{ end }}.` +
 		`{{ else }}No open risks in the register.{{ end }}`,
 
-	SectionCoverageTrend: `Control coverage stands at {{ .Data.CoveragePct }}% at quarter end, ` +
-		`against an operator-set baseline of {{ .Data.BaselineCoveragePct }}% — ` +
-		`a {{ signed .Data.CoverageDelta }} point change over the period. ` +
-		`Set the baseline_coverage_pct field to the prior-quarter coverage to make this delta meaningful.`,
+	// A pack stored before #2056 has no scoped-framework count; its figures
+	// render as stored (ScopeCountUnknown), never as "no framework scoped".
+	SectionCoverageTrend: `{{ if .Data.NoScopedFrameworks }}No framework has an activated scope, so there is no coverage to trend. ` +
+		`Activate a framework scope to populate this section.` +
+		`{{ else if .Data.ScopeCountUnknown }}Control coverage stands at {{ pct .Data.CoveragePct }}% at quarter end, ` +
+		`against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change.` +
+		`{{ else }}Control coverage averages {{ pct .Data.CoveragePct }}%` +
+		`{{ if .Data.ShowsExceptionShare }} ({{ pct .Data.CoveredByExceptionPct }}% of requirements covered only by exception){{ end }} across ` +
+		`the {{ .Data.ScopedFrameworks }} {{ pluralize .Data.ScopedFrameworks "framework" "frameworks" }} with an activated scope` +
+		`{{ if .Data.NoBaseline }}, with {{ noBaseline }}, so no change is reported. ` +
+		`Set baseline_coverage_pct to compare against a prior-quarter figure.` +
+		`{{ else }}, against a baseline of {{ pct .Data.BaselineCoveragePct }}%` +
+		`{{ if and .Data.ShowsExceptionShare .Data.BaselineExceptionKnown }} ({{ pct .Data.BaselineCoveredByExceptionPct }}% by exception){{ end }}` +
+		` — a {{ pts .Data.CoverageDelta }} point change. ` +
+		`The baseline is the same frameworks' coverage at the start of the 90-day posture trend, unless the operator has set baseline_coverage_pct.{{ end }}` +
+		`{{ end }}`,
 
 	SectionOpenFindings: `{{ if .Data.Findings }}{{ .Data.FindingsCount }} open {{ pluralize .Data.FindingsCount "finding" "findings" }} ` +
 		`as of {{ .PeriodEnd }} — each is a control whose latest evaluation is failing as of the quarter-end horizon.` +
@@ -117,11 +138,12 @@ var sectionSources = map[string]string{
 		`override this narrative with the quarter's numbers before approving the section.`,
 
 	SectionInvestment: `{{ if gt .Data.SpendUSD 0 }}Security spend for the quarter was ${{ .Data.SpendUSD }}. ` +
-		`Against a {{ signed .Data.CoverageDelta }} point coverage change, that is approximately ` +
-		`${{ printf "%.0f" .Data.CostPerCoveragePoint }} per coverage point gained.` +
-		`{{ else }}Investment vs coverage is operator-entered — enter the quarter's security spend (spend_usd) ` +
-		`and the prior-quarter coverage baseline (baseline_coverage_pct). The cost-per-coverage-point is then ` +
-		`computed as spend divided by the coverage delta. Override this narrative once the figures are in.{{ end }}`,
+		`{{ if .Data.NoBaseline }}Cost per coverage point: n/a — ` +
+		`{{ if .Data.NoScopedFrameworks }}no framework has an activated scope{{ else }}{{ noBaseline }}{{ end }}.` +
+		`{{ else }}Against a {{ pts .Data.CoverageDelta }} point coverage change, that is approximately ` +
+		`${{ printf "%.0f" .Data.CostPerCoveragePoint }} per coverage point gained.{{ end }}` +
+		`{{ else }}Investment vs coverage is operator-entered — enter the quarter's security spend (spend_usd). ` +
+		`The cost-per-coverage-point is then computed as spend divided by the coverage-trend section's coverage delta. Override this narrative once the figures are in.{{ end }}`,
 
 	SectionAsks: `Asks of the board are authored by the security leader — there is no generated or AI-assisted ` +
 		`text for this section. Replace this placeholder with the specific decisions, budget, or headcount ` +
@@ -153,7 +175,7 @@ func RenderPackNarrative(p Pack) (string, error) {
 	fmt.Fprintf(&sb, "# Quarterly Board Pack — %s\n\n", p.PeriodEnd)
 	fmt.Fprintf(&sb, "_Generated %s. Status: %s._\n", p.GeneratedAt, p.Status)
 
-	for i, key := range SectionKeys {
+	for i, key := range p.Keys() {
 		sec, ok := p.Sections[key]
 		if !ok {
 			return "", fmt.Errorf("board: pack missing section %q", key)

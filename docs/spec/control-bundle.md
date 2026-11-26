@@ -40,39 +40,75 @@ When uploaded as a tarball, the archive **MUST**:
 
 ### 2.1 Required fields
 
-| Field                   | Type   | Notes                                                                                                                                                     |
-| ----------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                        |
-| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                  |
-| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                              |
-| `scf_anchor_id`         | string | SCF code (e.g., `IAC-06`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). |
-| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                |
+| Field                   | Type   | Notes                                                                                                                                                                                                         |
+| ----------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                                                                            |
+| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                                                                      |
+| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                                                                                  |
+| `scf_anchor_id`         | string | SCF code (e.g., `IAC-37`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). May be omitted only with `anchor_fit: none` (§2.2). |
+| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                                                                    |
 
 ### 2.2 Optional fields
 
-| Field                    | Type        | Notes                                                                                                                 |
-| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                            |
-| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                    |
-| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                 |
-| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                  |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.          |
-| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.  |
-| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.          |
-| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                       |
-| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI. |
+| Field                    | Type        | Notes                                                                                                                                                                                     |
+| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                                                                                                |
+| `control_family`         | string      | SCF taxonomy family (AST, BCD, CFG, ...). Inferred from the SCF anchor if omitted.                                                                                                        |
+| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                                     |
+| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                                      |
+| `freshness_class`        | enum        | `realtime`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI. See §2.2.1 for each class's window.                                                    |
+| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                                      |
+| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                              |
+| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                           |
+| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI.                                                                     |
+| `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736.        |
+| `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`. Editing only the note updates the control in place; changing `anchor_fit` creates a new version (#2023, §4). |
+| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                                                                                                   |
+
+#### 2.2.1 Freshness windows (the class includes a grace period)
+
+The evaluation engine keeps only evidence whose `observed_at` falls inside the
+control's window; older records are `stale`, and a control whose records are
+all stale evaluates over an empty set. The window is the class's nominal
+cadence **plus a grace period**, so a review that slips a few weeks past its
+due date is not yet stale. Write a stock or tenant description against the
+effective window in this table, not the nominal cadence:
+
+| `freshness_class` | Nominal cadence | Effective window | Grace                  |
+| ----------------- | --------------- | ---------------- | ---------------------- |
+| `realtime`        | continuous      | 24 h             | n/a                    |
+| `daily`           | 1 d             | 7 d              | 6 d                    |
+| `weekly`          | 7 d             | 30 d             | 23 d                   |
+| `monthly`         | 30 d            | 90 d             | 60 d                   |
+| `quarterly`       | 90 d            | 120 d            | 30 d                   |
+| `annual`          | 365 d           | 400 d            | 35 d (about 13 months) |
+
+The table comes from canvas §2.3 and has two copies. The authority is
+`freshnessMaxAgeTable` in `internal/eval/state.go`, which evaluation reads.
+The calendar repeats it as `CASE c.freshness_class` blocks in
+`internal/db/queries/calendar.sql` to compute review due dates.
+`TestCalendarSQL_FreshnessCaseMatchesFreshnessMaxAge`
+(`internal/eval/calendar_freshness_sync_test.go`) parses those blocks and
+fails if any class window or the 90-day fallback differs from the Go table, so
+change both together (#2868). The Go table is also the source of
+the classes a bundle may declare: parse and upload refuse any class the table
+does not map, so a typo cannot silently widen a control's window (#2896).
+There are no exceptions: `hourly`, kept for stock `soc2_a1_1` until that
+bundle moved to `realtime`, is refused like any other class (#2826). Why the windows carry grace,
+and why they were kept rather than narrowed to the cadence, is recorded in
+`docs/audit-log/2816-freshness-window-grace-decisions.md`.
 
 ### 2.3 Evidence queries
 
 Each entry has:
 
-| Field           | Type   | Notes                                                                                                                              |
-| --------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | string | Unique within the bundle. Pattern `^[a-z][a-z0-9_-]{2,63}$`.                                                                       |
-| `language`      | enum   | `rego` \| `sql` \| `jsonpath`. The slice-009 parser stores the language verbatim; the slice-012 evaluator dispatches on it.        |
-| `expression`    | string | The query body. **Not executed in slice 009** — only stored.                                                                       |
-| `evidence_kind` | string | Optional. When set, must match an `evidence_kind` registered in the schema registry (slice 014). Unregistered kinds reject upload. |
-| `description`   | string | Author-facing comment.                                                                                                             |
+| Field           | Type   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | string | Unique within the bundle. Pattern `^[a-z][a-z0-9_-]{2,63}$`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `language`      | enum   | `rego` \| `sql` \| `jsonpath`. The slice-009 parser stores the language verbatim; the slice-012 evaluator dispatches on it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `expression`    | string | The query body. **Not executed in slice 009** — only stored.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `evidence_kind` | string | Optional. When set, must match an `evidence_kind` registered in the schema registry (slice 014). Unregistered kinds reject upload. The query then evaluates only the control's records of this kind (#2818, ADR 0028). A control's records of a routed kind include every record of that kind in the tenant that is bound to no control, which is every one ingested since #2924, whatever control the connector named (#2924, ADR 0028 decision 9). A query without one evaluates every record the control receives, of any kind; upload and `atlas-cli controls validate` warn on it. A `manual_attested` or `manual_periodic` control's attestations are `manual.attestation.v1` records, so a kinded query on such a control reads them only if it declares `manual.attestation.v1` (#2818 decisions log D6). |
+| `description`   | string | Author-facing comment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### 2.4 applicability_expr shape (mirror of slice 017)
 
@@ -92,6 +128,32 @@ Operators: `true`, `eq`, `in`, `and`, `or`, `not`. Empty / null / `{}` means "ap
 
 AC-5: a bundle whose `applicability_expr` references an undeclared scope dimension (or uses an unknown operator, or malformed args) is **rejected at parse**.
 
+### 2.5 External references (#1737)
+
+`external_refs` keeps the trace from a control to the identifiers auditors and GRC teams work from: the organisation's own control number, an auditor's reference, or the framework requirement the control was tested under. A unified control merged from several audited activities lists one entry per activity instead of burying them in `description`.
+
+| Field    | Type   | Notes                                                                                                                                        |
+| -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system` | string | Required. Where the id comes from: a framework slug (`soc2`) or an organisation label (`acme-audit`). Pattern `^[a-z0-9][a-z0-9_.-]{0,63}$`. |
+| `kind`   | enum   | `reference` (default) or `tested_under`. For `tested_under`, `system` is the framework slug and `id` the requirement code.                   |
+| `id`     | string | Required, at most 200 characters. The identifier as the other system writes it (`RA-03`, `CC3.1`).                                           |
+| `note`   | string | Optional, at most 500 characters. E.g. `"FY25 report, section 4"`.                                                                           |
+
+A bundle may carry at most 100 entries, and no two may share the same `system` + `kind` + `id`. Length caps count characters, not bytes. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
+
+**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs`, `description`, `anchor_fit_note` and/or `evidence_queries[].description` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
+
+```yaml
+external_refs:
+  - system: acme-audit
+    id: RA-03
+    note: "2025 SOC 2 report, Section 4"
+  - system: soc2
+    kind: tested_under
+    id: CC3.1
+    note: "FY25 report, section 4"
+```
+
 ---
 
 ## 3. Full worked example
@@ -102,7 +164,7 @@ A complete `control.yaml` for an MFA control on production AWS:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA enforced for all human IAM users in production AWS"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 control_family: IAC
 owner_role: security-engineering
@@ -129,16 +191,102 @@ evidence_queries:
     evidence_kind: aws.iam_user.access_state
     description: "All human IAM users must have MFA enabled"
     expression: |
-      package atlas.controls.aws_iam_mfa_prod
-      default allow := false
-      allow if {
-        every u in input.iam_users {
-          u.is_service_account == true
-        } or {
-          u.mfa_enabled == true
-        }
-      }
+      package evidence.query
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
 ```
+
+A Rego evidence query lives in `package evidence.query` and assigns `result`
+(`pass | fail | na | inconclusive`). Its only input is
+`{records: [{result, observed_at}]}`: the per-record verdicts the connector
+already decided, each with its RFC 3339 observation time in UTC. It never sees the
+payload; use the SQL or JSON-path languages to read payload fields.
+
+#### The evaluation instant
+
+A query that checks a time window compares against the **evaluation instant**,
+never the wall clock (#2911, ADR 0028 d1 amendment):
+
+| Language | Where the instant is                                                         | Example                                                                            |
+| -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| SQL      | the `evaluated_at` column of `evidence`, the same `timestamptz` on every row | `SELECT bool_and(observed_at >= evaluated_at - interval '24 hours') FROM evidence` |
+| Rego     | `time.now_ns()` (#2890)                                                      | `time.now_ns() - time.parse_rfc3339_ns(r.observed_at) < 24 * 60 * 60 * 1000000000` |
+
+The instant is the engine's evaluation time, or the as-of horizon when a
+replay or an as-of evaluation passes an earlier one. In a bundle test it is
+the case's `evaluated_at`. So a replay judges the window as of its horizon,
+and a test case whose dates are pinned keeps passing however old they get.
+
+In SQL, use `evaluated_at` and never `now()`, `current_timestamp`,
+`clock_timestamp()`, `statement_timestamp()`, `transaction_timestamp()`,
+`current_date`, `localtimestamp` or a `'now'` / `'today'` literal: those read
+the wall clock. A test refuses them in the stock bundles under `controls/`
+(`eval.SQLUsesWallClock`). A tenant's own query is not refused, but it gives a
+replay the wrong answer.
+
+#### Reading a payload timestamp
+
+A payload field is whatever string the pusher sent, and one value that does
+not cast errors the whole query: the control goes inconclusive, and that one
+bad record hides every other record's result. So cast a payload timestamp
+only behind this guard, and treat a value more than an hour after the
+evaluation instant as unreadable (#2939):
+
+```sql
+CASE
+  WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+       AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+    THEN CASE
+           WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+             THEN (payload->>'last_seen_at')::timestamptz
+         END
+END
+```
+
+- **The regex** is the full RFC 3339 shape, anchored at both ends
+  (`eval.RFC3339Pattern`). A start-anchored prefix such as
+  `'^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'` admits
+  `2026-13-45T00:00Z`, which then errors the cast.
+- **`pg_input_is_valid`** (Postgres 16) rejects what the regex still
+  admits, such as month 13 or February 30th, without casting.
+- **The cast sits in a `THEN`**, so it runs only for a value both checks
+  accepted. `AND` operands have no guaranteed evaluation order, so
+  `WHEN <guard> AND value::timestamptz <= …` can still error.
+- **The cap**: a value more than an hour after `evaluated_at` is clock skew
+  gone wrong or a bad record. An hour covers ordinary skew between the
+  source and the platform. Past that, the value reads as NULL, as a missing
+  one does, so a far-future value cannot hold a record at "latest" or
+  "fresh" indefinitely.
+
+A NULL then means "not read", and the query decides what that implies. If
+the timestamp is what the check asks about (cc4_1's check-in time), the
+record is inconclusive. If it only orders records (the osquery posture
+checks rank each host's latest record by it), it sorts `NULLS LAST` and the
+checked field decides. A test refuses a payload conversion to a date or
+time type in the stock bundles under `controls/` that is not guarded this
+way (`eval.SQLUnguardedTimestampCasts`, #2973). It reads tokens, not text,
+and finds `(value)::T`, `CAST(value AS T)`, `to_timestamp(value, …)` and
+`to_date(value, …)`, where the value may be aliased (`e.payload->>'f'`) or
+a path (`payload#>>'{a,b}'`, `payload->'a'->>'b'`). A conversion counts as
+guarded only inside the `THEN` of a `WHEN` that holds both checks on that
+same value, alias included, with no `OR` or `NOT` in the condition. A guard
+in another `CASE`, an `ELSE` branch or a `WHERE` clause does not count. The
+cap is not linted. Each bundle's tests carry a future-value case instead.
+
+The static guard refuses any qualified name but `evidence.<column>`. It
+reads tokens too, so a dotted word inside a string literal
+(`'injection.sql'`), a dollar-quoted string or a comment is not a name, and
+rule ids are written as plain literals (#2973).
 
 A minimal **manual** control:
 
@@ -146,7 +294,7 @@ A minimal **manual** control:
 bundle_schema_version: "1"
 bundle_id: annual_access_review
 title: "Annual access review completed for all production systems"
-scf_anchor_id: IAC-15
+scf_anchor_id: IAC-12
 implementation_type: manual_periodic
 freshness_class: annual
 
@@ -204,11 +352,16 @@ Responses:
 | 404    | `scf_anchor_id` does not resolve to an `scf_anchors` row.                                                          |
 | 413    | Tarball over the size limit.                                                                                       |
 
+A successful response carries `anchor_warning` when the `scf_anchor_id` reaches no requirement in an enabled framework, so the control earns no framework credit (#1738). Enabled means the tenant's activated FrameworkScopes, or every current framework version when none is activated. The warning names the parent anchor (`NET-26.5` -> `NET-26`) when that one is mapped. It is non-fatal: the control is persisted, and `atlas-cli controls upload` repeats it on stderr. `validate` does not check it, because it is local-only and has no catalog.
+
 ### Versioning + supersession
 
-- Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6).
+- Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
+  - A byte-identical `control.yaml` is a no-op: the active row is returned unchanged (slice 068).
+  - A `control.yaml` that differs from the active version's **only in the top-level `description`, `external_refs` and/or `anchor_fit_note`, and/or in the `description` of one or more `evidence_queries[]` entries** (rewording, reflow, adding, editing or removing any of them) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Query entries are compared in order: a query's `id`, `language`, `expression`, `evidence_kind` or any other key, and adding, removing, renaming or reordering a query, still creates a new version. So does any other change, including `title`, `freshness_class` or `anchor_fit` (a fit change alters what the SCF mapping means, #2023). See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
+  - The stock bundles under `controls/` are re-uploaded on every start of an existing deployment, so a superseding change to one orphans tenant data on upgrade. CI's `stock-supersede-check` (#2891) compares each one with the PR base using the same comparison as the upload, and fails unless the PR carries the `supersedes-stock` label and a changed `docs/audit-log/*.md` names the bundle with its upgrade note.
 - The partial unique index `controls_one_active_version_per_bundle` guarantees only one active version per `(tenant_id, bundle_id)`.
-- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility.
+- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. An in-place update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose and refs history lives. An upload locks the active row (`SELECT … FOR UPDATE`) before deciding, so concurrent uploads of one bundle run one after another and each in-place update records the manifest the previous one wrote. A concurrent upload that supersedes the row mid-update returns `409`.
 
 ---
 
@@ -236,10 +389,11 @@ cases:
   - name: all-users-have-mfa # required, unique
     description: "optional human context"
     expected_state: pass # required: pass | fail | na | inconclusive
-    evaluated_at: 2026-06-01T12:00:00Z # optional: pins the freshness "now"
+    evaluated_at: 2026-06-01T12:00:00Z # optional: pins the evaluation instant (freshness, SQL evaluated_at, Rego time.now_ns())
     records: # fixture evidence records
       - result: pass # required: pass | fail | na | inconclusive
         observed_at: 2026-06-01T00:00:00Z # optional, defaults to evaluated_at
+        evidence_kind: aws.iam_user.access_state # optional; omitted = whatever kind each query reads
         payload: # optional; read by SQL + JSON-path queries
           iam_users:
             - { mfa_enabled: true }
@@ -247,6 +401,7 @@ cases:
 
 - **`expected_state`** is the control state you assert the query produces. An **expected-fail is a passing test**: a case that declares `expected_state: fail` passes when the query correctly returns `fail`.
 - **`observed_at`** defaults to the case's evaluation instant, so a record is in-window by default — you only set it when you are testing freshness/staleness behaviour.
+- **`evidence_kind`** routes the record to the queries that declare that kind, as the engine does live (#2818). Omit it in a single-kind bundle: a record with no kind counts as whatever kind each query reads. Set it when a control has queries over two kinds, to test that each query sees only its own records. In such a bundle a record without a kind reaches every query in the test but, live, none of the kinded ones, so `atlas-cli controls validate`, `atlas-cli controls test` and the upload response's `warnings` (also on a green gate) flag it (#2882). It does not fail the run; a stock bundle fails `TestStockTwoKindBundles_FixtureRecordsDeclareEvidenceKind`.
 - **`payload`** is the evidence record's JSON body; the Rego path ignores it (it sees only `result`), while the SQL and JSON-path query languages read it.
 
 ### Worked example — the MFA control
@@ -257,7 +412,7 @@ cases:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA on every prod IAM user"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -313,16 +468,18 @@ bundle: aws_iam_mfa_prod
 
 ## 5. Anti-criteria (rejected at upload, never stored)
 
-| Reject                                                                  | Reason                                                        |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `scf_anchor_id` absent or unresolvable                                  | Canvas invariant 7 — SCF anchoring is non-negotiable.         |
-| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                         |
-| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.           |
-| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                     |
-| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                |
-| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.           |
-| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                |
-| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected. |
+| Reject                                                                  | Reason                                                                                        |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `scf_anchor_id` absent (unless `anchor_fit: none`) or unresolvable      | Canvas invariant 7 — SCF anchoring is non-negotiable; `none` is ADR 0013's honest "unmapped". |
+| `anchor_fit` not one of `exact`, `partial`, `none`                      | Unknown fit values would read as a fit nobody defined.                                        |
+| `anchor_fit` `partial` or `none` without `anchor_fit_note`              | A non-exact fit must say what the anchor misses.                                              |
+| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                                                         |
+| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.                                           |
+| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                                                     |
+| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                                                |
+| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.                                           |
+| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                                                |
+| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected.                                 |
 
 ---
 

@@ -102,6 +102,18 @@ describe("contract: GET /api/dashboard/risks <-> atlas GET /v1/risks (transform-
             "string",
           );
         }
+        // #1746: acceptance_status rides only on treatment=accept rows.
+        if (rk.treatment === "accept") {
+          expect(
+            ["proposed", "approved"],
+            `${name}.acceptance_status`,
+          ).toContain(rk.acceptance_status);
+        } else {
+          expect(
+            rk.acceptance_status,
+            `${name}.acceptance_status`,
+          ).toBeUndefined();
+        }
         if (rk.accepted_until !== undefined && rk.accepted_until !== null) {
           expect(typeof rk.accepted_until, `${name}.accepted_until`).toBe(
             "string",

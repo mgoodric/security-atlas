@@ -1,0 +1,223 @@
+// #2085 — resolvePerson: user, API key, removed user and unknown each
+// render as specified, and no case shows a raw ID as visible text.
+
+import { describe, expect, it } from "vitest";
+
+import {
+  actorText,
+  apiKeyText,
+  buildDirectory,
+  isActorReference,
+  isMachineActor,
+  normaliseUserId,
+  resolvePerson,
+  typedName,
+} from "./person";
+
+const ALICE = "11111111-1111-4111-8111-111111111111";
+const BOB = "22222222-2222-4222-8222-222222222222";
+const KEY = "33333333-3333-4333-8333-333333333333";
+const ORPHAN_KEY = "44444444-4444-4444-8444-444444444444";
+const STRANGER = "55555555-5555-4555-8555-555555555555";
+const LABELLED_KEY = "66666666-6666-4666-8666-666666666666";
+const LABELLED_ORPHAN = "77777777-7777-4777-8777-777777777777";
+
+const dir = buildDirectory(
+  [
+    { id: ALICE, display_name: "Alice Admin", status: "active" },
+    { id: BOB, display_name: "Bob Former", status: "disabled" },
+  ],
+  [
+    { id: KEY, owner_id: ALICE },
+    { id: ORPHAN_KEY },
+    { id: LABELLED_KEY, owner_id: ALICE, label: "CI deploy" },
+    { id: LABELLED_ORPHAN, label: "Nightly sync" },
+  ],
+);
+
+describe("normaliseUserId", () => {
+  it("strips the user: prefix", () => {
+    expect(normaliseUserId(`user:${ALICE}`)).toBe(ALICE);
+  });
+  it("lowercases", () => {
+    expect(normaliseUserId(ALICE.toUpperCase())).toBe(ALICE);
+  });
+  it("rejects the nil UUID and non-UUIDs", () => {
+    expect(normaliseUserId("00000000-0000-0000-0000-000000000000")).toBeNull();
+    expect(normaliseUserId("jwt:abc")).toBeNull();
+    expect(normaliseUserId("")).toBeNull();
+  });
+});
+
+describe("resolvePerson", () => {
+  it("renders a user as name and initials", () => {
+    expect(resolvePerson(ALICE, dir)).toEqual({
+      kind: "user",
+      text: "Alice Admin",
+      initials: "AA",
+      title: "Alice Admin",
+    });
+  });
+
+  it("resolves a user:-prefixed subject to the same user", () => {
+    expect(resolvePerson(`user:${ALICE}`, dir).text).toBe("Alice Admin");
+  });
+
+  it("renders an API key with its owner and never its ID", () => {
+    const p = resolvePerson(KEY, dir);
+    expect(p.kind).toBe("api_key");
+    expect(p.text).toBe("API key (owner: Alice Admin)");
+    expect(p.title).not.toContain(KEY);
+  });
+
+  it("renders an API key without a resolvable owner as 'API key'", () => {
+    expect(resolvePerson(ORPHAN_KEY, dir).text).toBe("API key");
+  });
+
+  it("renders a labelled API key with its label and owner (#2384)", () => {
+    const p = resolvePerson(LABELLED_KEY, dir);
+    expect(p.kind).toBe("api_key");
+    expect(p.text).toBe("API key 'CI deploy' (owner: Alice Admin)");
+    expect(p.title).toBe(p.text);
+    expect(p.title).not.toContain(LABELLED_KEY);
+  });
+
+  it("renders a labelled API key with no owner as its label (#2384)", () => {
+    expect(resolvePerson(LABELLED_ORPHAN, dir).text).toBe(
+      "API key 'Nightly sync'",
+    );
+  });
+
+  it("renders a disabled user as Former user", () => {
+    const p = resolvePerson(BOB, dir);
+    expect(p.kind).toBe("former_user");
+    expect(p.text).toBe("Former user");
+  });
+
+  it.each([
+    ["another tenant's user", STRANGER],
+    ["a JWT credential", "jwt:9f1c2d"],
+    ["a user: subject that is a key ID", `user:${KEY}`],
+    ["garbage", "not-an-id"],
+  ])("renders %s as Unknown with the ID in the tooltip", (_, ref) => {
+    const p = resolvePerson(ref, dir);
+    expect(p.kind).toBe("unknown");
+    expect(p.text).toBe("Unknown");
+    expect(p.title).toContain(ref);
+  });
+
+  it.each(["system", "system:action-plan-verification"])(
+    "renders %s as System, with or without a directory (#2138)",
+    (ref) => {
+      for (const d of [dir, null]) {
+        const p = resolvePerson(ref, d);
+        expect(p.kind).toBe("system");
+        expect(p.text).toBe("System");
+      }
+    },
+  );
+
+  it("renders an OAuth client by kind, the client ID in the tooltip (#2414)", () => {
+    for (const d of [dir, null]) {
+      expect(resolvePerson("oauth_client:ci-runner", d)).toEqual({
+        kind: "oauth_client",
+        text: "OAuth client",
+        title: "oauth_client:ci-runner",
+      });
+    }
+  });
+
+  it.each([
+    ["system", true],
+    ["system:scheduler", true],
+    ["oauth_client:ci", true],
+    ["oauth_client:", false],
+    [ALICE, false],
+    ["key_abc", false],
+    ["", false],
+  ])("isMachineActor(%j) is %s", (ref, want) => {
+    expect(isMachineActor(ref)).toBe(want);
+  });
+
+  it("renders Unknown when the directory is unavailable", () => {
+    const p = resolvePerson(ALICE, null);
+    expect(p.text).toBe("Unknown");
+    expect(p.title).toContain(ALICE);
+  });
+
+  it("renders Unknown for an empty reference", () => {
+    expect(resolvePerson("", dir)).toEqual({
+      kind: "unknown",
+      text: "Unknown",
+      title: "Unknown",
+    });
+    expect(resolvePerson(undefined, dir).text).toBe("Unknown");
+  });
+});
+
+describe("apiKeyText (#2384)", () => {
+  it.each([
+    [undefined, undefined, "API key"],
+    ["", "Alice", "API key (owner: Alice)"],
+    ["  ", "Alice", "API key (owner: Alice)"],
+    [" CI ", "Alice", "API key 'CI' (owner: Alice)"],
+    ["CI", "", "API key 'CI'"],
+  ])("label %j owner %j reads %j", (label, owner, want) => {
+    expect(apiKeyText(label, owner)).toBe(want);
+  });
+});
+
+describe("isActorReference (#2385)", () => {
+  it.each([
+    ["a user ID", ALICE],
+    ["an upper-case UUID", KEY.toUpperCase()],
+    ["a user: subject", `user:${ALICE}`],
+    ["a JWT credential", "jwt:9f1c2d"],
+    ["a key credential", "key_0a1b2c"],
+    ["the bootstrap admin", "bootstrap-admin"],
+    ["the system actor", "system"],
+    ["a system process", "system:scheduler"],
+    ["an OAuth client", "oauth_client:ci"],
+  ])("treats %s as a reference", (_, ref) => {
+    expect(isActorReference(ref)).toBe(true);
+  });
+
+  it.each([
+    ["a typed name", "Sam Rivera (CISO)"],
+    ["a connector name", "aws-config"],
+    ["a service account", "ci.test"],
+    ["the empty string", ""],
+  ])("treats %s as free text", (_, ref) => {
+    expect(isActorReference(ref)).toBe(false);
+  });
+});
+
+describe("actorText (#2385)", () => {
+  it("resolves a reference to its name", () => {
+    expect(actorText(ALICE, dir)).toBe("Alice Admin");
+    expect(actorText(`user:${ALICE}`, dir)).toBe("Alice Admin");
+  });
+
+  it("never shows an unresolved reference", () => {
+    expect(actorText(STRANGER, dir)).toBe("Unknown");
+    expect(actorText("jwt:9f1c2d", null)).toBe("Unknown");
+  });
+
+  it("shows free text as written", () => {
+    expect(actorText("aws-config", dir)).toBe("aws-config");
+  });
+});
+
+describe("typedName (#2684)", () => {
+  it("shows a typed name as written and says it was typed", () => {
+    const t = typedName("  Sam Rivera (CISO) ");
+    expect(t.text).toBe("Sam Rivera (CISO)");
+    expect(t.title).toBe("Typed name, not a linked user: Sam Rivera (CISO)");
+  });
+
+  it("never reads like a resolved user's tooltip", () => {
+    const resolved = resolvePerson(ALICE, dir);
+    expect(resolved.title).toBe("Alice Admin");
+    expect(typedName("Alice Admin").title).not.toBe(resolved.title);
+  });
+});

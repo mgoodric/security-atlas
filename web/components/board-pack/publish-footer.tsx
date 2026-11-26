@@ -6,7 +6,9 @@
 // banner names the unapproved sections).
 //
 // A published pack shows the frozen state — the approver name and a
-// note that the artifact is immutable (AC-7).
+// note that the artifact is immutable (AC-7). `published_by` is the name
+// the approver typed, or an actor reference; <Person freeText> resolves
+// a reference and shows a typed name as written (#2385).
 
 "use client";
 
@@ -23,6 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, publishBoardPack } from "@/lib/api/board";
 
@@ -58,14 +61,23 @@ export function PublishFooter({
     return (
       <Card
         id="publish-footer"
-        className="border-emerald-200"
+        className="border-pass/25"
         data-testid="publish-footer-published"
       >
         <CardHeader>
           <CardTitle>Published</CardTitle>
           <CardDescription>
             This pack is frozen and immutable. Published by{" "}
-            <span className="font-medium">{publishedBy || "unknown"}</span>
+            {publishedBy ? (
+              <Person
+                id={publishedBy}
+                freeText
+                className="font-medium"
+                testId="publish-footer-published-by"
+              />
+            ) : (
+              <span className="font-medium">unknown</span>
+            )}
             {publishedAt ? ` on ${publishedAt}` : ""}.
           </CardDescription>
         </CardHeader>
@@ -89,7 +101,7 @@ export function PublishFooter({
   return (
     <Card
       id="publish-footer"
-      className="border-indigo-200"
+      className="border-brand/30"
       data-testid="publish-footer-draft"
     >
       <CardHeader>
@@ -118,7 +130,7 @@ export function PublishFooter({
           }}
         >
           <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">
+            <label className="text-sm font-medium text-foreground">
               Approver name
             </label>
             <Input

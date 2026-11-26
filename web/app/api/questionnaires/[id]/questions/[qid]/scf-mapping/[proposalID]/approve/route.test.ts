@@ -21,9 +21,9 @@ function paramsFor(): {
 } {
   return {
     params: Promise.resolve({
-      id: "q1",
-      qid: "question1",
-      proposalID: "proposal1",
+      id: "00000000-0000-0000-0000-000025580001",
+      qid: "00000000-0000-0000-0000-000025580002",
+      proposalID: "00000000-0000-0000-0000-000025580003",
     }),
   };
 }
@@ -42,14 +42,14 @@ describe("POST mapping approve BFF", () => {
   test("forwards approve route", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ scf_anchor_id: "IAC-06" }), {
+      new Response(JSON.stringify({ scf_anchor_id: "IAC-37" }), {
         status: 200,
       }),
     );
     const res = await POST({} as never, paramsFor());
     expect(res.status).toBe(200);
     expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain(
-      "/v1/questionnaires/q1/questions/question1/scf-mapping/proposal1/approve",
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/questions/00000000-0000-0000-0000-000025580002/scf-mapping/00000000-0000-0000-0000-000025580003/approve",
     );
   });
 });

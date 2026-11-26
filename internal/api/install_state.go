@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -27,6 +29,9 @@ type PlatformStatus interface {
 	// bootstrap tenant can be resolved — the handler treats that as
 	// "no tenant_id to include" and degrades gracefully (slice 210).
 	BootstrapTenantID(ctx context.Context) (uuid.UUID, error)
+	// TenantCount returns how many real tenants exist (the all-zeros row
+	// excluded). install-state reports single_tenant from it (#1756).
+	TenantCount(ctx context.Context) (int, error)
 }
 
 // AttachPlatformStatus wires the slice-073 Status reader/writer onto the
@@ -49,8 +54,9 @@ func (s *Server) AttachBootstrapTokenPath(path string) {
 
 // AttachLogger wires the platform logger onto the server for handlers
 // that log non-request-bound events (slice-073 bootstrap-token deletion
-// is the first such surface). Unit servers leave it nil and the
-// handlers use slog.Default().
+// is the first such surface; the needs-attention large-read warning,
+// #2783, is another). Unit servers leave it nil and the handlers use
+// slog.Default(). Attach it before the router is built (RunHTTP).
 func (s *Server) AttachLogger(l *slog.Logger) {
 	s.logger = l
 }
@@ -62,9 +68,16 @@ func (s *Server) AttachLogger(l *slog.Logger) {
 // `omitempty` keeps the response shape unchanged for post-first-install
 // installs (which never carry a tenant_id) and for the graceful-degradation
 // path where the tenant lookup failed.
+//
+// #1756: SingleTenant is true when exactly one tenant exists, at any point
+// in the install's life. /login then signs in by email and password without
+// naming a tenant: POST /auth/local/login resolves the only tenant server
+// side. It is a boolean, not the tenant id, so the endpoint names no
+// tenant once first install is over.
 type installStateResponse struct {
 	FirstInstall bool   `json:"first_install"`
 	TenantID     string `json:"tenant_id,omitempty"`
+	SingleTenant bool   `json:"single_tenant"`
 }
 
 // handleInstallState answers GET /v1/install-state with
@@ -111,14 +124,29 @@ func (s *Server) handleInstallState(w http.ResponseWriter, r *http.Request) {
 			resp.TenantID = tid.String()
 		}
 	}
+	// #1756 — a failed count is non-fatal too: single_tenant stays false
+	// and /login asks for the tenant, which still signs in.
+	n, cerr := s.platformStatus.TenantCount(r.Context())
+	if cerr != nil {
+		s.installLogger().Warn("install-state tenant count failed",
+			slog.String("error", cerr.Error()))
+	}
+	resp.SingleTenant = cerr == nil && n == 1
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // markFirstSigninResponse is the response shape for the elevated POST
 // /v1/install/mark-first-signin endpoint.
+//
+// RevokedCredentialIDs lists the bootstrap-recovery keys this sign-in
+// revoked (#1892). RecoveryKeyKept is true when the caller is itself a
+// recovery key: it is left live, to expire on its TTL, because revoking it
+// would end the session that just signed in.
 type markFirstSigninResponse struct {
-	Marked     bool `json:"marked"`
-	FileDelete bool `json:"file_deleted"`
+	Marked               bool     `json:"marked"`
+	FileDelete           bool     `json:"file_deleted"`
+	RevokedCredentialIDs []string `json:"revoked_credential_ids"`
+	RecoveryKeyKept      bool     `json:"recovery_key_kept"`
 }
 
 // handleMarkFirstSignin flips platform_status.first_signin_at if it is
@@ -129,9 +157,14 @@ type markFirstSigninResponse struct {
 // bearer is required (so a drive-by attacker cannot flip the marker and
 // trick the login UX into hiding the fresh-install guidance for the
 // next operator). The bearer auth middleware applied by httpHandler
-// already gates this route. The leading /v1/install path lives outside
-// any /_internal namespace: the bearer-auth middleware is the access
-// control, not a path-prefix convention.
+// already gates this route, and the handler also requires an admin
+// credential (#1906): the first flip revokes the bootstrap-recovery keys,
+// so a low-privilege key calling it first after a reset would cut the
+// operator off from the recovery path. The recovery key is itself an admin
+// key, and a super_admin JWT bridges to IsAdmin, so both are admitted. The
+// leading /v1/install path lives outside any /_internal namespace: the
+// bearer-auth middleware is the access control, not a path-prefix
+// convention.
 //
 // The handler is idempotent: a subsequent call is a no-op (marked=false,
 // file_deleted=false). The cmd/atlas startup path mints the bootstrap
@@ -146,6 +179,17 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"install state not configured"}`))
 		return
 	}
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"missing credential"}`))
+		return
+	}
+	if !cred.IsAdmin {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"admin credential required"}`))
+		return
+	}
 	marked, err := s.platformStatus.MarkFirstSignin(r.Context(), time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, platform.ErrWriteNotConfigured) {
@@ -158,7 +202,7 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"mark first signin failed"}`))
 		return
 	}
-	resp := markFirstSigninResponse{Marked: marked, FileDelete: false}
+	resp := markFirstSigninResponse{Marked: marked, FileDelete: false, RevokedCredentialIDs: []string{}}
 	if marked && s.bootstrapTokenPath != "" {
 		// Only the FIRST flip should attempt file deletion; idempotent
 		// re-calls (marked=false) leave the (already-absent) file alone.
@@ -175,7 +219,44 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 		// exactly one handler observes marked=true across all concurrent
 		// callers; no in-process dedup is needed.
 	}
+	if marked {
+		s.revokeRecoveryKeysOnSignin(r.Context(), &resp)
+	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// revokeRecoveryKeysOnSignin revokes the bootstrap-recovery keys
+// reset-bootstrap minted, now that someone has signed in (#1892). It
+// matches on the api_keys.purpose marker and the credential id, never on
+// the bearer, so the env ATLAS_BOOTSTRAP_TOKEN key and every ordinary key
+// are out of reach. The caller's own key is spared: the bearer-paste
+// sign-in uses the pasted key as the session, and revoking it would sign
+// the operator straight back out. That key expires on its TTL instead,
+// and the operator can revoke it after signing in another way.
+func (s *Server) revokeRecoveryKeysOnSignin(ctx context.Context, resp *markFirstSigninResponse) {
+	if s.credStore == nil {
+		return
+	}
+	cred, _ := authctx.CredentialFromContext(ctx)
+	if cred.Purpose == credstore.PurposeBootstrapRecovery {
+		resp.RecoveryKeyKept = true
+		s.installLogger().Info("first sign-in used the recovery key; it stays live until it expires",
+			slog.String("credential_id", cred.ID),
+			slog.String("expires_at", cred.ExpiresAt().Format(time.RFC3339)))
+	}
+	revoked, err := s.credStore.RevokePurpose(credstore.PurposeBootstrapRecovery, cred.ID)
+	if err != nil {
+		s.installLogger().Warn("revoke of recovery keys on first sign-in failed",
+			slog.String("error", err.Error()))
+	}
+	if revoked != nil {
+		resp.RevokedCredentialIDs = revoked
+	}
+	if len(revoked) > 0 {
+		s.installLogger().Info("first sign-in revoked recovery keys",
+			slog.String("caller_credential_id", cred.ID),
+			slog.Any("revoked_credential_ids", revoked))
+	}
 }
 
 // installLogger returns a non-nil slog.Logger, falling back to the

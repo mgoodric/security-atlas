@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,8 +25,11 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
+	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
+	"github.com/mgoodric/security-atlas/internal/api/needsattention"
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
@@ -38,19 +42,23 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/backup"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
 	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	notifyemail "github.com/mgoodric/security-atlas/internal/notify/email"
 	notifyscheduler "github.com/mgoodric/security-atlas/internal/notify/scheduler"
 	notifyslack "github.com/mgoodric/security-atlas/internal/notify/slack"
@@ -89,8 +97,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "atlas: trusted-proxy config: %v\n", err)
 		os.Exit(1)
 	} else if deprecated {
-		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated; "+
-			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy). "+
+		// #2047: trust-any-proxy lets every client choose its own per-IP
+		// rate-limit key, so the warning says that, not just "deprecated".
+		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated and UNSAFE; "+
+			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy), so any client "+
+			"can set X-Forwarded-For to choose the IP recorded on its session and the key of every "+
+			"per-IP rate limit (login, OAuth client auth, demo seed). "+
 			"Set TRUSTED_PROXY_CIDRS to the specific CIDR(s) your reverse proxy connects from "+
 			"and remove TRUST_FORWARDED_HEADERS. See deploy/docker/.env.example.")
 	}
@@ -302,7 +314,7 @@ func main() {
 		personnelSubscriber = personnelsecurity.NewWorkerEventSubscriber(
 			streamConn.Stream(),
 			streamConn.Cfg().Subject,
-			personnelsecurity.NewStore(pool),
+			personnelsecurity.NewStore(pool).WithIngest(ingestSvc),
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber ready (OE-661)\n")
@@ -317,10 +329,16 @@ func main() {
 		// public, no-auth metadata endpoint (see api.NewVersionHandler
 		// for the documented intent).
 		VersionFieldsFn: versionFields,
+		// #2479: per-principal limit on POST /v1/controls/{id}/evaluate.
+		EvaluateRatePerMin: positiveIntEnv(logger, "ATLAS_EVALUATE_RATE_PER_MIN", controlstateapi.DefaultEvaluateRatePerMin),
+		// #2698: warn when one needs-attention source read passes this
+		// many rows, the size #2555 D1 says to revisit the uncapped reads.
+		NeedsAttentionWarnRows: positiveIntEnv(logger, "ATLAS_NEEDS_ATTENTION_WARN_ROWS", needsattention.DefaultWarnRows),
 	}
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub
 	}
+	cfg.ArtifactStore = buildArtifactStore(pool)
 	srv := api.New(cfg)
 
 	// Slice 121 (AC-15/16): wire the opt-in Prometheus `/metrics` fallback
@@ -421,13 +439,30 @@ func main() {
 				}
 			}
 			localAuthResolver = oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool)
-			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
+
+			// #1850: one live super_admins re-check, on the same
+			// BYPASSRLS pool the resolver uses to set the claim, for
+			// every path that would otherwise carry a stale claim:
+			// token exchange, device-code approval, /oauth/introspect
+			// (#1870), and the JWT middleware (which drops the claim
+			// from a demoted user's live tokens). A nil pool fails
+			// closed.
+			superAdmins := superadmin.NewDBChecker(resolverAuthPool)
+			ep.AttachSuperAdminChecker(superAdmins)
+			srv.AttachSuperAdminChecker(superAdmins)
+			authorizeCfg := oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
 				Sessions: sessions.NewStore(pool, 0),
 				Users:    localAuthResolver,
 				Issuer:   issuer,
-			})
+			}
+			// #1761: on a single-tenant install /oauth/authorize may omit
+			// tenant_id. The lookup needs the BYPASSRLS pool.
+			if resolverAuthPool != nil {
+				authorizeCfg.ImplicitTenant = authapi.PoolImplicitTenantResolver{Q: resolverAuthPool}.ImplicitTenant
+			}
+			authorizeEP := oauthapi.NewAuthorizeEndpoint(authorizeCfg)
 			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
 			logger.Info("atlas: OAuth authorize endpoint wired",
 				"pkce_methods", "S256")
@@ -453,16 +488,31 @@ func main() {
 			// /oauth/introspect (RFC 7662) endpoints, the JWT
 			// validation middleware on /v1/*, and the revocation-
 			// list sweeper goroutine.
+			//
+			// #2041: both endpoints run an argon2id client-secret verify
+			// unauthenticated, so each throttles per client_id and per
+			// caller IP (resolved through TRUSTED_PROXY_CIDRS) first.
 			revokedStore := revocation.New(pool)
+			clientAuthRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN", oauthapi.DefaultClientAuthRatePerMin)
+			clientAuthIPRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN", oauthapi.DefaultClientAuthIPRatePerMin)
 			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
-				Issuer: issuer,
+				Issuer:              issuer,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
-				Issuer: issuer,
+				Issuer:              issuer,
+				SuperAdmins:         superAdmins,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			oauthHandler.AttachRevocationEndpoint(revokeEP)
 			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
-			logger.Info("atlas: OAuth revocation + introspection endpoints wired")
+			logger.Info("atlas: OAuth revocation + introspection endpoints wired",
+				"client_auth_rate_per_min", clientAuthRate,
+				"client_auth_ip_rate_per_min", clientAuthIPRate)
 
 			// Slice 190: attach the JWT validator to the HTTP server
 			// so it prepends jwtmw to the /v1/* chain.
@@ -477,7 +527,10 @@ func main() {
 			deviceAuthEP := oauthapi.NewDeviceAuthorizationEndpoint(clients, deviceCodes, oauthapi.DeviceAuthorizationConfig{
 				Issuer: issuer,
 			})
-			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{})
+			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{
+				SuperAdmins: superAdmins,
+				Roles:       authz.NewDBRolesResolver(pool),
+			})
 			ep.AttachDeviceCodeStore(deviceCodes)
 			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
 			oauthHandler.AttachDeviceApprovalEndpoint(deviceApprovalEP)
@@ -698,10 +751,9 @@ func main() {
 		// Slice 037: wire the user-facing auth routes so /auth/local/login
 		// mounts. The docker-compose self-host bundle is a local-mode
 		// deployment — a default local user signs in with email+password,
-		// no external IdP. The OIDC authenticator is still constructed
-		// (the handler requires a non-nil *oidc.Authenticator) but its
-		// resolver always reports "unknown IdP": OIDC is an opt-in
-		// post-install configuration step, not part of first sign-in.
+		// no external IdP. OIDC is an opt-in post-install step: an admin
+		// saves an IdP on the SSO page, and until then the resolver finds
+		// no config and /auth/oidc/* answers "unknown IdP" (#2034).
 		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
 		// the local-HTTP self-host default; operators set it true behind
 		// TLS).
@@ -715,7 +767,31 @@ func main() {
 		// pre-slice-198 behaviour of erroring on "tenant_id required").
 		userStore := users.NewStoreWithAuthPool(pool, authPool)
 		sessionStore := sessions.NewStore(pool, 0)
-		oidcAuth := oidc.New(localModeIdpResolver{})
+		// #2177: the OIDC state HMAC key. ATLAS_OIDC_STATE_KEY when set,
+		// else derived from BEARER_HASH_KEY, so every replica signs and
+		// verifies with the same key.
+		oidcStateKey, err := oidc.StateKeyFromEnv(bearerHashKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: oidc state key: %v\n", err)
+			os.Exit(1)
+		}
+		// #2534: every request to a tenant's IdP is SSRF-guarded; private
+		// issuers only with the deployment opt-in.
+		issuerPolicy, err := oidc.IssuerPolicyFromEnv()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+			os.Exit(1)
+		}
+		// #2034: OIDC sign-in reads the tenant's saved oidc_idp_configs row
+		// (PATCH /v1/admin/sso). Only ATLAS_OIDC_LOCAL_MODE=true, for dev,
+		// wires the resolver that knows no IdP. A missing secret key does
+		// not stop the boot; every saved config then refuses sign-in.
+		idpResolver, oidcSource, err := oidcResolverFromEnv(pool, issuerPolicy)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+			os.Exit(1)
+		}
+		oidcAuth := oidc.New(idpResolver, oidcStateKey, oidc.WithIssuerPolicy(issuerPolicy))
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
 		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
 		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
@@ -735,9 +811,15 @@ func main() {
 		// it reads/writes under the request's tenant RLS context (pool is the
 		// RLS app pool).
 		authHandler.AttachGroupDeriver(oidcGroupDeriver{resolver: grouprole.NewResolver(pool)})
+		// #1727: a local login may omit tenant_id on a single-tenant
+		// install. Resolving the implicit tenant reads `tenants` before
+		// any tenant context exists, so it needs the BYPASSRLS authPool.
+		if authPool != nil {
+			authHandler.AttachImplicitTenantResolver(authapi.PoolImplicitTenantResolver{Q: authPool})
+		}
 		srv.AttachAuthHandler(authHandler)
-		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
-			secureCookies, localAS != nil)
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on, oidc_idp_source=%s)\n",
+			secureCookies, localAS != nil, oidcSource)
 
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;
@@ -832,97 +914,79 @@ func main() {
 		fmt.Fprintln(os.Stderr, "atlas: DATABASE_URL_APP not set — HTTP server will refuse to start")
 	}
 
-	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	// #2781: a fatal subsystem's error cancels ctx, so every loop below
+	// drains and the process exits 1 instead of running half-dead.
+	run, ctx := newRunGroup(ctx)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	run.fatal("grpc", func() error {
 		fmt.Fprintf(os.Stderr, "atlas: gRPC listening on %s\n", grpcAddr)
-		if err := srv.Run(ctx, grpcAddr); err != nil {
-			errCh <- fmt.Errorf("grpc: %w", err)
-		}
-	}()
+		return srv.Run(ctx, grpcAddr)
+	})
 
 	if pool != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("http", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: HTTP listening on %s\n", httpAddr)
-			if err := srv.RunHTTP(ctx, httpAddr); err != nil {
-				errCh <- fmt.Errorf("http: %w", err)
-			}
-		}()
+			return srv.RunHTTP(ctx, httpAddr)
+		})
 	}
 
 	// Slice 015: drive the consumer alongside the gRPC + HTTP servers.
 	// It shares the same stop signal so SIGTERM tears all three down
 	// together.
 	if streamConsumer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("streambuf consumer", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: NATS consumer draining %s\n", streambufSubject())
-			if err := streamConsumer.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("streambuf consumer: %w", err)
-			}
-		}()
+			return streamConsumer.Start(ctx)
+		})
 	}
 
 	// Slice 012: drive the evaluation ingest subscriber alongside the
 	// other consumers. Shares the same stop signal so SIGTERM tears it
 	// down with everything else (AC-2).
 	if evalSubscriber != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("eval ingest subscriber", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber starting\n")
-			if err := evalSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("eval ingest subscriber: %w", err)
-			}
-		}()
+			return evalSubscriber.Start(ctx)
+		})
 	}
 
 	// Slice 016: drive the freshness/drift refresh subscriber alongside the
 	// other consumers. Shares the same stop signal so SIGTERM tears it down
 	// with everything else (AC-4: refresh on every ledger write).
 	if freshnessDriftSubscriber != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("freshness/drift refresh subscriber", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber starting\n")
-			if err := freshnessDriftSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("freshness/drift refresh subscriber: %w", err)
-			}
-		}()
+			return freshnessDriftSubscriber.Start(ctx)
+		})
 	}
 
 	// Slice 020: drive the risk residual subscriber alongside the other
 	// consumers. Shares the same stop signal so SIGTERM tears it down with
 	// everything else (AC-5).
 	if residualSubscriber != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("risk residual subscriber", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber starting\n")
-			if err := residualSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("risk residual subscriber: %w", err)
-			}
-		}()
+			return residualSubscriber.Start(ctx)
+		})
 	}
 
 	// OE-661: drive the personnel-security worker-event subscriber alongside
 	// the other consumers. Shares the same stop signal so SIGTERM tears it
 	// down with everything else.
 	if personnelSubscriber != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		run.fatal("personnel security worker-event subscriber", func() error {
 			fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber starting\n")
-			if err := personnelSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("personnel security worker-event subscriber: %w", err)
-			}
-		}()
+			return personnelSubscriber.Start(ctx)
+		})
+	}
+
+	// #2175: the reminder and notification jobs follow module switches and
+	// module access, through the same moduleaccess answers the API uses.
+	// With no app pool there is nothing to read, and the nil Views reaches
+	// everyone, as a server with no database does.
+	var bgModules *moduleaccess.Views
+	if pool != nil {
+		bgModules = moduleaccess.NewViews(moduleaccess.NewStore(pool), featureflag.NewStore(pool))
 	}
 
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
@@ -948,15 +1012,16 @@ func main() {
 				}
 			}
 			expirer := exception.NewExpirer(expiryPool, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			// #2269: re-evaluate each expired exception's control through
+			// the app-role pool, so RLS binds the evaluation's writes.
+			if pool != nil {
+				expirer.WithReevaluate(eval.ExceptionChangeReevaluator(eval.NewEngineFactory(pool), logger))
+			}
+			run.nonFatal("exception expirer", func() error {
 				defer expiryPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
-				if err := expirer.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("exception expirer: %w", err)
-				}
-			}()
+				return expirer.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -985,16 +1050,12 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: ATLAS_DECISION_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
 				}
 			}
-			notifier := decision.NewNotifier(overduePool, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			notifier := decision.NewNotifier(overduePool, logger).WithModules(bgModules)
+			run.nonFatal("decision overdue notifier", func() error {
 				defer overduePool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
-				if err := notifier.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
-				}
-			}()
+				return notifier.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -1022,16 +1083,12 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: ATLAS_PERSONNEL_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
 				}
 			}
-			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool), logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool).WithIngest(ingestSvc), logger).WithModules(bgModules)
+			run.nonFatal("personnel overdue notifier", func() error {
 				defer psPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: personnel overdue notifier ticking every %s\n", interval.String())
-				if err := psNotifier.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("personnel overdue notifier: %w", err)
-				}
-			}()
+				return psNotifier.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -1061,15 +1118,11 @@ func main() {
 				}
 			}
 			rs := securityawareness.NewRosterSyncer(rsPool, pool, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.nonFatal("security awareness roster sync", func() error {
 				defer rsPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: security awareness roster sync ticking every %s\n", interval.String())
-				if err := rs.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("security awareness roster sync: %w", err)
-				}
-			}()
+				return rs.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -1097,15 +1150,11 @@ func main() {
 				}
 			}
 			scheduler := eval.NewScheduler(schedPool, eval.NewEngineFactory(pool), logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.fatal("eval scheduler", func() error {
 				defer schedPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: eval scheduler ticking every %s\n", interval.String())
-				if err := scheduler.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("eval scheduler: %w", err)
-				}
-			}()
+				return scheduler.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -1133,15 +1182,11 @@ func main() {
 				}
 			}
 			fdScheduler := freshnessdrift.NewScheduler(fdPool, freshnessdrift.NewRefresherFactory(pool), logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.fatal("freshness/drift scheduler", func() error {
 				defer fdPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
-				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
-					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
-				}
-			}()
+				return fdScheduler.Run(ctx, tickCheck)
+			})
 		}
 	}
 
@@ -1177,15 +1222,11 @@ func main() {
 				}
 			}
 			ms := metricsscheduler.New(mPool, pool, registry, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.fatal("metrics scheduler", func() error {
 				defer mPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
-				if err := ms.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("metrics scheduler: %w", err)
-				}
-			}()
+				return ms.Run(ctx, interval)
+			})
 		}
 	}
 
@@ -1217,15 +1258,50 @@ func main() {
 				}
 			}
 			ss := stalenesssched.New(sPool, pool, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.fatal("staleness scheduler", func() error {
 				defer sPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: staleness scheduler ticking every %s (weekly digest Mondays 09:00 UTC)\n", interval.String())
-				if err := ss.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("staleness scheduler: %w", err)
-				}
-			}()
+				return ss.Run(ctx, interval)
+			})
+		}
+	}
+
+	// #2038: control import suggestion sweeper. A background suggestion run
+	// dies with its process, leaving the batch pending; this fails batches
+	// pending past a cutoff, once at start and every 10 minutes. The
+	// migrator pool only lists tenant IDs; each tenant's update runs on the
+	// app pool under tenancy.WithTenant. Safe on every replica (FOR UPDATE
+	// SKIP LOCKED).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ciPool, err := atlasotel.NewTracedPool(cctx, migratorURL)
+		ccancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: control import sweeper pool: %v\n", err)
+		} else {
+			sweeper := controlimport.NewSweeper(ciPool, pool, logger, controlimport.DefaultStaleSuggestionsAfter)
+			run.nonFatal("control import sweeper", func() error {
+				defer ciPool.Close()
+				return sweeper.Run(ctx, controlimport.DefaultSweepInterval)
+			})
+		}
+	}
+
+	// #2714: exception Idempotency-Key sweeper. Deletes keys past the 24h
+	// window, once at start and hourly. The migrator pool only lists tenant
+	// IDs; each tenant's delete runs on the app pool under tenancy.WithTenant.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
+		idemPool, err := atlasotel.NewTracedPool(ictx, migratorURL)
+		icancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: exception idempotency sweeper pool: %v\n", err)
+		} else {
+			idemSweeper := exception.NewIdempotencySweeper(idemPool, pool, logger)
+			run.nonFatal("exception idempotency sweeper", func() error {
+				defer idemPool.Close()
+				return idemSweeper.Run(ctx, exception.DefaultIdempotencySweepInterval)
+			})
 		}
 	}
 
@@ -1253,14 +1329,14 @@ func main() {
 			// Email channel (slice 445) — mounts only when SMTP is configured.
 			emailCfg := notifyemail.ConfigFromEnv()
 			if emailCfg.Enabled() {
-				emailCh := notifyemail.NewChannel(pool, notifyemail.NewSMTPProvider(emailCfg), emailCfg.BaseURL)
+				emailCh := notifyemail.NewChannel(pool, notifyemail.NewSMTPProvider(emailCfg), emailCfg.BaseURL).WithModules(bgModules)
 				channels = append(channels, notifyscheduler.EmailChannel(emailCh))
 			}
 
 			// Slack channel (slice 543) — mounts only when a webhook URL is set.
 			slackCfg := notifyslack.ConfigFromEnv()
 			if slackCfg.Enabled() {
-				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg, notifyslack.SSRFPolicy()), slackCfg.BaseURL).WithModules(bgModules)
 				channels = append(channels, notifyscheduler.SlackChannel(slackCh))
 			}
 
@@ -1272,7 +1348,7 @@ func main() {
 				if terr != nil {
 					fmt.Fprintf(os.Stderr, "atlas: webhook digest channel: %v\n", terr)
 				} else {
-					webhookCh := notifywebhook.NewChannel(pool, transport, webhookCfg.BaseURL)
+					webhookCh := notifywebhook.NewChannel(pool, transport, webhookCfg.BaseURL).WithModules(bgModules)
 					channels = append(channels, notifyscheduler.WebhookChannel(webhookCh))
 				}
 			}
@@ -1290,16 +1366,12 @@ func main() {
 					}
 				}
 				ds := notifyscheduler.New(dPool, channels, logger)
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				run.nonFatal("digest scheduler", func() error {
 					defer dPool.Close()
 					fmt.Fprintf(os.Stderr, "atlas: digest scheduler ticking every %s (%d channels)\n",
 						interval.String(), len(channels))
-					if err := ds.Run(ctx, interval); err != nil {
-						errCh <- fmt.Errorf("digest scheduler: %w", err)
-					}
-				}()
+					return ds.Run(ctx, interval)
+				})
 			}
 		}
 	}
@@ -1340,12 +1412,10 @@ func main() {
 				// coordinates the single close without a double-close race.
 				var bkWG sync.WaitGroup
 				bkWG.Add(2)
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				run.add(func() {
 					bkWG.Wait()
 					bkPool.Close()
-				}()
+				})
 				go func() {
 					defer bkWG.Done()
 					fmt.Fprintf(os.Stderr, "atlas: backup scheduler ticking every %s (target=%s)\n",
@@ -1362,13 +1432,14 @@ func main() {
 		}
 	}
 
-	wg.Wait()
-	close(errCh)
+	collected := run.wait()
 	if streamConn != nil {
 		streamConn.Close()
 	}
-	for err := range errCh {
-		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+	if len(collected) > 0 {
+		for _, err := range collected {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -1419,6 +1490,22 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// positiveIntEnv reads a positive integer from key, falling back when
+// it is unset, malformed or not positive. A set-but-unusable value is
+// logged so the operator learns their setting was ignored.
+func positiveIntEnv(logger *slog.Logger, key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		return v
+	}
+	logger.Warn("atlas: ignoring invalid env value; using default",
+		"key", key, "value", raw, "default", fallback)
+	return fallback
+}
+
 // oscalSignerFromEnv builds the slice-030 export-bundle signer. When
 // OSCAL_SIGNING_KEY is set (hex-encoded 64-byte ed25519 private key) it
 // is loaded; otherwise a fresh per-process ephemeral keypair is
@@ -1436,19 +1523,6 @@ func oscalSignerFromEnv() (*oscal.Signer, error) {
 		return nil, fmt.Errorf("OSCAL_SIGNING_KEY is not valid hex: %w", err)
 	}
 	return oscal.NewSigner(ed25519.PrivateKey(key))
-}
-
-// localModeIdpResolver is the slice-037 no-op IdP resolver for local-mode
-// self-host deployments. The docker-compose bundle ships local-mode
-// authentication (email + password against a seeded default user); OIDC
-// is an opt-in post-install configuration step. Until an operator
-// configures an IdP, every OIDC resolution reports "unknown IdP" and the
-// /auth/oidc/* routes 400 cleanly — /auth/local/login is the working
-// sign-in path.
-type localModeIdpResolver struct{}
-
-func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
-	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
 }
 
 // oidcGroupDeriver adapts the slice-509 grouprole.Resolver to the
@@ -1656,4 +1730,42 @@ func doKeyRotation(ctx context.Context, ks keyRotator, logger *slog.Logger) {
 		logger.Info("atlas: key-rotation: pruned keys past overlap window",
 			"count", len(removed), "pruned_kids", removed)
 	}
+}
+
+// buildArtifactStore wires the slice-036 artifact store from ARTIFACTS_*
+// (security-atlas#1928). Unset ARTIFACTS_BUCKET keeps the store off: the
+// /v1/artifacts routes stay unmounted and attachment uploads answer 503,
+// as before. A configured store that cannot reach its bucket exits the
+// process, the same fail-fast posture as an unreachable NATS_URL: an
+// operator who set the variables expects uploads to work, and finding out
+// at first upload is worse than a boot that names the cause. Credentials
+// come from the AWS SDK default chain and are never logged.
+func buildArtifactStore(pool *pgxpool.Pool) *artifact.Store {
+	cfg, ok, err := artifact.ConfigFromEnv(os.LookupEnv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store: %v\n", err)
+		os.Exit(1)
+	}
+	if !ok {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store off (%s unset); file uploads unavailable\n", artifact.EnvBucket)
+		return nil
+	}
+	if pool == nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store off (no database); file uploads unavailable\n")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := artifact.Build(ctx, pool, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store: %v\n", err)
+		os.Exit(1)
+	}
+	endpoint := cfg.Endpoint
+	if u, perr := url.Parse(endpoint); perr == nil {
+		endpoint = u.Redacted() // never print userinfo, if an operator put any there
+	}
+	fmt.Fprintf(os.Stderr, "atlas: artifact store ready (bucket=%s endpoint=%s path_style=%t)\n",
+		cfg.Bucket, endpoint, cfg.UsePathStyle)
+	return store
 }

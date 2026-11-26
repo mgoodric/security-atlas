@@ -1,0 +1,140 @@
+# manual.upload.v1 records pushed to this control, shaped to the registered
+# schema (internal/api/schemaregistry/schemas/manual.upload/1.0.0.json:
+# uploaded_by, filename, content_type, size_bytes, description). The manual
+# connector writes every upload as inconclusive for a person to judge; the
+# query ignores `result`. The window is on `observed_at`, the push time.
+# Every case pins `evaluated_at`: 365 days before 2026-11-21T12:00:00Z is
+# 2025-11-21T12:00:00Z, and the annual window reaches back 400 days.
+cases:
+  - name: upload-inside-365d-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-03-02T10:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v4.pdf
+          content_type: application/pdf
+          size_bytes: 1204811
+          description: Annual BCP/DR plan, reviewed by the CISO
+
+  - name: upload-exactly-365d-passes
+    description: the window is inclusive at 365 days
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-11-21T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+
+  - name: upload-just-over-365d-fails
+    description: inside the 400-day annual window, so the record is seen, but outside the 365-day check
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-11-21T11:59:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+
+  - name: upload-older-than-annual-window-is-not-seen
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-10-01T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+
+  - name: one-recent-upload-passes-beside-an-old-one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-09-15T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v4.pdf
+          content_type: application/pdf
+
+  - name: observed-within-1h-after-instant-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-21T13:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v4.pdf
+          content_type: application/pdf
+
+  - name: observed-over-1h-after-instant-is-inconclusive
+    description: an upload two hours after the instant does not show one existed by it, and the only other upload is stale
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v4.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+
+  - name: record-without-filename-is-left-out
+    description: the recent record names no file, so only the stale upload counts
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: bcp-dr-plan-v3.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          uploaded_by: ciso@example.com
+          filename: ""
+          content_type: application/pdf
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z

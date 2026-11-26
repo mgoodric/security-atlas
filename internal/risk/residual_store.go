@@ -38,6 +38,15 @@ import (
 // inherent and the operator is told why.
 const WarningNoControlsLinked = "no_controls_linked"
 
+// ErrUnderivable marks a deterministic derive failure: the risk row itself
+// cannot yield a residual (a malformed non-empty inherent_score, or a
+// methodology with no scalar score), or a linked control whose stored
+// evidence_queries cannot be read (#3005). Retrying reads the same row and fails
+// the same way, so the residual subscriber terms the message instead of
+// redelivering it (#2964). Transient DB and connection errors are never
+// wrapped with it.
+var ErrUnderivable = errors.New("risk: residual underivable")
+
 // effectivenessEngine is the slice-012 surface the deriver depends on. Declared
 // as an interface so the deriver is unit-testable and decoupled from
 // eval.Engine's concrete type. *eval.Engine satisfies it.
@@ -76,6 +85,10 @@ type ResidualResult struct {
 	// Warning is "no_controls_linked" when Breakdown is empty (AC-7); empty
 	// string otherwise.
 	Warning string `json:"warning,omitempty"`
+	// Unscored is true for a risk with no inherent_score (#2511): there is
+	// no residual to derive, so InherentScore and ResidualScore are 0 and
+	// mean nothing. The breakdown is still derived (#2867).
+	Unscored bool `json:"unscored,omitempty"`
 }
 
 // ResidualDeriver computes and persists residual risk. Construct with
@@ -133,12 +146,18 @@ func (d *ResidualDeriver) Derive(ctx context.Context, riskID uuid.UUID, recomput
 		return ResidualResult{}, err
 	}
 
-	inherent, err := inherentScalar(methodology, inherentJSON)
-	if err != nil {
-		return ResidualResult{}, fmt.Errorf("risk %s inherent_score: %w", riskID, err)
+	// #2867: an unscored risk (#2511) is a valid row with no residual,
+	// not a derivation failure.
+	unscored := unscoredScore(inherentJSON)
+	var inherent float64
+	if !unscored {
+		inherent, err = inherentScalar(methodology, inherentJSON)
+		if err != nil {
+			return ResidualResult{}, fmt.Errorf("%w: risk %s inherent_score: %w", ErrUnderivable, riskID, err)
+		}
 	}
 
-	result := ResidualResult{RiskID: riskID, InherentScore: inherent}
+	result := ResidualResult{RiskID: riskID, InherentScore: inherent, Unscored: unscored}
 	if len(links) == 0 {
 		// AC-7: no linked controls -> residual equals inherent, warning set.
 		result.ResidualScore = inherent
@@ -158,7 +177,9 @@ func (d *ResidualDeriver) Derive(ctx context.Context, riskID uuid.UUID, recomput
 		perControl = append(perControl, bd.ControlEffectiveness)
 	}
 	result.WeightedControlEffectiveness = WeightedEffectiveness(perControl)
-	result.ResidualScore = ResidualScore(inherent, result.WeightedControlEffectiveness)
+	if !unscored {
+		result.ResidualScore = ResidualScore(inherent, result.WeightedControlEffectiveness)
+	}
 	return result, nil
 }
 
@@ -171,6 +192,12 @@ func (d *ResidualDeriver) DeriveAndPersist(ctx context.Context, riskID uuid.UUID
 	result, err := d.Derive(ctx, riskID, recompute)
 	if err != nil {
 		return ResidualResult{}, err
+	}
+	if result.Unscored {
+		// An unscored risk keeps residual_score `{}`: PrepareCreateScores
+		// refuses a residual without an inherent score, and a stored blob
+		// of zeros would read as scored (#2867).
+		return result, nil
 	}
 	blob, err := json.Marshal(residualBlobFromResult(result))
 	if err != nil {
@@ -206,11 +233,19 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 		// written the new row. EvaluateControl is idempotent (append-only,
 		// latest-by-evaluated_at wins) so the extra row is harmless.
 		if _, err := d.engine.EvaluateControl(ctx, controlID, eval.TriggerIngest, eval.FarFuture); err != nil {
-			if !errors.Is(err, eval.ErrControlNotFound) {
+			switch {
+			case errors.Is(err, eval.ErrControlNotFound):
+				// A linked control that no longer exists in-tenant contributes
+				// nothing — fall through with zeroed operational/coverage.
+			case errors.Is(err, eval.ErrUnevaluable):
+				// The control as stored cannot be evaluated, so no new
+				// evaluation row is coming (#3005): fall through and read the
+				// rows it already has. Failing here would hold back the
+				// residual of every risk linked to it, and the eval
+				// subscriber already logs and counts the control.
+			default:
 				return ControlBreakdown{}, fmt.Errorf("recompute control %s: %w", controlID, err)
 			}
-			// A linked control that no longer exists in-tenant contributes
-			// nothing — fall through with zeroed operational/coverage.
 		}
 	}
 
@@ -221,11 +256,11 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 
 	operational, noData, err := d.operationalScore(ctx, controlID)
 	if err != nil {
-		return ControlBreakdown{}, err
+		return ControlBreakdown{}, underivableIfUnevaluable(err)
 	}
 	coverage, err := d.coverageScore(ctx, controlID)
 	if err != nil {
-		return ControlBreakdown{}, err
+		return ControlBreakdown{}, underivableIfUnevaluable(err)
 	}
 
 	components := EffectivenessComponents{
@@ -247,6 +282,18 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 		ControlEffectiveness: ControlEffectiveness(components),
 		OperationalNoData:    noData,
 	}, nil
+}
+
+// underivableIfUnevaluable marks a read of a linked control's evaluations
+// as ErrUnderivable when the control cannot be read as stored (#3005): its
+// evidence_queries do not parse, so every read fails the same way. A zero
+// score in its place would claim a measured 0% effectiveness. Any other
+// error is returned as is.
+func underivableIfUnevaluable(err error) error {
+	if errors.Is(err, eval.ErrUnevaluable) {
+		return fmt.Errorf("%w: %w", ErrUnderivable, err)
+	}
+	return err
 }
 
 // operationalScore reuses slice 012's eval.Engine.Effectiveness — the rolling

@@ -7,6 +7,9 @@
 //                             as an evidence record per invariant #2)
 //   - push_evidence         — propose an evidence record append
 //   - update_risk_treatment — propose a risk treatment + owner change
+//   - link_child_risks      — propose attaching risks under an existing
+//                             parent risk (#1748)
+//   - unlink_child_risk     — propose detaching a child risk (#1748)
 //   - confirm_write         — operator-driven approval of a pending proposal
 //
 // Each write tool dispatches to POST /v1/mcp/write-proposals; the platform
@@ -91,7 +94,8 @@ const createRiskInputSchema = `{
     },
     "category": {
       "type": "string",
-      "description": "Risk category slug (e.g., operational, technical, legal)."
+      "minLength": 1,
+      "description": "One of the organisation's own risk categories, by slug or by display name (case-insensitive). Call list_risk_categories for the valid values; archived categories cannot be given to a new risk. An unknown category is refused with the list of valid slugs."
     },
     "methodology": {
       "type": "string",
@@ -99,22 +103,39 @@ const createRiskInputSchema = `{
     },
     "inherent_score": {
       "type": "object",
-      "description": "Methodology-shaped scoring envelope; structure depends on methodology."
+      "description": "Optional methodology-shaped scoring envelope; structure depends on methodology. Omit it to file an unscored risk, as the app's Score later does."
     },
     "treatment": {
       "type": "string",
-      "enum": ["avoid", "accept", "transfer", "mitigate"],
-      "description": "Optional; defaults to avoid (safest)."
+      "enum": ["untreated", "avoid", "accept", "transfer", "mitigate"],
+      "description": "Optional; defaults to untreated (no treatment decision yet). accept needs acceptance_status=proposed here, since create_risk sets no accepter or expiry; mitigate needs a linked control or action plan, which a new risk does not have."
+    },
+    "acceptance_status": {
+      "type": "string",
+      "enum": ["proposed"],
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off; needs justification and proposed_until. A risk cannot be created already approved; approve the acceptance afterwards."
+    },
+    "justification": {
+      "type": "string",
+      "description": "Required with acceptance_status=proposed, forbidden otherwise: why the risk should be accepted."
+    },
+    "proposed_until": {
+      "type": "string",
+      "description": "Required with acceptance_status=proposed, forbidden otherwise: the proposed expiry, YYYY-MM-DD, after today. The approver sets the approved expiry."
     },
     "treatment_owner": {
       "type": "string",
-      "description": "User/credential id responsible for the treatment plan."
+      "description": "Free text naming who is responsible for the treatment plan, shown as Owner (unlinked) only while no owner_user_id is set. Prefer owner_user_id."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "Optional; the risk's owner, the UUID of an active user of this organisation. When set, treatment_owner is not stored. A user of another organisation, a disabled user or an unknown id is refused."
     }
   }
 }`
 
 // CreateRiskTool files a create_risk proposal. The proposal sits at
-// state=ai_proposed until an approver invokes confirm_write or the
+// state=ai_proposed until a tenant admin invokes confirm_write or the
 // operator clicks Approve in the UI.
 type CreateRiskTool struct {
 	client *mcp.Client
@@ -128,7 +149,7 @@ func (t *CreateRiskTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "create_risk",
 		Description: "Propose a new risk register entry. The proposal is staged at " +
-			"state='ai_proposed' until an authorized approver confirms or rejects it. " +
+			"state='ai_proposed' until a tenant admin confirms or rejects it. " +
 			"Use confirm_write(proposal_id) to commit. No audit-binding artifact is " +
 			"published until a human approves.",
 		InputSchema: json.RawMessage(createRiskInputSchema),
@@ -206,7 +227,11 @@ const pushEvidenceInputSchema = `{
     "kind": {
       "type": "string",
       "minLength": 1,
-      "description": "evidence_kind slug (e.g., aws.s3.bucket_encryption.v1)."
+      "description": "Registered evidence_kind (e.g., aws.s3.bucket_encryption_state.v1)."
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Semver of the evidence_kind schema the payload conforms to; defaults to 1.0.0."
     },
     "result": {
       "type": "string",
@@ -215,11 +240,11 @@ const pushEvidenceInputSchema = `{
     "observed_at": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO-8601 timestamp; defaults to now if omitted."
+      "description": "ISO-8601 timestamp; defaults to now if omitted. Must be within 24h of the time the proposal is confirmed, or the confirm is rejected."
     },
     "payload": {
       "type": "object",
-      "description": "Evidence payload (structured per evidence_kind schema). Bounded."
+      "description": "Evidence payload. Validated against the evidence_kind schema at confirm; a non-conforming payload is refused. Bounded."
     }
   }
 }`
@@ -240,7 +265,9 @@ func (t *PushEvidenceTool) Definition() mcp.ToolDefinition {
 		Name: "push_evidence",
 		Description: "Propose an evidence record append. Same wire shape as the push SDK " +
 			"(slice 003) but mediated by HITL approval because the LLM is the origin. " +
-			"Proposal sits at state='ai_proposed' until an approver confirms.",
+			"Proposal sits at state='ai_proposed' until a tenant admin confirms. On confirm the " +
+			"record goes through the same ingest checks as a push: observed_at within 24h, " +
+			"payload valid for the kind's schema.",
 		InputSchema: json.RawMessage(pushEvidenceInputSchema),
 	}
 }
@@ -263,11 +290,29 @@ const updateRiskTreatmentInputSchema = `{
     },
     "treatment": {
       "type": "string",
-      "enum": ["avoid", "accept", "transfer", "mitigate"]
+      "enum": ["untreated", "avoid", "accept", "transfer", "mitigate"],
+      "description": "untreated = no decision yet. mitigate needs at least one linked control or linked action plan."
+    },
+    "acceptance_status": {
+      "type": "string",
+      "enum": ["proposed", "approved"],
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = propose accepting the risk (needs justification and accepted_until as the proposed expiry); approved = approve the risk's proposed acceptance until accepted_until, with the confirming person as the approver, who cannot be the proposer unless the organisation allows self-approval. An approved or proposed acceptance is ended in the app (reject, revoke), not here."
+    },
+    "justification": {
+      "type": "string",
+      "description": "Required with acceptance_status=proposed: why the risk should be accepted."
+    },
+    "accepted_until": {
+      "type": "string",
+      "description": "YYYY-MM-DD, after today. With proposed, the proposed expiry; with approved, the approved expiry."
     },
     "treatment_owner": {
       "type": "string",
-      "description": "Optional; the user/credential id that owns the new treatment plan."
+      "description": "Optional free text naming who owns the new treatment plan, shown as Owner (unlinked) only while the risk has no owner user. Prefer owner_user_id; ignored when owner_user_id is given."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "Optional; the risk's new owner, the UUID of an active user of this organisation. Clears treatment_owner. A user of another organisation, a disabled user or an unknown id is refused."
     }
   }
 }`
@@ -286,8 +331,8 @@ func NewUpdateRiskTreatment(c *mcp.Client) *UpdateRiskTreatmentTool {
 func (t *UpdateRiskTreatmentTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "update_risk_treatment",
-		Description: "Propose a risk treatment change (and optionally a treatment_owner " +
-			"reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
+		Description: "Propose a risk treatment change (and optionally an owner " +
+			"reassignment). Proposal sits at state='ai_proposed' until a tenant admin confirms.",
 		InputSchema: json.RawMessage(updateRiskTreatmentInputSchema),
 	}
 }
@@ -295,6 +340,96 @@ func (t *UpdateRiskTreatmentTool) Definition() mcp.ToolDefinition {
 // Handle implements mcp.Tool.
 func (t *UpdateRiskTreatmentTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
 	return fileProposal(ctx, t.client, "update_risk_treatment", args)
+}
+
+// ===== link_child_risks (#1748) =====
+
+const linkChildRisksInputSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["parent_risk_id", "child_risk_ids"],
+  "properties": {
+    "parent_risk_id": {
+      "type": "string",
+      "description": "UUID of the existing parent risk."
+    },
+    "child_risk_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {"type": "string"},
+      "description": "UUIDs of existing risks to attach. Each must sit at a lower level than the parent (team < org < company), be scored on the 5x5 grid, and not be the parent or one of its ancestors. A child already attached is left as it is."
+    }
+  }
+}`
+
+// LinkChildRisksTool files a link_child_risks proposal.
+type LinkChildRisksTool struct {
+	client *mcp.Client
+}
+
+// NewLinkChildRisks constructs the tool.
+func NewLinkChildRisks(c *mcp.Client) *LinkChildRisksTool {
+	return &LinkChildRisksTool{client: c}
+}
+
+// Definition implements mcp.Tool.
+func (t *LinkChildRisksTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name: "link_child_risks",
+		Description: "Propose attaching existing risks as children of an existing parent risk, " +
+			"so they roll up to it. The parent's own score and treatment are not changed. " +
+			"Proposal sits at state='ai_proposed' until a tenant admin confirms.",
+		InputSchema: json.RawMessage(linkChildRisksInputSchema),
+	}
+}
+
+// Handle implements mcp.Tool.
+func (t *LinkChildRisksTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
+	return fileProposal(ctx, t.client, "link_child_risks", args)
+}
+
+// ===== unlink_child_risk (#1748) =====
+
+const unlinkChildRiskInputSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["parent_risk_id", "child_risk_id"],
+  "properties": {
+    "parent_risk_id": {
+      "type": "string",
+      "description": "UUID of the parent risk."
+    },
+    "child_risk_id": {
+      "type": "string",
+      "description": "UUID of the child risk to detach. It must be linked to the parent."
+    }
+  }
+}`
+
+// UnlinkChildRiskTool files an unlink_child_risk proposal.
+type UnlinkChildRiskTool struct {
+	client *mcp.Client
+}
+
+// NewUnlinkChildRisk constructs the tool.
+func NewUnlinkChildRisk(c *mcp.Client) *UnlinkChildRiskTool {
+	return &UnlinkChildRiskTool{client: c}
+}
+
+// Definition implements mcp.Tool.
+func (t *UnlinkChildRiskTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name: "unlink_child_risk",
+		Description: "Propose detaching a child risk from its parent risk. Neither risk is " +
+			"deleted. Proposal sits at state='ai_proposed' until a tenant admin confirms.",
+		InputSchema: json.RawMessage(unlinkChildRiskInputSchema),
+	}
+}
+
+// Handle implements mcp.Tool.
+func (t *UnlinkChildRiskTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
+	return fileProposal(ctx, t.client, "unlink_child_risk", args)
 }
 
 // ===== confirm_write =====
@@ -306,7 +441,7 @@ const confirmWriteInputSchema = `{
   "properties": {
     "proposal_id": {
       "type": "string",
-      "description": "Proposal UUID to confirm. The caller's credential MUST hold the approver role."
+      "description": "Proposal UUID to confirm. The caller's credential MUST be a tenant admin."
     }
   }
 }`
@@ -316,7 +451,7 @@ type confirmWriteArgs struct {
 }
 
 // ConfirmWriteTool dispatches to POST /v1/mcp/write-proposals/{id}/confirm.
-// The platform enforces IsApprover / IsAdmin gating server-side.
+// The platform requires a tenant admin server-side (#2428).
 type ConfirmWriteTool struct {
 	client *mcp.Client
 }
@@ -331,7 +466,7 @@ func (t *ConfirmWriteTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "confirm_write",
 		Description: "Confirm an ai_proposed write proposal. Requires the caller's credential " +
-			"to hold the approver role; the platform runs the canonical Applier inside the " +
+			"to be a tenant admin; the platform runs the canonical Applier inside the " +
 			"same transaction as the state flip. Idempotent: a second call on an applied " +
 			"proposal returns a 409 conflict.",
 		InputSchema: json.RawMessage(confirmWriteInputSchema),
@@ -401,6 +536,8 @@ func AllWrites(client *mcp.Client) []mcp.Tool {
 		NewUpdateControlState(client),
 		NewPushEvidence(client),
 		NewUpdateRiskTreatment(client),
+		NewLinkChildRisks(client),
+		NewUnlinkChildRisk(client),
 		NewConfirmWrite(client),
 	}
 }

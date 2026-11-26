@@ -3,7 +3,7 @@
 // These tests cover the gate logic WITHOUT a Postgres dependency:
 //
 //   - Status route shape (enabled / disabled)
-//   - Env-var gate returns 503 when unset
+//   - Env-var gate returns 409 feature_not_enabled when unset
 //   - Admin gate returns 401 when no credential, 403 when not admin
 //   - Rate limiter returns 429 on second call inside window
 //
@@ -25,6 +25,7 @@ import (
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -33,12 +34,34 @@ import (
 // --- helpers ---
 
 // requestWithAdmin returns a fresh request whose context carries an
-// admin credential (cred.IsAdmin=true). The credential's TenantID is
-// a valid UUID so resolveActor can construct it.
+// admin credential (cred.IsAdmin=true) AND verified JWT claims with
+// atlas:super_admin, the authority Seed and Teardown require (#1851).
+// The credential's TenantID is a valid UUID so resolveActor can
+// construct it.
 func requestWithAdmin(method, path string) *http.Request {
 	r := httptest.NewRequest(method, path, nil)
+	userID := uuid.NewString()
 	cred := credstore.Credential{
 		ID:       "test-admin",
+		UserID:   userID,
+		TenantID: uuid.NewString(),
+		IsAdmin:  true,
+	}
+	ctx := authctx.WithCredential(r.Context(), cred)
+	ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID},
+		SuperAdmin:       true,
+	})
+	return r.WithContext(ctx)
+}
+
+// requestWithTenantAdminKey returns a request carrying what a per-tenant
+// admin API key produces: cred.IsAdmin=true and no JWT claims, so no
+// super_admin.
+func requestWithTenantAdminKey(method, path string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	cred := credstore.Credential{
+		ID:       "key_tenant-admin",
 		UserID:   uuid.NewString(),
 		TenantID: uuid.NewString(),
 		IsAdmin:  true,
@@ -170,6 +193,32 @@ func TestStatus_EnabledFalse(t *testing.T) {
 	}
 }
 
+// Status keeps the admin gate, not super_admin (#1851): a tenant admin key
+// and a tenant admin role grant both read it; a viewer is 403 and a missing
+// credential 401.
+func TestStatus_AdminGate(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		req  *http.Request
+		want int
+	}{
+		{"tenant admin API key", requestWithTenantAdminKey(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"tenant admin role JWT", requestWithOwnerRoleAdmin(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"viewer", requestWithViewer(http.MethodGet, "/v1/admin/demo/status"), http.StatusForbidden},
+		{"no credential", httptest.NewRequest(http.MethodGet, "/v1/admin/demo/status", nil), http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		h := New(nil, func() bool { return true })
+		w := httptest.NewRecorder()
+		h.Status(w, tc.req)
+		if w.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d; body=%s", tc.name, w.Code, tc.want, w.Body.String())
+		}
+	}
+}
+
 // --- Admin gate ---
 
 // ISC-4: non-admin caller (viewer) gets 403.
@@ -199,54 +248,100 @@ func TestSeed_MissingCredentialGets401(t *testing.T) {
 	}
 }
 
-// ISC-4: admin role via OwnerRoles (JWT path) is accepted by the gate.
-// Reaches the next gate (env-var) which returns 503 because the test
-// passes an empty pool. Verifies the admin path doesn't 403.
-func TestSeed_OwnerRoleAdminPasses(t *testing.T) {
+// #1851: Seed and Teardown create or delete a whole tenant through the
+// BYPASSRLS pool, so a tenant-scoped admin without the super_admin claim
+// is refused: a per-tenant admin API key (IsAdmin) and a tenant admin
+// role grant (OwnerRoles) alike. The env gate is open, so a 403 here
+// can only come from the super_admin check.
+func TestSeedTeardown_TenantAdminWithoutSuperAdminGets403(t *testing.T) {
 	t.Parallel()
 
-	h := New(nil, func() bool { return true })
-	w := httptest.NewRecorder()
-	h.Seed(w, requestWithOwnerRoleAdmin(http.MethodPost, "/v1/admin/demo/seed"))
+	callers := map[string]func(string, string) *http.Request{
+		"tenant admin API key":  requestWithTenantAdminKey,
+		"tenant admin role JWT": requestWithOwnerRoleAdmin,
+	}
+	for name, mk := range callers {
+		for _, route := range []string{"seed", "teardown"} {
+			t.Run(name+"/"+route, func(t *testing.T) {
+				t.Parallel()
+				h := New(nil, func() bool { return true })
+				w := httptest.NewRecorder()
+				r := mk(http.MethodPost, "/v1/admin/demo/"+route)
+				if route == "seed" {
+					h.Seed(w, r)
+				} else {
+					h.Teardown(w, r)
+				}
+				if w.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+				}
+			})
+		}
+	}
+}
 
-	// Past the admin gate; will fail on the next gate (authPool=nil
-	// → 503 "no auth pool"). Anything that is NOT 403/401 confirms
-	// admin acceptance.
-	if w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
-		t.Fatalf("admin via OwnerRoles rejected; status=%d body=%s", w.Code, w.Body.String())
+// #1851: a super_admin passes the gate and reaches the next one (authPool
+// is nil here, so 503 "no auth pool"). Anything but 401/403 confirms it.
+func TestSeedTeardown_SuperAdminPasses(t *testing.T) {
+	t.Parallel()
+
+	for _, route := range []string{"seed", "teardown"} {
+		h := New(nil, func() bool { return true })
+		w := httptest.NewRecorder()
+		r := requestWithAdmin(http.MethodPost, "/v1/admin/demo/"+route)
+		if route == "seed" {
+			h.Seed(w, r)
+		} else {
+			h.Teardown(w, r)
+		}
+		if w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+			t.Fatalf("%s: super_admin rejected; status=%d body=%s", route, w.Code, w.Body.String())
+		}
 	}
 }
 
 // --- Env-var gate ---
 
-// ISC-3: env-var unset → 503 with documented error message.
-func TestSeed_EnvDisabledGets503(t *testing.T) {
+// ISC-3: env-var unset → 409 feature_not_enabled with documented error
+// message. A 4xx so the web client shows the wording (#2730).
+func TestSeed_EnvDisabledGets409(t *testing.T) {
 	t.Parallel()
 
 	h := New(nil, func() bool { return false })
 	w := httptest.NewRecorder()
 	h.Seed(w, requestWithAdmin(http.MethodPost, "/v1/admin/demo/seed"))
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d, want 503; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status code = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
 	var body map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["error"] != "demo seed not enabled on this deployment" {
 		t.Fatalf("error message = %q; want exact phrase", body["error"])
 	}
+	if body["code"] != httpresp.CodeFeatureNotEnabled {
+		t.Fatalf("code = %q; want %q", body["code"], httpresp.CodeFeatureNotEnabled)
+	}
 }
 
-// ISC-9 parallel: env unset for teardown also gets 503.
-func TestTeardown_EnvDisabledGets503(t *testing.T) {
+// ISC-9 parallel: env unset for teardown also gets 409 feature_not_enabled.
+func TestTeardown_EnvDisabledGets409(t *testing.T) {
 	t.Parallel()
 
 	h := New(nil, func() bool { return false })
 	w := httptest.NewRecorder()
 	h.Teardown(w, requestWithAdmin(http.MethodPost, "/v1/admin/demo/teardown"))
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d, want 503; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status code = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["error"] != "demo seed not enabled on this deployment" {
+		t.Fatalf("error message = %q; want exact phrase", body["error"])
+	}
+	if body["code"] != httpresp.CodeFeatureNotEnabled {
+		t.Fatalf("code = %q; want %q", body["code"], httpresp.CodeFeatureNotEnabled)
 	}
 }
 
@@ -300,6 +395,37 @@ func TestSeed_RateLimitPerIPIndependent(t *testing.T) {
 
 	if w2.Code == http.StatusTooManyRequests {
 		t.Fatalf("second call from different IP should not be rate-limited; got 429")
+	}
+}
+
+// #2497: the window is exactly 60s, and Seed and Teardown spend one shared
+// per-IP token (a teardown right after a seed is refused).
+func TestSeedTeardown_RateLimitWindowAndSharedBucket(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	h := New(nil, func() bool { return true }).WithClock(func() time.Time { return now })
+	call := func(path string, fn http.HandlerFunc) int {
+		r := requestWithAdmin(http.MethodPost, path)
+		r.RemoteAddr = "192.0.2.30:1"
+		w := httptest.NewRecorder()
+		fn(w, r)
+		return w.Code
+	}
+
+	if got := call("/v1/admin/demo/seed", h.Seed); got == http.StatusTooManyRequests {
+		t.Fatal("first seed rate-limited")
+	}
+	if got := call("/v1/admin/demo/teardown", h.Teardown); got != http.StatusTooManyRequests {
+		t.Fatalf("teardown right after seed = %d; want 429 (one shared bucket)", got)
+	}
+	now = now.Add(59 * time.Second)
+	if got := call("/v1/admin/demo/seed", h.Seed); got != http.StatusTooManyRequests {
+		t.Fatalf("seed at +59s = %d; want 429", got)
+	}
+	now = now.Add(time.Second)
+	if got := call("/v1/admin/demo/teardown", h.Teardown); got == http.StatusTooManyRequests {
+		t.Fatal("teardown at +60s rate-limited; the window has passed")
 	}
 }
 

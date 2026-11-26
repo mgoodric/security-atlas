@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,49 @@ func TestValidateEvidenceKinds_AcceptsRegisteredKind(t *testing.T) {
 	}
 }
 
+// #2901: a `.v2` kind registers its baseline at 2.0.0, never 1.0.0, and a
+// bundle naming it must still validate.
+func TestValidateEvidenceKinds_AcceptsLaterMajorKind(t *testing.T) {
+	t.Parallel()
+	reg := &stubRegistry{
+		known: map[string]map[string]bool{
+			"okta.mfa_policy.v1": {"1.0.0": true},
+			"okta.mfa_policy.v2": {"2.0.0": true},
+		},
+	}
+	for _, kind := range []string{"okta.mfa_policy.v1", "okta.mfa_policy.v2"} {
+		b := &Bundle{Manifest: Manifest{EvidenceQueries: []EvidenceQuery{
+			{ID: "q", Language: "sql", Expression: "x", EvidenceKind: kind},
+		}}}
+		if err := b.ValidateEvidenceKinds(context.Background(), reg); err != nil {
+			t.Errorf("%s: expected ok; got %v", kind, err)
+		}
+	}
+	b := &Bundle{Manifest: Manifest{EvidenceQueries: []EvidenceQuery{
+		{ID: "q", Language: "sql", Expression: "x", EvidenceKind: "okta.mfa_policy.v3"},
+	}}}
+	if err := b.ValidateEvidenceKinds(context.Background(), reg); err == nil {
+		t.Error("okta.mfa_policy.v3: expected an unknown-kind error")
+	}
+}
+
+func TestKindMajor(t *testing.T) {
+	t.Parallel()
+	for kind, want := range map[string]string{
+		"okta.mfa_policy.v1":             "1",
+		"okta.mfa_policy.v2":             "2",
+		"okta.mfa_policy.v12":            "12",
+		"aws.s3.bucket_encryption_state": "1",
+		"manual.vendor":                  "1",
+		"x.v":                            "1",
+		"x.v0":                           "1",
+	} {
+		if got := kindMajor(kind); got != want {
+			t.Errorf("kindMajor(%q) = %q; want %q", kind, got, want)
+		}
+	}
+}
+
 func TestValidateEvidenceKinds_RejectsUnknownKind(t *testing.T) {
 	t.Parallel()
 	reg := &stubRegistry{known: map[string]map[string]bool{}}
@@ -132,5 +176,23 @@ func TestValidateEvidenceKinds_SkipsEmptyKind(t *testing.T) {
 	}
 	if err := b.ValidateEvidenceKinds(context.Background(), reg); err != nil {
 		t.Fatalf("expected ok for empty kind; got %v", err)
+	}
+}
+
+func TestUnkindedQueryWarnings(t *testing.T) {
+	t.Parallel()
+	m := Manifest{EvidenceQueries: []EvidenceQuery{
+		{ID: "kinded", Language: "rego", Expression: "x", EvidenceKind: "okta.mfa_policy.v1"},
+		{ID: "kindless", Language: "sql", Expression: "y"},
+	}}
+	got := m.UnkindedQueryWarnings()
+	if len(got) != 1 {
+		t.Fatalf("warnings = %q, want one for the kindless query", got)
+	}
+	if !strings.Contains(got[0], "evidence_queries[1] (kindless)") || !strings.Contains(got[0], "declares no evidence_kind") {
+		t.Fatalf("warning = %q", got[0])
+	}
+	if w := (&Manifest{}).UnkindedQueryWarnings(); w != nil {
+		t.Fatalf("no queries: warnings = %q, want none", w)
 	}
 }

@@ -14,42 +14,55 @@
 // The platform caps the upload at questionnaire.MaxUploadBytes (5MB).
 // The list page additionally validates client-side (UX courtesy) so
 // oversize files never leave the browser — see upload-zone.tsx.
+// readBoundedUpload (#2344) holds the BFF to the same cap on the declared
+// and the streamed length, so the BFF never buffers more than that.
 //
 // Constitutional invariants:
 //   * Invariant 6: bearer-forward only. RLS enforces tenancy at DB.
 //   * P0-263-4: consumes the slice 155 ImportExcel handler verbatim.
 
-import { cookies } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
+import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
+
+// MAX_UPLOAD_BYTES mirrors questionnaire.MaxUploadBytes (5 MiB), which the
+// handler applies to the whole request body via MaxBytesReader.
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+const NOT_MULTIPART = "request must be multipart/form-data with a file field";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const jar = await cookies();
-  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
-  if (!bearer) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
   const { id } = await params;
-  // Pull the multipart body from the incoming request and re-pose it
-  // to the upstream. fetch() with a FormData body sets the correct
-  // multipart boundary header automatically.
-  const form = await req.formData();
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  const read = await readBoundedUpload(req, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    tooLarge: "upload exceeds the 5 MB size cap",
+    notMultipart: NOT_MULTIPART,
+  });
+  if (!read.ok) return read.response;
+  const form = await parseBoundedForm(read.upload);
+  if (!form) {
+    return NextResponse.json({ error: NOT_MULTIPART }, { status: 400 });
+  }
+  // fetch() with a FormData body sets the correct multipart boundary
+  // header automatically.
   const upstream = await fetch(
     `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(id)}/import-excel`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${bearer}` },
+      headers: { Authorization: `Bearer ${read.upload.bearer}` },
       body: form,
       cache: "no-store",
     },
   );
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

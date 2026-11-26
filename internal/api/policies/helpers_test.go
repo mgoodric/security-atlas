@@ -23,6 +23,7 @@ package policies
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -208,6 +209,7 @@ func TestWriteCreateErr(t *testing.T) {
 		{"owner role required", policy.ErrOwnerRoleRequired, http.StatusBadRequest},
 		{"approver role required", policy.ErrApproverRoleRequired, http.StatusBadRequest},
 		{"created_by required", policy.ErrCreatedByRequired, http.StatusBadRequest},
+		{"synced predecessor → 409 (#2852)", policy.ErrManagedBySync, http.StatusConflict},
 		{"unknown → 500", errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -232,6 +234,11 @@ func TestWriteTransitionErr(t *testing.T) {
 	}{
 		{policy.ErrNotFound, http.StatusNotFound},
 		{policy.ErrWrongState, http.StatusConflict},
+		{fmt.Errorf("transition: %w", policy.ErrSelfApproval), http.StatusForbidden},
+		{fmt.Errorf("transition: %w", policy.ErrApproverNotPerson), http.StatusForbidden},
+		{fmt.Errorf("transition: %w", policy.ErrSubmitterUnknown), http.StatusConflict},
+		{fmt.Errorf("transition: %w", policy.ErrUnknownLinkedControl), http.StatusUnprocessableEntity},
+		{fmt.Errorf("transition: %w", policy.ErrManagedBySync), http.StatusConflict},
 		{errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -247,6 +254,58 @@ func TestWriteTransitionErr(t *testing.T) {
 	}
 }
 
+// #2837: the 409 names the system the policy is synced from.
+func TestWriteManagedBySyncNamesSource(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&policy.ManagedBySyncError{Source: policy.SyncSourceSharePoint}, "managed in SharePoint: "},
+		{fmt.Errorf("x: %w", &policy.ManagedBySyncError{Source: policy.SyncSourceConfluence}), "managed in Confluence: "},
+		{policy.ErrManagedBySync, "managed in Confluence: "},
+	} {
+		rec := httptest.NewRecorder()
+		if !writeManagedBySync(rec, tc.err) {
+			t.Fatalf("writeManagedBySync(%v) = false", tc.err)
+		}
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("writeManagedBySync(%v) = %d %s, want 409 containing %q", tc.err, rec.Code, rec.Body.String(), tc.want)
+		}
+	}
+	if writeManagedBySync(httptest.NewRecorder(), errors.New("other")) {
+		t.Fatal("writeManagedBySync(other) = true")
+	}
+	if got := managedBySyncMsg(""); !strings.HasPrefix(got, "managed in Confluence: ") {
+		t.Fatalf("managedBySyncMsg(\"\") = %q", got)
+	}
+}
+
+// TestActorOf pins #1807's identity rule: two JWT sessions of one user, and
+// a key bound to that user, are one actor, so the submitter cannot approve
+// from a second session or through their key.
+func TestActorOf(t *testing.T) {
+	t.Parallel()
+	user := uuid.NewString()
+	a := credstore.Credential{ID: "jwt:session-a", UserID: "user:" + user}
+	b := credstore.Credential{ID: "jwt:session-b", UserID: "user:" + user}
+	key := credstore.Credential{ID: "key_bound", UserID: user}
+	for _, c := range []credstore.Credential{a, b, key} {
+		if got := actorOf(c); got != user {
+			t.Fatalf("actorOf(%s) = %q, want the bare user id %q", c.ID, got, user)
+		}
+	}
+	if got := actorOf(credstore.Credential{ID: "key_1", UserID: "key_1"}); got != "key_1" {
+		t.Fatalf("credential with no user: actorOf = %q, want the credential id", got)
+	}
+	// #2101: a machine JWT is recorded by its principal, never by its
+	// per-token "jwt:" id, which approval reads as a pre-#1807 session.
+	machine := credstore.Credential{ID: "jwt:session-m", UserID: "oauth_client:ci"}
+	if got := actorOf(machine); got != "oauth_client:ci" {
+		t.Fatalf("machine JWT: actorOf = %q, want its principal", got)
+	}
+}
+
 func TestWritePublishErr(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
@@ -255,6 +314,7 @@ func TestWritePublishErr(t *testing.T) {
 		want int
 	}{
 		{policy.ErrOrphanPublish, http.StatusConflict},
+		{policy.ErrNoLiveLinkedControl, http.StatusUnprocessableEntity},
 		{policy.ErrNotFound, http.StatusNotFound},
 		{policy.ErrWrongState, http.StatusConflict},
 		{policy.ErrInvalidVersion, http.StatusBadRequest},
@@ -313,12 +373,13 @@ func TestHandlers_NoAuthContext_Return401(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	handlers := map[string]http.HandlerFunc{
-		"CreatePolicy": h.CreatePolicy,
-		"ListPolicies": h.ListPolicies,
-		"GetPolicy":    h.GetPolicy,
-		"Submit":       h.Submit,
-		"Approve":      h.Approve,
-		"Publish":      h.Publish,
+		"CreatePolicy":  h.CreatePolicy,
+		"ListPolicies":  h.ListPolicies,
+		"GetPolicy":     h.GetPolicy,
+		"Submit":        h.Submit,
+		"Approve":       h.Approve,
+		"Publish":       h.Publish,
+		"SetReviewDate": h.SetReviewDate,
 	}
 	for name, hf := range handlers {
 		name, hf := name, hf
@@ -356,7 +417,7 @@ func TestApprovePublish_NonApprover_Return403(t *testing.T) {
 		ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
 		return base.WithContext(ctx)
 	}
-	for name, hf := range map[string]http.HandlerFunc{"Approve": h.Approve, "Publish": h.Publish} {
+	for name, hf := range map[string]http.HandlerFunc{"Approve": h.Approve, "Publish": h.Publish, "SetReviewDate": h.SetReviewDate} {
 		name, hf := name, hf
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

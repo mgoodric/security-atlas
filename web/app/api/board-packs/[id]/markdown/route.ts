@@ -19,12 +19,15 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
@@ -42,7 +45,7 @@ export async function GET(
     // so the UI can surface 404 / 401 / 5xx the same way it does for
     // the other board-pack routes.
     const text = await upstream.text();
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: { "Content-Type": "application/json" },
     });

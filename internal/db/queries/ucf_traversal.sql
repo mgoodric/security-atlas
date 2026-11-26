@@ -15,9 +15,11 @@
 -- request's `app.current_tenant` GUC set by tenancy.Middleware; RLS does
 -- the filtering. Catalog tables (`framework_requirements`,
 -- `fw_to_scf_edges`, `scf_anchors`, `framework_versions`) have no
--- tenant_id and no RLS — global, platform-bundled. No app-level
--- `WHERE tenant_id = ?` clause is permitted on the controls reads
--- (constitutional invariant 6 per CLAUDE.md / canvas §5.4).
+-- tenant_id and no RLS — global, platform-bundled. These traversals take
+-- no tenant parameter and rely on RLS alone for the controls reads
+-- (constitutional invariant 6 per CLAUDE.md / canvas §5.4). An explicit
+-- `tenant_id = $n` predicate would be an allowed second leg that only
+-- narrows, never the boundary (ADR 0026).
 
 -- name: ListAnchorsForRequirementWithEdges :many
 -- AC-1 (anchors arm). Given a framework_requirement id, return every
@@ -31,15 +33,23 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
 ORDER BY e.strength DESC, a.scf_id;
 
 -- name: ListAnchorsForRequirementWithEdgesByFrameworkVersion :many
@@ -55,15 +65,23 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND a.framework_version_id = $2
 ORDER BY e.strength DESC, a.scf_id;
 
@@ -108,7 +126,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -117,12 +139,16 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
 ORDER BY f.slug, fv.version, r.code;
 
 -- name: ListRequirementsForAnchorCurrentVersions :many
@@ -141,7 +167,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -150,12 +180,16 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND fv.status = 'current'
 ORDER BY f.slug, fv.version, r.code;
 
@@ -170,7 +204,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -179,12 +217,16 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND r.framework_version_id = $2
 ORDER BY f.slug, fv.version, r.code;
 

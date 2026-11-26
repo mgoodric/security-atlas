@@ -35,7 +35,7 @@ func sampleDevice() cfgprofile.Device {
 
 func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleDevice(), "scf:CFG-02", "connector:jamf:config-profile@dev", "jamf", "prod")
+	rec, err := Build(sampleDevice(), "scf:CFG-04", "connector:jamf:config-profile@dev", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	if rec.GetIdempotencyKey() != want {
 		t.Errorf("idempotency key = %q; want %q", rec.GetIdempotencyKey(), want)
 	}
-	if rec.GetControlId() != "scf:CFG-02" {
+	if rec.GetControlId() != "scf:CFG-04" {
 		t.Errorf("control = %q", rec.GetControlId())
 	}
 	scope := map[string]string{}
@@ -80,7 +80,7 @@ func TestBuild_PayloadCarriesProfileFieldsOnly_NoSecrets(t *testing.T) {
 		cfgprofile.Setting{Key: "certificate_private_key", Value: "FAKE-PRIVKEY-MATERIAL-FIXTURE"},
 		cfgprofile.Setting{Key: "PayloadContent", Value: "<data>c2VjcmV0</data>"},
 	)
-	rec, err := Build(dev, "scf:CFG-02", "a", "jamf", "prod")
+	rec, err := Build(dev, "scf:CFG-04", "a", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestBuild_PayloadCarriesProfileFieldsOnly_NoSecrets(t *testing.T) {
 
 func TestBuild_ProfileCountAndOptionalFields(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:CFG-02", "a", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:CFG-04", "a", "jamf", "prod")
 	pm := rec.GetPayload().AsMap()
 	if pm["profile_count"].(float64) != 2 {
 		t.Errorf("profile_count = %v; want 2", pm["profile_count"])
@@ -174,7 +174,7 @@ func TestBuild_EmptyProfileListEmitsZeroCount(t *testing.T) {
 	t.Parallel()
 	d := sampleDevice()
 	d.Profiles = nil
-	rec, err := Build(d, "scf:CFG-02", "a", "jamf", "prod")
+	rec, err := Build(d, "scf:CFG-04", "a", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -189,8 +189,8 @@ func TestBuild_EmptyProfileListEmitsZeroCount(t *testing.T) {
 
 func TestBuild_SameDeviceSameHourSameKey(t *testing.T) {
 	t.Parallel()
-	r1, _ := Build(sampleDevice(), "scf:CFG-02", "a", "jamf", "prod")
-	r2, _ := Build(sampleDevice(), "scf:CFG-02", "a", "jamf", "prod")
+	r1, _ := Build(sampleDevice(), "scf:CFG-04", "a", "jamf", "prod")
+	r2, _ := Build(sampleDevice(), "scf:CFG-04", "a", "jamf", "prod")
 	if r1.GetIdempotencyKey() != r2.GetIdempotencyKey() {
 		t.Error("same device + hour should yield same idempotency key")
 	}
@@ -198,7 +198,7 @@ func TestBuild_SameDeviceSameHourSameKey(t *testing.T) {
 
 func TestBuild_ResultIsInconclusive(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:CFG-02", "a", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:CFG-04", "a", "jamf", "prod")
 	if rec.GetResult().String() != "RESULT_INCONCLUSIVE" {
 		t.Errorf("result = %s; want RESULT_INCONCLUSIVE", rec.GetResult())
 	}

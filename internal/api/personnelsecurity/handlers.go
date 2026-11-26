@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -257,17 +258,27 @@ func (h *Handler) CompleteItem(w http.ResponseWriter, r *http.Request) {
 		Notes:       req.Notes,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, personnelsecurity.ErrItemNotFound):
-			httpresp.WriteError(w, http.StatusNotFound, "checklist item not found")
-		case errors.Is(err, personnelsecurity.ErrCompleterRequired):
-			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		default:
-			httperr.WriteInternal(w, r, "complete personnel checklist item", err)
-		}
+		writeCompleteErr(w, r, err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"item": itemWireFrom(item)})
+}
+
+func writeCompleteErr(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, personnelsecurity.ErrItemNotFound):
+		httpresp.WriteError(w, http.StatusNotFound, "checklist item not found")
+	case errors.Is(err, personnelsecurity.ErrCompleterRequired):
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ingest.ErrUnavailable):
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: an audit period froze while the completion was open;
+		// nothing was written, and a retry starts after the freeze.
+		httpresp.WriteConcurrentFreeze(w, "an audit period was frozen while the item was completed; nothing was written, retry")
+	default:
+		httperr.WriteInternal(w, r, "complete personnel checklist item", err)
+	}
 }
 
 // ----- helpers -----

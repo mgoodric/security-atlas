@@ -6,12 +6,13 @@ system components") evidence demand. It follows the locked connector pattern
 verbatim: register-per-run, a stable `actor_id`, an hour-truncated `observed_at`,
 scope minimums, and vendor-native read-only auth. It emits three evidence kinds:
 
-| Kind                         | Profile      | Source                                                                                                       |
-| ---------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------ |
-| `monitoring.alert_config.v1` | pull         | Datadog API `GET /api/v1/monitor` (`monitors_read` scope)                                                    |
-| `datadog.siem_rule.v1`       | pull         | Datadog API `GET /api/v2/security_monitoring/rules` (`security_monitoring_rules_read` scope) — slice 533     |
-| `datadog.siem_signal.v1`     | bounded pull | Datadog API `GET /api/v2/security_monitoring/signals` (`security_monitoring_signals_read` scope) — slice 636 |
-| `monitoring.alert_firing.v1` | bounded pull | Datadog API `GET /api/v1/events` (`sources=monitor_alert`, `events_read` scope) — slice 535                  |
+| Kind                          | Profile              | Source                                                                                                           |
+| ----------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `monitoring.alert_config.v1`  | pull                 | Datadog API `GET /api/v1/monitor` (`monitors_read` scope)                                                        |
+| `datadog.siem_rule.v1`        | pull                 | Datadog API `GET /api/v2/security_monitoring/rules` (`security_monitoring_rules_read` scope) — slice 533         |
+| `datadog.siem_signal.v1`      | bounded pull         | Datadog API `GET /api/v2/security_monitoring/signals` (`security_monitoring_signals_read` scope) — slice 636     |
+| `monitoring.alert_firing.v1`  | bounded pull         | Datadog API `GET /api/v1/events` (`sources=monitor_alert`, `events_read` scope) — slice 535                      |
+| `monitoring.host_capacity.v1` | bounded pull, opt-in | Datadog API `GET /api/v1/query` (`timeseries_query` permission), only with `--capacity-production-scope` — #2935 |
 
 `monitoring.alert_config.v1` is shared with the Grafana connector.
 `datadog.siem_rule.v1` is Datadog-specific: a Cloud-SIEM detection rule carries a
@@ -27,7 +28,7 @@ this surface reads what **fired** and how it was **triaged** (CC7.3 incident
 response — "rules actually fired and were triaged over the audit period, when,
 and by whom"). It carries triage **metadata only** — the signal id, firing rule
 id, severity, triage status, timeline timestamps, and the opaque triager handle.
-Anchors: SCF **THR-01** (detection lineage) + **IRO-09** (incident reporting).
+Anchors: SCF **THR-02** (detection lineage) + **IRO-06** (Incident Handling).
 
 `monitoring.alert_firing.v1` (slice 535) is the **firing-history sibling** of the
 shared config kind — vendor-neutral, emitted by **both** the Datadog and Grafana
@@ -35,9 +36,8 @@ connectors. Slice 488 reads which alerts are **configured** (CC7.2); this reads
 what actually **fired** and resolved (CC7.3/CC7.4 — the entity evaluates events
 and responds). One record per firing event: `rule_id`, `source_vendor`, `state`
 (alerting / resolved / no_data / pending), `fired_at`, `resolved_at`, and the
-routing-target **handle** the alert notified. Anchors: SCF **MON-01** + **IRO-09**
-(the spec candidate IRO-02 is absent from the bundled SCF fixture; IRO-09 is the
-closest present incident anchor — see slice-535 decisions log D3).
+routing-target **handle** the alert notified. Anchors: SCF **MON-02** + **IRO-06**
+(Incident Handling: a firing is where handling an incident starts; #2413).
 
 The connector is **API-based**, not an in-host agent — consistent with the
 "no closed proprietary collector agents" anti-pattern. It reads the read-only
@@ -49,6 +49,42 @@ email address, the monitor query, the SIEM detection query, a **signal message
 body, matched log samples, matched-event payloads, or signal-body tags**,
 dashboard JSON, or metric time-series. The Datadog API+APP keys stay source-side
 and never enter an evidence record or a platform push (canvas invariant #3).
+
+## Host capacity (`monitoring.host_capacity.v1`, #2935)
+
+Run with `--capacity-production-scope env:production` (any comma-separated
+Datadog tag scope), and the connector reads the last 5 minutes of four
+metrics for the hosts in that scope. It then pushes one record per host,
+with three readings.
+SOC 2 A1.1 (`soc2_a1_1_capacity_monitoring`) reads the records.
+
+| Field                 | From                                                                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `memory_used_percent` | (1 - `system.mem.pct_usable`) \* 100 at the latest point; the System check documents `pct_usable` as a fraction of the total       |
+| `cpu_p95_5m_percent`  | nearest-rank p95 of 100 - `system.cpu.idle` at a 15-second rollup, computed here: Datadog offers percentiles only on distributions |
+| `disk_used_percent`   | the fullest device's `system.disk.used` / `system.disk.total` \* 100                                                               |
+
+A reading is left out rather than guessed when the window has fewer than 10
+CPU points, when the memory value is outside 0..1, or when any device has
+used bytes but no usable total. Hosts are keyed by Datadog's `host` tag.
+Datadog has no host UUID, so nothing joins these records to Fleet's.
+`--capacity-control` defaults to empty: the kind is routed to every control
+that reads it (#2924).
+
+The idempotency key is the host plus the UTC hour of the window end, and
+`observed_at` is that hour. A second run in the same hour therefore collapses
+into the first record for each host: the platform keeps the first reading of
+the hour, not the latest. Schedule the surface hourly or less often. A tighter
+schedule adds no new evidence.
+
+The surface needs the `timeseries_query` permission on the Application key.
+That permission reads metric values. Without the flag the surface is skipped,
+so a key made for the other surfaces keeps working.
+
+**Not verified live.** The tests run on responses built to Datadog's
+documented `/api/v1/query` shape
+(`internal/hostcapacity/testdata/README.md`), not on responses captured from
+a tenant.
 
 ## Profile + interval — honest, not "continuous monitoring"
 
@@ -82,13 +118,14 @@ carries the authorization scope; create it with **exactly** the read-only
 `monitors_read` + `security_monitoring_rules_read` +
 `security_monitoring_signals_read` + `events_read` scopes.
 
-| Credential      | Minimum scope                      | Why                                          |
-| --------------- | ---------------------------------- | -------------------------------------------- |
-| Application key | `monitors_read`                    | list monitors (read-only)                    |
-| Application key | `security_monitoring_rules_read`   | list Cloud-SIEM detection rules (read-only)  |
-| Application key | `security_monitoring_signals_read` | list Cloud-SIEM signal history (read-only)   |
-| Application key | `events_read`                      | list monitor alert-firing events (read-only) |
-| API key         | (no scope; org-level)              | required alongside the Application key       |
+| Credential      | Minimum scope                      | Why                                                            |
+| --------------- | ---------------------------------- | -------------------------------------------------------------- |
+| Application key | `monitors_read`                    | list monitors (read-only)                                      |
+| Application key | `security_monitoring_rules_read`   | list Cloud-SIEM detection rules (read-only)                    |
+| Application key | `security_monitoring_signals_read` | list Cloud-SIEM signal history (read-only)                     |
+| Application key | `events_read`                      | list monitor alert-firing events (read-only)                   |
+| Application key | `timeseries_query`                 | host capacity metrics, only with `--capacity-production-scope` |
+| API key         | (no scope; org-level)              | required alongside the Application key                         |
 
 Run `atlas-datadog permissions` to print this.
 
@@ -97,7 +134,12 @@ Run `atlas-datadog permissions` to print this.
 `events_write`, admin, or any broad scope "to be safe." The connector has no write
 code path; the only operations it issues are read `GET /api/v1/monitor`,
 `GET /api/v2/security_monitoring/rules`, `GET /api/v2/security_monitoring/signals`,
-and `GET /api/v1/events`.
+and `GET /api/v1/events`, plus `GET /api/v1/query` for host capacity. Every request
+refuses a redirect to another host or scheme, so the keys only ever reach the
+Datadog site they were sent to. The site itself (`--site` / `DATADOG_SITE`)
+must be lowercase DNS labels under `datadoghq.com`, `datadoghq.eu` or
+`ddog-gov.com` (e.g. `us3.datadoghq.com`). Any other value, including one with
+userinfo, a port or a path, is refused before a key is sent.
 
 ## Subcommands
 
@@ -123,19 +165,21 @@ atlas-datadog run \
 atlas-datadog permissions
 ```
 
-| Flag                        | Subcommand | Required | Default                              | Notes                                                       |
-| --------------------------- | ---------- | -------- | ------------------------------------ | ----------------------------------------------------------- |
-| `--endpoint`                | both       | yes      | env `SECURITY_ATLAS_ENDPOINT`        | platform gRPC endpoint                                      |
-| `--token`                   | both       | yes      | env `SECURITY_ATLAS_TOKEN`           | security-atlas bearer token                                 |
-| `--insecure`                | both       | no       | `false`                              | disables TLS; loopback endpoints only                       |
-| `--environment`             | `run`      | yes      | —                                    | environment scope tag; records are never emitted un-scoped  |
-| `--monitor-control`         | `run`      | no       | `scf:MON-01`                         | control id attached to `monitoring.alert_config.v1` records |
-| `--siem-control`            | `run`      | no       | `scf:THR-01`                         | control id attached to `datadog.siem_rule.v1` records       |
-| `--siem-signal-control`     | `run`      | no       | `scf:IRO-09`                         | control id attached to `datadog.siem_signal.v1` records     |
-| `--firing-control`          | `run`      | no       | `scf:IRO-09`                         | control id attached to `monitoring.alert_firing.v1` records |
-| `--siem-lookback`           | `run`      | no       | `24h`                                | bounded look-back window for the signal-history pull        |
-| `--datadog-firing-lookback` | `run`      | no       | `24h`                                | bounded look-back window for the alert-firing-history pull  |
-| `--site`                    | `run`      | no       | env `DATADOG_SITE` / `datadoghq.com` | Datadog site override                                       |
+| Flag                          | Subcommand | Required | Default                              | Notes                                                        |
+| ----------------------------- | ---------- | -------- | ------------------------------------ | ------------------------------------------------------------ |
+| `--endpoint`                  | both       | yes      | env `SECURITY_ATLAS_ENDPOINT`        | platform gRPC endpoint                                       |
+| `--token`                     | both       | yes      | env `SECURITY_ATLAS_TOKEN`           | security-atlas bearer token                                  |
+| `--insecure`                  | both       | no       | `false`                              | disables TLS; loopback endpoints only                        |
+| `--environment`               | `run`      | yes      | —                                    | environment scope tag; records are never emitted un-scoped   |
+| `--monitor-control`           | `run`      | no       | `scf:MON-02`                         | control id attached to `monitoring.alert_config.v1` records  |
+| `--siem-control`              | `run`      | no       | `scf:THR-02`                         | control id attached to `datadog.siem_rule.v1` records        |
+| `--siem-signal-control`       | `run`      | no       | `scf:IRO-06`                         | control id attached to `datadog.siem_signal.v1` records      |
+| `--firing-control`            | `run`      | no       | `scf:IRO-06`                         | control id attached to `monitoring.alert_firing.v1` records  |
+| `--siem-lookback`             | `run`      | no       | `24h`                                | bounded look-back window for the signal-history pull         |
+| `--datadog-firing-lookback`   | `run`      | no       | `24h`                                | bounded look-back window for the alert-firing-history pull   |
+| `--site`                      | `run`      | no       | env `DATADOG_SITE` / `datadoghq.com` | Datadog site override                                        |
+| `--capacity-production-scope` | `run`      | no       | empty (surface skipped)              | Datadog tag scope of production hosts, e.g. `env:production` |
+| `--capacity-control`          | `run`      | no       | empty (routed)                       | control id attached to `monitoring.host_capacity.v1` records |
 
 The Datadog keys are **only** read from `DATADOG_API_KEY` / `DATADOG_APP_KEY` —
 never a CLI flag — so they never land in shell history. They are never logged and
@@ -182,7 +226,13 @@ id / severity / triage status / timeline timestamps / opaque triager handle**
 - the monitor query / the SIEM **detection query**
 - a **signal message body, the detection query's matched raw log samples,
   matched-event payloads, or signal-body tags/facets** (Cloud-SIEM)
-- dashboard JSON / metric time-series / log query results
+- dashboard JSON / log query results
+- metric time-series, except the host-capacity surface: it reads the 5-minute
+  points of `system.cpu.idle`, `system.mem.pct_usable`, `system.disk.used` and
+  `system.disk.total` for the production scope, keeps only the `host` and
+  `device` tags, and emits three numbers per host. The points themselves never
+  reach a record; `hostcapacity.Host` has no field that can hold them, and
+  `TestStructuralOverCollectionGuard` in that package pins its field set.
 
 For both SIEM surfaces this is a **structural** guard: the collector's
 `RawRule`/`Rule` (rules) and `RawSignal`/`Signal` (signals) structs have no

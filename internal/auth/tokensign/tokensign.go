@@ -40,7 +40,7 @@ const SignatureAlgorithm = jose.ES256
 // across the package boundary.
 const SignatureAlgorithmString = "ES256"
 
-// AllowedAlgs is the closed set of signature algorithms ParseSigned
+// AllowedAlgs is the closed set of signature algorithms ParseSignedCompact
 // will accept. Locking this at the parser level prevents algorithm
 // confusion attacks (RFC 8725 §2.1 — "Perform Algorithm Verification").
 // Exported as a package-level immutable for use by future verifiers
@@ -155,7 +155,7 @@ func (s *Signer) Verify(ctx context.Context, tok string) (jwt.AtlasClaims, error
 	if err != nil {
 		return jwt.AtlasClaims{}, fmt.Errorf("tokensign: keystore get: %w", err)
 	}
-	parsed, err := jose.ParseSigned(tok, AllowedAlgs)
+	parsed, err := jose.ParseSignedCompact(tok, AllowedAlgs)
 	if err != nil {
 		return jwt.AtlasClaims{}, fmt.Errorf("tokensign: parse: %w", err)
 	}
@@ -182,7 +182,7 @@ func (s *Signer) Verify(ctx context.Context, tok string) (jwt.AtlasClaims, error
 // without verifying the signature. Used by tests + diagnostic
 // utilities; production code MUST always go through Verify.
 func PeekKeyID(tok string) (string, error) {
-	parsed, err := jose.ParseSigned(tok, AllowedAlgs)
+	parsed, err := jose.ParseSignedCompact(tok, AllowedAlgs)
 	if err != nil {
 		return "", fmt.Errorf("tokensign: parse: %w", err)
 	}

@@ -2,6 +2,7 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 099 + 106: /evidence list view (browser-side BFF call) -----
 //
@@ -32,6 +33,10 @@ export type EvidenceRecord = {
   // by connector — we render a summary client-side. `null` when the row
   // has no provenance metadata recorded.
   source: Record<string, unknown> | null;
+  // #2771: the pusher's actor claim ({actor_type, actor_id, session_id}),
+  // what the Source column shows and the source_actor_* filters match.
+  // `null` when the record carries none.
+  source_attribution: Record<string, unknown> | null;
   content_hash: string;
   scope_cell: string | null;
   /**
@@ -40,6 +45,11 @@ export type EvidenceRecord = {
    * the column is NOT NULL on the table.
    */
   result: EvidenceResultEnum;
+  /**
+   * #2043 — true when the in-place demo seed added this record to the
+   * organisation. Omitted for real evidence.
+   */
+  demo?: boolean;
 };
 
 export type EvidenceListResponse = {
@@ -116,14 +126,86 @@ export async function fetchEvidenceList(
     : `/api/evidence`;
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as EvidenceListResponse;
+}
+
+// ----- #2432: evidence search for the entity picker -----
+//
+// `/v1/evidence` has no text filter (and a 30-day default window), so a
+// picker searching the whole ledger asks the unified search
+// (`/api/search?types=evidence`, slice 268): an RLS-scoped ILIKE over
+// `evidence_kind` and `control_ref`, newest first. Search refuses a type
+// by listing it in `partial_types` with a 200; that is surfaced here as
+// the 403 it means, so the picker treats it like any refused list.
+
+export type EvidenceSearchHit = { id: string; title: string };
+
+// The most hits one search returns (the endpoint's hard cap).
+export const EVIDENCE_SEARCH_LIMIT = 50;
+
+export async function searchEvidence(q: string): Promise<EvidenceSearchHit[]> {
+  const qs = new URLSearchParams({
+    q: q.trim(),
+    types: "evidence",
+    limit: String(EVIDENCE_SEARCH_LIMIT),
+  });
+  const res = await fetch(`/api/search?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new APIError(res.status, `${res.status}`);
+  const body = (await res.json()) as {
+    hits?: { id: string; type: string; title: string }[];
+    partial_types?: string[];
+  };
+  if ((body.partial_types ?? []).includes("evidence")) {
+    throw new APIError(403, "evidence is not readable");
+  }
+  return (body.hits ?? [])
+    .filter((h) => h.type === "evidence")
+    .map((h) => ({ id: h.id, title: h.title }));
+}
+
+// ----- #2137: /evidence/[id] detail view -----
+//
+// Row source: `evidenceDetailWire` in
+// `internal/api/controldetail/evidence_detail.go` (`GET /v1/evidence/{id}`).
+// The payload is already redacted server-side; the browser renders it as
+// served. A caller without access gets a 404, the same as an unknown id.
+
+export type EvidenceDetail = {
+  evidence_id: string;
+  evidence_kind: string | null;
+  schema_version: string | null;
+  observed_at: string;
+  ingested_at: string;
+  result: EvidenceResultEnum;
+  payload: unknown;
+  payload_uri: string | null;
+  source: Record<string, unknown> | null;
+  source_attribution: Record<string, unknown> | null;
+  credential_id: string | null;
+  ingestion_path: string;
+  control_id: string | null;
+  control_ref: string;
+  scope_cell: string | null;
+  content_hash: string;
+  demo?: boolean;
+};
+
+export type EvidenceDetailResponse = { evidence: EvidenceDetail };
+
+// Browser-side fetcher for the detail page. Hits the BFF at
+// `/api/evidence/{id}`, which forwards the bearer cookie upstream.
+export async function fetchEvidenceDetail(
+  id: string,
+): Promise<EvidenceDetailResponse> {
+  const res = await fetch(`/api/evidence/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    const msg = await upstreamErrorMessage(res);
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EvidenceDetailResponse;
 }

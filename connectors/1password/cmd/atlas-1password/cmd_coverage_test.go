@@ -8,9 +8,9 @@
 //   - resolveCommon: env-var + global flag resolution. Six paths:
 //     endpoint via flag, endpoint via env, endpoint missing (error);
 //     platform-token via flag, platform-token via env, platform-token
-//     missing (error). Note the cmd uses --platform-token (not --token)
-//     because --token is the 1Password Service Account bearer; the two
-//     are distinct secrets and must not share a flag.
+//     missing (error). The cmd uses --platform-token so it is never
+//     mistaken for a 1Password secret, which comes from the environment
+//     only (#2968).
 //   - newRootCmd: smoke that the root cobra command instantiates,
 //     wires all three subcommands (register + run + scopes), and
 //     exposes the persistent flags (--endpoint, --platform-token,
@@ -35,7 +35,7 @@
 //     of length 1 (WithInsecure) when insecure=true.
 //   - connectorVersion: non-empty fallback to "dev".
 //   - actorID: connector:1passw0rd<service>@<version> shape.
-//   - doRun: auth-resolve error wrap (Service Account token missing);
+//   - doRun: auth-resolve error wrap (a 1Password secret missing);
 //     plus an inspect-fail path against a 5xx httptest server that
 //     drives resolve → sdk.NewClient → opaccount.Inspect.
 //
@@ -43,17 +43,20 @@
 // helper to prevent cross-test state pollution (cobra binds the
 // flags into package-level globals).
 //
-// No vendor-prefixed tokens (1Password Service Account tokens etc.)
-// appear in fixtures — neutral "test-*" strings only, per CLAUDE.md's
+// No real 1Password tokens appear in fixtures — neutral "test-*" strings only, per CLAUDE.md's
 // hard rule.
 package main
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +66,7 @@ import (
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 
 	"github.com/mgoodric/security-atlas/connectors/1password/internal/opaccount"
+	"github.com/mgoodric/security-atlas/connectors/1password/internal/opauth"
 )
 
 // resetCommon snapshots the package-global `common` struct and
@@ -295,6 +299,45 @@ func TestNewRunCmd_PreRunResolveCommonFails(t *testing.T) {
 	}
 }
 
+// TestNewRunCmd_PreRunRejectsUnsafeBaseURLs: the base URLs are checked at
+// flag resolution, before any credential is read or sent; the defaults and
+// other regions pass.
+func TestNewRunCmd_PreRunRejectsUnsafeBaseURLs(t *testing.T) {
+	cases := map[string]struct {
+		args    []string
+		wantErr string
+	}{
+		"events http":       {[]string{"--events-base-url", "http://events.1password.com"}, "--events-base-url"},
+		"events foreign":    {[]string{"--events-base-url", "https://evil.example"}, "--events-base-url"},
+		"users userinfo":    {[]string{"--users-base-url", "https://api.1password.com@evil.example"}, "--users-base-url"},
+		"users port":        {[]string{"--users-base-url", "https://api.1password.com:8443"}, "--users-base-url"},
+		"defaults":          {nil, ""},
+		"eu region":         {[]string{"--events-base-url", "https://events.1password.eu", "--users-base-url", "https://api.1password.eu"}, ""},
+		"enterprise region": {[]string{"--events-base-url", "https://events.ent.1password.com", "--users-base-url", "https://api.ent.1password.com"}, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			resetCommon(t)
+			common.endpoint = "127.0.0.1:1"
+			common.token = "test-bearer"
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags(append([]string{"--environment", "prod"}, tc.args...)); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("PreRunE: %v; want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v; want %s refused", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestNewScopesCmd_PrintsTabularRoster runs the scopes subcommand and
 // confirms it emits the expected tabwriter header plus at least one
 // row from opauth.DocumentedScopes().
@@ -448,20 +491,59 @@ func TestActorID_Shape(t *testing.T) {
 	}
 }
 
+// setOPEnv sets the three 1Password secrets to neutral test values.
+func setOPEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("ONEPASSWORD_EVENTS_TOKEN", "test-events-token")
+	t.Setenv("ONEPASSWORD_USERS_CLIENT_ID", "test-client-id")
+	t.Setenv("ONEPASSWORD_USERS_CLIENT_SECRET", "test-client-secret")
+}
+
+// fake1Password serves the documented introspect, token and list-users
+// responses from the opaccount fixtures.
+func fake1Password(t *testing.T) *httptest.Server {
+	t.Helper()
+	read := func(name string) []byte {
+		b, err := os.ReadFile(filepath.Join("..", "..", "internal", "opaccount", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/auth/introspect":
+			_, _ = w.Write(read("introspect.json"))
+		case r.URL.Path == "/v1/oauth/token":
+			_, _ = w.Write(read("token.json"))
+		case strings.HasSuffix(r.URL.Path, "/users") && r.URL.Query().Get("page_token") == "":
+			_, _ = w.Write(read("users_page1.json"))
+		case strings.HasSuffix(r.URL.Path, "/users"):
+			_, _ = w.Write(read("users_page2.json"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 // TestDoRun_AuthResolveFails drives doRun's first error wrap: with the
-// Service Account token empty AND ONEPASSWORD_SERVICE_ACCOUNT_TOKEN
-// unset, opauth.Resolve fails and doRun wraps with "auth:".
+// 1Password secrets unset, opauth.Resolve fails and doRun wraps with
+// "auth:".
 func TestDoRun_AuthResolveFails(t *testing.T) {
 	resetCommon(t)
 	common.endpoint = "127.0.0.1:1"
 	common.token = "test-bearer"
 	common.insecure = true
-	t.Setenv("ONEPASSWORD_SERVICE_ACCOUNT_TOKEN", "")
+	t.Setenv("ONEPASSWORD_EVENTS_TOKEN", "")
+	t.Setenv("ONEPASSWORD_USERS_CLIENT_ID", "")
+	t.Setenv("ONEPASSWORD_USERS_CLIENT_SECRET", "")
 	err := doRun(context.Background(), runFlags{
-		environment: "prod",
-		opBaseURL:   "https://api.1password.example.invalid",
-		controlID:   "scf:IAC-10",
-		// serviceToken intentionally empty
+		environment:   "prod",
+		eventsBaseURL: "https://events.1password.example.invalid",
+		usersBaseURL:  "https://api.1password.example.invalid",
+		controlID:     "scf:IAC-14",
 	})
 	if err == nil {
 		t.Fatal("expected auth-resolve error from doRun")
@@ -479,6 +561,7 @@ func TestDoRun_InspectFails(t *testing.T) {
 	common.endpoint = "127.0.0.1:1"
 	common.token = "test-bearer"
 	common.insecure = true
+	setOPEnv(t)
 
 	opSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -486,10 +569,10 @@ func TestDoRun_InspectFails(t *testing.T) {
 	t.Cleanup(opSrv.Close)
 
 	err := doRun(context.Background(), runFlags{
-		environment:  "prod",
-		opBaseURL:    opSrv.URL,
-		serviceToken: "test-service-token",
-		controlID:    "scf:IAC-10",
+		environment:   "prod",
+		eventsBaseURL: opSrv.URL,
+		usersBaseURL:  opSrv.URL,
+		controlID:     "scf:IAC-14",
 	})
 	if err == nil {
 		t.Fatal("expected inspect error from doRun against 500 server")
@@ -499,8 +582,59 @@ func TestDoRun_InspectFails(t *testing.T) {
 	}
 }
 
+// TestDoRun_RefusesRedirectToAnotherHost: a 302 from the Events API to
+// another host is refused, and the other host never sees the bearer.
+func TestDoRun_RefusesRedirectToAnotherHost(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	setOPEnv(t)
+
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(`{"account_uuid":"X","features":["auditevents"]}`))
+	}))
+	t.Cleanup(other.Close)
+	events := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(events.Close)
+
+	err := doRun(context.Background(), runFlags{
+		environment:   "prod",
+		eventsBaseURL: events.URL,
+		usersBaseURL:  events.URL,
+	})
+	if !errors.Is(err, opauth.ErrUnsafeRedirect) {
+		t.Fatalf("err = %v; want ErrUnsafeRedirect", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the other host received %d requests", hits.Load())
+	}
+}
+
+// TestRun_NoSecretFlags: no flag carries a 1Password secret (#2947). The
+// v1 --token flag is gone.
+func TestRun_NoSecretFlags(t *testing.T) {
+	cmd := newRunCmd()
+	for _, name := range []string{"token", "events-token", "client-id", "client-secret", "users-client-secret"} {
+		if cmd.Flags().Lookup(name) != nil || cmd.InheritedFlags().Lookup(name) != nil {
+			t.Errorf("run has a --%s flag; 1Password secrets come from the environment only", name)
+		}
+	}
+	root := newRootCmd()
+	root.SetArgs([]string{"run", "--environment", "prod", "--token", "x"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("run --token: err = %v; want unknown flag", err)
+	}
+}
+
 // TestDoRun_PushFails drives doRun through a successful Inspect against
-// a fake 1Password API server, then fails at the Push step because the
+// the documented fixtures, then fails at the Push step because the
 // platform endpoint (127.0.0.1:1) is unreachable. Exercises the
 // resolve → sdk-client → inspect → build → push error wrap end-to-end.
 func TestDoRun_PushFails(t *testing.T) {
@@ -508,28 +642,18 @@ func TestDoRun_PushFails(t *testing.T) {
 	common.endpoint = "127.0.0.1:1"
 	common.token = "test-bearer"
 	common.insecure = true
-
-	opSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{
-			"id": "test-corp",
-			"name": "Test Corp",
-			"two_factor_required": true,
-			"minimum_password_length": 14,
-			"domain_restrictions_enabled": true,
-			"active_member_count": 12
-		}`))
-	}))
-	t.Cleanup(opSrv.Close)
+	setOPEnv(t)
+	opSrv := fake1Password(t)
 
 	// Tight context so push fails fast against the unreachable endpoint.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	err := doRun(ctx, runFlags{
-		environment:  "prod",
-		opBaseURL:    opSrv.URL,
-		serviceToken: "test-service-token",
-		controlID:    "scf:IAC-10",
+		environment:   "prod",
+		eventsBaseURL: opSrv.URL,
+		usersBaseURL:  opSrv.URL,
+		controlID:     "scf:IAC-14",
 	})
 	if err == nil {
 		t.Fatal("expected push error from doRun against unreachable endpoint")
@@ -539,41 +663,33 @@ func TestDoRun_PushFails(t *testing.T) {
 	}
 }
 
-// TestBuildOrgPolicyRecord_ZeroValueOptionalFields covers the optional-
-// field branches in buildOrgPolicyRecord: when MinimumPasswordLength is
-// 0 and ActiveMembers is 0, neither key is populated in the payload.
-// (The integration test covers the populated-value path; this pins the
-// zero-value short-circuit branches.)
-func TestBuildOrgPolicyRecord_ZeroValueOptionalFields(t *testing.T) {
+// TestBuildOrgPolicyRecord_AlwaysEmitsEveryField: v2's four fields are all
+// required, so zero counts and a false stream are emitted, not omitted.
+func TestBuildOrgPolicyRecord_AlwaysEmitsEveryField(t *testing.T) {
 	state := &opaccount.PolicyState{
-		OrgID:                     "test-org",
-		TwoFactorRequired:         true,
-		MinimumPasswordLength:     0,
-		DomainRestrictionsEnabled: false,
-		ActiveMembers:             0,
-		Result:                    opaccount.ResultPass,
-		ObservedAt:                time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		OrgID:      "test-org",
+		Result:     opaccount.ResultFail,
+		ObservedAt: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("buildOrgPolicyRecord: %v", err)
 	}
+	if rec.GetEvidenceKind() != "1password.org_policy.v2" || rec.GetSchemaVersion() != "2.0.0" {
+		t.Errorf("kind/version = %s/%s", rec.GetEvidenceKind(), rec.GetSchemaVersion())
+	}
 	payload := rec.GetPayload().AsMap()
-	if _, ok := payload["minimum_password_length"]; ok {
-		t.Error("minimum_password_length present despite zero value")
+	for _, k := range []string{"org_id", "audit_events_enabled", "active_members", "suspended_members"} {
+		if _, ok := payload[k]; !ok {
+			t.Errorf("%s missing", k)
+		}
 	}
-	if _, ok := payload["active_members"]; ok {
-		t.Error("active_members present despite zero value")
+	for _, k := range []string{"two_factor_required", "minimum_password_length", "domain_restrictions_enabled"} {
+		if _, ok := payload[k]; ok {
+			t.Errorf("%s present; v2 has no documented source for it", k)
+		}
 	}
-	// The non-optional fields are always present.
-	if got, _ := payload["org_id"].(string); got != "test-org" {
-		t.Errorf("org_id = %q; want test-org", got)
-	}
-	if got, _ := payload["two_factor_required"].(bool); !got {
-		t.Errorf("two_factor_required = false; want true")
-	}
-	// domain_restrictions_enabled is unconditionally populated.
-	if _, ok := payload["domain_restrictions_enabled"]; !ok {
-		t.Error("domain_restrictions_enabled missing")
+	if rec.GetResult() != evidencev1.Result_RESULT_FAIL {
+		t.Errorf("result = %v", rec.GetResult())
 	}
 }

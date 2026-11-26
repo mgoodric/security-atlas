@@ -33,9 +33,16 @@
 //     redemption. A later mutation (e.g., admin removes user from
 //     tenant) cannot retroactively change the JWT's scope. This is
 //     the standard OAuth eventual-eviction shape (slice 190 R2).
-//   - P0-188-4 (no super_admin elevation): the snapshot copies
-//     super_admin from the verified identity; it cannot be set
-//     true synthetically.
+//   - P0-188-4 (no super_admin elevation): the snapshot reads
+//     super_admin from the live `super_admins` table for the
+//     approver's user_id; it cannot be set true synthetically. It is
+//     never taken from the credential's IsAdmin bit, which a
+//     tenant-scoped admin credential also carries (#1850, #1757).
+//   - Live roles (#2505): the snapshot's roles are the approver's live
+//     user_roles in the tenant, read at approval. They are never the
+//     credential's OwnerRoles: for a JWT session that is the role claim,
+//     which outlives a revoke, and copying it would re-mint a revoked role
+//     with a fresh expiry.
 package oauth
 
 import (
@@ -45,19 +52,34 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // DeviceApprovalEndpoint owns the dependencies for the approve and
 // deny handlers. Construction goes through NewDeviceApprovalEndpoint
 // because both handlers share the same store + clock.
 type DeviceApprovalEndpoint struct {
-	codes *DeviceCodeStore
-	now   func() time.Time
+	codes       *DeviceCodeStore
+	now         func() time.Time
+	superAdmins superadmin.Checker
+	roles       authz.RolesResolver
 }
 
 // DeviceApprovalConfig is the constructor bag.
 type DeviceApprovalConfig struct {
 	Now func() time.Time
+
+	// SuperAdmins re-reads `super_admins` for the approver. Nil fails
+	// closed: no device-code token carries super_admin.
+	SuperAdmins superadmin.Checker
+
+	// Roles reads the approver's live user_roles in the tenant, which
+	// become the minted token's roles (#2505). Nil fails closed: the
+	// token carries no role.
+	Roles authz.RolesResolver
 }
 
 // NewDeviceApprovalEndpoint constructs the approval endpoint.
@@ -69,7 +91,7 @@ func NewDeviceApprovalEndpoint(codes *DeviceCodeStore, cfg DeviceApprovalConfig)
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &DeviceApprovalEndpoint{codes: codes, now: nowFn}
+	return &DeviceApprovalEndpoint{codes: codes, now: nowFn, superAdmins: cfg.SuperAdmins, roles: cfg.Roles}
 }
 
 // approveRequest is the JSON body shape the slice-191 approval UI
@@ -112,12 +134,17 @@ func (e *DeviceApprovalEndpoint) ServeApprove(w http.ResponseWriter, r *http.Req
 	// will surface real OIDC metadata when the slice-034
 	// session model is extended.
 	in := ApproveInput{
-		UserCode:        body.UserCode,
-		UserID:          cred.UserID,
+		UserCode: body.UserCode,
+		// A JWT-authenticated approver's credential carries the token
+		// subject, "user:<uuid>"; approved_by_user_id is a UUID column.
+		UserID:          jwtmw.SubjectUserID(cred.UserID),
 		IDPIssuer:       MachineIDPIssuer,
 		IDPSubject:      "",
 		CurrentTenantID: cred.TenantID,
-		SuperAdmin:      cred.IsAdmin,
+		// #1850: super_admin comes from the super_admins table, not
+		// cred.IsAdmin. A tenant admin's credential has IsAdmin set;
+		// copying it would mint a platform-global token.
+		SuperAdmin: superadmin.Confirm(r.Context(), e.superAdmins, cred.UserID),
 	}
 	// AvailableTenants + Roles for v1: the slice-034 credential is
 	// single-tenant, so we mirror that into the snapshot as a
@@ -125,7 +152,13 @@ func (e *DeviceApprovalEndpoint) ServeApprove(w http.ResponseWriter, r *http.Req
 	// these out from the real grants table.
 	if cred.TenantID != "" {
 		in.AvailableTenants = []string{cred.TenantID}
-		roles := map[string][]string{cred.TenantID: cred.OwnerRoles}
+		live, err := e.liveRoles(r, cred.TenantID, cred.UserID)
+		if err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error",
+				"failed to read the approver's roles")
+			return
+		}
+		roles := map[string][]string{cred.TenantID: live}
 		if rolesJSON, err := json.Marshal(roles); err == nil {
 			in.RolesJSON = rolesJSON
 		}
@@ -158,6 +191,31 @@ func (e *DeviceApprovalEndpoint) ServeApprove(w http.ResponseWriter, r *http.Req
 		Status:   "approved",
 		UserCode: body.UserCode,
 	})
+}
+
+// liveRoles returns the approver's live user_roles in tenantID as labels,
+// or an empty list when the endpoint has no resolver (#2505). A user with
+// no role there gets an empty list: the token derives nothing (#2401).
+func (e *DeviceApprovalEndpoint) liveRoles(r *http.Request, tenantID, userID string) ([]string, error) {
+	out := []string{}
+	if e.roles == nil {
+		return out, nil
+	}
+	// The route is outside tenancymw, and user_roles is RLS-scoped: the
+	// resolver applies the tenant GUC from ctx, so set it from the
+	// credential's tenant.
+	ctx, err := tenancy.WithTenant(r.Context(), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	roles, err := e.roles.RolesFor(ctx, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, role := range roles {
+		out = append(out, string(role))
+	}
+	return out, nil
 }
 
 // ServeDeny handles `POST /oauth/device_authorization/deny`. Sets

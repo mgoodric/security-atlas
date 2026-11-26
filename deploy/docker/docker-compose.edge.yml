@@ -248,11 +248,17 @@ services:
       DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
       ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
       ATLAS_HTTP_URL: http://atlas-edge:8080
+      # #2353: the one http:// host bootstrap may send credentials to.
+      ATLAS_BOOTSTRAP_PLAINTEXT_HOST: atlas-edge
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
       ATLAS_DATA_DIR: /var/lib/atlas-bootstrap
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
       ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
       REPO_ROOT: /repo
+      # security-atlas#1888: bootstrap.sh prints the opt-in crosswalk
+      # import commands with these, so they run from the repo root.
+      ATLAS_COMPOSE_ARGS: -p security-atlas-edge -f deploy/docker/docker-compose.edge.yml --env-file deploy/docker/.env.edge
+      ATLAS_BOOTSTRAP_SERVICE: atlas-bootstrap-edge
     volumes:
       # The published bootstrap image embeds its `:edge` view of the repo
       # tree (Dockerfile COPY); the bind-mount of the host repo is
@@ -284,6 +290,10 @@ services:
         condition: service_healthy
       minio-edge:
         condition: service_healthy
+      # security-atlas#1928: atlas probes the artifacts bucket at boot and
+      # exits if it is missing, so wait for the one-shot that creates it.
+      minio-mc-edge:
+        condition: service_completed_successfully
       # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
       # atlas-edge does NOT serve until atlas-migrate-edge has exited 0.
       # On a Watchtower binary update both advance together; the binary
@@ -309,6 +319,13 @@ services:
       ATLAS_KEYSTORE_PATH: /var/lib/atlas/keys
       ATLAS_DATA_DIR: /var/lib/atlas
       ATLAS_OAUTH_TOKEN_RATE_PER_MIN: ${ATLAS_OAUTH_TOKEN_RATE_PER_MIN:-600}
+      # #2041: client-auth limits on /oauth/introspect + /oauth/revoke.
+      ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN: ${ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN:-60}
+      ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN: ${ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN:-120}
+      # #2479: per-principal limit on Evaluate now.
+      ATLAS_EVALUATE_RATE_PER_MIN: ${ATLAS_EVALUATE_RATE_PER_MIN:-6}
+      # #2698: needs-attention large-read warning threshold.
+      ATLAS_NEEDS_ATTENTION_WARN_ROWS: ${ATLAS_NEEDS_ATTENTION_WARN_ROWS:-10000}
       NATS_URL: nats://nats-edge:4222
       BEARER_HASH_KEY: ${BEARER_HASH_KEY:?}
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
@@ -328,6 +345,11 @@ services:
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-true}
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio-edge:9000
+      # security-atlas#1928: the endpoint baked into presigned download
+      # URLs. http://minio-edge:9000 only resolves inside the compose network, so
+      # browsers need the host-published MinIO address here (e.g.
+      # http://<host>:9000). Empty falls back to ARTIFACTS_S3_ENDPOINT.
+      ARTIFACTS_S3_PUBLIC_ENDPOINT: ${ARTIFACTS_S3_PUBLIC_ENDPOINT:-}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
       AWS_REGION: ${AWS_REGION:-us-east-1}

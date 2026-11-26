@@ -1,0 +1,56 @@
+[
+  {
+    "id": "rul1mfa",
+    "status": "ACTIVE",
+    "name": "Admins with 2FA",
+    "priority": 0,
+    "system": false,
+    "conditions": null,
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "factorMode": "2FA",
+          "type": "ASSURANCE",
+          "reauthenticateIn": "PT2H",
+          "constraints": [
+            {
+              "knowledge": { "reauthenticateIn": "PT2H", "types": ["password"] }
+            }
+          ]
+        }
+      }
+    },
+    "type": "ACCESS_POLICY"
+  },
+  {
+    "id": "rul2old",
+    "status": "INACTIVE",
+    "name": "Old 1FA rule",
+    "priority": 1,
+    "system": false,
+    "conditions": null,
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "factorMode": "1FA",
+          "type": "ASSURANCE",
+          "reauthenticateIn": "PT12H",
+          "constraints": []
+        }
+      }
+    },
+    "type": "ACCESS_POLICY"
+  },
+  {
+    "id": "ruleId",
+    "status": "ACTIVE",
+    "name": "Catch-all rule",
+    "priority": 99,
+    "system": true,
+    "conditions": null,
+    "actions": { "appSignOn": { "access": "DENY" } },
+    "type": "ACCESS_POLICY"
+  }
+]

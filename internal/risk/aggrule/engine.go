@@ -11,7 +11,11 @@
 //  1. NARROW WRITER (safety bound). The Engine holds a *dbx.Queries, but it
 //     only ever calls a deliberately small set of write methods —
 //     CreateAggregateRisk, UpdateMetaRiskInherentScore, LinkRiskAggregation,
-//     and WriteAggregationRuleEvaluation. It NEVER calls CreateRisk,
+//     UnlinkRiskAggregation (only for links its own rule made),
+//     WriteAggregationRuleEvaluation, and InsertRiskAuditLog (the `created`
+//     row of a meta-risk it creates, #2835, and the child_linked /
+//     child_unlinked rows of the links it adds and removes, #2961). It
+//     NEVER calls CreateRisk,
 //     DeleteRisk, or any control / policy / evidence writer. The set of
 //     methods the engine touches is the safety bound, enforced by the
 //     metaRiskWriter interface below — the engine is constructed with that
@@ -27,12 +31,19 @@
 //     prevention; the dsl.go self-referential-rule_id check is only defense
 //     in depth.
 //
-//  3. WINDOW IDEMPOTENCY. A rule fires at most once per (rule_id,
-//     window_start). window_start snaps to the UTC day boundary so
-//     concurrent writes inside one day converge. The idempotency key —
-//     sha256(rule_id|window_start) — is stored on the meta-risk's
-//     inherent_score.aggregation_key; the engine looks it up before
-//     creating, and UPDATEs the existing meta-risk instead of duplicating.
+//  3. ONE META-RISK PER ACTIVATION (#1861). A rule owns exactly one
+//     meta-risk per activation. Its idempotency key —
+//     sha256(rule_id|activated_at) — is fixed while the rule stays active,
+//     so the rolling window moving forward each day never changes it.
+//     (Keying on the window start spawned a new meta-risk every day once
+//     window_days had passed.) The window is an attribute of the meta-risk,
+//     not its identity: each evaluation re-links the meta-risk to exactly the
+//     risks in the current window and recomputes its score, even when the
+//     threshold is no longer met, so a removed theme, a deleted risk, or a
+//     child ageing out of the window never leaves a stale link or score.
+//     Re-activating a rule starts a new meta-risk; the old one is kept as
+//     history. Every evaluation of a key runs under a transaction-scoped
+//     advisory lock, so two concurrent writes cannot both create.
 package aggrule
 
 import (
@@ -56,7 +67,7 @@ import (
 // metaRiskWriter is the NARROW write surface the engine is allowed to touch.
 // It is the safety bound: the engine cannot write `risks` arbitrarily,
 // cannot touch `controls`, `policies`, or `evidence_records` — the only
-// mutations it can perform are the four methods declared here. *dbx.Queries
+// mutations it can perform are the six methods declared here. *dbx.Queries
 // satisfies this interface; the engine is constructed against the interface,
 // not the concrete struct, so the bound holds by construction.
 type metaRiskWriter interface {
@@ -65,11 +76,22 @@ type metaRiskWriter interface {
 	ListCandidateRisksForRule(ctx context.Context, arg dbx.ListCandidateRisksForRuleParams) ([]dbx.Risk, error)
 	GetRuleMetaRiskByKey(ctx context.Context, arg dbx.GetRuleMetaRiskByKeyParams) (dbx.Risk, error)
 	ListRiskAggregationChildren(ctx context.Context, arg dbx.ListRiskAggregationChildrenParams) ([]dbx.ListRiskAggregationChildrenRow, error)
-	// the four — and only four — writes
+	// hierarchy cycle check and its tenant-wide lock (#1748)
+	RiskAggregationReaches(ctx context.Context, arg dbx.RiskAggregationReachesParams) (bool, error)
+	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
+	// transaction-scoped advisory lock on a meta-risk key (#1861)
+	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// the tenant's risk categories, for the meta-risk category (#1813)
+	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]dbx.OrgRiskCategory, error)
+	// the six — and only six — writes
 	CreateAggregateRisk(ctx context.Context, arg dbx.CreateAggregateRiskParams) (dbx.Risk, error)
 	UpdateMetaRiskInherentScore(ctx context.Context, arg dbx.UpdateMetaRiskInherentScoreParams) (dbx.Risk, error)
 	LinkRiskAggregation(ctx context.Context, arg dbx.LinkRiskAggregationParams) error
+	UnlinkRiskAggregation(ctx context.Context, arg dbx.UnlinkRiskAggregationParams) (int64, error)
 	WriteAggregationRuleEvaluation(ctx context.Context, arg dbx.WriteAggregationRuleEvaluationParams) (dbx.AggregationRuleEvaluation, error)
+	// the `created` audit row of a new meta-risk (#2835) and the
+	// child_linked / child_unlinked rows of its links (#2961)
+	InsertRiskAuditLog(ctx context.Context, arg dbx.InsertRiskAuditLogParams) error
 }
 
 // Compile-time proof that *dbx.Queries satisfies the narrow writer.
@@ -78,14 +100,22 @@ var _ metaRiskWriter = (*dbx.Queries)(nil)
 // Engine evaluates aggregation rules. Construct one per evaluation cycle via
 // NewEngine, inside the caller's transaction.
 type Engine struct {
-	w metaRiskWriter
+	w   metaRiskWriter
+	now func() time.Time
 }
 
 // NewEngine constructs an Engine over the narrow metaRiskWriter. Callers pass
 // a *dbx.Queries bound to their transaction; the engine only ever sees the
 // narrow interface.
 func NewEngine(w metaRiskWriter) *Engine {
-	return &Engine{w: w}
+	return &Engine{w: w, now: time.Now}
+}
+
+// WithClock replaces the engine's clock, which places the rolling window.
+// Tests use it to step across more than window_days.
+func (e *Engine) WithClock(now func() time.Time) *Engine {
+	e.now = now
+	return e
 }
 
 // Evaluation is one row of the aggregation_rule_evaluations ledger surfaced
@@ -113,19 +143,23 @@ func (e *Engine) Evaluate(ctx context.Context, tenantID uuid.UUID, triggerThemes
 		return nil, fmt.Errorf("aggrule: list active rules: %w", err)
 	}
 
-	triggerSet := make(map[string]struct{}, len(triggerThemes))
-	for _, t := range triggerThemes {
-		triggerSet[t] = struct{}{}
+	selected := rulesForThemes(rules, triggerThemes)
+	if len(selected) == 0 {
+		return nil, nil
 	}
-
+	// The categories are a plain read, taken before the hierarchy and key
+	// locks (#1813): it locks no row, so it cannot join the lock order
+	// those protect (#1867).
+	cats, err := e.loadCategories(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.lockHierarchy(ctx, tenantID, selected); err != nil {
+		return nil, err
+	}
 	var out []Evaluation
-	for _, ruleRow := range rules {
-		if len(triggerSet) > 0 {
-			if _, hit := triggerSet[ruleRow.TargetTheme]; !hit {
-				continue
-			}
-		}
-		ev, err := e.evaluateRule(ctx, tenantID, ruleRow)
+	for _, ruleRow := range selected {
+		ev, err := e.evaluateRule(ctx, tenantID, ruleRow, cats)
 		if err != nil {
 			return nil, err
 		}
@@ -134,10 +168,78 @@ func (e *Engine) Evaluate(ctx context.Context, tenantID uuid.UUID, triggerThemes
 	return out, nil
 }
 
+// LockRules takes the meta-risk-key advisory lock of every active rule that
+// Evaluate(ctx, tenantID, themes) would evaluate, in the same order
+// Evaluate takes them (created_at, id). A risk write calls it BEFORE it
+// locks or deletes the risk row (#1867).
+//
+// Without it the write holds the row first and the rule's key second, while
+// an evaluation holds the key first and needs the row second (linking a
+// child takes FOR KEY SHARE on it, which a DELETE's row lock blocks), so
+// the two deadlock (40P01). With it both sides take the key first. The
+// locks are transaction-scoped and re-entrant within a session, so the
+// evaluation the write runs afterwards takes them again without waiting.
+// Empty themes lock nothing, matching EvaluateOnRiskWrite.
+func (e *Engine) LockRules(ctx context.Context, tenantID uuid.UUID, themes []string) error {
+	if len(themes) == 0 {
+		return nil
+	}
+	rules, err := e.w.ListActiveAggregationRules(ctx, pgUUID(tenantID))
+	if err != nil {
+		return fmt.Errorf("aggrule: list active rules: %w", err)
+	}
+	selected := rulesForThemes(rules, themes)
+	if err := e.lockHierarchy(ctx, tenantID, selected); err != nil {
+		return err
+	}
+	for _, ruleRow := range selected {
+		key := metaRiskKey(uuid.UUID(ruleRow.ID.Bytes), ruleRow.ActivatedAt)
+		if err := e.w.LockAggregationKey(ctx, key); err != nil {
+			return fmt.Errorf("aggrule: lock meta-risk key for rule %s: %w", uuid.UUID(ruleRow.ID.Bytes), err)
+		}
+	}
+	return nil
+}
+
+// lockHierarchy takes the tenant's risk-hierarchy lock (#1748) when there is
+// at least one rule to evaluate, so the engine's links are serialized with
+// POST /v1/risks/{id}/children and the link_child_risks applier. It runs
+// before any meta-risk key lock in both LockRules and Evaluate: taking it
+// later, between two rules' key locks, could deadlock against a transaction
+// that holds the second key and waits for the hierarchy lock.
+func (e *Engine) lockHierarchy(ctx context.Context, tenantID uuid.UUID, rules []dbx.AggregationRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	if err := e.w.LockRiskHierarchy(ctx, pgUUID(tenantID)); err != nil {
+		return fmt.Errorf("aggrule: lock risk hierarchy: %w", err)
+	}
+	return nil
+}
+
+// rulesForThemes keeps the rules whose target_theme is in themes, in their
+// listed order. Empty themes keep every rule (a full sweep).
+func rulesForThemes(rules []dbx.AggregationRule, themes []string) []dbx.AggregationRule {
+	if len(themes) == 0 {
+		return rules
+	}
+	set := make(map[string]struct{}, len(themes))
+	for _, t := range themes {
+		set[t] = struct{}{}
+	}
+	out := make([]dbx.AggregationRule, 0, len(rules))
+	for _, r := range rules {
+		if _, hit := set[r.TargetTheme]; hit {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // evaluateRule runs one active rule: reads candidates, checks thresholds,
 // and on a met threshold creates or updates the meta-risk. Exactly one
 // aggregation_rule_evaluations row is written before return.
-func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow dbx.AggregationRule) (Evaluation, error) {
+func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow dbx.AggregationRule, cats metaRiskCategories) (Evaluation, error) {
 	var rule Rule
 	if err := json.Unmarshal(ruleRow.RuleBody, &rule); err != nil {
 		return Evaluation{}, fmt.Errorf("aggrule: unmarshal rule_body for %s: %w",
@@ -145,11 +247,19 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 	}
 	ruleID := uuid.UUID(ruleRow.ID.Bytes)
 
+	// Serialize every evaluation of this rule's meta-risk before reading
+	// anything, so the candidate read and the meta-risk lookup below both see
+	// a concurrent evaluation's committed result (#1861).
+	key := metaRiskKey(ruleID, ruleRow.ActivatedAt)
+	if err := e.w.LockAggregationKey(ctx, key); err != nil {
+		return Evaluation{}, fmt.Errorf("aggrule: lock meta-risk key for rule %s: %w", ruleID, err)
+	}
+
 	// Window cut-off: the LATER of (now - window_days) and the rule's
 	// activated_at. Using activated_at as a floor means a re-activated rule
 	// never re-fires on risks written before its (re)activation — P0
 	// anti-criterion "no re-fire on historical data".
-	now := time.Now().UTC()
+	now := e.now().UTC()
 	windowStart := dayFloorUTC(now.AddDate(0, 0, -int(ruleRow.WindowDays)))
 	if ruleRow.ActivatedAt.Valid {
 		activatedFloor := ruleRow.ActivatedAt.Time.UTC()
@@ -167,14 +277,41 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 		return Evaluation{}, fmt.Errorf("aggrule: list candidates for rule %s: %w", ruleID, err)
 	}
 
+	existing, err := e.w.GetRuleMetaRiskByKey(ctx, dbx.GetRuleMetaRiskByKeyParams{
+		TenantID: pgUUID(tenantID),
+		Column2:  key,
+	})
+	found := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Evaluation{}, fmt.Errorf("aggrule: meta-risk key lookup for rule %s: %w", ruleID, err)
+	}
+
 	// CYCLE EXCLUSION: drop any candidate that is itself a rule-generated
 	// meta-risk. Without this, a rule would immediately re-aggregate its own
 	// output (a rule-generated meta-risk carries the union of its children's
 	// themes, which always includes target_theme).
+	//
+	// Links made by hand can also place an existing meta-risk under one of
+	// the candidates (#1748). Linking that candidate back under the
+	// meta-risk would close a cycle, so it is dropped too, before it counts
+	// toward the thresholds or the score. A new meta-risk has no ancestors.
 	eligible := make([]dbx.Risk, 0, len(candidates))
 	for _, c := range candidates {
 		if isRuleGenerated(c.InherentScore) {
 			continue
+		}
+		if found {
+			cycle, cerr := e.w.RiskAggregationReaches(ctx, dbx.RiskAggregationReachesParams{
+				TenantID:     pgUUID(tenantID),
+				FromRiskID:   c.ID,
+				TargetRiskID: existing.ID,
+			})
+			if cerr != nil {
+				return Evaluation{}, fmt.Errorf("aggrule: cycle check for rule %s: %w", ruleID, cerr)
+			}
+			if cycle {
+				continue
+			}
 		}
 		eligible = append(eligible, c)
 	}
@@ -184,7 +321,7 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 	scores := make([]ChildSeverity, 0, len(eligible))
 	childIDs := make([]uuid.UUID, 0, len(eligible))
 	themeUnion := make(map[string]struct{})
-	var category dbx.RiskCategory
+	scored := make([]dbx.Risk, 0, len(eligible))
 	for _, c := range eligible {
 		sev, perr := severityFromInherent(c.InherentScore)
 		if perr != nil {
@@ -206,13 +343,7 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 			teamKey = uuid.UUID(c.OrgUnitID.Bytes).String()
 		}
 		teamSet[teamKey] = struct{}{}
-		// Category of the meta-risk is the first scored child's category.
-		if category == "" {
-			category = c.Category
-		}
-	}
-	if category == "" {
-		category = dbx.RiskCategoryOperational
+		scored = append(scored, c)
 	}
 
 	riskCount := len(childIDs)
@@ -220,53 +351,71 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 
 	thresholdMet := riskCount >= int(ruleRow.MinRisks) && teamCount >= int(ruleRow.MinTeams)
 
+	// Severity over the current window. With no scored child (possible only
+	// below threshold) it is 0, which empties a stale meta-risk's score.
+	severity := 0
+	if len(scores) > 0 {
+		var serr error
+		severity, serr = ComputeRuleSeverity(ctx, rule.SeverityFunction, scores, rule.CustomRego)
+		if serr != nil {
+			return Evaluation{}, fmt.Errorf("aggrule: compute severity for rule %s: %w", ruleID, serr)
+		}
+	}
+	likelihood, impact := risk.DeriveGridCell(severity)
+	inherent, err := metaRiskInherent(rule, key, windowStart, severity, likelihood, impact, riskCount)
+	if err != nil {
+		return Evaluation{}, err
+	}
+
 	if !thresholdMet {
 		outcome := "no_match"
 		// near_miss: at least one dimension reached its threshold but not all.
 		if (riskCount >= int(ruleRow.MinRisks)) != (teamCount >= int(ruleRow.MinTeams)) {
 			outcome = "near_miss"
 		}
+		// A meta-risk this activation already created stays (the engine never
+		// closes or deletes a parent), but its links and score follow the
+		// current window so it never reports a child that has left (#1861).
+		// The ledger row names the meta-risk it refreshed (#1867).
+		if found {
+			if err := e.refreshMetaRisk(ctx, tenantID, existing, ruleID, inherent, childIDs); err != nil {
+				return Evaluation{}, err
+			}
+			refreshed := uuid.UUID(existing.ID.Bytes)
+			return e.writeEvaluation(ctx, tenantID, ruleID, outcome, riskCount, teamCount, &windowStart, &refreshed)
+		}
 		return e.writeEvaluation(ctx, tenantID, ruleID, outcome, riskCount, teamCount, nil, nil)
 	}
 
-	// Threshold met — fire. Compute the meta-risk severity, then create or
-	// update the meta-risk keyed on (rule_id, window_start).
-	severity, err := ComputeRuleSeverity(ctx, rule.SeverityFunction, scores, rule.CustomRego)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("aggrule: compute severity for rule %s: %w", ruleID, err)
-	}
-	likelihood, impact := risk.DeriveGridCell(severity)
-
-	key := windowKey(ruleID, windowStart)
-	themes := make([]string, 0, len(themeUnion))
-	for t := range themeUnion {
-		themes = append(themes, t)
-	}
-
-	metaRiskID, err := e.upsertMetaRisk(ctx, tenantID, rule, ruleID, key, windowStart,
-		severity, likelihood, impact, riskCount, category, themes, childIDs)
-	if err != nil {
-		return Evaluation{}, err
+	// Threshold met — fire: update this activation's meta-risk, or create it.
+	var metaRiskID uuid.UUID
+	if found {
+		if err := e.refreshMetaRisk(ctx, tenantID, existing, ruleID, inherent, childIDs); err != nil {
+			return Evaluation{}, err
+		}
+		metaRiskID = uuid.UUID(existing.ID.Bytes)
+	} else {
+		themes := make([]string, 0, len(themeUnion))
+		for t := range themeUnion {
+			themes = append(themes, t)
+		}
+		category, cerr := cats.pick(scored)
+		if cerr != nil {
+			return Evaluation{}, fmt.Errorf("aggrule: category for rule %s: %w", ruleID, cerr)
+		}
+		metaRiskID, err = e.createMetaRisk(ctx, tenantID, rule, ruleID, inherent, riskCount, category, themes, childIDs)
+		if err != nil {
+			return Evaluation{}, err
+		}
 	}
 
 	return e.writeEvaluation(ctx, tenantID, ruleID, "fired", riskCount, teamCount, &windowStart, &metaRiskID)
 }
 
-// upsertMetaRisk creates the meta-risk for a (rule_id, window_start) window,
-// or — when one already exists for the key — recomputes its inherent_score
-// and re-links any new children. Returns the meta-risk id.
-func (e *Engine) upsertMetaRisk(
-	ctx context.Context,
-	tenantID uuid.UUID,
-	rule Rule,
-	ruleID uuid.UUID,
-	key string,
-	windowStart time.Time,
-	severity, likelihood, impact, childCount int,
-	category dbx.RiskCategory,
-	themes []string,
-	childIDs []uuid.UUID,
-) (uuid.UUID, error) {
+// metaRiskInherent builds a meta-risk's inherent_score blob. window_start
+// records the window the score was computed over; it is an attribute, not
+// part of the key.
+func metaRiskInherent(rule Rule, key string, windowStart time.Time, severity, likelihood, impact, childCount int) ([]byte, error) {
 	inherent := map[string]any{
 		"likelihood":        likelihood,
 		"impact":            impact,
@@ -280,73 +429,158 @@ func (e *Engine) upsertMetaRisk(
 		"rule_id":        rule.RuleID,
 		"window_start":   windowStart.Format(time.RFC3339),
 	}
-	inherentBytes, err := json.Marshal(inherent)
+	b, err := json.Marshal(inherent)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("aggrule: marshal meta-risk inherent_score: %w", err)
+		return nil, fmt.Errorf("aggrule: marshal meta-risk inherent_score: %w", err)
 	}
+	return b, nil
+}
 
-	existing, err := e.w.GetRuleMetaRiskByKey(ctx, dbx.GetRuleMetaRiskByKeyParams{
-		TenantID: pgUUID(tenantID),
-		Column2:  key,
+// refreshMetaRisk recomputes an existing meta-risk's inherent_score and
+// reconciles its rule-made child links to childIDs. Title / level /
+// lifecycle stay frozen.
+func (e *Engine) refreshMetaRisk(ctx context.Context, tenantID uuid.UUID, existing dbx.Risk, ruleID uuid.UUID, inherent []byte, childIDs []uuid.UUID) error {
+	metaRiskID := uuid.UUID(existing.ID.Bytes)
+	if _, err := e.w.UpdateMetaRiskInherentScore(ctx, dbx.UpdateMetaRiskInherentScoreParams{
+		TenantID:      pgUUID(tenantID),
+		ID:            existing.ID,
+		InherentScore: inherent,
+	}); err != nil {
+		return fmt.Errorf("aggrule: update meta-risk %s: %w", metaRiskID, err)
+	}
+	linked, err := e.unlinkStaleChildren(ctx, tenantID, metaRiskID, ruleID, childIDs)
+	if err != nil {
+		return err
+	}
+	return e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs, linked)
+}
+
+// RuleActor is the actor a rule-generated meta-risk's `created` audit row
+// names: the aggregation rule that made it.
+func RuleActor(ruleID uuid.UUID) string {
+	return "system:aggregation-rule:" + ruleID.String()
+}
+
+// createMetaRisk creates this activation's meta-risk and links its
+// children. qualitative_5x5 + treatment=untreated mirrors slice 053's
+// manual-aggregation parent: a generated meta-risk carries no treatment
+// decision until someone makes one (#1746).
+func (e *Engine) createMetaRisk(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	rule Rule,
+	ruleID uuid.UUID,
+	inherent []byte,
+	childCount int,
+	category pgtype.UUID,
+	themes []string,
+	childIDs []uuid.UUID,
+) (uuid.UUID, error) {
+	metaRiskID := uuid.New()
+	row, err := e.w.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
+		ID:                  pgUUID(metaRiskID),
+		TenantID:            pgUUID(tenantID),
+		Title:               rule.Title(),
+		Description:         fmt.Sprintf("Rule-generated aggregation (%s) of %d child risks via %s.", rule.RuleID, childCount, rule.SeverityFunction),
+		CategoryID:          category,
+		Methodology:         dbx.RiskMethodologyQualitative5x5,
+		InherentScore:       inherent,
+		Treatment:           dbx.RiskTreatmentUntreated,
+		TreatmentOwner:      "",
+		ResidualScore:       []byte("{}"),
+		Accepter:            "",
+		InstrumentReference: "",
+		Level:               dbx.RiskLevel(rule.ParentLevel),
+		OrgUnitID:           pgtype.UUID{}, // meta-risks span teams; no single org unit
+		Column15:            themes,
 	})
-	switch {
-	case err == nil:
-		// WINDOW IDEMPOTENCY: a meta-risk already exists for this window —
-		// recompute its inherent_score and link any new children. Never
-		// create a duplicate. Title / level / lifecycle stay frozen.
-		metaRiskID := uuid.UUID(existing.ID.Bytes)
-		if _, uerr := e.w.UpdateMetaRiskInherentScore(ctx, dbx.UpdateMetaRiskInherentScoreParams{
-			TenantID:      pgUUID(tenantID),
-			ID:            existing.ID,
-			InherentScore: inherentBytes,
-		}); uerr != nil {
-			return uuid.Nil, fmt.Errorf("aggrule: update meta-risk %s: %w", metaRiskID, uerr)
-		}
-		if lerr := e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs); lerr != nil {
-			return uuid.Nil, lerr
-		}
-		return metaRiskID, nil
-
-	case errors.Is(err, pgx.ErrNoRows):
-		// No meta-risk for this window yet — create one. qualitative_5x5 +
-		// treatment=avoid mirrors slice 053's manual-aggregation parent so
-		// it passes the slice-019 risk CHECK constraints without linked
-		// controls (a meta-risk is a pattern tracker, not control-mitigated).
-		metaRiskID := uuid.New()
-		if _, cerr := e.w.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
-			ID:                  pgUUID(metaRiskID),
-			TenantID:            pgUUID(tenantID),
-			Title:               rule.Title(),
-			Description:         fmt.Sprintf("Rule-generated aggregation (%s) of %d child risks via %s.", rule.RuleID, childCount, rule.SeverityFunction),
-			Category:            category,
-			Methodology:         dbx.RiskMethodologyQualitative5x5,
-			InherentScore:       inherentBytes,
-			Treatment:           dbx.RiskTreatmentAvoid,
-			TreatmentOwner:      "",
-			ResidualScore:       []byte("{}"),
-			Accepter:            "",
-			InstrumentReference: "",
-			Level:               dbx.RiskLevel(rule.ParentLevel),
-			OrgUnitID:           pgtype.UUID{}, // meta-risks span teams; no single org unit
-			Column15:            themes,
-		}); cerr != nil {
-			return uuid.Nil, fmt.Errorf("aggrule: create meta-risk for rule %s: %w", ruleID, cerr)
-		}
-		if lerr := e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs); lerr != nil {
-			return uuid.Nil, lerr
-		}
-		return metaRiskID, nil
-
-	default:
-		return uuid.Nil, fmt.Errorf("aggrule: meta-risk key lookup for rule %s: %w", ruleID, err)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("aggrule: create meta-risk for rule %s: %w", ruleID, err)
 	}
+	// No person makes a rule-generated meta-risk; its rule does, and the
+	// created row names it (#2835).
+	if err := risk.RecordCreatedTx(ctx, e.w, tenantID, metaRiskID, RuleActor(ruleID), risk.CreatedState{
+		Title:      row.Title,
+		CategoryID: uuid.UUID(row.CategoryID.Bytes),
+		Treatment:  row.Treatment,
+	}); err != nil {
+		return uuid.Nil, fmt.Errorf("aggrule: audit meta-risk for rule %s: %w", ruleID, err)
+	}
+	// A new meta-risk has no links yet, so every link is new.
+	if err := e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs, nil); err != nil {
+		return uuid.Nil, err
+	}
+	return metaRiskID, nil
+}
+
+// unlinkStaleChildren removes this rule's links from the meta-risk to any
+// child no longer in childIDs: a theme removed, or a child that aged out of
+// the window. Links made by hand (rule_id NULL) or by another rule are left
+// alone. A deleted child's link is already gone (ON DELETE CASCADE), and
+// its delete wrote that link's child_unlinked row.
+//
+// Each removed link writes a child_unlinked row on the meta-risk, by the
+// rule (#2961). It returns the children still linked to the meta-risk
+// afterwards, by any source, so linkChildren audits only new links.
+func (e *Engine) unlinkStaleChildren(ctx context.Context, tenantID, metaRiskID, ruleID uuid.UUID, childIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	links, err := e.w.ListRiskAggregationChildren(ctx, dbx.ListRiskAggregationChildrenParams{
+		TenantID:     pgUUID(tenantID),
+		ParentRiskID: pgUUID(metaRiskID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("aggrule: list children of meta-risk %s: %w", metaRiskID, err)
+	}
+	keep := make(map[uuid.UUID]struct{}, len(childIDs))
+	for _, id := range childIDs {
+		keep[id] = struct{}{}
+	}
+	linked := make(map[uuid.UUID]bool, len(links))
+	for _, l := range links {
+		childID := uuid.UUID(l.ChildRiskID.Bytes)
+		linked[childID] = true
+		if !l.RuleID.Valid || uuid.UUID(l.RuleID.Bytes) != ruleID {
+			continue
+		}
+		if _, ok := keep[childID]; ok {
+			continue
+		}
+		n, err := e.w.UnlinkRiskAggregation(ctx, dbx.UnlinkRiskAggregationParams{
+			TenantID:     pgUUID(tenantID),
+			ParentRiskID: pgUUID(metaRiskID),
+			ChildRiskID:  l.ChildRiskID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("aggrule: unlink child %s from meta-risk %s: %w", childID, metaRiskID, err)
+		}
+		delete(linked, childID)
+		// No row removed: the link is already gone, and whoever removed it
+		// wrote its child_unlinked row. The hierarchy lock every unlink
+		// takes makes this unreachable today; the count keeps the audit
+		// exact if a path ever unlinks without it.
+		if n == 0 {
+			continue
+		}
+		if err := risk.RecordChildUnlinkedTx(ctx, e.w, tenantID, metaRiskID, childID,
+			risk.HierarchyAudit{Actor: RuleActor(ruleID)}); err != nil {
+			return nil, fmt.Errorf("aggrule: audit unlink of child %s from meta-risk %s: %w", childID, metaRiskID, err)
+		}
+	}
+	return linked, nil
 }
 
 // linkChildren links every childID under the meta-risk via risk_aggregations,
 // stamping the originating rule_id. LinkRiskAggregation is ON CONFLICT DO
-// NOTHING so re-linking on a window update is a harmless no-op.
-func (e *Engine) linkChildren(ctx context.Context, tenantID, metaRiskID, ruleID uuid.UUID, childIDs []uuid.UUID) error {
+// NOTHING so re-linking on a window update is a harmless no-op. A child
+// not in linked (the meta-risk's links before this call) writes one
+// child_linked row on the meta-risk, by the rule (#2961); a re-link writes
+// none. The evaluation holds the hierarchy lock, which every path that
+// adds or removes a link takes (LinkChildrenTx, UnlinkChildTx, a risk
+// delete), so linked cannot go stale before the inserts.
+func (e *Engine) linkChildren(ctx context.Context, tenantID, metaRiskID, ruleID uuid.UUID, childIDs []uuid.UUID, linked map[uuid.UUID]bool) error {
 	for _, childID := range childIDs {
+		if linked[childID] {
+			continue
+		}
 		if err := e.w.LinkRiskAggregation(ctx, dbx.LinkRiskAggregationParams{
 			ParentRiskID: pgUUID(metaRiskID),
 			ChildRiskID:  pgUUID(childID),
@@ -355,13 +589,18 @@ func (e *Engine) linkChildren(ctx context.Context, tenantID, metaRiskID, ruleID 
 		}); err != nil {
 			return fmt.Errorf("aggrule: link child %s under meta-risk %s: %w", childID, metaRiskID, err)
 		}
+		if err := risk.RecordChildLinkedTx(ctx, e.w, tenantID, metaRiskID, childID,
+			risk.HierarchyAudit{Actor: RuleActor(ruleID)}); err != nil {
+			return fmt.Errorf("aggrule: audit link of child %s under meta-risk %s: %w", childID, metaRiskID, err)
+		}
 	}
 	return nil
 }
 
 // writeEvaluation appends exactly one aggregation_rule_evaluations row and
-// returns the Go-side Evaluation. window + metaRiskID are non-nil only for
-// outcome="fired" (the DB CHECK enforces this coherence).
+// returns the Go-side Evaluation. window + metaRiskID are set together: on
+// every "fired" row, and on a near_miss / no_match row that refreshed an
+// existing meta-risk (#1867). The DB CHECK enforces this coherence.
 func (e *Engine) writeEvaluation(
 	ctx context.Context,
 	tenantID, ruleID uuid.UUID,
@@ -420,22 +659,29 @@ func toInt32(v int) int32 {
 	return int32(v)
 }
 
-// dayFloorUTC truncates t to the start of its UTC day. Snapping window_start
-// to a stable boundary means concurrent risk writes within one day converge
-// on the same (rule_id, window_start) key and therefore the same meta-risk.
+// dayFloorUTC truncates t to the start of its UTC day, so every evaluation
+// within one day reads the same window.
 func dayFloorUTC(t time.Time) time.Time {
 	t = t.UTC()
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// windowKey is the deterministic idempotency key for a (rule_id,
-// window_start) window: sha256_hex(rule_id|window_start_rfc3339). Stored on
-// the meta-risk's inherent_score.aggregation_key.
-func windowKey(ruleID uuid.UUID, windowStart time.Time) string {
+// metaRiskKey is the idempotency key of a rule activation's meta-risk:
+// sha256_hex(rule_id|activated_at_rfc3339), stored on the meta-risk's
+// inherent_score.aggregation_key. activated_at changes only on
+// (re)activation, so the key holds still while the window rolls (#1861).
+//
+// It hashes the same string the old window key hashed during a rule's first
+// window_days, when window_start was activated_at, so a meta-risk created
+// then keeps matching. An active rule always has activated_at (DB CHECK);
+// without one the key falls back to the rule id alone.
+func metaRiskKey(ruleID uuid.UUID, activatedAt pgtype.Timestamptz) string {
 	h := sha256.New()
 	h.Write([]byte(ruleID.String()))
 	h.Write([]byte("|"))
-	h.Write([]byte(windowStart.UTC().Format(time.RFC3339)))
+	if activatedAt.Valid {
+		h.Write([]byte(activatedAt.Time.UTC().Format(time.RFC3339)))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

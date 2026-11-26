@@ -60,7 +60,8 @@ control_owner_readable_resources := {
     # defaults.rego.catalog_resources["frameworks"] (slice 035), so
     # the slice-156 contract is two new resource-type symbols here.
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
 }
 
 # Slice 148: control owner can mint their own ICS subscription URL via
@@ -74,12 +75,36 @@ allow if {
     input.request.path == "/v1/calendar/subscription"
 }
 
+# #2110: Evaluate now. A control_owner may run evaluation for a control
+# through POST /v1/controls/{uuid}/evaluate, and gains no other controls
+# write. Which control they may evaluate (only one assigned to them,
+# owner_user_id) is the handler's check; rego admits the role at this one
+# path, as the calendar subscription rule above does.
+allow if {
+    has_role("control_owner")
+    input.action == "write"
+    input.resource.type == "controls"
+    input.request.method == "POST"
+    regex.match(`^/v1/controls/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/evaluate$`, input.request.path)
+}
+
+# #2523: Attest. A control_owner may submit a manual attestation through
+# POST /v1/controls/{uuid}/attestations, and gains no other controls write.
+# Whether they own that control (its owner_role among their live roles) is
+# the handler's check, authz.HasOwnerRole; rego admits the role at this one
+# path, as the evaluate rule above does.
+allow if {
+    has_role("control_owner")
+    input.action == "write"
+    input.resource.type == "controls"
+    input.request.method == "POST"
+    regex.match(`^/v1/controls/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/attestations$`, input.request.path)
+}
+
 control_owner_writable_resources := {
     "evidence",
     "artifacts",
-    # Slice 027: control owner can author walkthroughs for their
-    # controls. The walkthrough.created_by stamp + the control's
-    # owner_role intersection is the per-row gate; rego allows the
-    # action at the role level.
-    "walkthroughs",
+    # #2708: walkthroughs are not here. Admins and GRC engineers record
+    # them (walkthroughs canWrite is authz.IsTenantApprover); a control
+    # owner reads them through the read set above.
 }

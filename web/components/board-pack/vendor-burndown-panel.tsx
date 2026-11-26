@@ -70,11 +70,8 @@ function Tile({
   testid: string;
 }) {
   return (
-    <div
-      className="rounded-lg border border-slate-200 p-4"
-      data-testid={testid}
-    >
-      <div className="mb-1 text-xs text-slate-500">{label}</div>
+    <div className="rounded-lg border border-border p-4" data-testid={testid}>
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
       <div className="flex items-baseline gap-2">
         <span className="text-2xl font-semibold">{value}</span>
         {hint && (
@@ -82,10 +79,10 @@ function Tile({
             className={cn(
               "text-xs font-medium",
               tone === "good"
-                ? "text-emerald-600"
+                ? "text-pass"
                 : tone === "warn"
-                  ? "text-amber-600"
-                  : "text-slate-500",
+                  ? "text-warning"
+                  : "text-muted-foreground",
             )}
           >
             {hint}

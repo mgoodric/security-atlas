@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeepLink(t *testing.T) {
@@ -148,6 +150,14 @@ func TestSSRFPolicy_DeniesInternal(t *testing.T) {
 		"ftp://hooks.public.test/hook",             // non-http scheme
 		"https://rebind.test/hook",                 // mixed public+private
 		"",                                         // empty
+		// Shared netguard ranges (#2534): this-network, broadcast,
+		// benchmarking, reserved, and NAT64 / 6to4 wrapping internal v4.
+		"https://0.1.2.3/hook",
+		"https://255.255.255.255/hook",
+		"https://198.18.0.1/hook",
+		"https://240.0.0.1/hook",
+		"https://[64:ff9b::a9fe:a9fe]/hook",
+		"https://[2002:a00:1::1]/hook",
 	}
 	for _, raw := range denied {
 		if _, err := p.ValidateWebhookURL(raw); err == nil {
@@ -173,5 +183,62 @@ func TestSSRFPolicy_TestAllowances(t *testing.T) {
 	// Even with allowances, link-local metadata is still denied.
 	if _, err := p.ValidateWebhookURL("http://169.254.169.254/"); err == nil {
 		t.Fatalf("metadata IP must be denied even with test allowances")
+	}
+}
+
+// The dial-time hook judges the resolved ip:port actually being dialled
+// (#2304). Anything that is not a parseable public IP is refused.
+func TestSSRFPolicy_DialControl(t *testing.T) {
+	t.Parallel()
+	strict := SSRFPolicy{}
+	deny := []string{
+		"127.0.0.1:443",
+		"[::1]:443",
+		"0.0.0.0:443",
+		"[::]:443",
+		"169.254.169.254:80",
+		"[fe80::1]:443",
+		"10.1.2.3:443",
+		"192.168.1.1:443",
+		"[fd00::1]:443",
+		"100.64.0.1:443",
+		"[::ffff:127.0.0.1]:443", // IPv4-mapped IPv6 loopback
+		"[::ffff:169.254.169.254]:443",
+		"not-an-address",
+		"hooks.public.test:443", // a hostname, not a resolved IP: fail closed
+	}
+	for _, a := range deny {
+		if err := strict.DialControl("tcp", a, nil); err == nil {
+			t.Errorf("DialControl(%q) = nil, want refusal", a)
+		}
+	}
+	for _, a := range []string{"93.184.216.34:443", "[2606:2800:220:1:248:1893:25c8:1946]:443"} {
+		if err := strict.DialControl("tcp", a, nil); err != nil {
+			t.Errorf("DialControl(%q) = %v, want allowed", a, err)
+		}
+	}
+	if err := (SSRFPolicy{AllowLoopback: true}).DialControl("tcp", "127.0.0.1:80", nil); err != nil {
+		t.Errorf("AllowLoopback should permit loopback at dial time: %v", err)
+	}
+}
+
+// The hardened client must not route through an environment proxy (a
+// proxy dial would bypass DialControl), must refuse redirects, and must
+// carry a backstop timeout (#2304).
+func TestSSRFPolicy_NewHTTPClient_Hardened(t *testing.T) {
+	t.Parallel()
+	c := SSRFPolicy{}.NewHTTPClient(7 * time.Second)
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok || tr == http.DefaultTransport {
+		t.Fatalf("client must own its *http.Transport")
+	}
+	if tr.Proxy != nil {
+		t.Fatalf("Proxy must be nil: an environment proxy bypasses the dial-time check")
+	}
+	if c.Timeout != 7*time.Second {
+		t.Fatalf("Timeout = %s, want 7s backstop", c.Timeout)
+	}
+	if c.CheckRedirect == nil || c.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatalf("CheckRedirect must return http.ErrUseLastResponse")
 	}
 }

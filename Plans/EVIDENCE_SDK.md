@@ -145,7 +145,7 @@ Both wrap the same internal `IngestEvidence` call. The REST endpoint is the publ
   "idempotency_key": "ci-run-2026-05-10-abc123-step-sast", // required, dedups within a window
   "evidence_kind": "sast.scan_result.v1", // required, must be registered in the schema registry
   "schema_version": "1.0.0", // required, validated against registry
-  "control_id": "scf:VPM-04", // required — control or SCF anchor
+  "control_id": "scf:VPM-06", // required — control or SCF anchor
   "scope": {
     // required — at least one dimension
     "environment": "prod",
@@ -193,6 +193,17 @@ Every credential is **scoped** at issue time:
 - To a TTL
 
 The platform refuses pushes that violate scope. The audit log records every push attempt — accepted or rejected — keyed by credential.
+
+**Scope predicate schema (#2435).** `api_keys.scope_predicate` is JSONB in the same expression grammar as `applicability_expr` (`internal/scope`), the one the scope builder writes:
+
+| Predicate                                                                | Meaning                                 |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| `{}` (the column default), `""` or `null`                                | Unrestricted                            |
+| `{"op":"eq","dim":"cloud_account","value":"aws:111122223333"}`           | The dimension has that value            |
+| `{"op":"in","dim":"environment","values":["prod","staging"]}`            | The dimension has one of those values   |
+| `{"op":"and"\|"or","args":[…]}`, `{"op":"not","arg":…}`, `{"op":"true"}` | Combinators, as in `applicability_expr` |
+
+A record's scope can give a dimension several values. The record expands to every cell those values span, and the predicate must hold in each cell. A key scoped to `environment=prod` cannot push a record that also names `staging`. Under a restricted key, a record that names no dimensions is refused. Any other shape is invalid: a bare `{"environment":"prod"}` map, an unknown op, an unknown field, an empty `and`/`or`, an `in` with no values, or non-JSON. Issue refuses an invalid predicate (HTTP 400 / gRPC `InvalidArgument`), and a push under one is refused as `rejected_scope_violation` with the parse error in the audit row. It is never treated as unrestricted. The legacy `key=value[,key=value]` string is still accepted at issue and is stored converted to an `and` of `eq` nodes. No stored key can hold the raw string, because the column is JSONB. The evaluator is `scope.MatchRecordScope` in `internal/scope/predicate.go`.
 
 ### 4.4 Idempotency and replay protection
 
@@ -306,7 +317,7 @@ Friction kills adoption. The reference CLI ships with the platform:
 # One-shot push from a CI step
 security-atlas evidence push \
   --kind sast.scan_result.v1 \
-  --control scf:VPM-04 \
+  --control scf:VPM-06 \
   --scope environment=prod,cloud_account=aws:111122223333 \
   --observed-at "$(date -u +%FT%TZ)" \
   --result pass \

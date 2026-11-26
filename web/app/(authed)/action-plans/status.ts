@@ -3,10 +3,7 @@
 // unit-testable without rendering (slice-353 Q-2 pure-Go-first spirit,
 // applied to the TS side).
 
-import {
-  ACTION_PLAN_STATUS_LABELS,
-  type ActionPlanStatus,
-} from "@/lib/api/action-plans";
+import { lookupLabel } from "@/lib/labels/enum-labels";
 
 /** Tailwind class for the status pill, by lifecycle state. */
 export function statusPillClass(status: string): string {
@@ -28,13 +25,19 @@ export function statusPillClass(status: string): string {
 
 /** Human label for a status; falls back to the raw value. */
 export function statusLabel(status: string): string {
-  return ACTION_PLAN_STATUS_LABELS[status as ActionPlanStatus] ?? status;
+  return lookupLabel("ActionPlanStatus", status) ?? status;
 }
 
-/** Format an ISO date/timestamp as YYYY-MM-DD; "—" for empty/malformed. */
-export function dateLabel(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 10);
+/**
+ * The status a plan shows, given whether its linked controls still fail
+ * (#2109): a completed plan waiting on its controls says so.
+ */
+export function planStatusLabel(
+  status: string,
+  controlsFailing?: boolean,
+): string {
+  if (status === "completed" && controlsFailing) {
+    return "Completed · linked controls still failing";
+  }
+  return statusLabel(status);
 }

@@ -111,7 +111,7 @@ func TestResidualSubscriber_RecomputesOnEvidenceIngest(t *testing.T) {
 	store := risk.NewStore(app)
 	// Link with weights isolating operational so the ingested pass evidence
 	// visibly moves residual.
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     0.0,
@@ -180,7 +180,7 @@ func TestResidualSubscriber_RedeliveryIsIdempotent(t *testing.T) {
 	riskID := seedNistRisk(t, migrate, tenant, 4, 4) // inherent 16
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     0.0,
@@ -248,4 +248,93 @@ func residualScoreField(blob []byte) (float64, bool) {
 	}
 	v, ok := m["score"].(float64)
 	return v, ok
+}
+
+// ===== #2964: an underivable risk is termed, never redelivered, and does
+// not hold back the other risks linked to the same control =====
+
+func TestResidualSubscriber_UnderivableRiskTermedOthersRecompute(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	goodID := seedNistRisk(t, migrate, tenant, 5, 5) // inherent 25
+	// Non-empty but malformed: likelihood is not a number, so the residual
+	// cannot be derived from this row no matter how often it is retried.
+	badID := uuid.New()
+	if _, err := migrate.Exec(context.Background(), `
+		INSERT INTO risks (
+			id, tenant_id, title, description, category_id, methodology,
+			inherent_score, treatment, treatment_owner, residual_score
+		)
+		VALUES ($1, $2, '#2964 malformed risk', '', risk_category_id($2, 'operational'), 'nist_800_30',
+		        '{"likelihood":"high","impact":5}'::jsonb, 'avoid', 'owner', '{}'::jsonb)
+	`, badID, tenant); err != nil {
+		t.Fatalf("seed malformed risk: %v", err)
+	}
+	ctrlID := seedEvalControl(t, migrate, tenant)
+	store := risk.NewStore(app)
+	for _, id := range []uuid.UUID{badID, goodID} {
+		if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
+			RiskID:          id,
+			ControlID:       ctrlID,
+			DesignScore:     0.0,
+			DesignScoreSet:  true,
+			WeightDesign:    0.0,
+			WeightOperation: 1.0,
+			WeightCoverage:  0.0,
+			WeightsSet:      true,
+		}); err != nil {
+			t.Fatalf("LinkControl %s: %v", id, err)
+		}
+	}
+	seedEvidence(t, migrate, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*time.Hour))
+
+	conn := openStream(t)
+	subscriber := risk.NewResidualSubscriber(conn.Stream(), conn.Cfg().Subject, app, nil)
+	subCtx, subCancel := context.WithCancel(context.Background())
+	defer subCancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = subscriber.Start(subCtx)
+	}()
+	stop := func() { subCancel(); <-done }
+
+	before := risk.UnderivableResiduals()
+	publishEvidenceRecord(t, conn, tenant, ctrlID)
+
+	deadline := time.Now().Add(30 * time.Second)
+	recomputed := false
+	for time.Now().Before(deadline) {
+		rk, err := store.Get(ctx, goodID)
+		if err != nil {
+			t.Fatalf("Get good risk: %v", err)
+		}
+		if score, ok := residualScoreField(rk.ResidualScore); ok && score < 1.0 {
+			recomputed = true
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if !recomputed {
+		stop()
+		t.Fatal("good risk linked to the same control did not recompute while the malformed one failed")
+	}
+
+	// A Nak redelivers after 2s. Wait past several redelivery windows: a
+	// termed message is counted once and never again.
+	time.Sleep(7 * time.Second)
+	stop()
+	if got := risk.UnderivableResiduals() - before; got != 1 {
+		t.Fatalf("underivable count = %d, want 1 (a redelivered message would count again)", got)
+	}
+	bad, err := store.Get(ctx, badID)
+	if err != nil {
+		t.Fatalf("Get malformed risk: %v", err)
+	}
+	if _, ok := residualScoreField(bad.ResidualScore); ok {
+		t.Fatalf("malformed risk got a residual_score: %s", bad.ResidualScore)
+	}
 }

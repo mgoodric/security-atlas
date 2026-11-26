@@ -67,14 +67,29 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { getSessionMe } from "@/lib/api/board";
 
 import { ApiTokensSection } from "./_tabs/api-tokens";
 import { AppearanceSection } from "./_tabs/appearance";
 import { NotificationsSection } from "./_tabs/notifications";
+import { OnboardingSection } from "./_tabs/onboarding";
 import { ProfileSection } from "./_tabs/profile";
 import { SessionsSection } from "./_tabs/sessions";
 import { TenantSection } from "./_tabs/tenant";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2503: a tenant admin by its live roles reaches /admin and its own
+// tenant's API keys. #2443: it also sees the Organisation section, matching
+// PATCH /v1/tenants/{id}'s authz.IsTenantAdmin gate. `is_admin` stays the
+// super-admin bit (the profile badge). Fail-closed: a failed read is false.
+async function fetchIsTenantAdmin(): Promise<boolean> {
+  const res = await fetch("/api/admin/me", { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_tenant_admin?: unknown };
+  return body.is_tenant_admin === true;
+}
 
 export default function SettingsPage() {
   const meQuery = useQuery({
@@ -82,15 +97,22 @@ export default function SettingsPage() {
     queryFn: getSessionMe,
   });
   const isAdmin = meQuery.data?.is_admin === true;
+  const tenantAdminQuery = useQuery({
+    queryKey: ["settings-session-me", "is-tenant-admin"],
+    queryFn: fetchIsTenantAdmin,
+  });
+  const canAdminister = isAdmin || tenantAdminQuery.data === true;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6" data-testid="settings-page">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Your personal preferences and credentials. Tenant-wide settings live
-          in{" "}
-          {isAdmin ? (
+    <PageShell
+      title={pageTitle("/settings")}
+      width="reading"
+      data-testid="settings-page"
+      subtitle={
+        <>
+          Your personal preferences and credentials.{" "}
+          <Term id="tenant">Tenant</Term>-wide settings live in{" "}
+          {canAdminister ? (
             <a
               href="/admin"
               className="text-primary underline-offset-4 hover:underline"
@@ -104,15 +126,16 @@ export default function SettingsPage() {
             </span>
           )}
           .
-        </p>
-      </header>
-
+        </>
+      }
+    >
       <ProfileSection isAdmin={isAdmin} />
-      {isAdmin ? <TenantSection /> : null}
+      {canAdminister ? <TenantSection /> : null}
       <AppearanceSection />
+      <OnboardingSection />
       <NotificationsSection />
-      <ApiTokensSection isAdmin={isAdmin} />
+      <ApiTokensSection isAdmin={canAdminister} />
       <SessionsSection />
-    </div>
+    </PageShell>
   );
 }

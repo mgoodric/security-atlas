@@ -19,6 +19,9 @@ import {
   clearFilters,
   DEFAULT_FILTERS,
   isDefault,
+  REVIEW_DUE_SOON,
+  REVIEW_OVERDUE,
+  reviewMatches,
   setFilter,
   uniqueOwners,
   type PolicyFilters,
@@ -52,28 +55,44 @@ describe("DEFAULT_FILTERS", () => {
     expect(DEFAULT_FILTERS.status).toBe(ALL);
     expect(DEFAULT_FILTERS.owner_role).toBe(ALL);
     expect(DEFAULT_FILTERS.ack_status).toBe(ALL);
+    expect(DEFAULT_FILTERS.review).toBe(ALL);
   });
 });
 
 describe("isDefault", () => {
   test("returns true when all three pills are ALL", () => {
-    expect(isDefault({ status: ALL, owner_role: ALL, ack_status: ALL })).toBe(
-      true,
-    );
+    expect(
+      isDefault({ status: ALL, owner_role: ALL, ack_status: ALL, review: ALL }),
+    ).toBe(true);
   });
   test("returns false when status is narrowed", () => {
     expect(
-      isDefault({ status: "published", owner_role: ALL, ack_status: ALL }),
+      isDefault({
+        status: "published",
+        owner_role: ALL,
+        ack_status: ALL,
+        review: ALL,
+      }),
     ).toBe(false);
   });
   test("returns false when owner is narrowed", () => {
     expect(
-      isDefault({ status: ALL, owner_role: "security_lead", ack_status: ALL }),
+      isDefault({
+        status: ALL,
+        owner_role: "security_lead",
+        ack_status: ALL,
+        review: ALL,
+      }),
     ).toBe(false);
   });
   test("returns false when ack_status is narrowed", () => {
     expect(
-      isDefault({ status: ALL, owner_role: ALL, ack_status: ACK_STATUS_GE_95 }),
+      isDefault({
+        status: ALL,
+        owner_role: ALL,
+        ack_status: ACK_STATUS_GE_95,
+        review: ALL,
+      }),
     ).toBe(false);
   });
 });
@@ -99,6 +118,7 @@ describe("applyFilters", () => {
       status: "published",
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p1", "p3"]);
   });
@@ -107,6 +127,7 @@ describe("applyFilters", () => {
       status: ALL,
       owner_role: "people_ops",
       ack_status: ALL,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p2", "p3"]);
   });
@@ -115,6 +136,7 @@ describe("applyFilters", () => {
       status: ALL,
       owner_role: "unassigned",
       ack_status: ALL,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p4"]);
   });
@@ -123,6 +145,7 @@ describe("applyFilters", () => {
       status: "published",
       owner_role: "people_ops",
       ack_status: ALL,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p3"]);
   });
@@ -240,6 +263,7 @@ describe("applyFilters — ack_status pill", () => {
       status: ALL,
       owner_role: ALL,
       ack_status: ACK_STATUS_GE_95,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p1"]);
   });
@@ -249,6 +273,7 @@ describe("applyFilters — ack_status pill", () => {
       status: ALL,
       owner_role: ALL,
       ack_status: ACK_STATUS_LT_95,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p2", "p3"]);
   });
@@ -258,6 +283,7 @@ describe("applyFilters — ack_status pill", () => {
       status: ALL,
       owner_role: ALL,
       ack_status: ACK_STATUS_LT_50,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p3"]);
   });
@@ -267,6 +293,7 @@ describe("applyFilters — ack_status pill", () => {
       status: "published",
       owner_role: ALL,
       ack_status: ACK_STATUS_LT_95,
+      review: ALL,
     });
     expect(narrowed.map((r) => r.id)).toEqual(["p2", "p3"]);
   });
@@ -301,17 +328,20 @@ describe("setFilter / clearFilters", () => {
       status: ALL,
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     };
     const after = setFilter(before, "status", "published");
     expect(after).toEqual({
       status: "published",
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     });
     expect(before).toEqual({
       status: ALL,
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     });
   });
   test("setFilter updates ack_status independently", () => {
@@ -319,17 +349,49 @@ describe("setFilter / clearFilters", () => {
       status: ALL,
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     };
     const after = setFilter(before, "ack_status", ACK_STATUS_GE_95);
     expect(after.ack_status).toBe(ACK_STATUS_GE_95);
     expect(after.status).toBe(ALL);
     expect(after.owner_role).toBe(ALL);
   });
-  test("clearFilters returns ALL/ALL/ALL", () => {
+  test("clearFilters returns ALL on every pill", () => {
     expect(clearFilters()).toEqual({
       status: ALL,
       owner_role: ALL,
       ack_status: ALL,
+      review: ALL,
     });
+  });
+});
+
+describe("review filter (#1806)", () => {
+  const rows = [
+    makePolicy({ id: "late", review_status: "overdue" }),
+    makePolicy({ id: "soon", review_status: "due-soon" }),
+    makePolicy({ id: "later", review_status: "upcoming" }),
+    makePolicy({ id: "undated" }),
+    makePolicy({ id: "draft", status: "draft", review_status: null }),
+  ];
+  const only = (review: string) =>
+    applyFilters(rows, { ...DEFAULT_FILTERS, review }).map((r) => r.id);
+
+  test("ALL keeps every row, including undated and unpublished", () => {
+    expect(only(ALL)).toEqual(["late", "soon", "later", "undated", "draft"]);
+  });
+  test("overdue keeps exactly the overdue rows", () => {
+    expect(only(REVIEW_OVERDUE)).toEqual(["late"]);
+  });
+  test("due-soon keeps exactly the due-soon rows", () => {
+    expect(only(REVIEW_DUE_SOON)).toEqual(["soon"]);
+  });
+  test("a non-default review filter is not the default set", () => {
+    expect(isDefault({ ...DEFAULT_FILTERS, review: REVIEW_OVERDUE })).toBe(
+      false,
+    );
+  });
+  test("reviewMatches drops rows with no review status", () => {
+    expect(reviewMatches(makePolicy({}), REVIEW_OVERDUE)).toBe(false);
   });
 });

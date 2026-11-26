@@ -91,6 +91,9 @@ var (
 	ErrCompleterRequired   = errors.New("personnel security: completed_by is required")
 	ErrNoChecklistForEvent = errors.New("personnel security: worker event is not a joiner or leaver")
 	ErrItemNotFound        = errors.New("personnel security: checklist item not found")
+	// ErrControlNotFound: the checklist names a control_id that is not a
+	// control in the tenant, so the composite FK refuses the insert (#3005).
+	ErrControlNotFound = errors.New("personnel security: control not found")
 )
 
 func workflowFromWorker(w worker.Worker) (WorkflowKind, bool) {

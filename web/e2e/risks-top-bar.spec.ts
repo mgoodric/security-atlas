@@ -65,10 +65,12 @@ test.describe("risks top bar chrome (slice 243)", () => {
     // Same period name the audits-header fixture seeds + the slice
     // 213 spec pins on /audits. Asserting on /risks proves the
     // shared-chrome wiring is intact for this route.
-    await expect(pill).toContainText("SOC 2 Type II · Q2 2026 in progress");
+    // #2135: the pill is the audit banner, counting down to the
+    // period's end; the period name stays in its accessible label.
+    await expect(pill).toContainText(/Audit (ends|ended)/);
     await expect(pill).toHaveAttribute(
       "aria-label",
-      "SOC 2 Type II · Q2 2026 in progress",
+      /^SOC 2 Type II · Q2 2026: audit (ends|ended)/,
     );
   });
 
@@ -105,6 +107,11 @@ test.describe("risks top bar chrome (slice 243)", () => {
     await page.goto("/risks");
     const input = page.getByTestId("global-search-input");
     await expect(input).not.toBeFocused();
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
   });

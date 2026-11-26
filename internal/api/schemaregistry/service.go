@@ -160,33 +160,71 @@ func (s *Service) LoadFromDB(ctx context.Context) error {
 	s.redaction = map[string][]string{}
 	s.cache = New(nil)
 	for _, r := range rows {
-		compiled, err := compileSchema(r.SchemaJson)
-		if err != nil {
-			return fmt.Errorf("compile %s/%s: %w", r.Kind, r.Semver, err)
-		}
-		key := cacheKey(r.Kind, r.Semver)
-		s.compiled[key] = compiled
-		s.byKey[key] = storedSchema{
+		if err := s.addGlobalLocked(storedSchema{
 			id:                r.ID,
 			kind:              r.Kind,
 			semver:            r.Semver,
 			schemaJSON:        r.SchemaJson,
 			owner:             r.Owner,
 			defaultSCFAnchors: r.DefaultScfAnchors,
+		}); err != nil {
+			return err
 		}
-		// Slice 015: extract x-redaction-rules. A malformed list is
-		// fatal at load — we'd rather refuse to start than silently
-		// fail-open on secret redaction.
-		rules, rerr := redact.ExtractRulesFromSchema(r.SchemaJson)
-		if rerr != nil {
-			return fmt.Errorf("redaction rules %s/%s: %w", r.Kind, r.Semver, rerr)
-		}
-		if len(rules) > 0 {
-			s.redaction[key] = rules
-		}
-		s.cache.Register(r.Kind, r.Semver)
 	}
 	return nil
+}
+
+// addGlobalLocked compiles one global schema row into the caches. The
+// caller holds s.mu for writing.
+func (s *Service) addGlobalLocked(row storedSchema) error {
+	compiled, err := compileSchema(row.schemaJSON)
+	if err != nil {
+		return fmt.Errorf("compile %s/%s: %w", row.kind, row.semver, err)
+	}
+	key := cacheKey(row.kind, row.semver)
+	s.compiled[key] = compiled
+	s.byKey[key] = row
+	// Slice 015: extract x-redaction-rules. A malformed list is
+	// fatal at load — we'd rather refuse to start than silently
+	// fail-open on secret redaction.
+	rules, rerr := redact.ExtractRulesFromSchema(row.schemaJSON)
+	if rerr != nil {
+		return fmt.Errorf("redaction rules %s/%s: %w", row.kind, row.semver, rerr)
+	}
+	if len(rules) > 0 {
+		s.redaction[key] = rules
+	}
+	s.cache.Register(row.kind, row.semver)
+	return nil
+}
+
+// NewEmbedded returns a Service with no database, holding only the
+// bundled platform schemas from root (normally PlatformSchemasFS()). Its
+// ValidatePayload is the code the push path runs, so a connector's tests
+// can check its payloads against the registered schema without Postgres
+// (#2815). Tenant-private kinds and every write method need the pool and
+// are unavailable: a lookup that would reach the database reports
+// ErrUnknownKind.
+func NewEmbedded(root fs.FS) (*Service, error) {
+	schemas, err := LoadPlatformSchemas(root)
+	if err != nil {
+		return nil, fmt.Errorf("load platform schemas: %w", err)
+	}
+	s := NewService(nil)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ps := range schemas {
+		if err := s.addGlobalLocked(storedSchema{
+			kind:              ps.Kind,
+			semver:            ps.Semver,
+			schemaJSON:        ps.SchemaJSON,
+			owner:             ps.Owner,
+			defaultSCFAnchors: ps.DefaultSCFAnchors,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
 }
 
 // IsRegisteredForTenant implements ingest.TenantAwareRegistry (slice 015).
@@ -315,9 +353,10 @@ type RegisterRequest struct {
 	Semver     string
 	SchemaJSON []byte
 	Owner      string
-	// IsAdmin is true when the calling credential is marked admin. The
-	// handler (api/schemaregistry HTTP) extracts this from the credential
-	// in context; Service.Register treats !IsAdmin as ErrUnauthorized.
+	// IsAdmin is true when the calling credential administers its tenant.
+	// The handler (api/schemaregistry HTTP) sets it from
+	// authz.IsTenantAdmin on the credential in context (#2674);
+	// Service.Register treats !IsAdmin as ErrUnauthorized.
 	IsAdmin       bool
 	HasCredential bool
 	CreatedBy     string
@@ -581,8 +620,9 @@ func (s *Service) lookupCompiled(ctx context.Context, tenantID, kind, version st
 	s.mu.RUnlock()
 
 	// Slow path: hit the DB. Lets a private kind registered via Register
-	// resolve without a full LoadFromDB refresh.
-	if tenantID != "" {
+	// resolve without a full LoadFromDB refresh. A NewEmbedded Service has
+	// no pool and stops here.
+	if tenantID != "" && s.pool != nil {
 		row, err := s.Get(ctx, tenantID, kind, version)
 		if err == nil && row.TenantID == tenantID {
 			compiled, err := compileSchema(row.SchemaJSON)
@@ -627,11 +667,29 @@ func (s *Service) InvalidateTenant(tenantID string) {
 
 // ---- helpers ----
 
+// assertFormatKey opts one schema version into enforcing its `format`
+// keywords (#2930). Without it, `format` is an annotation only, which is the
+// JSON Schema 2020-12 default and what every version registered before the
+// key existed was accepted under. Opting in is per version so an existing
+// version's acceptance never changes.
+const assertFormatKey = "x-assert-format"
+
 func compileSchema(body []byte) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
+	}
+	if obj, ok := doc.(map[string]any); ok {
+		if v, present := obj[assertFormatKey]; present {
+			on, isBool := v.(bool)
+			if !isBool {
+				return nil, fmt.Errorf("%s must be a boolean, got %T", assertFormatKey, v)
+			}
+			if on {
+				c.AssertFormat()
+			}
+		}
 	}
 	// Use a stable, file-like URL so $id references inside the schema
 	// resolve consistently.

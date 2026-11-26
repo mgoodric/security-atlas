@@ -2,57 +2,183 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc1_4_competence_training
 title: "All personnel complete annual security awareness training"
 description: |
-  The entity demonstrates a commitment to attract, develop, and retain
-  competent individuals (TSC CC1.4, COSO Principle 4). Operationally for
-  SOC 2 the auditor-tested manifestation is: every employee and
-  contractor completes annual security awareness training within their
-  required cadence (on hire + within 12 months thereafter). The control
-  is automated by inspecting completion tickets — each training assignment
-  is filed as a Jira ticket tagged `security-training`, and the evidence
-  query asserts every active user has an open or closed completion ticket
-  within the last 365 days.
+  People doing security-relevant work are hired for it, trained in it and
+  kept capable of it (TSC CC1.4, COSO Principle 4). The intended test is
+  that every employee and contractor completes security awareness training
+  on hire and at least annually.
 
-scf_anchor_id: HRS-04
-control_family: HRS
+  What runs today: two queries, and the control combines them the way the
+  engine combines verdicts (any fail fails, otherwise any pass passes).
+
+  On `jira.ticket_evidence.v1` a SQL query reads each ticket's payload.
+  It takes each ticket's latest in-window record, keyed by `ticket_key`,
+  and keeps it when its `labels` include `security-training` and it names
+  an `assignee_account_id`; other records are left out. A ticket is
+  current when its `resolution` is Done and its `resolved_at` is no more
+  than 365 days before the evaluation instant. An open ticket (no
+  `resolution`) is in its grace period while it is younger than 30 days
+  (720 hours): the evaluation instant is before its `created_at` plus 720
+  hours. Each assignee needs one current ticket or one in grace. An
+  assignee whose tickets are all open 30 days or longer, resolved other
+  than Done, or resolved Done more than 365 days ago fails the control. An
+  assignee with neither but a Done ticket whose `resolved_at`, or an open
+  ticket whose `created_at`, is absent or unreadable leaves the query
+  inconclusive unless another assignee fails it. The query passes when every assignee has a current
+  ticket, and is inconclusive when no ticket is kept. When two records for
+  one ticket tie on `observed_at`, the worse verdict decides. The
+  connector's per-record verdict is not used. Records from a connector
+  older than #2829 carry no labels or account id, so they are left out.
+
+  On `security_awareness.training_completion.v1` a SQL query reads each
+  completion's payload. It takes each person's latest record, keyed by
+  `person_id` and ordered by `completed_at`, then by `observed_at`. A
+  person whose latest completion is more than 365 days before the
+  evaluation instant (`evaluated_at`), or whose latest record names a
+  `completion_source` other than manual, csv or lms_connector, fails the
+  control. Otherwise the query passes only when every person's latest
+  completion is from one of those sources and within the 365 days, and is
+  inconclusive when any person's latest record has no readable
+  `completed_at` or no `completion_source`. No record also leaves it
+  inconclusive. The platform writes every completion as pass; that
+  `result` is not used.
+
+  In both queries a timestamp (`completed_at`, `created_at`, `resolved_at`) that is not
+  a full RFC 3339 timestamp, or is more than an hour after the evaluation
+  instant, is treated as unreadable and never errors the query. Records
+  without a `person_id` are left out. Records count for the annual window
+  of 400 days, so a person whose latest completion is 366 to 400 days old
+  fails the control and one whose records are all older is not seen; the
+  same holds for an assignee's tickets. The 365 days are counted as 8,760
+  hours, so the bound does not move with daylight saving or a leap day.
+
+  Pending: every active user holding a current completion or ticket. Only
+  the people in the records the control receives are checked: a person
+  with no training ticket and no completion is not seen. That half needs a
+  user inventory (#2834).
+
+scf_anchor_id: SAT-04
+scf_release: test-2026.3
+control_family: SAT
 implementation_type: automated
 owner_role: hr
 lifecycle_state: active
-freshness_class: monthly
+freshness_class: annual
 
 evidence_queries:
   - id: training_completion_within_365d
-    language: rego
+    language: sql
     evidence_kind: jira.ticket_evidence.v1
-    description: "Every active user has a closed security-training ticket within 365 days"
+    description: "Each assignee of a security-training ticket has one resolved Done within 365 days of the evaluation instant, or one open for under 30 days"
     expression: |
-      package atlas.controls.soc2.cc1_4
-
-      default allow := false
-
-      # input.users         — array of {id, active, email}
-      # input.training_tix  — array of jira tickets with labels[], resolution, resolution_date
-
-      allow if {
-        every u in input.users {
-          u.active == true
-          some t in input.training_tix
-          t.assignee == u.email
-          "security-training" in t.labels
-          t.resolution == "Done"
-          time.parse_rfc3339_ns(t.resolution_date) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
-        }
-      }
-  - id: training_completion_records_within_365d
-    language: rego
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT person, max(verdict) AS verdict
+        FROM (
+          SELECT ticket, person, min(verdict) AS verdict
+          FROM (
+            SELECT ticket,
+                   person,
+                   kept,
+                   CASE
+                     WHEN done AND resolved IS NULL THEN 1
+                     WHEN done AND resolved >= evaluated_at - interval '8760 hours' THEN 2
+                     WHEN done OR resolved_other THEN 0
+                     WHEN created IS NULL THEN 1
+                     WHEN evaluated_at < created + interval '720 hours' THEN 2
+                     ELSE 0
+                   END AS verdict,
+                   rank() OVER (PARTITION BY ticket ORDER BY observed_at DESC) AS recency
+            FROM (
+              SELECT ticket,
+                     person,
+                     kept,
+                     done,
+                     resolved_other,
+                     observed_at,
+                     evaluated_at,
+                     CASE WHEN created_ts <= evaluated_at + interval '1 hour' THEN created_ts END AS created,
+                     CASE WHEN resolved_ts <= evaluated_at + interval '1 hour' THEN resolved_ts END AS resolved
+              FROM (
+                SELECT payload->>'ticket_key' AS ticket,
+                       payload->>'assignee_account_id' AS person,
+                       coalesce(jsonb_typeof(payload->'labels') = 'array'
+                                AND payload->'labels' @> '["security-training"]'::jsonb
+                                AND jsonb_typeof(payload->'assignee_account_id') = 'string'
+                                AND payload->>'assignee_account_id' <> '', false) AS kept,
+                       coalesce(payload->'resolution' = '"Done"'::jsonb, false) AS done,
+                       coalesce(payload->'resolution' <> '"Done"'::jsonb AND payload->>'resolution' <> '', false) AS resolved_other,
+                       observed_at,
+                       evaluated_at,
+                       CASE
+                         WHEN payload->>'created_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                              AND pg_input_is_valid(payload->>'created_at', 'timestamptz')
+                           THEN (payload->>'created_at')::timestamptz
+                       END AS created_ts,
+                       CASE
+                         WHEN payload->>'resolved_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                              AND pg_input_is_valid(payload->>'resolved_at', 'timestamptz')
+                           THEN (payload->>'resolved_at')::timestamptz
+                       END AS resolved_ts
+                FROM evidence
+                WHERE jsonb_typeof(payload->'ticket_key') = 'string'
+                  AND payload->>'ticket_key' <> ''
+              ) AS cast_checked
+            ) AS parsed
+          ) AS ranked
+          WHERE recency = 1 AND kept
+          GROUP BY ticket, person
+        ) AS per_ticket
+        GROUP BY person
+      ) AS per_person
+  - id: each_person_completed_training_within_365d
+    language: sql
     evidence_kind: security_awareness.training_completion.v1
-    description: "Every assigned security-awareness training completion is current within 365 days"
+    description: "Each person's latest training completion is from an allowed source and within 365 days of the evaluation instant"
     expression: |
-      package atlas.controls.soc2.cc1_4.training_records
-
-      default allow := false
-
-      allow if {
-        input.assignment_id
-        time.parse_rfc3339_ns(input.completed_at) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
-        input.completion_source in {"manual", "csv", "lms_connector"}
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_off) THEN 'fail'
+               WHEN bool_and(all_current) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT person,
+               bool_or(coalesce(source_off OR completed < evaluated_at - interval '8760 hours', false)) AS any_off,
+               bool_and(coalesce(source_ok AND completed >= evaluated_at - interval '8760 hours', false)) AS all_current
+        FROM (
+          SELECT payload->>'person_id' AS person,
+                 completed,
+                 evaluated_at,
+                 payload->>'completion_source' IN ('manual', 'csv', 'lms_connector') AS source_ok,
+                 payload->>'completion_source' NOT IN ('manual', 'csv', 'lms_connector') AS source_off,
+                 rank() OVER (
+                   PARTITION BY payload->>'person_id'
+                   ORDER BY completed DESC NULLS LAST, observed_at DESC
+                 ) AS recency
+          FROM (
+            SELECT payload,
+                   observed_at,
+                   evaluated_at,
+                   CASE WHEN ts <= evaluated_at + interval '1 hour' THEN ts END AS completed
+            FROM (
+              SELECT payload,
+                     observed_at,
+                     evaluated_at,
+                     CASE
+                       WHEN payload->>'completed_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                            AND pg_input_is_valid(payload->>'completed_at', 'timestamptz')
+                         THEN (payload->>'completed_at')::timestamptz
+                     END AS ts
+              FROM evidence
+              WHERE coalesce(payload->>'person_id', '') <> ''
+            ) AS cast_checked
+          ) AS parsed
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY person
+      ) AS per_person

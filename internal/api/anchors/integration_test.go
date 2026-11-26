@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func TestListAnchors_ReturnsDBBackedAnchors(t *testing.T) {
 
 func TestGetAnchorByID_BySCFID(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	resp, body := get(t, ts, "/v1/anchors/IAC-06", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -113,8 +114,8 @@ func TestGetAnchorByID_BySCFID(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Anchor["scf_id"] != "IAC-06" {
-		t.Fatalf("scf_id = %q; want IAC-06", got.Anchor["scf_id"])
+	if got.Anchor["scf_id"] != "IAC-37" {
+		t.Fatalf("scf_id = %q; want IAC-37", got.Anchor["scf_id"])
 	}
 	if got.Anchor["name"] != "Multi-Factor Authentication (MFA)" {
 		t.Fatalf("name = %q", got.Anchor["name"])
@@ -125,7 +126,7 @@ func TestGetAnchorByID_UUID(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
 
 	// First find the UUID via the SCF ID.
-	_, body := get(t, ts, "/v1/anchors/IAC-06", bearer)
+	_, body := get(t, ts, "/v1/anchors/IAC-37", bearer)
 	var first struct {
 		Anchor map[string]string `json:"anchor"`
 	}
@@ -153,7 +154,7 @@ func TestGetAnchor_UnknownReturns404(t *testing.T) {
 
 func TestRequirementsForAnchor_StillReturnsMappings(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	resp, body := get(t, ts, "/v1/anchors/IAC-06/requirements", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37/requirements", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -164,11 +165,11 @@ func TestRequirementsForAnchor_StillReturnsMappings(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Anchor["scf_id"] != "IAC-06" {
+	if got.Anchor["scf_id"] != "IAC-37" {
 		t.Fatalf("anchor scf_id = %q", got.Anchor["scf_id"])
 	}
 	if len(got.Requirements) == 0 {
-		t.Fatal("expected requirement mappings for IAC-06")
+		t.Fatal("expected requirement mappings for IAC-37")
 	}
 }
 
@@ -193,6 +194,49 @@ func TestListFrameworks_IncludesSCF(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("SCF framework not in list: %+v", got.Frameworks)
+	}
+}
+
+// #2086: `?include=versions` lists each framework's versions; without it
+// the response carries none.
+func TestListFrameworks_IncludeVersions(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	type fw struct {
+		Slug     string              `json:"slug"`
+		Versions []map[string]string `json:"versions"`
+	}
+	list := func(path string) []fw {
+		resp, body := get(t, ts, path, bearer)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d; want 200; body=%s", path, resp.StatusCode, body)
+		}
+		var got struct {
+			Frameworks []fw `json:"frameworks"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return got.Frameworks
+	}
+	for _, f := range list("/v1/frameworks") {
+		if f.Versions != nil {
+			t.Fatalf("%s: versions present without include=versions", f.Slug)
+		}
+	}
+	var scf *fw
+	all := list("/v1/frameworks?include=versions")
+	for i := range all {
+		if all[i].Slug == "scf" {
+			scf = &all[i]
+		}
+	}
+	if scf == nil || len(scf.Versions) == 0 {
+		t.Fatalf("SCF with versions not in list: %+v", all)
+	}
+	for _, v := range scf.Versions {
+		if v["id"] == "" || v["version"] == "" {
+			t.Fatalf("SCF version missing id or version: %+v", v)
+		}
 	}
 }
 
@@ -255,7 +299,7 @@ func TestAnchorsForRequirement_ResolvesSOC2CC66BySlugVersionCode(t *testing.T) {
 		t.Fatalf("requirement.code = %q; want CC6.6", got.Requirement["code"])
 	}
 	if len(got.Anchors) == 0 {
-		t.Fatal("expected at least one anchor for CC6.6 (NET-04, IAC-06 per crosswalk)")
+		t.Fatal("expected at least one anchor for CC6.6 (NET-03, IAC-37 per crosswalk)")
 	}
 	for _, a := range got.Anchors {
 		if a.SCFID == "" {
@@ -306,5 +350,128 @@ func TestAnchorsForRequirement_RejectsMissingBearer(t *testing.T) {
 	resp, _ := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/anchors", "")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d; want 401", resp.StatusCode)
+	}
+}
+
+// #2414: `?include=versions` carries the caller's own tenant-private
+// frameworks and versions, and never another tenant's. Tenant A and B each
+// get a private framework with a private version, plus a private version on
+// the global SCF framework. The read runs as the app role, so RLS is what
+// isolates the tenants; the tenant_id predicate is only a second leg.
+func TestListFrameworks_IncludeVersions_TenantPrivateIsolation(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	if err := scfseed.EnsureFullCatalog(ctx, migrate); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
+	}
+
+	var scfID uuid.UUID
+	if err := migrate.QueryRow(ctx,
+		`SELECT id FROM frameworks WHERE slug = 'scf' AND tenant_id IS NULL`,
+	).Scan(&scfID); err != nil {
+		t.Fatalf("lookup SCF framework: %v", err)
+	}
+
+	type seeded struct {
+		tenant, frameworkSlug, privateFwVersion, scfVersion string
+	}
+	seed := func(label string) seeded {
+		tenant := dbtest.SeedTenant(t, migrate, "framework_versions", "frameworks")
+		s := seeded{
+			tenant:           tenant,
+			frameworkSlug:    "private-2414-" + label + "-" + tenant[:8],
+			privateFwVersion: "p-" + label + "-" + tenant[:8],
+			scfVersion:       "scf-private-" + label + "-" + tenant[:8],
+		}
+		fwID := uuid.New()
+		if _, err := migrate.Exec(ctx,
+			`INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, $2, $3, $4, 'test')`,
+			fwID, tenant, "Private "+label, s.frameworkSlug,
+		); err != nil {
+			t.Fatalf("seed private framework %s: %v", label, err)
+		}
+		if _, err := migrate.Exec(ctx,
+			`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+			 VALUES ($1, $2, $3, $4, 'current'), ($5, $2, $6, $7, 'legacy')`,
+			uuid.New(), tenant, fwID, s.privateFwVersion,
+			uuid.New(), scfID, s.scfVersion,
+		); err != nil {
+			t.Fatalf("seed private versions %s: %v", label, err)
+		}
+		return s
+	}
+	a, b := seed("a"), seed("b")
+
+	srv := api.New(api.Config{RotationGrace: time.Hour})
+	srv.AttachDB(dbtest.NewAppPool(t))
+	// Mint every bearer before HTTPHandlerForTests: the handler captures
+	// the signing keys when it is built, so a token minted afterwards is
+	// not recognised and the request reaches the route with no tenant.
+	bearers := map[string]string{}
+	for _, s := range []seeded{a, b} {
+		bearers[s.tenant] = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(s.tenant)))
+	}
+	appTS := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(appTS.Close)
+
+	type fw struct {
+		Slug     string `json:"slug"`
+		Versions []struct {
+			Version string `json:"version"`
+		} `json:"versions"`
+	}
+	// versions returns slug -> version strings, as seen by tenant.
+	versions := func(tenant string) map[string][]string {
+		resp, body := get(t, appTS, "/v1/frameworks?include=versions", bearers[tenant])
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+		}
+		var got struct {
+			Frameworks []fw `json:"frameworks"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		out := map[string][]string{}
+		for _, f := range got.Frameworks {
+			out[f.Slug] = []string{}
+			for _, v := range f.Versions {
+				out[f.Slug] = append(out[f.Slug], v.Version)
+			}
+		}
+		return out
+	}
+	has := func(vs []string, want string) bool {
+		for _, v := range vs {
+			if v == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, tc := range []struct{ self, other seeded }{{a, b}, {b, a}} {
+		got := versions(tc.self.tenant)
+		if !has(got[tc.self.frameworkSlug], tc.self.privateFwVersion) {
+			t.Errorf("tenant %s: own private framework/version missing: %v", tc.self.tenant, got[tc.self.frameworkSlug])
+		}
+		if !has(got["scf"], tc.self.scfVersion) {
+			t.Errorf("tenant %s: own private SCF version missing", tc.self.tenant)
+		}
+		if _, ok := got[tc.other.frameworkSlug]; ok {
+			t.Errorf("tenant %s: sees other tenant's private framework %s", tc.self.tenant, tc.other.frameworkSlug)
+		}
+		if has(got["scf"], tc.other.scfVersion) {
+			t.Errorf("tenant %s: sees other tenant's private SCF version %s", tc.self.tenant, tc.other.scfVersion)
+		}
+	}
+
+	// The plain list stays catalog-only.
+	resp, body := get(t, appTS, "/v1/frameworks", bearers[a.tenant])
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plain list status = %d; body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), a.frameworkSlug) {
+		t.Errorf("plain list carries a tenant-private framework: %s", body)
 	}
 }

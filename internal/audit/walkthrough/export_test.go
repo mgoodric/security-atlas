@@ -14,10 +14,11 @@ package walkthrough
 //   - headingLevel        (export.go:311)
 //   - isAllDigits         (export.go:326)
 //   - renderInline        (export.go:338)
-//   - encodeForDataURL    (export.go:357)
-//   - isChromeUnavailable (export.go:369)
-//   - safePrefix          (export.go:379)
 //   - IsTamperFlagged     (export.go:391)
+//
+// The data-URL encoder, chrome-unavailable classifier and safePrefix moved
+// to internal/pdfrender with the shared render helper (#1847); their tests
+// live in internal/pdfrender/print_test.go.
 //
 // Branches the file is designed to cover:
 //   - markdown: every block kind (H1-H4, UL, OL, paragraph, blank
@@ -26,13 +27,8 @@ package walkthrough
 //     back) that exercise renderMarkdown's closeBlocks() path
 //   - PDF HTML: tamper banner, status class, optional transcript +
 //     attachments, live vs period-pinned walkthrough
-//   - data-URL encoding: every replacement target (% # & ? \n \r)
-//   - chrome-unavailable error classification: every matched substring
-//     plus the nil + unrelated-error negative cases
-//   - safePrefix: short, exact-16, and long byte buffers
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -253,81 +249,6 @@ func TestRenderInline(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := renderInline(tc.in); got != tc.want {
 				t.Errorf("renderInline(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestEncodeForDataURL exercises every replacement target so a regress-
-// ion in the strings.NewReplacer pair list surfaces here.
-func TestEncodeForDataURL(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"plain", "plain"},
-		{"a%b", "a%25b"},
-		{"a#b", "a%23b"},
-		{"a&b", "a%26b"},
-		{"a?b", "a%3Fb"},
-		{"a\nb", "a%0Ab"},
-		{"a\rb", "ab"}, // CR is stripped
-		{"all % # & ? \n \r", "all %25 %23 %26 %3F %0A "}, // composite
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.in, func(t *testing.T) {
-			if got := encodeForDataURL(tc.in); got != tc.want {
-				t.Errorf("encodeForDataURL(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestIsChromeUnavailable covers each substring branch plus the nil
-// + unrelated-error negative cases. A regression in this classifier
-// would cause RenderPDF to surface ErrChromeUnavailable for unrelated
-// failures (false positive) or to mask the real error (false negative).
-func TestIsChromeUnavailable(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"unrelated", errors.New("some other error"), false},
-		{"exec_prefix", errors.New("exec: \"chromium\": not found"), true},
-		{"exec_substring_in_message", errors.New("chromedp: exec: failed"), true},
-		{"executable_file_not_found", errors.New("executable file not found in $PATH"), true},
-		{"no_chrome_found", errors.New("chromedp: no chrome found"), true},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isChromeUnavailable(tc.err); got != tc.want {
-				t.Errorf("isChromeUnavailable(%v) = %v, want %v", tc.err, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestSafePrefix covers the long-buffer + short-buffer branches.
-func TestSafePrefix(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []byte
-		want string
-	}{
-		{"empty", []byte{}, ""},
-		{"short", []byte("abc"), "abc"},
-		{"exactly_16", []byte("0123456789abcdef"), "0123456789abcdef"},
-		{"longer_than_16", []byte("0123456789abcdef!!!extra"), "0123456789abcdef"},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			if got := safePrefix(tc.in); got != tc.want {
-				t.Errorf("safePrefix(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

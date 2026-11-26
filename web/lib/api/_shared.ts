@@ -35,20 +35,65 @@ export async function apiFetch(
   return res;
 }
 
+// upstreamErrorMessage is the text an error response shows the user. A 4xx
+// is a refusal the platform words for the user (the approval rule, a frozen
+// revision, "reason is required"), so its `{error}` body passes through. A
+// 5xx never does: its body is the server's own failure, and a handler that
+// wrote `err.Error()` there would leak internals. It gets `generic`, the
+// status line unless the caller names another (#2433).
+export async function upstreamErrorMessage(
+  res: Response,
+  generic = `${res.status} ${res.statusText}`,
+): Promise<string> {
+  if (res.status >= 500) return generic;
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    // body not JSON — keep the generic text
+  }
+  return upstreamErrorText(res.status, body, generic);
+}
+
+// upstreamErrorText is the same rule for a body the caller has already
+// parsed (the AI-assist view-model parsers take `(ok, status, raw)`).
+export function upstreamErrorText(
+  status: number,
+  body: unknown,
+  generic: string,
+): string {
+  if (status >= 500) return generic;
+  const e = (body as { error?: unknown } | null)?.error;
+  return typeof e === "string" && e ? e : generic;
+}
+
 // bffControlFetch is the browser-side fetch against the BFF routes under
-// `/api/**`. It unwraps an upstream `{error}` JSON body into the thrown
-// APIError message when present, otherwise falls back to the status line.
+// `/api/**`. It unwraps a 4xx `{error}` JSON body into the thrown APIError
+// message when present, otherwise falls back to the status line.
 export async function bffControlFetch<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
-    throw new APIError(res.status, msg);
+    throw new APIError(res.status, await upstreamErrorMessage(res));
   }
   return (await res.json()) as T;
+}
+
+// bffPostJSON posts to a BFF route and returns the parsed body, or throws
+// an APIError carrying the platform's status and `{error}` message (409
+// "already running", 400 "reason is required", ...). Moved here from
+// control-imports.ts (#1778) so the remap review client shares it.
+export async function bffPostJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers:
+      body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new APIError(
+      res.status,
+      await upstreamErrorMessage(res, `request failed (${res.status})`),
+    );
+  }
+  return (await res.json().catch(() => ({}))) as T;
 }

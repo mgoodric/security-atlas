@@ -1,42 +1,45 @@
 "use client";
 
-// Slice 270 — /activity client island.
+// Slice 270 — /activity client island. Since #2093 this is the one
+// audit-log page; the slice-125 /audit-log island it duplicated is gone.
 //
-// AC-1 through AC-4 + AC-9. URL-driven filter state + TanStack
-// `useInfiniteQuery` over the BFF + IntersectionObserver-driven infinite
-// scroll capped at 10 auto-loaded pages, after which a manual "Load
-// more" button takes over (mirrors slice 125 audit-log page DoS posture
-// via the shared 1000-row backend cap).
+// URL-driven filter state + TanStack `useInfiniteQuery` over the BFF +
+// IntersectionObserver-driven infinite scroll capped at 10 auto-loaded
+// pages, after which a manual "Load more" button takes over (the shared
+// 1000-row backend cap, slice 125 DoS posture).
 //
 // Filters live in the URL (`?from=...&to=...&actor=...&kind=foo,bar`)
-// so back/forward buttons and shared links restore the same view.
+// so back/forward buttons and shared links restore the same view; a
+// link saved from the old /audit-log page carries the same keys and
+// lands here through its redirect.
 //
-// Slice 270 D3: this island is a near-duplicate of slice 125's
-// `AuditLogPageClient` (`web/app/audit-log/page-client.tsx`). The
-// differences are:
+// Two views of the same rows (#2093), chosen by `?view=`:
 //
-//   - BFF URL is `/api/activity` instead of `/api/audit-log/unified`.
-//   - `router.replace` target is `/activity` instead of `/audit-log`.
-//   - The actor filter accepts the literal `me` sentinel (slice 270
-//     D5) which the BFF resolves server-side to the caller's user_id.
-//     The input box shows `me` with a friendlier `(your activity)`
-//     label so the operator does not see a UUID they did not type.
-//   - No export bar — slice 270 does not ship export (out of scope).
+//   - sentences (default): "<Person> approved exception …", grouped by
+//     day, relative time, payload behind an expander. The sentence comes
+//     from `lib/activity-sentences.ts` and uses only the row envelope.
+//   - ledger (`?view=ledger`): the raw table — kind, target, IDs.
 //
-// A follow-on slice can extract a shared `<UnifiedAuditTable>`
-// component consumed by both pages; for slice 270 the duplication is
-// intentional and bounded. When either page changes, the maintainer
-// MUST update both — surface drift is a real risk and the duplicated
-// shell carries this header as the gate.
+// `payload_json` is null on a row whose source the caller cannot read
+// (#2379). The expander then says the details are not available; it
+// never fetches them from anywhere else.
+//
+// Export (CSV / JSON / XLSX) goes through `/api/audit-log/export`, which
+// admits fewer roles than `/v1/activity/unified`; the server shell
+// passes `canExport` so the bar shows only to callers it admits.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   Table,
   TableBody,
@@ -46,6 +49,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { describeEvent, groupByDay } from "@/lib/activity-sentences";
+import {
+  type ActivityWindow,
+  defaultActivityWindow,
+  fromBoundForDay,
+  fromInputValue,
+  toBoundForDay,
+  toInputValue,
+} from "@/lib/activity-window";
+import { useHydrated } from "@/lib/use-hydrated";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import {
+  machineActorOptions,
+  type EntityKind,
+  type EntityOption,
+} from "@/lib/entity-picker";
 import {
   ACTIVITY_KINDS,
   ACTOR_ME_SENTINEL,
@@ -55,8 +74,14 @@ import {
   ActivityListResponse,
   MAX_WINDOW_DAYS,
   fetchActivity,
+  fetchActivityActors,
   renderActorLabel,
 } from "@/lib/api/activity";
+import {
+  AUDIT_LOG_EXPORT_FORMATS,
+  type AuditLogExportFormat,
+  buildAuditLogExportURL,
+} from "@/lib/api/audit-log";
 
 // AUTO_LOAD_PAGE_LIMIT — after this many auto-loaded pages, switch to
 // a manual "Load more" button so the operator must explicitly opt
@@ -64,23 +89,9 @@ import {
 // slice 125.
 const AUTO_LOAD_PAGE_LIMIT = 10;
 
-// Default window: last 7 days.
-function defaultFrom(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 7);
-  return toRFC3339Day(d);
-}
-function defaultTo(): string {
-  return toRFC3339Day(new Date());
-}
-
-function toRFC3339Day(d: Date): string {
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}T00:00:00.000Z`;
-}
-
+// htmlDateValue is the UTC day of a bound: what the date inputs show in
+// the server render and the hydrating pass, before the viewer's timezone
+// is known (#2658).
 function htmlDateValue(rfc3339: string): string {
   return rfc3339.slice(0, 10);
 }
@@ -94,13 +105,7 @@ function rangeIsValid(from: string, to: string): boolean {
   return days <= MAX_WINDOW_DAYS;
 }
 
-function formatLocal(s: string): string {
-  try {
-    return new Date(s).toLocaleString();
-  } catch {
-    return s;
-  }
-}
+type View = "sentences" | "ledger";
 
 type Filters = {
   from: string;
@@ -114,19 +119,36 @@ type Filters = {
   // links restore the same view. This is a view filter only; the
   // underlying audit ledger is unchanged.
   includeReads: boolean;
+  view: View;
 };
 
-export function ActivityPageClient() {
+export function ActivityPageClient({
+  canExport,
+  openedAt,
+}: {
+  canExport: boolean;
+  openedAt: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // #2464: the default window ends at the moment the page opened. The
+  // server shell supplies that moment, so the server render and the
+  // hydrated client agree on it (a clock read on each side would leave
+  // the server-rendered export href on a different `to` than the feed).
+  // It is fixed for the life of the page so the query key does not move
+  // on every render.
+  const [defaults] = useState(() => defaultActivityWindow(new Date(openedAt)));
   const filters = useMemo<Filters>(
-    () => parseFilters(searchParams),
-    [searchParams],
+    () => parseFilters(searchParams, defaults),
+    [searchParams, defaults],
   );
 
   const queryEnabled = rangeIsValid(filters.from, filters.to);
 
+  // The view is not part of the query: switching it re-renders the
+  // rows already loaded.
+  const { view, ...queryFilters } = filters;
   const query = useInfiniteQuery<
     ActivityListResponse,
     ActivityFetchError,
@@ -134,7 +156,7 @@ export function ActivityPageClient() {
     readonly unknown[],
     string | undefined
   >({
-    queryKey: ["activity", filters],
+    queryKey: ["activity", queryFilters],
     enabled: queryEnabled,
     initialPageParam: undefined,
     queryFn: async ({ pageParam }) => {
@@ -186,21 +208,20 @@ export function ActivityPageClient() {
       if (next.actor) params.set("actor", next.actor);
       if (next.kinds.length > 0) params.set("kind", next.kinds.join(","));
       if (next.includeReads) params.set("include_reads", "true");
+      if (next.view === "ledger") params.set("view", "ledger");
       router.replace(`/activity?${params.toString()}`);
     },
     [router],
   );
 
-  const setFrom = (from: string) => {
-    const next = {
-      ...filters,
-      from: toRFC3339Day(new Date(`${from}T00:00:00Z`)),
-    };
-    replaceWith(next);
+  // #2658: a picked day is the viewer's local day, and "To" includes it.
+  const setFrom = (day: string) => {
+    const from = fromBoundForDay(day);
+    if (from) replaceWith({ ...filters, from });
   };
-  const setTo = (to: string) => {
-    const next = { ...filters, to: toRFC3339Day(new Date(`${to}T00:00:00Z`)) };
-    replaceWith(next);
+  const setTo = (day: string) => {
+    const to = toBoundForDay(day);
+    if (to) replaceWith({ ...filters, to });
   };
   const toggleKind = (k: ActivityKind) => {
     const next = filters.kinds.includes(k)
@@ -211,11 +232,14 @@ export function ActivityPageClient() {
   const toggleIncludeReads = () => {
     replaceWith({ ...filters, includeReads: !filters.includeReads });
   };
-  const applyActor = (draft: string) => {
-    replaceWith({ ...filters, actor: draft.trim() });
+  const applyActor = (actor: string) => {
+    replaceWith({ ...filters, actor: actor.trim() });
   };
   const clearActor = () => {
     replaceWith({ ...filters, actor: "" });
+  };
+  const setView = (v: View) => {
+    replaceWith({ ...filters, view: v });
   };
 
   const error = query.error;
@@ -232,6 +256,13 @@ export function ActivityPageClient() {
         onIncludeReadsToggle={toggleIncludeReads}
         windowValid={queryEnabled}
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ViewToggle view={view} onChange={setView} />
+        {canExport ? (
+          <ExportBar filters={filters} disabled={!queryEnabled} />
+        ) : null}
+      </div>
 
       {!queryEnabled ? (
         <div
@@ -252,7 +283,11 @@ export function ActivityPageClient() {
         </div>
       ) : null}
 
-      <RowsTable rows={rows} loading={query.isLoading} />
+      {view === "ledger" ? (
+        <LedgerTable rows={rows} loading={query.isLoading} />
+      ) : (
+        <SentenceList rows={rows} loading={query.isLoading} />
+      )}
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span data-testid="activity-row-count">
@@ -280,7 +315,10 @@ export function ActivityPageClient() {
   );
 }
 
-function parseFilters(searchParams: URLSearchParams): Filters {
+function parseFilters(
+  searchParams: URLSearchParams,
+  defaults: ActivityWindow,
+): Filters {
   const fromRaw = searchParams.get("from");
   const toRaw = searchParams.get("to");
   const actor = searchParams.get("actor") ?? "";
@@ -288,10 +326,12 @@ function parseFilters(searchParams: URLSearchParams): Filters {
   // Slice 669: read-telemetry is excluded by default; only the explicit
   // `include_reads=true` opts back into the full ledger.
   const includeReads = searchParams.get("include_reads") === "true";
+  const view: View =
+    searchParams.get("view") === "ledger" ? "ledger" : "sentences";
 
   const from =
-    fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaultFrom();
-  const to = toRaw && Number.isFinite(Date.parse(toRaw)) ? toRaw : defaultTo();
+    fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaults.from;
+  const to = toRaw && Number.isFinite(Date.parse(toRaw)) ? toRaw : defaults.to;
 
   const kinds: ActivityKind[] = kindRaw
     ? kindRaw
@@ -302,12 +342,12 @@ function parseFilters(searchParams: URLSearchParams): Filters {
         )
     : [];
 
-  return { from, to, actor, kinds, includeReads };
+  return { from, to, actor, kinds, includeReads, view };
 }
 
 type FilterBarProps = {
   filters: Filters;
-  onActorApply: (draft: string) => void;
+  onActorApply: (actor: string) => void;
   onActorClear: () => void;
   onFromChange: (v: string) => void;
   onToChange: (v: string) => void;
@@ -324,7 +364,9 @@ function FilterBar({
   onToChange,
   onKindToggle,
   onIncludeReadsToggle,
+  windowValid,
 }: FilterBarProps) {
+  const hydrated = useHydrated();
   return (
     <div
       data-testid="activity-filters"
@@ -336,13 +378,17 @@ function FilterBar({
             htmlFor="activity-from"
             className="block text-xs font-medium text-muted-foreground"
           >
-            From (UTC day)
+            From
           </label>
           <Input
             id="activity-from"
             data-testid="activity-from"
             type="date"
-            value={htmlDateValue(filters.from)}
+            value={
+              hydrated
+                ? fromInputValue(filters.from)
+                : htmlDateValue(filters.from)
+            }
             onChange={(e) => onFromChange(e.target.value)}
           />
         </div>
@@ -351,13 +397,15 @@ function FilterBar({
             htmlFor="activity-to"
             className="block text-xs font-medium text-muted-foreground"
           >
-            To (UTC day)
+            To (inclusive)
           </label>
           <Input
             id="activity-to"
             data-testid="activity-to"
             type="date"
-            value={htmlDateValue(filters.to)}
+            value={
+              hydrated ? toInputValue(filters.to) : htmlDateValue(filters.to)
+            }
             onChange={(e) => onToChange(e.target.value)}
           />
         </div>
@@ -365,6 +413,12 @@ function FilterBar({
           <ActorFilterInput
             key={filters.actor}
             initial={filters.actor}
+            actorWindow={{
+              from: filters.from,
+              to: filters.to,
+              includeReads: filters.includeReads,
+            }}
+            windowValid={windowValid}
             onApply={onActorApply}
             onClear={onActorClear}
             hasCommittedValue={Boolean(filters.actor)}
@@ -396,7 +450,7 @@ function FilterBar({
                     : "border-input bg-background hover:bg-muted")
                 }
               >
-                {k}
+                {enumLabel("ActivityKind", k)}
               </button>
             );
           })}
@@ -434,34 +488,67 @@ function FilterBar({
   );
 }
 
-// ActorFilterInput owns its own draft so the parent can re-render on
-// every keystroke without forcing a refetch. Parent commits via
-// onApply(draft) when the user presses Enter or clicks Apply.
+// ActorFilterInput picks the actor by name (#2086): a person, an API key,
+// or "You". Picking one applies the filter; a pasted user or API key ID
+// is checked on entry and applied when valid.
 //
-// Slice 270 D5: the literal string `me` is a sentinel the BFF resolves
-// server-side to the caller's user_id. When the URL value is `me`, the
-// input renders the friendlier "(your activity)" label next to the
-// input so the operator does not see a UUID they did not type.
+// #2414: the machine and system actors in the window's activity are
+// listed too ("System", "OAuth client", the process or client ID as the
+// hint), from GET /api/activity/actors. A deep-linked machine actor
+// (`?actor=system`, `?actor=oauth_client:<id>`) is listed even when the
+// window holds none of its rows, so it keeps its label and survives a
+// blur. Free text for other values is not accepted.
+//
+// Slice 270 D5: "You" is the literal `me` sentinel the BFF resolves
+// server-side to the caller's user_id, so the operator never sees a UUID
+// they did not type.
+const ACTOR_KINDS: readonly EntityKind[] = ["user", "credential"];
+const ACTOR_ME_OPTION: readonly EntityOption[] = [
+  { value: ACTOR_ME_SENTINEL, label: "You", hint: "Your activity" },
+];
+
 function ActorFilterInput({
   initial,
+  actorWindow,
+  windowValid,
   onApply,
   onClear,
   hasCommittedValue,
 }: {
   initial: string;
-  onApply: (draft: string) => void;
+  actorWindow: { from: string; to: string; includeReads: boolean };
+  windowValid: boolean;
+  onApply: (actor: string) => void;
   onClear: () => void;
   hasCommittedValue: boolean;
 }) {
-  const [draft, setDraft] = useState<string>(initial);
   const isMeSentinel = initial === ACTOR_ME_SENTINEL;
+  const machineActors = useQuery({
+    queryKey: [
+      "activity-actors",
+      actorWindow.from,
+      actorWindow.to,
+      actorWindow.includeReads,
+    ],
+    enabled: windowValid,
+    queryFn: ({ signal }) => fetchActivityActors(actorWindow, signal),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const actorOptions = useMemo<readonly EntityOption[]>(
+    () => [
+      ...ACTOR_ME_OPTION,
+      ...machineActorOptions([...(machineActors.data ?? []), initial]),
+    ],
+    [machineActors.data, initial],
+  );
   return (
     <div>
       <label
         htmlFor="activity-actor"
         className="block text-xs font-medium text-muted-foreground"
       >
-        Actor (UUID, credential id, or `me`)
+        Actor
         {isMeSentinel ? (
           <span
             className="ml-2 text-foreground"
@@ -472,26 +559,17 @@ function ActorFilterInput({
         ) : null}
       </label>
       <div className="flex gap-2">
-        <Input
-          id="activity-actor"
-          data-testid="activity-actor"
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onApply(draft);
-          }}
-          placeholder="me, 00000000-0000-0000-0000-000000001111, key_..."
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-testid="activity-actor-apply"
-          onClick={() => onApply(draft)}
-        >
-          Apply
-        </Button>
+        <div className="min-w-0 flex-1">
+          <EntityPicker
+            kinds={ACTOR_KINDS}
+            id="activity-actor"
+            testId="activity-actor"
+            placeholder="Search people, API keys and system actors, or paste an ID"
+            value={initial}
+            extraOptions={actorOptions}
+            onChange={(actor) => (actor ? onApply(actor) : onClear())}
+          />
+        </div>
         {hasCommittedValue ? (
           <Button
             type="button"
@@ -508,14 +586,120 @@ function ActorFilterInput({
   );
 }
 
-function RowsTable({
-  rows,
-  loading,
+// ----- view toggle ---------------------------------------------------
+
+function ViewToggle({
+  view,
+  onChange,
 }: {
-  rows: ActivityEntry[];
-  loading: boolean;
+  view: View;
+  onChange: (v: View) => void;
 }) {
-  if (loading && rows.length === 0) {
+  const option = (v: View, label: string) => (
+    <button
+      type="button"
+      data-testid={`activity-view-${v}`}
+      aria-pressed={view === v}
+      onClick={() => onChange(v)}
+      className={
+        "rounded-full border px-3 py-1 text-xs transition-colors " +
+        (view === v
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-input bg-background hover:bg-muted")
+      }
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      data-testid="activity-view-toggle"
+      className="flex items-center gap-2"
+    >
+      {option("sentences", "Events")}
+      {option("ledger", "Raw ledger")}
+    </div>
+  );
+}
+
+// ----- export --------------------------------------------------------
+//
+// Slice 135: CSV / JSON / XLSX of the current filter set. Each format
+// is an <a download> at the BFF export URL; the filename is
+// server-authored. The export endpoint returns every row in the window
+// (it takes no include_reads filter), as it did on /audit-log.
+
+const EXPORT_FORMAT_LABELS: Record<AuditLogExportFormat, string> = {
+  csv: "CSV",
+  json: "JSON",
+  xlsx: "XLSX",
+};
+
+function ExportBar({
+  filters,
+  disabled,
+}: {
+  filters: Filters;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      data-testid="activity-export-bar"
+      className="flex flex-wrap items-center gap-2"
+    >
+      <span className="text-xs font-medium text-muted-foreground">
+        Export current filter:
+      </span>
+      {AUDIT_LOG_EXPORT_FORMATS.map((format) => {
+        if (disabled) {
+          return (
+            <Button
+              key={format}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled
+              data-testid={`activity-export-${format}`}
+            >
+              {EXPORT_FORMAT_LABELS[format]}
+            </Button>
+          );
+        }
+        const href = buildAuditLogExportURL(format, {
+          from: filters.from,
+          to: filters.to,
+          actor: filters.actor,
+          kinds: filters.kinds,
+        });
+        return (
+          <a
+            key={format}
+            href={href}
+            download
+            rel="noopener"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            data-testid={`activity-export-${format}`}
+          >
+            {EXPORT_FORMAT_LABELS[format]}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+// ----- shared row states ----------------------------------------------
+
+function EmptyOrLoading({
+  loading,
+  empty,
+}: {
+  loading: boolean;
+  empty: boolean;
+}) {
+  if (loading && empty) {
     return (
       <div
         data-testid="activity-loading"
@@ -525,15 +709,193 @@ function RowsTable({
       </div>
     );
   }
-  if (rows.length === 0) {
+  return (
+    <div
+      data-testid="activity-empty"
+      className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground"
+    >
+      No activity entries match these filters.
+    </div>
+  );
+}
+
+function rowKey(row: ActivityEntry): string {
+  return `${row.kind}-${row.row_id}`;
+}
+
+// PayloadView renders the row's payload, or says it is not available
+// when the backend withheld it (#2379: null for a source the caller
+// cannot read).
+function PayloadView({ row, id }: { row: ActivityEntry; id: string }) {
+  if (row.payload_json === null || row.payload_json === undefined) {
     return (
-      <div
-        data-testid="activity-empty"
-        className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground"
+      <p
+        id={id}
+        data-testid="activity-payload-unavailable"
+        className="text-xs text-muted-foreground"
       >
-        No activity entries match these filters.
-      </div>
+        Details not available.
+      </p>
     );
+  }
+  return (
+    <pre
+      id={id}
+      tabIndex={0}
+      aria-label="Event payload"
+      className="max-h-80 overflow-auto rounded bg-foreground/5 p-3 text-xs"
+    >
+      {safeStringify(row.payload_json)}
+    </pre>
+  );
+}
+
+function ExpandToggle({
+  open,
+  controls,
+  onToggle,
+}: {
+  open: boolean;
+  controls: string;
+  onToggle: () => void;
+}) {
+  // A real button: aria-expanded is not allowed on a bare span (axe
+  // aria-allowed-attr). A ledger row click toggles too, so the button
+  // stops its own click from toggling twice.
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      data-testid="activity-row-toggle"
+      aria-expanded={open}
+      aria-controls={open ? controls : undefined}
+      aria-label={open ? "Collapse details" : "Expand details"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      {open ? "▾" : "▸"}
+    </Button>
+  );
+}
+
+// ----- sentences -----------------------------------------------------
+
+function SentenceList({
+  rows,
+  loading,
+}: {
+  rows: ActivityEntry[];
+  loading: boolean;
+}) {
+  if (rows.length === 0) {
+    return <EmptyOrLoading loading={loading} empty />;
+  }
+  const groups = groupByDay(rows);
+  return (
+    <div data-testid="activity-sentences" className="space-y-4">
+      {groups.map((g) => (
+        <section
+          key={g.key}
+          data-testid="activity-day"
+          aria-labelledby={`activity-day-${g.key}`}
+          className="rounded-xl border bg-card"
+        >
+          <h2
+            id={`activity-day-${g.key}`}
+            data-testid="activity-day-heading"
+            className="border-b px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground"
+          >
+            {g.label}
+          </h2>
+          <ul className="divide-y">
+            {g.rows.map((row) => (
+              <SentenceRow key={rowKey(row)} row={row} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SentenceRow({ row }: { row: ActivityEntry }) {
+  const [open, setOpen] = useState(false);
+  const s = describeEvent(row);
+  const payloadId = `activity-payload-${rowKey(row)}`;
+  return (
+    <li data-testid="activity-row" data-kind={row.kind} className="px-4 py-2">
+      <div className="flex items-start gap-2">
+        <ExpandToggle
+          open={open}
+          controls={payloadId}
+          onToggle={() => setOpen((v) => !v)}
+        />
+        <p data-testid="activity-sentence" className="flex-1 text-sm">
+          <Person id={row.actor_id} className="font-medium" /> {s.phrase}
+          {s.noun ? ` ${s.noun}` : ""}
+          {s.targetId && s.person ? (
+            <>
+              {" "}
+              <Person id={s.targetId} testId="activity-sentence-target" />
+            </>
+          ) : s.targetId ? (
+            <>
+              {" "}
+              {s.href ? (
+                <Link
+                  href={s.href}
+                  className="font-mono text-xs underline underline-offset-2"
+                  data-testid="activity-sentence-target"
+                >
+                  {shortId(s.targetId)}
+                </Link>
+              ) : (
+                <span
+                  className="font-mono text-xs"
+                  title={s.targetId}
+                  data-testid="activity-sentence-target"
+                >
+                  {shortId(s.targetId)}
+                </span>
+              )}
+            </>
+          ) : null}
+          {s.suffix ? ` ${s.suffix}` : ""}
+        </p>
+        <Timestamp
+          value={row.occurred_at}
+          className="shrink-0 text-xs text-muted-foreground"
+        />
+      </div>
+      {open ? (
+        <div data-testid="activity-row-payload" className="mt-2 pl-8">
+          <PayloadView row={row} id={payloadId} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+// shortId keeps a UUID-length id readable in a sentence; the full id is
+// in the raw ledger and the tooltip.
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+// ----- raw ledger ----------------------------------------------------
+
+function LedgerTable({
+  rows,
+  loading,
+}: {
+  rows: ActivityEntry[];
+  loading: boolean;
+}) {
+  if (rows.length === 0) {
+    return <EmptyOrLoading loading={loading} empty />;
   }
   return (
     <div
@@ -543,7 +905,9 @@ function RowsTable({
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <TableHead className="w-8" />
+            <TableHead className="w-8">
+              <span className="sr-only">Details</span>
+            </TableHead>
             <TableHead>Occurred</TableHead>
             <TableHead>Actor</TableHead>
             <TableHead>Kind</TableHead>
@@ -554,7 +918,7 @@ function RowsTable({
         </TableHeader>
         <TableBody>
           {rows.map((row) => (
-            <Row key={`${row.kind}-${row.row_id}`} row={row} />
+            <LedgerRow key={rowKey(row)} row={row} />
           ))}
         </TableBody>
       </Table>
@@ -562,29 +926,25 @@ function RowsTable({
   );
 }
 
-function Row({ row }: { row: ActivityEntry }) {
+function LedgerRow({ row }: { row: ActivityEntry }) {
   const [open, setOpen] = useState(false);
-  const utcLabel = row.occurred_at;
+  const payloadId = `activity-ledger-payload-${rowKey(row)}`;
   return (
     <>
       <TableRow
-        data-testid="activity-row"
+        data-testid="activity-ledger-row"
         className="cursor-pointer hover:bg-muted/40"
         onClick={() => setOpen((v) => !v)}
       >
         <TableCell className="w-8 text-center text-muted-foreground">
-          <span
-            data-testid="activity-row-toggle"
-            aria-expanded={open}
-            aria-label={open ? "Collapse payload" : "Expand payload"}
-          >
-            {open ? "▾" : "▸"}
-          </span>
+          <ExpandToggle
+            open={open}
+            controls={payloadId}
+            onToggle={() => setOpen((v) => !v)}
+          />
         </TableCell>
         <TableCell>
-          <time dateTime={utcLabel} title={`${utcLabel} (UTC)`}>
-            {formatLocal(row.occurred_at)}
-          </time>
+          <Timestamp value={row.occurred_at} />
         </TableCell>
         <TableCell>
           <span
@@ -601,7 +961,7 @@ function Row({ row }: { row: ActivityEntry }) {
         </TableCell>
         <TableCell>
           <Badge variant="secondary" data-testid="activity-row-kind">
-            {row.kind}
+            {enumLabel("ActivityKind", row.kind)}
           </Badge>
         </TableCell>
         <TableCell>
@@ -620,9 +980,7 @@ function Row({ row }: { row: ActivityEntry }) {
         <TableRow data-testid="activity-row-payload">
           <TableCell />
           <TableCell colSpan={6}>
-            <pre className="max-h-80 overflow-auto rounded bg-foreground/5 p-3 text-xs">
-              {safeStringify(row.payload_json)}
-            </pre>
+            <PayloadView row={row} id={payloadId} />
           </TableCell>
         </TableRow>
       ) : null}

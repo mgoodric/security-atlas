@@ -27,6 +27,8 @@ const PAGE_NAMES: Record<string, string> = {
   calendar: "Calendar",
   dashboards: "Metrics", // /dashboards/metrics
   activity: "Activity",
+  approvals: "Approvals",
+  "needs-attention": "Needs attention",
   // Core five
   controls: "Controls",
   evidence: "Evidence",

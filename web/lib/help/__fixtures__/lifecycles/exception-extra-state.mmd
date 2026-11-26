@@ -1,0 +1,13 @@
+%% lifecycle: exception
+%% #2148 fixture: draws an on_hold state the backend does not have.
+stateDiagram-v2
+  [*] --> requested: request
+  requested --> approved: approve
+  requested --> denied: deny
+  approved --> active: activate
+  active --> expired: expire (system)
+  active --> revoked: revoke
+  active --> on_hold: pause
+  denied --> [*]
+  expired --> [*]
+  revoked --> [*]

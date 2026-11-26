@@ -4,10 +4,75 @@
   "variants": {
     "empty": {
       "count": 0,
-      "risks": []
+      "limit": 500,
+      "offset": 0,
+      "risks": [],
+      "total": 0
+    },
+    "lifecycle_states": {
+      "count": 2,
+      "limit": 500,
+      "offset": 0,
+      "risks": [
+        {
+          "accepter": "",
+          "category": "operational",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "external_ref": null,
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "owner_unlinked": "",
+          "owner_user_id": null,
+          "residual_score": {},
+          "severity": 0,
+          "status": "open",
+          "themes": [],
+          "title": "Intake risk not yet triaged",
+          "treatment": "untreated",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        },
+        {
+          "accepter": "",
+          "category": "operational",
+          "closure": {
+            "closed_at": "2026-05-20T00:00:00Z",
+            "closed_by": "user-2107",
+            "note": "Lease ended; site decommissioned.",
+            "reason": "not_applicable"
+          },
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "external_ref": null,
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "owner_unlinked": "",
+          "owner_user_id": null,
+          "residual_score": {},
+          "severity": 0,
+          "status": "closed",
+          "themes": [],
+          "title": "Retired data-centre lease risk",
+          "treatment": "mitigate",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        }
+      ],
+      "total": 2
     },
     "populated": {
       "count": 2,
+      "limit": 500,
+      "offset": 0,
       "risks": [
         {
           "accepted_until": "2026-12-31",
@@ -15,6 +80,7 @@
           "category": "technology",
           "created_at": "2026-05-01T00:00:00Z",
           "description": "A high-severity CVE in an internet-facing dependency.",
+          "external_ref": "R-014",
           "id": "44444444-4444-4444-8444-444444444444",
           "inherent_score": {
             "impact": 5,
@@ -22,11 +88,14 @@
             "severity": 20
           },
           "instrument_reference": "JIRA-410",
+          "level": "org",
           "linked_control_ids": [
             "11111111-1111-4111-8111-111111111111",
             "22222222-2222-4222-8222-222222222222"
           ],
           "methodology": "nist_800_30",
+          "owner_unlinked": "security-eng",
+          "owner_user_id": null,
           "residual_score": {
             "impact": 4,
             "likelihood": 2,
@@ -34,6 +103,7 @@
           },
           "review_due_at": "2026-08-01T00:00:00Z",
           "severity": 20,
+          "status": "open",
           "themes": [],
           "title": "Unpatched perimeter dependency",
           "treatment": "mitigate",
@@ -45,20 +115,85 @@
           "category": "third_party",
           "created_at": "2026-05-01T00:00:00Z",
           "description": "",
+          "external_ref": null,
           "id": "44444444-4444-4444-8444-444444444444",
           "inherent_score": {},
           "instrument_reference": "",
+          "level": "",
           "linked_control_ids": [],
           "methodology": "nist_800_30",
+          "owner_unlinked": "",
+          "owner_user_id": null,
           "residual_score": {},
           "severity": 0,
+          "status": "open",
           "themes": [],
           "title": "Vendor SOC 2 report pending renewal",
           "treatment": "mitigate",
           "treatment_owner": "",
           "updated_at": "2026-05-12T00:00:00Z"
         }
-      ]
+      ],
+      "total": 2
+    },
+    "treatment_states": {
+      "count": 2,
+      "limit": 500,
+      "offset": 0,
+      "risks": [
+        {
+          "accepter": "",
+          "category": "operational",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "external_ref": null,
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "owner_unlinked": "",
+          "owner_user_id": null,
+          "residual_score": {},
+          "severity": 0,
+          "status": "open",
+          "themes": [],
+          "title": "Intake risk not yet triaged",
+          "treatment": "untreated",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        },
+        {
+          "acceptance": {
+            "justification": "",
+            "self_approved": false
+          },
+          "acceptance_status": "proposed",
+          "accepter": "",
+          "category": "technology",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "external_ref": null,
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "owner_unlinked": "",
+          "owner_user_id": null,
+          "residual_score": {},
+          "severity": 0,
+          "status": "open",
+          "themes": [],
+          "title": "Legacy TLS endpoint, acceptance pending sign-off",
+          "treatment": "accept",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        }
+      ],
+      "total": 2
     }
   }
 }

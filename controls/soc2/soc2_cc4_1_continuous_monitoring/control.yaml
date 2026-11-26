@@ -1,17 +1,44 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc4_1_continuous_monitoring
-title: "Endpoint posture is continuously monitored via osquery / Fleet"
+title: "Endpoints reporting posture have checked in within 24 hours"
 description: |
-  The entity selects, develops, and performs ongoing and separate
-  evaluations to ascertain whether the components of internal control
-  are present and functioning (TSC CC4.1). The ongoing evaluation half
-  is satisfied automatically by the osquery / Fleet connector reporting
-  endpoint posture (disk encryption, screen lock, OS patch level) for
-  every managed device on at least a daily cadence. The evidence query
-  asserts every active employee endpoint has a posture record within the
-  last 24 hours.
+  Controls are checked, both continuously and at set intervals, to confirm
+  they exist and work (TSC CC4.1). The intended test is that every managed
+  endpoint has reported its osquery / Fleet posture within the last 24
+  hours.
 
-scf_anchor_id: MON-01
+  What runs today: a SQL query over the payloads of osquery's
+  `osquery.host_posture.v1` records, one per host per connector run. It
+  takes each host's latest in-window record, keyed by `host_uuid` and
+  ordered by the host's own `last_seen_at` (Fleet's `seen_time`), then by
+  the record's `observed_at`. A host whose latest `last_seen_at` is more
+  than 24 hours before the evaluation instant (`evaluated_at`) fails the
+  control, whatever the other hosts report. Otherwise the control passes
+  only when every host's latest `last_seen_at` is within those 24 hours,
+  and is inconclusive when any host's latest record has no readable
+  `last_seen_at`. No in-window record also leaves it inconclusive. Records
+  count for the daily window of 7 days. The connector's per-record
+  verdict, which is disk encryption plus screen lock, is not used.
+
+  Why `last_seen_at` and not `observed_at`: `observed_at` is the
+  connector's pull time, and Fleet lists offline hosts too, so a fresh
+  `observed_at` shows only that the connector ran. A record without
+  `last_seen_at` (a 1.0.0 record, or a host Fleet gave no `seen_time`)
+  does not show when the host last reported, so it is inconclusive, not a
+  pass. A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant, is treated as unreadable the
+  same way; it never errors the query, so the other hosts still decide.
+
+  Records without a `host_uuid` are left out. Records that tie on both
+  times carry the same `last_seen_at`, so they agree.
+
+  Pending: completeness against the managed-endpoint inventory. Only the
+  hosts seen in the records the control receives are checked: a managed
+  endpoint that never reported, or last reported before the 7-day window,
+  is not seen. That half waits on an endpoint inventory (#2834).
+
+scf_anchor_id: MON-02
+scf_release: test-2026.3
 control_family: MON
 implementation_type: automated
 owner_role: security-engineering
@@ -19,19 +46,48 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: every_endpoint_reported_in_24h
-    language: rego
+  - id: every_reporting_host_seen_in_24h
+    language: sql
     evidence_kind: osquery.host_posture.v1
-    description: "Every managed endpoint has a posture record observed within 24h"
+    description: "Every reporting host's latest posture record shows a check-in within 24h of the evaluation instant"
     expression: |
-      package atlas.controls.soc2.cc4_1
-
-      default allow := false
-
-      allow if {
-        every h in input.managed_endpoints {
-          some p in input.posture_records
-          p.host_uuid == h.host_uuid
-          time.parse_rfc3339_ns(p.observed_at) > (time.now_ns() - (24 * 60 * 60 * 1000000000))
-        }
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_stale) THEN 'fail'
+               WHEN bool_and(all_fresh) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT host,
+               bool_or(coalesce(seen < evaluated_at - interval '24 hours', false)) AS any_stale,
+               bool_and(coalesce(seen >= evaluated_at - interval '24 hours', false)) AS all_fresh
+        FROM (
+          SELECT payload->>'host_uuid' AS host,
+                 seen,
+                 evaluated_at,
+                 rank() OVER (
+                   PARTITION BY payload->>'host_uuid'
+                   ORDER BY seen DESC NULLS LAST, observed_at DESC
+                 ) AS recency
+          FROM (
+            SELECT payload,
+                   observed_at,
+                   evaluated_at,
+                   CASE WHEN ts <= evaluated_at + interval '1 hour' THEN ts END AS seen
+            FROM (
+              SELECT payload,
+                     observed_at,
+                     evaluated_at,
+                     CASE
+                       WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                            AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                         THEN (payload->>'last_seen_at')::timestamptz
+                     END AS ts
+              FROM evidence
+              WHERE coalesce(payload->>'host_uuid', '') <> ''
+            ) AS cast_checked
+          ) AS parsed
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY host
+      ) AS per_host

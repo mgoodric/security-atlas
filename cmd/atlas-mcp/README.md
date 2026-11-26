@@ -12,7 +12,7 @@ stabilizes.
 
 **Write tools require HITL approval.** Every write tool files a proposal
 at `state='ai_proposed'`; no audit-binding artifact is published until
-an authorized approver calls `confirm_write` (or clicks Approve in the
+a tenant admin calls `confirm_write` (or clicks Approve in the
 web UI). The schema-level CHECK constraint `mcp_wp_ai_assist_invariant`
 guarantees this contract at the database layer. See
 `docs/audit-log/173-mcp-write-tools-decisions.md` for the full design.
@@ -35,18 +35,19 @@ is a 1-tenant-per-process veneer over that surface.
 The first six shipped in slice 172; the last four widened the read surface
 to the rest of the program (see `docs-site/docs/mcp.md`).
 
-| Tool                 | Wraps endpoint                                              | Returns                                                    |
-| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
-| `list_controls`      | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)             |
-| `get_control`        | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                            |
-| `list_risks`         | `GET /v1/risks`                                             | Tenant risks; status filter forwarded as `?treatment=`     |
-| `get_risk`           | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive    |
-| `list_evidence`      | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**  |
-| `list_audit_periods` | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                  |
-| `list_policies`      | `GET /v1/policies`                                          | The policy library with acknowledgment state               |
-| `list_vendors`       | `GET /v1/vendors`                                           | The vendor register with review cadence                    |
-| `list_exceptions`    | `GET /v1/exceptions`                                        | Accepted non-compliance + compensating controls and expiry |
-| `list_action_plans`  | `GET /v1/action-plans`                                      | Forward-looking remediation commitments (OSCAL POA&M)      |
+| Tool                   | Wraps endpoint                                              | Returns                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `list_controls`        | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)                                                                           |
+| `get_control`          | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                                                                                          |
+| `list_risks`           | `GET /v1/risks`                                             | Tenant risks, roll-ups excluded; `status`→`?treatment=`, `category`→`?category=`, `include_rollups`→`?include_rollups=`  |
+| `get_risk`             | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive                                                                  |
+| `list_risk_categories` | `GET /v1/risks/categories`                                  | The organisation's own risk categories: valid `category` values for `create_risk` (slug or name) and `list_risks` (slug) |
+| `list_evidence`        | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**                                                                |
+| `list_audit_periods`   | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                                                                                |
+| `list_policies`        | `GET /v1/policies`                                          | The policy library with acknowledgment state                                                                             |
+| `list_vendors`         | `GET /v1/vendors`                                           | The vendor register with review cadence                                                                                  |
+| `list_exceptions`      | `GET /v1/exceptions`                                        | Accepted non-compliance + compensating controls and expiry                                                               |
+| `list_action_plans`    | `GET /v1/action-plans`                                      | Forward-looking remediation commitments (OSCAL POA&M)                                                                    |
 
 Defaults: every list tool returns up to 100 results; pass `limit=N`
 (max 500) to override. Asking for more than 500 returns a tool error
@@ -54,20 +55,22 @@ Defaults: every list tool returns up to 100 results; pass `limit=N`
 
 ### Write tools (slice 173 — HITL approval, Pattern A draft-then-confirm)
 
-| Tool                    | Wraps endpoint                              | Effect                                                                |
-| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
-| `create_risk`           | `POST /v1/mcp/write-proposals`              | Files a draft risk; state=`ai_proposed`                               |
-| `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)        |
-| `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                  |
-| `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                |
-| `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Approver-only: flips state to `applied`; the Applier writes canonical |
+| Tool                    | Wraps endpoint                              | Effect                                                                    |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| `create_risk`           | `POST /v1/mcp/write-proposals`              | Files a draft risk; state=`ai_proposed`                                   |
+| `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)            |
+| `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                      |
+| `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                    |
+| `link_child_risks`      | `POST /v1/mcp/write-proposals`              | Files a draft attach of existing risks under an existing parent risk      |
+| `unlink_child_risk`     | `POST /v1/mcp/write-proposals`              | Files a draft detach of one child risk from its parent                    |
+| `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Tenant-admin-only: flips state to `applied`; the Applier writes canonical |
 
 **HITL flow.** Write tools NEVER commit to the canonical tables directly.
 Each write inserts a row into `mcp_write_proposals` with `state=
 'ai_proposed', ai_assisted=true, human_approved=false, human_approver=
-NULL`. An authorized approver (the operator's `IsApprover` or `IsAdmin`
-credential) confirms via either (a) the `confirm_write` MCP tool or
-(b) the web-UI Approve button. The platform then runs the canonical
+NULL`. A tenant admin (`authz.IsTenantAdmin`, enforced at both the
+engine and the handler since #2428) confirms via either (a) the
+`confirm_write` MCP tool or (b) the web-UI Approve button. The platform then runs the canonical
 Applier inside the same transaction as the state flip; a failure rolls
 the proposal back to `ai_proposed`.
 

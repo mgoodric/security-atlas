@@ -37,18 +37,18 @@
   --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.5 0.245 27.325);
 
   /* Muted-pastel accent layer — deep same-hue tones (primary stays black).
-     As text on their own color-mix tint, measured on white:
-     pass 4.73 · info 4.72 · warning 4.71 · critical 4.77 · progress 4.73 ·
-     brand 4.72 (all :1). */
-  --pass: oklch(0.545 0.1 155);
-  --info: oklch(0.555 0.1 245);
-  --warning: oklch(0.56 0.095 75);
-  --critical: oklch(0.57 0.14 28);
-  --progress: oklch(0.565 0.1 292);
-  --brand: oklch(0.56 0.13 265);
+     As text on their own /15 tint over white (#2097):
+     pass 4.82 · info 5.00 · warning 5.12 · critical 5.31 · progress 5.23 ·
+     brand 5.14 (all :1). */
+  --pass: oklch(0.49 0.1 155);
+  --info: oklch(0.49 0.1 245);
+  --warning: oklch(0.49 0.095 75);
+  --critical: oklch(0.49 0.14 28);
+  --progress: oklch(0.49 0.1 292);
+  --brand: oklch(0.49 0.13 265);
   --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
   --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
 
@@ -104,13 +104,16 @@
   --destructive: oklch(0.704 0.191 22.216);
 
   /* Muted-pastel accent layer — dark-tuned (lighter tones on dark surfaces).
-     As text on their tint over the dark card, measured:
-     pass 7.06 · info 6.76 · warning 6.61 · critical 6.40 · progress 6.48 (:1). */
-  --pass: oklch(0.7 0.11 155);
-  --info: oklch(0.7 0.11 245);
-  --warning: oklch(0.7 0.1 75);
-  --critical: oklch(0.7 0.11 28);
-  --progress: oklch(0.7 0.11 292);
+     #2199 lifted them from L 0.7 to 0.75: as badge text on their own /24
+     tint over --card they were 4.32-4.48:1 (all but pass), under the WCAG AA
+     4.5:1 floor. Now, on the tint over --card: pass 5.20 · info 5.08 ·
+     warning 4.99 · critical 4.91 · progress 4.93 (:1); over --background
+     5.67-6.03. Guarded by lib/a11y-badge-variant-contrast.test.ts. */
+  --pass: oklch(0.75 0.11 155);
+  --info: oklch(0.75 0.11 245);
+  --warning: oklch(0.75 0.1 75);
+  --critical: oklch(0.75 0.11 28);
+  --progress: oklch(0.75 0.11 292);
   --brand: oklch(0.72 0.11 265);
   --surface-1: color-mix(in oklab, var(--brand) 8%, var(--card));
   --surface-2: color-mix(in oklab, var(--info) 7%, var(--card));

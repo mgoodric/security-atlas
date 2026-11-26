@@ -3,13 +3,13 @@ title: Information Security Policy
 version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
+scf_release: test-2026.3
 linked_control_ids:
-  - GOV-01
-  - GOV-04
-  - RSK-01
+  - GOV-02
+  - GOV-05
+  - RSK-02
 acknowledgment_required_roles:
-  - employee
-  - contractor
+  - everyone
 source_attribution: community_draft
 ---
 

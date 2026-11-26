@@ -1,214 +1,222 @@
-// Slice 042 — Playwright E2E for the audit workspace flow.
+// #2157 — Playwright for an assigned auditor's workflow.
 //
-// Runner status (post-slice-069, verified 2026-05-15 by slice 071 audit):
-// Playwright IS installed in `web/` (`@playwright/test` in devDeps;
-// `web/playwright.config.ts` present; CI runs `Frontend · Playwright
-// e2e`). The job is currently quarantined per slice 079 because the
-// five un-shimmed specs reference seed-data preconditions the
-// docker-compose bring-up does not yet establish. Slice 082
-// (`Playwright e2e seed-data harness`, status `not-ready`) is the fix;
-// when it lands, the quarantine drops and the un-commented assertions
-// below become the gate.
+// Against the real platform, no route mocks. An admin assigns the auditor
+// to a period over POST /v1/audit-periods/{id}/auditors (#2118). Signed in,
+// the auditor finds the period in the audit workspace, then works it
+// through the platform API: reads the period's population, draws a sample
+// from it, and reads the evidence the population contains. The authz
+// middleware decides each call from the audit period the route belongs to
+// (the #2157 resource-attrs hydrator), so everything outside the
+// assignment is refused: a cell the population does not select, the
+// unassigned period's population and evidence, and a tenant-wide evidence
+// list. The admin then removes the auditor, and the same reads are
+// refused.
 //
-// Run locally:
-//   cd web
-//   npx playwright install chromium     # once per machine
-//   npx playwright test e2e/audit-workspace.spec.ts
+// The fixture (fixtures/e2e/audit-workspace.sql) seeds all of it in a
+// tenant of this spec's own, so no other spec's rows change: two periods,
+// their attached populations, two scope cells, the evidence, an admin and
+// an auditor. It drops the auditor's assignments, so each run starts
+// unassigned. The admin page's assignment picker is covered by
+// period-auditors.spec.ts in the demo tenant; here the admin uses the same
+// routes directly.
 //
-// Pre-conditions the seed-data harness (slice 082) must establish
-// before the commented assertions are turned on:
-//   - PLATFORM_BASE_URL points at a running platform instance
-//   - TEST_AUDITOR_BEARER carries a credential with an auditor_assignment
-//     to a known, frozen AuditPeriod
-//   - TEST_AUDITEE_BEARER carries a non-auditor credential in the same
-//     tenant (for the P0-2 private-note assertion)
-//   - the period has at least one control with evidence in-window
+// This replaces slice 042's spec, whose assertions were all commented-out
+// pseudo-steps against seed data that never existed.
+//
+// Hard rule (P0-A9 / GitGuardian): every id is a neutral test string.
 
-import { test } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
+import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 import { seedFromFixture } from "./seed";
 
-// Per the preamble above: assertions are deliberately commented pending
-// per-spec un-comment slices (slice 082's scoping decision — see
-// docs/audit-log/082-playwright-seed-data-harness-decisions.md). The
-// test body is preserved verbatim as a reviewable contract. Slice 082
-// DOES wire the seed harness in `beforeAll` so the harness is exercised
-// end-to-end against real Postgres+MinIO+NATS in CI.
+const TENANT_ID = "00000000-0000-0000-0000-000000002157";
+const PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb2157";
+const PERIOD_NAME = "Audit workspace e2e (2157)";
+const AUDITOR_ID = "44444444-4444-4444-4444-444444442157";
+const ADMIN_ID = "44444444-4444-4444-4444-444444442158";
 
-test.describe("audit workspace", () => {
-  test.beforeAll(() => {
-    seedFromFixture("audit-workspace");
-  });
+const POPULATION = "77777777-7777-7777-7777-77777777a157";
+const UNASSIGNED_POPULATION = "77777777-7777-7777-7777-77777777b157";
+const EVIDENCE_IN_SCOPE = "66666666-6666-6666-6666-66666666a157";
+const EVIDENCE_OTHER_CELL = "66666666-6666-6666-6666-66666666b157";
+const EVIDENCE_UNASSIGNED = "66666666-6666-6666-6666-66666666c157";
 
-  test("AC-1: /audit lands the auditor in their assigned AuditPeriod", async () => {
-    // 1. Sign in with the auditor bearer.
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_AUDITOR_BEARER!);
-    //    await page.click("button[type=submit]");
-    // 2. Visit /audit.
-    //    await page.goto("/audit");
-    // 3. The AuditPeriod top-bar renders the assigned period name + window.
-    //    await expect(page.getByTestId("audit-period-bar")).toBeVisible();
-    //    await expect(page.getByTestId("audit-period-bar")).toContainText(
-    //      "SOC 2 2026 Q2",
-    //    );
-    // 4. A frozen period shows the frozen badge (invariant 10 visual cue).
-    //    await expect(page.getByTestId("period-frozen-badge")).toBeVisible();
-  });
+function atlasBaseURL(): string {
+  return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
+}
 
-  test("AC-2: left nav lists controls in scope for the period", async () => {
-    // The period-scoped control-list endpoint is a pending backend
-    // slice; v1 seeds the nav from controls the auditor adds. The spec
-    // asserts the documented empty-state, then the populated state.
-    //    await page.goto("/audit");
-    //    await expect(page.getByTestId("control-nav-empty")).toBeVisible();
-    //    await page.fill('[data-testid="add-control-input"]', KNOWN_CONTROL_ID);
-    //    await page.click('[data-testid="add-control-submit"]');
-    //    await expect(page.getByTestId("control-nav-item")).toBeVisible();
+// A JWT for a "user:<uuid>" subject in this spec's tenant, the shape a
+// /login, PKCE or device-grant session carries.
+async function mintJWT(userID: string, role: string): Promise<string> {
+  const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tenant_id: TENANT_ID,
+      user_id: `user:${userID}`,
+      roles: [role],
+      super_admin: false,
+    }),
   });
+  if (!res.ok) {
+    throw new Error(
+      `#2157: ${url} returned ${res.status}: ${await res.text()}`,
+    );
+  }
+  const parsed = (await res.json()) as { token?: string };
+  if (!parsed.token) {
+    throw new Error(`#2157: ${url} returned 200 but no token field`);
+  }
+  return parsed.token;
+}
 
-  test("AC-3: population summary + sample-pull + annotation", async () => {
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
-    //    await expect(page.getByTestId("panel-sampling")).toBeVisible();
-    // Build a population.
-    //    await page.fill('[data-testid="population-start"]', "2026-04-01");
-    //    await page.fill('[data-testid="population-end"]', "2026-06-30");
-    //    await page.click('[data-testid="population-create"]');
-    //    await expect(page.getByTestId("population-row-count")).toBeVisible();
-    // Pull a sample.
-    //    await page.fill('[data-testid="sample-n-input"]', "5");
-    //    await page.fill('[data-testid="sample-seed-input"]', "e2e-seed");
-    //    await page.click('[data-testid="sample-pull-submit"]');
-    //    await expect(page.getByTestId("sample-card")).toBeVisible();
-    // Annotate the first evidence record.
-    //    const ann = page.getByTestId("sample-annotation").first();
-    //    await ann.locator('[data-testid="annotation-result-select"]').selectOption("passed");
-    //    await ann.locator('[data-testid="annotation-notes-input"]').fill("looks good");
-    //    await ann.locator('[data-testid="annotation-submit"]').click();
-    //    await expect(ann.getByTestId("annotation-saved-result")).toContainText("passed");
-  });
+async function auditorPage(
+  browser: Browser,
+  baseURL: string | undefined,
+  bearer: string,
+): Promise<Page> {
+  const url = new URL(baseURL ?? "http://localhost:3000");
+  const context = await browser.newContext({ baseURL: url.origin });
+  await context.addCookies([
+    {
+      name: ATLAS_JWT_COOKIE,
+      value: bearer,
+      domain: url.hostname,
+      path: "/",
+      httpOnly: true,
+      secure: url.protocol === "https:",
+      sameSite: "Lax",
+    },
+  ]);
+  return context.newPage();
+}
 
-  test("AC-4: walkthrough recorder saves narrative + attachment", async () => {
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
-    //    await page.click('[data-testid="tab-walkthrough"]');
-    //    await page.fill('[data-testid="walkthrough-narrative"]', "Owner demoed the IAM policy review.");
-    //    await page.click('[data-testid="walkthrough-save"]');
-    // On an admin/grc_engineer bearer the hash shows; on a pure auditor
-    // bearer the recorder surfaces the documented 403 role-gap message.
-    //    await expect(
-    //      page.getByTestId("walkthrough-hash").or(page.getByTestId("walkthrough-error")),
-    //    ).toBeVisible();
-    // With a writer bearer, attach a file:
-    //    await page.setInputFiles('[data-testid="walkthrough-file"]', "e2e/fixtures/screencap.png");
-    //    await page.click('[data-testid="walkthrough-attach"]');
-    //    await expect(page.getByTestId("walkthrough-attachment-count")).toBeVisible();
+// One platform call; returns the status and parsed body.
+async function call(
+  bearer: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const res = await fetch(`${atlasBaseURL()}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // Non-JSON body: the status is what the spec asserts.
+  }
+  return { status: res.status, json };
+}
 
-  test("AC-5 + P0-2: comment thread distinguishes auditor vs auditee; private notes auditor-only", async () => {
-    // As the auditor: post a shared comment and a private (auditor_only) one.
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
-    //    await page.click('[data-testid="tab-comments"]');
-    //    await page.fill('[data-testid="comment-body"]', "Please attach the Q2 access review.");
-    //    await page.selectOption('[data-testid="comment-visibility"]', "shared");
-    //    await page.click('[data-testid="comment-submit"]');
-    //    await expect(page.getByTestId("comment-shared-badge")).toBeVisible();
-    //    await page.fill('[data-testid="comment-body"]', "Private: control owner was vague on rotation.");
-    //    await page.selectOption('[data-testid="comment-visibility"]', "auditor_only");
-    //    await page.click('[data-testid="comment-submit"]');
-    //    await expect(page.getByTestId("comment-private-badge")).toBeVisible();
-    // P0-2: sign in as the AUDITEE and confirm the private note is ABSENT.
-    // The platform filters auditor_only notes server-side; the UI never
-    // client-side-filters — so the private note simply never arrives.
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_AUDITEE_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);  // (auditee path TBD)
-    //    await page.click('[data-testid="tab-comments"]');
-    //    await expect(page.getByTestId("comment-thread")).toContainText("Please attach the Q2 access review.");
-    //    await expect(page.getByTestId("comment-thread")).not.toContainText("control owner was vague");
-  });
+// The reads that follow the assignment: path -> status while assigned.
+const READS: Array<[string, number]> = [
+  [`/v1/populations/${POPULATION}`, 200],
+  [`/v1/populations/${UNASSIGNED_POPULATION}`, 403],
+  [`/v1/evidence/${EVIDENCE_IN_SCOPE}`, 200],
+  [`/v1/evidence/${EVIDENCE_OTHER_CELL}`, 403],
+  [`/v1/evidence/${EVIDENCE_UNASSIGNED}`, 403],
+  ["/v1/evidence", 403],
+];
 
-  test("AC-6: sign-out clears session; re-sign-in resumes to assigned period", async () => {
-    //    await page.goto("/audit");
-    //    await expect(page.getByTestId("audit-period-bar")).toBeVisible();
-    //    await page.click("text=Sign out");
-    //    await page.waitForURL(/\/login/);
-    // Visiting /audit while signed out redirects back to /login.
-    //    await page.goto("/audit");
-    //    await page.waitForURL(/\/login\?from=%2Faudit/);
-    // Re-sign-in returns to /audit with the same assigned period.
-    //    await page.fill('input[name="token"]', process.env.TEST_AUDITOR_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.goto("/audit");
-    //    await expect(page.getByTestId("audit-period-bar")).toContainText("SOC 2 2026 Q2");
-  });
+test.describe.configure({ mode: "serial" });
 
-  test("AC-7 + P0-3: tab between controls without losing in-progress annotations", async () => {
-    // Open control A, draw a sample, start (do NOT save) an annotation.
-    //    await page.goto(`/audit/${CONTROL_A}`);
-    //    ... build population, pull sample ...
-    //    const annA = page.getByTestId("sample-annotation").first();
-    //    await annA.locator('[data-testid="annotation-result-select"]').selectOption("failed");
-    //    await annA.locator('[data-testid="annotation-notes-input"]').fill("WIP: missing approver");
-    //    await expect(annA.getByTestId("annotation-draft-indicator")).toBeVisible();
-    // Switch to the Walkthrough tab and back — the draft must survive
-    // (in-control tab switch: panels toggle via `hidden`, never unmount).
-    //    await page.click('[data-testid="tab-walkthrough"]');
-    //    await page.click('[data-testid="tab-sampling"]');
-    //    await expect(annA.locator('[data-testid="annotation-notes-input"]')).toHaveValue("WIP: missing approver");
-    // Navigate to control B and back to control A — the draft STILL
-    // survives (cross-control: AnnotationDraftProvider lives in the
-    // AuditShell, which Next keeps mounted across the sibling route).
-    //    await page.click('[data-testid="add-control-input"]'); // add control B
-    //    await page.fill('[data-testid="add-control-input"]', CONTROL_B);
-    //    await page.click('[data-testid="add-control-submit"]');
-    //    await page.goto(`/audit/${CONTROL_B}`);
-    //    await page.goto(`/audit/${CONTROL_A}`);
-    //    ... re-open the same sample ...
-    //    await expect(page.getByTestId("annotation-notes-input").first()).toHaveValue("WIP: missing approver");
-  });
+let auditorBearer = "";
+let adminBearer = "";
 
-  test("slice 749: frozen period shows the period-scoped evidence summary, labeled + non-binding", async () => {
-    // Pre-condition (slice 082 harness): the auditor's assigned period is
-    // FROZEN and has at least one in-window evidence record for the opened
-    // control, so the period-scoped summary card renders. An OPEN period must
-    // NOT render the card (the backend 409s — P0-749-1: never mix live + frozen).
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
-    // The card renders above the activity tabs.
-    //    await expect(page.getByTestId("period-evidence-summary-section")).toBeVisible();
-    // AC-4: the load-bearing period-scoped + frozen-as-of label is present, so the
-    // auditor can never mistake this for live evidence.
-    //    await expect(page.getByTestId("period-evidence-summary-frozen-label"))
-    //      .toContainText("Period-scoped");
-    //    await expect(page.getByTestId("period-evidence-summary-frozen-label"))
-    //      .toContainText("frozen as of");
-    // AC-4 / AC-6: the non-binding disclosure names the model + the not-an-audit-
-    // artifact notice (rendered when the local-Ollama summary is available).
-    //    await expect(page.getByTestId("period-evidence-summary-disclosure"))
-    //      .toContainText("not an audit artifact");
-    // AC-4 / P0-502-3: there is NO approve/publish/export affordance anywhere in
-    // the card — a comprehension aid OVER the frozen sample, never an artifact.
-    //    const card = page.getByTestId("period-evidence-summary-section");
-    //    await expect(card.getByRole("button", { name: /approve|publish|export/i }))
-    //      .toHaveCount(0);
-    // AC-7: when generation is unavailable the deterministic frozen-evidence bound
-    // still renders (graceful degradation).
-    //    await expect(page.getByTestId("period-evidence-summary-bound")).toBeVisible();
-  });
+test.beforeAll(async () => {
+  seedFromFixture("audit-workspace");
+  auditorBearer = await mintJWT(AUDITOR_ID, "auditor");
+  adminBearer = await mintJWT(ADMIN_ID, "admin");
+});
 
-  test("P0-1: workspace never fetches data outside the assigned period", async () => {
-    // Static guarantee, asserted by inspection + network log:
-    //   - the page resolves the period ONLY via /v1/me/audit-period
-    //   - no URL accepts a period id; /audit/[controlId] takes a control
-    //     id only
-    //   - every BFF route forwards the caller's bearer; the platform's
-    //     RLS + auditor_assignments scope the response
-    // The network-log assertion: no request to /v1/audit-periods/{otherId}
-    // or /v1/controls/:id/state (the live path) is ever made.
-    //    const requests: string[] = [];
-    //    page.on("request", (r) => requests.push(r.url()));
-    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
-    //    ... exercise the workspace ...
-    //    expect(requests.some((u) => u.includes("/v1/controls/") && u.endsWith("/state"))).toBe(false);
+test("an assigned auditor works the period's population and evidence, and nothing else", async ({
+  browser,
+  baseURL,
+}) => {
+  // Unassigned, every period-scoped read is refused.
+  for (const [path] of READS) {
+    const { status } = await call(auditorBearer, "GET", path);
+    expect(status, `unassigned GET ${path}`).toBe(403);
+  }
+
+  // The admin assigns the auditor to the period.
+  const assigned = await call(
+    adminBearer,
+    "POST",
+    `/v1/audit-periods/${PERIOD_ID}/auditors`,
+    { user_id: AUDITOR_ID },
+  );
+  expect(assigned.status, "admin assigns the auditor").toBeLessThan(300);
+
+  // Signed in, the auditor's workspace opens on the period.
+  const auditor = await auditorPage(browser, baseURL, auditorBearer);
+  await auditor.goto("/audit");
+  await expect(auditor.getByTestId("audit-period-bar")).toContainText(
+    PERIOD_NAME,
+  );
+  // #2592: the workspace has no PageShell; the period bar carries the ?.
+  const help = auditor
+    .getByTestId("audit-period-bar")
+    .getByTestId("help-button");
+  await expect(help).toHaveAccessibleName("How this works: Audit workspace");
+  await clickHelp(help);
+  await expect(auditor.getByTestId("help-panel")).toBeVisible();
+  await auditor.keyboard.press("Escape");
+  await auditor.context().close();
+
+  // The period's reads, and only those.
+  for (const [path, want] of READS) {
+    const { status } = await call(auditorBearer, "GET", path);
+    expect(status, `assigned GET ${path}`).toBe(want);
+  }
+
+  // A sample drawn from the period's population holds only the in-scope
+  // record; the unassigned period's population cannot be drawn from.
+  const drawn = await call(auditorBearer, "POST", "/v1/samples", {
+    population_id: POPULATION,
+    n: 1,
+    seed: "e2e-2157",
   });
+  expect(drawn.status, "draw in the assigned period").toBe(201);
+  const sample = drawn.json.sample as {
+    id: string;
+    evidence_record_ids: string[];
+  };
+  expect(sample.evidence_record_ids).toEqual([EVIDENCE_IN_SCOPE]);
+  const read = await call(auditorBearer, "GET", `/v1/samples/${sample.id}`);
+  expect(read.status, "read own sample").toBe(200);
+  const refused = await call(auditorBearer, "POST", "/v1/samples", {
+    population_id: UNASSIGNED_POPULATION,
+    n: 1,
+    seed: "e2e-2157",
+  });
+  expect(refused.status, "draw in the unassigned period").toBe(403);
+
+  // Removed, the auditor loses the period's reads on the next request.
+  const removed = await call(
+    adminBearer,
+    "DELETE",
+    `/v1/audit-periods/${PERIOD_ID}/auditors/${AUDITOR_ID}`,
+  );
+  expect(removed.status, "admin removes the auditor").toBeLessThan(300);
+  for (const path of [
+    `/v1/populations/${POPULATION}`,
+    `/v1/evidence/${EVIDENCE_IN_SCOPE}`,
+    `/v1/samples/${sample.id}`,
+  ]) {
+    const { status } = await call(auditorBearer, "GET", path);
+    expect(status, `removed GET ${path}`).toBe(403);
+  }
 });

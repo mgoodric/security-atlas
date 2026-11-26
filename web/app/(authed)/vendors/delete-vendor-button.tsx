@@ -56,7 +56,7 @@ export function DeleteVendorButton({ vendorId, vendorName, onDeleted }: Props) {
     <>
       <Button
         type="button"
-        variant="destructive"
+        variant="outline"
         onClick={() => setOpen(true)}
         data-testid="vendor-delete-trigger"
       >

@@ -20,8 +20,9 @@
 //                           // upstreams may emit undefined / non-array
 //   }
 //
-// Admit (return true) when EITHER:
+// Admit (return true) when ANY of:
 //   * `is_admin === true`                                  — slice-060/130 cred flag
+//   * `is_tenant_admin === true`                           — #2503 tenant admin
 //   * `roles` contains any of the canonical admin variants — `admin`,
 //                                                            `super_admin`,
 //                                                            `tenant_admin`
@@ -34,13 +35,12 @@
 //   * `roles` contains only non-admin strings (viewer, control_owner,
 //     grc_engineer, auditor, etc.)
 //
-// Why the three admin variants? The slice-035 OPA role grant table +
-// slice-051 + slice-164 stack defines three role grants that map to
-// the platform's admin scope. `admin` is the canonical role in the
-// current single-tenant deployment; `tenant_admin` is the v2 SaaS
-// shape; `super_admin` is the platform-operator role. The spec's AC-2
-// names all three explicitly. Adding a fourth variant requires a new
-// slice — do NOT widen this list locally.
+// Why only `super_admin` in the role list? The /admin layout admits on
+// `is_admin` (super-admin) or `is_tenant_admin` (#2503: a tenant admin by
+// its live roles, for the tenant-scoped pages). Both are server-computed
+// flags on /v1/me; a role string here would admit on the session's role
+// claim instead. Do NOT widen this list locally; a change to who /admin
+// is for is a decision.
 //
 // Located in `web/lib/` rather than `web/components/shell/` so the
 // existing vitest config (`web/vitest.config.ts` include pattern
@@ -49,11 +49,12 @@
 // `canReachAuditLog` predicate exactly.
 
 // ADMIN_NAV_ROLES — the canonical set of role strings that grant the
-// sidebar's "Admin" entry. MUST match the platform's user_roles table
-// values for any role that maps to admin scope. A divergence between
-// this constant and the platform's admin-role set is a silent UI gap
-// (chrome hides an entry the user actually has access to).
-const ADMIN_NAV_ROLES = ["admin", "super_admin", "tenant_admin"] as const;
+// sidebar's "Admin" entry. MUST match who the /admin layout gate admits.
+// #2216 (Matt, 2026-11-14) kept the role list to super-admin; #2503
+// (Matt, 2026-11-17) opens the section to tenant admins through
+// `is_tenant_admin`, not through a role string. See
+// docs/audit-log/2503-tenant-admin-pages-decisions.md.
+const ADMIN_NAV_ROLES = ["super_admin"] as const;
 type AdminNavRole = (typeof ADMIN_NAV_ROLES)[number];
 
 /**
@@ -65,9 +66,10 @@ type AdminNavRole = (typeof ADMIN_NAV_ROLES)[number];
  */
 export function shouldShowAdminEntry(body: {
   is_admin?: unknown;
+  is_tenant_admin?: unknown;
   roles?: unknown;
 }): boolean {
-  if (body.is_admin === true) {
+  if (body.is_admin === true || body.is_tenant_admin === true) {
     return true;
   }
   if (!Array.isArray(body.roles)) {

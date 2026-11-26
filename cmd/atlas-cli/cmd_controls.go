@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -58,6 +59,9 @@ func acquireControlsBearer(ctx context.Context) (string, error) {
 		ClientID:     controlsAuth.clientID,
 		ClientSecret: controlsAuth.clientSecret,
 		IssuerURL:    controlsAuth.issuer,
+		// #2257: the client secret goes to the issuer; cmdhttp refuses a
+		// non-loopback http:// issuer before it is sent.
+		HTTPClient: cmdhttp.Client(oauth.DefaultHTTPTimeout),
 	})
 	if err != nil {
 		return "", fmt.Errorf("oauth client: %w", err)
@@ -125,11 +129,12 @@ func resolveControlsAuth() error {
 func newControlsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "controls",
-		Short: "control-as-code bundle authoring (validate / upload)",
+		Short: "control-as-code bundle authoring (validate / upload) and control sheet import",
 	}
 	cmd.AddCommand(newControlsValidateCmd())
 	cmd.AddCommand(newControlsUploadCmd())
 	cmd.AddCommand(newControlsTestCmd())
+	cmd.AddCommand(newControlsImportCmd())
 	return cmd
 }
 
@@ -207,6 +212,9 @@ func renderTestReportText(out io.Writer, rep *bundletest.Report) {
 			_, _ = fmt.Fprintf(out, "  FAIL  %s (expected=%s actual=%s)\n", c.Name, c.ExpectedState, c.ActualState)
 		}
 	}
+	for _, w := range rep.Warnings {
+		_, _ = fmt.Fprintf(out, "  WARN  %s\n", w)
+	}
 	_, _ = fmt.Fprintf(out, "%d passed, %d failed, %d errored of %d\n",
 		rep.Passed, rep.Failed, rep.Errored, len(rep.Cases))
 }
@@ -237,32 +245,140 @@ func renderGateRejection(body []byte) (string, bool) {
 }
 
 func newControlsValidateCmd() *cobra.Command {
+	var catalogs []string
 	cmd := &cobra.Command{
 		Use:   "validate <path>",
 		Short: "validate a control bundle locally (no network call)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			path := args[0]
-			bundle, err := loadBundleFromPath(path)
+		Long: "Parse and validate a control bundle locally. Reports the SCF release the bundle " +
+			"declares (scf_release). With --scf-catalog (repeatable; the same JSON catalogs " +
+			"`catalog import-scf` loads), also flags a scf_anchor_id whose meaning changed in " +
+			"a release later than the declared one: renamed, split, reused for another control, " +
+			"renumbered or withdrawn. Flags are warnings; they do not fail validation. " +
+			"A scf_anchor_id code with no scf_release does fail it, as upload refuses it; " +
+			"every such bundle is listed in one run. " +
+			"A directory with no control.yaml of its own validates every bundle directory " +
+			"directly under it, as `controls import export` writes them.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			paths, err := bundlePathsUnder(args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Printf("OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
-				bundle.Manifest.BundleID,
-				bundle.Manifest.Title,
-				bundle.Manifest.ImplementationType,
-				bundle.ManifestHashHex,
-			)
-			if len(bundle.Manifest.EvidenceQueries) > 0 {
-				fmt.Printf("    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
+			var noRelease []string
+			for _, p := range paths {
+				missing, err := validateBundle(out, p, catalogs)
+				if err != nil {
+					if len(paths) > 1 {
+						return fmt.Errorf("%s: %w", p, err)
+					}
+					return err
+				}
+				if missing {
+					noRelease = append(noRelease, p)
+				}
 			}
-			if err := bundle.ValidateApplicabilityExpr(); err != nil {
-				return err
-			}
-			return nil
+			return missingSCFReleaseError(noRelease)
 		},
 	}
+	cmd.Flags().StringArrayVar(&catalogs, "scf-catalog", nil,
+		"SCF catalog JSON (repeatable); flags scf_anchor_id codes whose meaning changed in a release later than the bundle's scf_release")
 	return cmd
+}
+
+// missingSCFReleaseError is the validate failure naming every bundle whose
+// scf_anchor_id code has no scf_release (#1774), or nil for none.
+func missingSCFReleaseError(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d bundle(s) name scf_anchor_id as an SCF code but declare no scf_release, which upload refuses: %s; add `scf_release: <release>` to each control.yaml, naming the SCF release its code is from (e.g. `scf_release: test-2026.3`)",
+		len(paths), strings.Join(paths, ", "))
+}
+
+// validateBundle validates one bundle and prints its report. missing reports
+// a scf_anchor_id code with no scf_release (#1774); the caller collects
+// those across a directory rather than stopping at the first.
+func validateBundle(out io.Writer, path string, catalogs []string) (missing bool, err error) {
+	bundle, err := loadBundleFromPath(path)
+	if err != nil {
+		return false, err
+	}
+	_, _ = fmt.Fprintf(out, "OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
+		bundle.Manifest.BundleID,
+		bundle.Manifest.Title,
+		bundle.Manifest.ImplementationType,
+		bundle.ManifestHashHex,
+	)
+	if len(bundle.Manifest.EvidenceQueries) > 0 {
+		_, _ = fmt.Fprintf(out, "    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
+	}
+	for _, w := range bundle.Manifest.UnkindedQueryWarnings() {
+		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
+	}
+	fixtureWarnings, err := kindlessFixtureWarnings(path, bundle)
+	if err != nil {
+		return false, err
+	}
+	for _, w := range fixtureWarnings {
+		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
+	}
+	if err := bundle.ValidateApplicabilityExpr(); err != nil {
+		return false, err
+	}
+	return bundle.Manifest.MissingSCFRelease(), reportSCFRelease(out, &bundle.Manifest, catalogs)
+}
+
+// kindlessFixtureWarnings loads the bundle's test cases (tests/ beside a
+// directory's control.yaml, or the tarball's tests/*.yaml) and returns
+// bundletest.KindlessRecordWarnings for them (#2882).
+func kindlessFixtureWarnings(path string, bundle *control.Bundle) ([]string, error) {
+	var cases []bundletest.TestCase
+	var err error
+	if info, serr := os.Stat(path); serr == nil && info.IsDir() {
+		cases, err = bundletest.LoadTestCases(path)
+	} else {
+		cases, err = bundletest.LoadTestCasesFromFiles(bundle.TestFiles)
+	}
+	if err != nil {
+		return nil, err
+	}
+	qs := make([]bundletest.ManifestQuery, 0, len(bundle.Manifest.EvidenceQueries))
+	for _, q := range bundle.Manifest.EvidenceQueries {
+		qs = append(qs, bundletest.ManifestQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
+	}
+	return bundletest.KindlessRecordWarnings(bundletest.QueriesFromManifest(qs), cases), nil
+}
+
+// bundlePathsUnder returns path itself unless it is a directory without a
+// control.yaml; then it returns each directory directly under it that has
+// one, in name order (#1784), and refuses a directory with none.
+func bundlePathsUnder(path string) ([]string, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return []string{path}, nil
+	}
+	if _, err := os.Stat(filepath.Join(path, "control.yaml")); err == nil {
+		return []string{path}, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(path, e.Name())
+		if _, err := os.Stat(filepath.Join(p, "control.yaml")); err == nil {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s has no control.yaml, and no bundle directory under it has one", path)
+	}
+	return out, nil
 }
 
 func newControlsUploadCmd() *cobra.Command {
@@ -359,8 +475,8 @@ func uploadBundleHTTP(path string) error {
 	}
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+bearer)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	// #2257: cmdhttp refuses plain http:// to a non-loopback endpoint.
+	resp, err := cmdhttp.Client(30 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
@@ -383,6 +499,14 @@ func uploadBundleHTTP(path string) error {
 		fmt.Println(pretty.String())
 	} else {
 		fmt.Println(string(rspBody))
+	}
+	// Issue #1738: surface the no-framework-credit anchor warning on stderr so
+	// it is not lost in the JSON.
+	var warn struct {
+		AnchorWarning string `json:"anchor_warning"`
+	}
+	if json.Unmarshal(rspBody, &warn) == nil && warn.AnchorWarning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warn.AnchorWarning)
 	}
 	return nil
 }

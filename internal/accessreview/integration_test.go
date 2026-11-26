@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
 func TestCampaignFlowEvidenceReminderAndRLS(t *testing.T) {
@@ -23,6 +25,7 @@ func TestCampaignFlowEvidenceReminderAndRLS(t *testing.T) {
 		"access_review_items",
 		"access_review_reviewer_assignments",
 		"access_review_campaigns",
+		"evidence_audit_log",
 		"evidence_records",
 		"scim_group_members",
 		"scim_groups",
@@ -33,6 +36,7 @@ func TestCampaignFlowEvidenceReminderAndRLS(t *testing.T) {
 		"access_review_items",
 		"access_review_reviewer_assignments",
 		"access_review_campaigns",
+		"evidence_audit_log",
 		"evidence_records",
 		"scim_group_members",
 		"scim_groups",
@@ -46,7 +50,7 @@ func TestCampaignFlowEvidenceReminderAndRLS(t *testing.T) {
 	seedUser(t, admin, tenantB, "mallory@example.test")
 
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	store := NewStore(app).WithClock(func() time.Time { return now })
+	store := newTestStore(t, admin, app, now, now)
 	ctxA := dbtest.WithTenantCtx(t, tenantA)
 
 	campaign, items, err := store.CreateCampaign(ctxA, CreateInput{
@@ -226,5 +230,127 @@ func assertReminder(t *testing.T, pool *pgxpool.Pool, tenant, reviewer string, c
 	}
 	if count != 1 {
 		t.Fatalf("reminder count = %d, want 1", count)
+	}
+}
+
+// newTestStore builds the production wiring: an access-review store
+// writing completion evidence through an ingest.Service over the app
+// role, validated by the DB-backed schema registry seeded with the
+// bundled platform schemas. storeNow is the store's clock (the evidence
+// observed_at); ingestNow is the ingest stage's received_at clock.
+func newTestStore(t *testing.T, admin, app *pgxpool.Pool, storeNow, ingestNow time.Time) *Store {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(admin)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	svc := ingest.New(app, reg).WithClock(func() time.Time { return ingestNow })
+	return NewStore(app).WithClock(func() time.Time { return storeNow }).WithIngest(svc)
+}
+
+// #1830: completion evidence goes through ingest.Service.ProcessInTx. It
+// keeps the quarterly freshness and 400-day valid_until the raw insert
+// set, and its acceptance is audited. A completion whose observed_at is
+// outside the skew window is refused with ErrObservedAtSkew, the campaign
+// stays active, no ledger row lands, and the refusal is audited.
+func TestCompleteEvidenceThroughIngest(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := dbtest.SeedTenant(t, admin,
+		"notifications",
+		"access_review_items",
+		"access_review_reviewer_assignments",
+		"access_review_campaigns",
+		"evidence_audit_log",
+		"evidence_records",
+		"users",
+	)
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	attestAll := func(store *Store, name string) uuid.UUID {
+		t.Helper()
+		campaign, items, err := store.CreateCampaign(ctx, CreateInput{
+			Name:      name,
+			Source:    SourceManualCSV,
+			DueAt:     now.Add(24 * time.Hour),
+			Reviewers: []string{"reviewer-a"},
+			CreatedBy: "owner",
+			ManualCSV: strings.NewReader("system,entitlement,user_id,email\ngithub,admin,u1,u1@example.test\n"),
+		})
+		if err != nil {
+			t.Fatalf("CreateCampaign: %v", err)
+		}
+		for _, item := range items {
+			if _, err := store.Attest(ctx, AttestInput{ItemID: item.ID, ReviewerID: item.ReviewerID, Decision: DecisionKeep, Reason: "still required"}); err != nil {
+				t.Fatalf("Attest: %v", err)
+			}
+		}
+		return campaign.ID
+	}
+	decisionFor := func(campaignID uuid.UUID) (string, string) {
+		t.Helper()
+		var decision, credential string
+		if err := admin.QueryRow(context.Background(), `
+			SELECT decision, credential_id FROM evidence_audit_log
+			WHERE tenant_id = $1 AND idempotency_key = $2
+		`, tenant, "access-review:"+campaignID.String()+":completion").Scan(&decision, &credential); err != nil {
+			t.Fatalf("fetch audit row: %v", err)
+		}
+		return decision, credential
+	}
+
+	// Accepted: evidence keeps its freshness window and is audited.
+	store := newTestStore(t, admin, app, now, now)
+	okID := attestAll(store, "accepted campaign")
+	rollup, err := store.Complete(ctx, okID)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	var freshness string
+	var validUntil time.Time
+	if err := admin.QueryRow(context.Background(), `
+		SELECT freshness_class::text, valid_until FROM evidence_records
+		WHERE tenant_id = $1 AND id = $2
+	`, tenant, *rollup.EvidenceRecordID).Scan(&freshness, &validUntil); err != nil {
+		t.Fatalf("fetch evidence: %v", err)
+	}
+	if freshness != "quarterly" || !validUntil.Equal(now.Add(400*24*time.Hour)) {
+		t.Fatalf("freshness/valid_until = %s/%s, want quarterly/%s", freshness, validUntil, now.Add(400*24*time.Hour))
+	}
+	if d, c := decisionFor(okID); d != "accepted" || c != EvidenceCredentialID {
+		t.Fatalf("audit row = %s/%s, want accepted/%s", d, c, EvidenceCredentialID)
+	}
+
+	// Refused: the store's clock is two days behind the ingest clock, so
+	// the completion evidence is backdated past the skew window.
+	backdated := newTestStore(t, admin, app, now.Add(-ingest.MaxObservedAtSkew-time.Hour), now)
+	badID := attestAll(backdated, "backdated campaign")
+	if _, err := backdated.Complete(ctx, badID); !errors.Is(err, ingest.ErrObservedAtSkew) {
+		t.Fatalf("backdated Complete: got %v, want ErrObservedAtSkew", err)
+	}
+	var status string
+	var evidenceID *uuid.UUID
+	if err := admin.QueryRow(context.Background(), `
+		SELECT status, evidence_record_id FROM access_review_campaigns
+		WHERE tenant_id = $1 AND id = $2
+	`, tenant, badID).Scan(&status, &evidenceID); err != nil {
+		t.Fatalf("fetch campaign: %v", err)
+	}
+	if status != StatusActive || evidenceID != nil {
+		t.Fatalf("campaign after refusal = %s/%v, want active/nil", status, evidenceID)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count evidence: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("evidence rows = %d, want 1 (the accepted campaign only)", n)
+	}
+	if d, _ := decisionFor(badID); d != "rejected_observed_at_skew" {
+		t.Fatalf("audit decision = %s, want rejected_observed_at_skew", d)
 	}
 }

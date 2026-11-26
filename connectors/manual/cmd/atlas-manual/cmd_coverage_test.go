@@ -682,7 +682,7 @@ func TestDoLocal_FailsOnMissingFile(t *testing.T) {
 	warn := newTempWarn(t)
 	err := doLocal(context.Background(), localFlags{
 		file:          filepath.Join(t.TempDir(), "missing.csv"),
-		controlID:     "scf:GOV-04",
+		controlID:     "scf:GOV-05",
 		scope:         []string{"environment=test"},
 		maxRows:       100,
 		maxFieldBytes: 1024,
@@ -714,7 +714,7 @@ func TestDoLocal_FailsOnPushUnreachable(t *testing.T) {
 	warn := newTempWarn(t)
 	err := doLocal(context.Background(), localFlags{
 		file:          csvPath,
-		controlID:     "scf:GOV-04",
+		controlID:     "scf:GOV-05",
 		scope:         []string{"environment=test"},
 		maxRows:       100,
 		maxFieldBytes: 1024,
@@ -743,7 +743,7 @@ func TestDoLocal_FailsOnBadScope(t *testing.T) {
 	warn := newTempWarn(t)
 	err := doLocal(context.Background(), localFlags{
 		file:          csvPath,
-		controlID:     "scf:GOV-04",
+		controlID:     "scf:GOV-05",
 		scope:         []string{"no-equals-sign"},
 		maxRows:       100,
 		maxFieldBytes: 1024,
@@ -773,7 +773,7 @@ func TestDoS3_FailsOnListUnreachable(t *testing.T) {
 		bucket:    "test-bucket",
 		prefix:    "audits/",
 		region:    "us-east-1",
-		controlID: "scf:GOV-04",
+		controlID: "scf:GOV-05",
 		scope:     []string{"environment=prod"},
 	})
 	if err == nil {
@@ -820,7 +820,7 @@ func TestDoS3_EmptyListSucceeds(t *testing.T) {
 		bucket:    "test-bucket",
 		prefix:    "audits/",
 		region:    "us-east-1",
-		controlID: "scf:GOV-04",
+		controlID: "scf:GOV-05",
 		scope:     []string{"environment=prod"},
 	})
 	if err != nil {
@@ -859,7 +859,7 @@ func TestDoS3_FailsOnBadScope(t *testing.T) {
 		bucket:    "test-bucket",
 		prefix:    "audits/",
 		region:    "us-east-1",
-		controlID: "scf:GOV-04",
+		controlID: "scf:GOV-05",
 		scope:     []string{"no-equals-sign"},
 	})
 	if err == nil {
@@ -908,7 +908,7 @@ func TestDoS3_FailsOnPushUnreachable(t *testing.T) {
 		bucket:    "test-bucket",
 		prefix:    "audits/",
 		region:    "us-east-1",
-		controlID: "scf:GOV-04",
+		controlID: "scf:GOV-05",
 		scope:     []string{"environment=prod"},
 	})
 	if err == nil {
@@ -934,7 +934,7 @@ func TestDoSFTP_FailsOnMissingKeyFile(t *testing.T) {
 		pathGlob:    "/inbox/*.pdf",
 		keyFile:     filepath.Join(t.TempDir(), "no-such-key"),
 		knownHosts:  filepath.Join(t.TempDir(), "no-such-known-hosts"),
-		controlID:   "scf:GOV-04",
+		controlID:   "scf:GOV-05",
 		scope:       []string{"environment=prod"},
 		dialTimeout: time.Second,
 	})
@@ -967,7 +967,7 @@ func TestDoSFTP_FailsOnMissingKnownHosts(t *testing.T) {
 		pathGlob:    "/inbox/*.pdf",
 		keyFile:     keyPath,
 		knownHosts:  filepath.Join(dir, "no-such-known-hosts"),
-		controlID:   "scf:GOV-04",
+		controlID:   "scf:GOV-05",
 		scope:       []string{"environment=prod"},
 		dialTimeout: time.Second,
 	})
@@ -988,18 +988,18 @@ func TestBuildLocalRecord_HappyPath(t *testing.T) {
 	}
 	scope := []*evidencev1.ScopeDimension{{Key: "environment", Values: []string{"prod"}}}
 	observed := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
-	rec, err := buildLocalRecord(row, "/inbox/rows.csv", "rows.csv", "scf:GOV-04", scope, observed)
+	rec, err := buildLocalRecord(row, "/inbox/rows.csv", "rows.csv", "scf:GOV-05", scope, observed)
 	if err != nil {
 		t.Fatalf("buildLocalRecord: %v", err)
 	}
 	if rec.GetEvidenceKind() != "manual.upload.v1" {
 		t.Errorf("evidence_kind = %q; want manual.upload.v1", rec.GetEvidenceKind())
 	}
-	if rec.GetSchemaVersion() != "1.0.0" {
-		t.Errorf("schema_version = %q; want 1.0.0", rec.GetSchemaVersion())
+	if rec.GetSchemaVersion() != "1.1.0" {
+		t.Errorf("schema_version = %q; want 1.1.0", rec.GetSchemaVersion())
 	}
-	if rec.GetControlId() != "scf:GOV-04" {
-		t.Errorf("control_id = %q; want scf:GOV-04", rec.GetControlId())
+	if rec.GetControlId() != "scf:GOV-05" {
+		t.Errorf("control_id = %q; want scf:GOV-05", rec.GetControlId())
 	}
 	if rec.GetResult() != evidencev1.Result_RESULT_INCONCLUSIVE {
 		t.Errorf("result = %v; want INCONCLUSIVE", rec.GetResult())
@@ -1030,7 +1030,7 @@ func TestBuildLocalRecord_HeaderlessRow(t *testing.T) {
 		Fields: []string{"x", "y"},
 	}
 	scope := []*evidencev1.ScopeDimension{{Key: "environment", Values: []string{"prod"}}}
-	rec, err := buildLocalRecord(row, "/p.csv", "p.csv", "scf:GOV-04", scope, time.Now().UTC())
+	rec, err := buildLocalRecord(row, "/p.csv", "p.csv", "scf:GOV-05", scope, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("buildLocalRecord: %v", err)
 	}
@@ -1051,7 +1051,7 @@ func TestBuildS3Record_HappyPath(t *testing.T) {
 		LastModified: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	}
 	scope := []*evidencev1.ScopeDimension{{Key: "environment", Values: []string{"prod"}}}
-	rec, err := buildS3Record(obj, "scf:GOV-04", scope, time.Now().UTC())
+	rec, err := buildS3Record(obj, "scf:GOV-05", scope, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("buildS3Record: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestBuildSFTPRecord_HappyPath(t *testing.T) {
 		"/inbox/quarterly.pdf",
 		8192,
 		mtime,
-		"scf:GOV-04",
+		"scf:GOV-05",
 		[]*evidencev1.ScopeDimension{{Key: "environment", Values: []string{"prod"}}},
 		time.Now().UTC(),
 	)

@@ -85,10 +85,10 @@ func seedNistRisk(t *testing.T, admin *pgxpool.Pool, tenant string, likelihood, 
 	inherent, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score
 		)
-		VALUES ($1, $2, 'slice 020 test risk', '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, 'slice 020 test risk', '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        $3::jsonb, 'avoid', 'owner', '{}'::jsonb)
 	`, riskID, tenant, string(inherent)); err != nil {
 		t.Fatalf("seed nist risk: %v", err)
@@ -141,7 +141,7 @@ func TestResidual_LinkedControlClearsWarning(t *testing.T) {
 	riskID := seedNistRisk(t, migrate, tenant, 3, 3)
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(ctx, risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}); err != nil {
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test", RiskID: riskID, ControlID: ctrlID}); err != nil {
 		t.Fatalf("LinkControl: %v", err)
 	}
 
@@ -172,7 +172,7 @@ func TestResidual_BreakdownReflectsOperationalPassRate(t *testing.T) {
 	// composite effectiveness is purely the operational pass rate. That
 	// isolates AC-4 — the breakdown's control_effectiveness must equal the
 	// slice-012 rolling pass rate.
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     1.0,
@@ -229,7 +229,7 @@ func TestResidual_NoEvaluationsFlagsNoData(t *testing.T) {
 	riskID := seedNistRisk(t, migrate, tenant, 2, 2)
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(ctx, risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}); err != nil {
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test", RiskID: riskID, ControlID: ctrlID}); err != nil {
 		t.Fatalf("LinkControl: %v", err)
 	}
 
@@ -260,7 +260,7 @@ func TestResidual_ControlFlipPassToFailRaisesResidual(t *testing.T) {
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	// Weights isolate operational so the flip is fully visible.
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     0.0,
@@ -348,7 +348,7 @@ func TestLinkControl_UnknownControlIsNotFound(t *testing.T) {
 
 	riskID := seedNistRisk(t, migrate, tenant, 1, 1)
 	store := risk.NewStore(app)
-	err := store.LinkControl(ctx, risk.LinkControlInput{
+	err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:    riskID,
 		ControlID: uuid.New(), // does not exist
 	})
@@ -365,7 +365,7 @@ func TestLinkControl_UnknownRiskIsNotFound(t *testing.T) {
 
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	err := store.LinkControl(ctx, risk.LinkControlInput{
+	err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:    uuid.New(), // does not exist
 		ControlID: ctrlID,
 	})
@@ -386,7 +386,7 @@ func TestLinkControl_IdempotentRelink(t *testing.T) {
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 
-	in := risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}
+	in := risk.LinkControlInput{Actor: "test", RiskID: riskID, ControlID: ctrlID}
 	if err := store.LinkControl(ctx, in); err != nil {
 		t.Fatalf("LinkControl first: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestLinkControl_WeightsAreTenantIsolated(t *testing.T) {
 	riskA := seedNistRisk(t, migrate, tenantA, 4, 4)
 	ctrlA := seedEvalControl(t, migrate, tenantA)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(dbtest.WithTenantCtx(t, tenantA), risk.LinkControlInput{
+	if err := store.LinkControl(dbtest.WithTenantCtx(t, tenantA), risk.LinkControlInput{Actor: "test",
 		RiskID: riskA, ControlID: ctrlA,
 		DesignScore: 0.9, DesignScoreSet: true,
 	}); err != nil {

@@ -5,6 +5,7 @@ import (
 
 	csfassessmentapi "github.com/mgoodric/security-atlas/internal/api/csfassessment"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
+	posturetargetsapi "github.com/mgoodric/security-atlas/internal/api/posturetargets"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -29,6 +30,27 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	)
 	root.Post("/v1/framework-scopes", fwH.Create)
 	root.Get("/v1/framework-scopes", fwH.List)
+	// Issue #1787: Statement of Applicability decisions on a revision. The
+	// literal /applicability segment resolves before /{id}.
+	root.Get("/v1/framework-scopes/applicability", fwH.ApplicabilityAsOf)
+	// Issue #1791: SoA export as CSV or xlsx.
+	root.Get("/v1/framework-scopes/applicability/export", fwH.ExportApplicability)
+	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
+	// Issue #1795: what changed against the activated revision.
+	root.Get("/v1/framework-scopes/{id}/applicability/diff", fwH.DiffApplicability)
+	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
+	// Issue #1790: bulk-set and CSV import of decisions.
+	root.Post("/v1/framework-scopes/{id}/applicability/bulk", fwH.BulkSetApplicability)
+	root.Post("/v1/framework-scopes/{id}/applicability/import", fwH.ImportApplicability)
+	// Issue #1793: carry decisions over from the prior framework version.
+	root.Post("/v1/framework-scopes/{id}/applicability:carry-over", fwH.CarryOverApplicability)
+	// Issue #2136: a framework version's posture target. Every role reads
+	// it; OPA admits the PUT on framework-scopes to admin and grc_engineer,
+	// and the handler checks the same. The literal posture-targets segment
+	// resolves before /{id}.
+	ptH := posturetargetsapi.New(posturetargetsapi.NewStore(s.dbPool))
+	root.Get("/v1/framework-scopes/posture-targets/{framework_version_id}", ptH.Get)
+	root.Put("/v1/framework-scopes/posture-targets/{framework_version_id}", ptH.Set)
 	// Sub-resource transitions are PATCH, distinct from the generic PATCH
 	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
 	// the literal-segment routes first within the same method.

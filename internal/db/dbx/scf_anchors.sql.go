@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillSCFAnchorLegacySCFID = `-- name: BackfillSCFAnchorLegacySCFID :execrows
+UPDATE scf_anchors
+SET legacy_scf_id = $2,
+    updated_at    = now()
+WHERE id = $1 AND legacy_scf_id IS NULL
+`
+
+type BackfillSCFAnchorLegacySCFIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	LegacyScfID *string     `json:"legacy_scf_id"`
+}
+
+// #1769: fill legacy_scf_id on an anchor imported without one. Only a
+// NULL is filled, so a stored value is never rewritten; the importer
+// refuses a re-import whose legacy_scf_id differs from a stored one.
+// legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+func (q *Queries) BackfillSCFAnchorLegacySCFID(ctx context.Context, arg BackfillSCFAnchorLegacySCFIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillSCFAnchorLegacySCFID, arg.ID, arg.LegacyScfID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSCFAnchorsForVersion = `-- name: CountSCFAnchorsForVersion :one
 SELECT count(*) FROM scf_anchors WHERE framework_version_id = $1
 `
@@ -20,6 +44,38 @@ func (q *Queries) CountSCFAnchorsForVersion(ctx context.Context, frameworkVersio
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSCFAnchorsLatest = `-- name: CountSCFAnchorsLatest :one
+SELECT
+    count(*)::bigint AS catalog_total,
+    count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM controls c
+        WHERE c.tenant_id = $1
+          AND c.scf_anchor_id = a.id AND c.superseded_by IS NULL
+    ))::bigint AS with_control_total
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+`
+
+type CountSCFAnchorsLatestRow struct {
+	CatalogTotal     int64 `json:"catalog_total"`
+	WithControlTotal int64 `json:"with_control_total"`
+}
+
+// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
+// the current SCF version: the whole catalog, and the anchors the
+// caller's tenant has at least one active control on. `controls` is
+// tenant-scoped under FORCE RLS; the explicit `c.tenant_id` predicate
+// (issue #1832) keeps with_control_total per tenant even where RLS is
+// bypassed.
+func (q *Queries) CountSCFAnchorsLatest(ctx context.Context, tenantID pgtype.UUID) (CountSCFAnchorsLatestRow, error) {
+	row := q.db.QueryRow(ctx, countSCFAnchorsLatest, tenantID)
+	var i CountSCFAnchorsLatestRow
+	err := row.Scan(&i.CatalogTotal, &i.WithControlTotal)
+	return i, err
 }
 
 const demoteCurrentFrameworkVersions = `-- name: DemoteCurrentFrameworkVersions :exec
@@ -37,7 +93,7 @@ func (q *Queries) DemoteCurrentFrameworkVersions(ctx context.Context, frameworkI
 }
 
 const getSCFAnchorByID = `-- name: GetSCFAnchorByID :one
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at FROM scf_anchors WHERE id = $1
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id FROM scf_anchors WHERE id = $1
 `
 
 func (q *Queries) GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error) {
@@ -53,19 +109,20 @@ func (q *Queries) GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnch
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const getSCFAnchorBySCFID = `-- name: GetSCFAnchorBySCFID :one
-SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at
+SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at, a.legacy_scf_id
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id IS NULL
 `
 
-// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+// Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 // framework version.
 func (q *Queries) GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error) {
 	row := q.db.QueryRow(ctx, getSCFAnchorBySCFID, scfID)
@@ -80,12 +137,13 @@ func (q *Queries) GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnc
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const getSCFAnchorByVersionAndSCFID = `-- name: GetSCFAnchorByVersionAndSCFID :one
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at FROM scf_anchors
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id FROM scf_anchors
 WHERE framework_version_id = $1 AND scf_id = $2
 `
 
@@ -111,14 +169,15 @@ func (q *Queries) GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFA
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const insertSCFAnchor = `-- name: InsertSCFAnchor :one
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics, legacy_scf_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 `
 
 type InsertSCFAnchorParams struct {
@@ -129,6 +188,7 @@ type InsertSCFAnchorParams struct {
 	Title              string      `json:"title"`
 	Description        string      `json:"description"`
 	Subtopics          []byte      `json:"subtopics"`
+	LegacyScfID        *string     `json:"legacy_scf_id"`
 }
 
 // Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
@@ -142,6 +202,7 @@ func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams
 		arg.Title,
 		arg.Description,
 		arg.Subtopics,
+		arg.LegacyScfID,
 	)
 	var i ScfAnchor
 	err := row.Scan(
@@ -154,6 +215,7 @@ func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
@@ -171,7 +233,8 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
-    e.rationale
+    e.rationale,
+    e.mapping_tier
 FROM fw_to_scf_edges e
 JOIN scf_anchors a                ON a.id = e.scf_anchor_id
 JOIN framework_versions afv       ON afv.id = a.framework_version_id
@@ -182,6 +245,8 @@ JOIN frameworks f                 ON f.id = fv.framework_id
 WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
+  -- A retired edge (#1971) is no longer part of the catalog.
+  AND e.retired_at IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code
 `
 
@@ -198,10 +263,11 @@ type ListAllFwToScfEdgesForExportRow struct {
 	Strength                  float64                    `json:"strength"`
 	SourceAttribution         CrosswalkSourceAttribution `json:"source_attribution"`
 	Rationale                 string                     `json:"rationale"`
+	MappingTier               CrosswalkMappingTier       `json:"mapping_tier"`
 }
 
-// Slice 174: anchor catalog export edges projection. Returns EVERY
-// fw_to_scf_edges row whose target anchor is in the current SCF
+// Slice 174: anchor catalog export edges projection. Returns EVERY live
+// (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 // framework_version, joined to framework_requirements +
 // framework_versions + frameworks so consumers get the natural-key
 // (`framework_slug:version:code`) without a second query.
@@ -214,6 +280,11 @@ type ListAllFwToScfEdgesForExportRow struct {
 // map to that requirement" as a recorded fact, not a silent
 // omission. The slice 008 traversal views filter no_relationship
 // out for coverage UI; the export does NOT.
+//
+// Issue #1826: mapping_tier is projected so a reviewer-rejected edge
+// appears in the export marked `rejected` rather than looking like a
+// live mapping. Rejected edges are NOT filtered out — the export is
+// the full catalog record, tier included.
 //
 // Sorted by anchor_scf_id then framework_slug + framework_version
 // + requirement_code so the rows group by anchor (matches the
@@ -240,6 +311,7 @@ func (q *Queries) ListAllFwToScfEdgesForExport(ctx context.Context) ([]ListAllFw
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.Rationale,
+			&i.MappingTier,
 		); err != nil {
 			return nil, err
 		}
@@ -372,6 +444,49 @@ func (q *Queries) ListFrameworkVersionsBySlug(ctx context.Context, slug string) 
 	return items, nil
 }
 
+const listFrameworkVersionsForTenant = `-- name: ListFrameworkVersionsForTenant :many
+SELECT fv.id, fv.tenant_id, fv.framework_id, fv.version, fv.effective_from, fv.effective_to, fv.status, fv.requirement_count, fv.oscal_catalog_uri, fv.created_at
+FROM framework_versions fv
+WHERE fv.tenant_id IS NULL OR fv.tenant_id = $1
+ORDER BY fv.framework_id, fv.effective_from DESC NULLS LAST, fv.version DESC
+`
+
+// #2414: every catalog version plus the caller's own tenant-private
+// versions, for `GET /v1/frameworks?include=versions`, newest first within
+// each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+// predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+// (board_briefs.sql).
+func (q *Queries) ListFrameworkVersionsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkVersion, error) {
+	rows, err := q.db.Query(ctx, listFrameworkVersionsForTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FrameworkVersion
+	for rows.Next() {
+		var i FrameworkVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.FrameworkID,
+			&i.Version,
+			&i.EffectiveFrom,
+			&i.EffectiveTo,
+			&i.Status,
+			&i.RequirementCount,
+			&i.OscalCatalogUri,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworks = `-- name: ListFrameworks :many
 SELECT id, tenant_id, name, slug, issuer, description, latest_version_id, created_at FROM frameworks
 WHERE tenant_id IS NULL
@@ -408,7 +523,7 @@ func (q *Queries) ListFrameworks(ctx context.Context) ([]Framework, error) {
 }
 
 const listSCFAnchorsForVersion = `-- name: ListSCFAnchorsForVersion :many
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 FROM scf_anchors
 WHERE framework_version_id = $1
 ORDER BY scf_id
@@ -442,6 +557,7 @@ func (q *Queries) ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAncho
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 		); err != nil {
 			return nil, err
 		}
@@ -464,20 +580,28 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = $4
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -497,11 +621,12 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = $4
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter; see comment on the
       -- latest-with-state variant above.
-      AND ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
+      AND ($5::uuid IS NULL OR le.scope_cell_id = $5::uuid)
     GROUP BY c.scf_anchor_id
 ),
 anchor_frameworks AS (
@@ -512,11 +637,12 @@ anchor_frameworks AS (
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
-    FROM fw_to_scf_edges e
+    FROM effective_fw_to_scf_edges e
     JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
@@ -524,6 +650,7 @@ anchor_frameworks AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
     -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -557,6 +684,7 @@ type ListSCFAnchorsForVersionWithStateParams struct {
 	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
 	Limit              int32       `json:"limit"`
 	Offset             int32       `json:"offset"`
+	TenantID           pgtype.UUID `json:"tenant_id"`
 	ScopeCellID        pgtype.UUID `json:"scope_cell_id"`
 }
 
@@ -570,6 +698,7 @@ type ListSCFAnchorsForVersionWithStateRow struct {
 	Subtopics            []byte             `json:"subtopics"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID          *string            `json:"legacy_scf_id"`
 	StateResult          *EvidenceResult    `json:"state_result"`
 	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
@@ -597,6 +726,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 		arg.FrameworkVersionID,
 		arg.Limit,
 		arg.Offset,
+		arg.TenantID,
 		arg.ScopeCellID,
 	)
 	if err != nil {
@@ -616,6 +746,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
@@ -633,7 +764,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 }
 
 const listSCFAnchorsLatest = `-- name: ListSCFAnchorsLatest :many
-SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at
+SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at, a.legacy_scf_id
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -667,6 +798,7 @@ func (q *Queries) ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLa
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 		); err != nil {
 			return nil, err
 		}
@@ -689,20 +821,28 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = $4
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -722,32 +862,56 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = $4
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
       -- When the param is the NULL UUID sentinel, this predicate is a no-op
       -- (every evaluation participates). When valid uuid, narrows to that cell.
-      AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
+      AND ($5::uuid IS NULL OR le.scope_cell_id = $5::uuid)
     GROUP BY c.scf_anchor_id
 ),
 anchor_frameworks AS (
     -- Slice 226: per-anchor framework set. One GROUP BY over the
-    -- catalog-global crosswalk; no per-row fan-out.
+    -- effective crosswalk (catalog edges + this tenant's overlay edges,
+    -- #1798); no per-row fan-out.
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
-    FROM fw_to_scf_edges e
+    FROM effective_fw_to_scf_edges e
     JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
+),
+anchor_controls AS (
+    -- Issue #1741: the tenant's active controls per anchor, so each
+    -- row links to a control id (not the anchor id the control detail
+    -- page cannot resolve) and the ` + "`" + `has_control` + "`" + ` filter runs here, in
+    -- SQL, ahead of LIMIT/OFFSET. ` + "`" + `controls` + "`" + ` is tenant-scoped under
+    -- FORCE RLS; the GUC limits this CTE to the caller's tenant, and the
+    -- explicit ` + "`" + `c.tenant_id` + "`" + ` predicate (issue #1832) holds it there even
+    -- where RLS is bypassed. The
+    -- representative control is the lowest bundle_id, deterministic
+    -- when more than one bundle anchors to the same SCF control.
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        (array_agg(c.id ORDER BY c.bundle_id))[1]::uuid AS control_id,
+        count(*)::bigint AS control_count
+    FROM controls c
+    WHERE c.tenant_id = $4
+      AND c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
     -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -771,13 +935,21 @@ SELECT
     -- nil → empty array). The LEFT JOIN ensures every anchor row
     -- carries the column; anchors with no satisfaction edges return
     -- NULL → empty slice → wire ` + "`" + `[]` + "`" + `.
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    ac.control_id                     AS control_id,
+    COALESCE(ac.control_count, 0)::bigint AS control_count
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
 LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
+LEFT JOIN anchor_controls ac ON ac.anchor_id = a.id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+  -- Issue #1741: optional server-side "has control" filter. NULL is
+  -- no filter; true keeps anchors the tenant has a control on; false
+  -- keeps the rest.
+  AND ($3::boolean IS NULL
+       OR (ac.anchor_id IS NOT NULL) = $3::boolean)
 ORDER BY a.scf_id
 LIMIT $1 OFFSET $2
 `
@@ -785,6 +957,8 @@ LIMIT $1 OFFSET $2
 type ListSCFAnchorsLatestWithStateParams struct {
 	Limit       int32       `json:"limit"`
 	Offset      int32       `json:"offset"`
+	HasControl  *bool       `json:"has_control"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
 	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
 }
 
@@ -798,11 +972,14 @@ type ListSCFAnchorsLatestWithStateRow struct {
 	Subtopics            []byte             `json:"subtopics"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID          *string            `json:"legacy_scf_id"`
 	StateResult          *EvidenceResult    `json:"state_result"`
 	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
 	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
 	FrameworkSlugs       []string           `json:"framework_slugs"`
+	ControlID            pgtype.UUID        `json:"control_id"`
+	ControlCount         int64              `json:"control_count"`
 }
 
 // Slice 104: paginated anchor list for the latest current SCF
@@ -838,10 +1015,11 @@ type ListSCFAnchorsLatestWithStateRow struct {
 //     tenant-instantiated control that satisfies one anchor:
 //     result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 //     freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
-//  3. `anchor_frameworks` aggregates the global crosswalk: for each
-//     anchor, the DISTINCT set of framework slugs reached via
-//     fw_to_scf_edges → framework_requirements → framework_versions
-//     → frameworks. Excludes the SCF spine itself (the column is
+//  3. `anchor_frameworks` aggregates the effective crosswalk (catalog
+//     edges plus the caller tenant's active overlay edges, #1798): for
+//     each anchor, the DISTINCT set of framework slugs reached via
+//     effective_fw_to_scf_edges → framework_requirements →
+//     framework_versions → frameworks. Excludes the SCF spine itself (the column is
 //     "what frameworks DOES this anchor satisfy?", not "is it an SCF
 //     anchor?" — the answer to that is always yes). Excludes
 //     `no_relationship` edges (those are explicit non-mappings, not
@@ -857,9 +1035,12 @@ type ListSCFAnchorsLatestWithStateRow struct {
 //	   column SURFACES this invariant on the controls list.
 //	#6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 //	   FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
-//	   filters those rows; the global `scf_anchors` rows + the
-//	   catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
-//	   visible to every tenant by design.
+//	   filters those rows, and each `controls` read also carries an
+//	   explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
+//	   #1832, belt-and-suspenders as in ListActiveControlsWithState);
+//	   the global `scf_anchors` rows + catalog `fw_to_scf_edges` are
+//	   visible to every tenant by design; the overlay arm of
+//	   effective_fw_to_scf_edges shows only the caller tenant's own.
 //	#2 Engine is sole writer of control_evaluations: this is a pure read
 //	   over the engine's output table, never a parallel computation.
 //
@@ -867,7 +1048,13 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 // regen-on-rebase note in MEMORY.md). Keep the two in sync.
 func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.ScopeCellID)
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState,
+		arg.Limit,
+		arg.Offset,
+		arg.HasControl,
+		arg.TenantID,
+		arg.ScopeCellID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -885,11 +1072,14 @@ func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCF
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
 			&i.StateEvaluatedAt,
 			&i.FrameworkSlugs,
+			&i.ControlID,
+			&i.ControlCount,
 		); err != nil {
 			return nil, err
 		}
@@ -926,7 +1116,7 @@ SET family      = $2,
     subtopics   = $5,
     updated_at  = now()
 WHERE id = $1
-RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 `
 
 type UpdateSCFAnchorParams struct {
@@ -958,6 +1148,7 @@ func (q *Queries) UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }

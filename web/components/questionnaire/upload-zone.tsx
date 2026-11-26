@@ -105,7 +105,6 @@ export function UploadZone({
       role="button"
       tabIndex={0}
       aria-disabled={busy}
-      aria-label="Upload Excel questionnaire"
       className={`bg-card border-2 border-dashed rounded-xl px-8 py-10 text-center cursor-pointer transition-colors ${
         busy
           ? "border-border opacity-60 pointer-events-none"

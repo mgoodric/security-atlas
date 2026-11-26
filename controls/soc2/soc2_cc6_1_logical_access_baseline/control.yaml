@@ -1,17 +1,40 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_1_logical_access_baseline
-title: "Identity provider enforces MFA on all org-managed applications"
+title: "Identity provider requires phishing-resistant MFA for everyone"
 description: |
-  The entity implements logical access security software, infrastructure,
-  and architectures over protected information assets (TSC CC6.1). The
-  canonical operationalisation is: the corporate identity provider (Okta
-  / Google Workspace / Azure AD) is the chokepoint for application access
-  and enforces MFA on every assigned application. The query reads the
-  Okta MFA policy snapshot and asserts the policy is enabled, applies to
-  the everyone group, and requires a phishing-resistant factor (WebAuthn,
-  push-with-number-matching) for at least admin roles.
+  Access to protected systems and data goes through managed logical access
+  controls (TSC CC6.1). The test is that the identity provider has an MFA
+  policy that requires MFA, applies to the everyone group, and allows a
+  phishing-resistant factor.
+
+  What runs today: a SQL query over the payloads of the Okta connector's
+  `okta.mfa_policy.v2` snapshots, one per MFA enrollment policy. It takes
+  each policy's latest in-window snapshot and passes the control when at
+  least one of them has `status` ACTIVE, `mfa_required` true,
+  `applies_to_everyone` true, and `webauthn` in `factors_allowed`. The
+  connector sets `applies_to_everyone` when the policy's group ids include
+  the org's Everyone group, and reports every FIDO factor (WebAuthn, U2F)
+  as `webauthn`, from Classic and Identity Engine policies alike.
+  Otherwise the control fails: an inactive policy, MFA not required, a
+  policy scoped to other groups only, or only SMS, voice, email, OTP or
+  push factors. No in-window v2 snapshot leaves it inconclusive, including
+  when only `okta.mfa_policy.v1` snapshots arrived (an Okta connector older
+  than #2901): v1 snapshots are not read. The connector's per-record
+  verdict is not used.
+
+  Not checked: Okta Verify with number matching also resists phishing, but
+  the snapshot records only the factor key (`okta_verify`), not whether
+  number matching is on, so `okta_verify` does not count. PIV and other
+  smart-card authenticators (`smart_card_idp`) resist phishing too, but the
+  connector does not map them to `webauthn`, so a policy that allows only
+  a smart card fails here. A higher-priority
+  policy scoped to a subset of users can override the Everyone policy for
+  them; the snapshot carries `priority`, but the query does not use it.
+  Only the records the control receives are checked; a policy the
+  connector did not report is not seen.
 
 scf_anchor_id: IAC-01
+scf_release: test-2026.3
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering
@@ -19,19 +42,24 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: idp_mfa_policy_enabled
-    language: rego
-    evidence_kind: okta.mfa_policy.v1
-    description: "Okta MFA policy is enabled, applies broadly, requires a phishing-resistant factor for admins"
+  - id: mfa_policy_everyone_phishing_resistant
+    language: sql
+    evidence_kind: okta.mfa_policy.v2
+    description: "An active Okta MFA policy requires MFA, applies to everyone, and allows WebAuthn"
     expression: |
-      package atlas.controls.soc2.cc6_1
-
-      default allow := false
-
-      allow if {
-        some pol in input.policies
-        pol.status == "ACTIVE"
-        "everyone" in pol.assigned_groups
-        some factor in pol.required_factors
-        factor in {"webauthn", "okta_verify_push_number_match"}
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(
+                 payload->>'status' = 'ACTIVE'
+                 AND payload->'mfa_required' = 'true'::jsonb
+                 AND payload->'applies_to_everyone' = 'true'::jsonb
+                 AND jsonb_typeof(payload->'factors_allowed') = 'array'
+                 AND payload->'factors_allowed' ? 'webauthn'
+               ) THEN 'pass'
+               ELSE 'fail'
+             END
+      FROM (
+        SELECT DISTINCT ON (payload->>'policy_id') payload
+        FROM evidence
+        ORDER BY payload->>'policy_id', observed_at DESC
+      ) AS latest

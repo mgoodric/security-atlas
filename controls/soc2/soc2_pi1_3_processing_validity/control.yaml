@@ -2,14 +2,49 @@ bundle_schema_version: "1"
 bundle_id: soc2_pi1_3_processing_validity
 title: "Authorization checks asserted by SAST in processing-path code"
 description: |
-  The entity implements policies and procedures over system processing
-  to result in products, services, and reporting to meet the entity's
-  objectives (TSC PI1.3). The SAST rule set covering authorization /
-  IDOR / privilege-escalation patterns surfaces zero unsuppressed
-  findings on the most recent scan of every in-scope repo.
+  Processing logic is controlled so it produces the intended results (TSC
+  PI1.3). The intended test is that the most recent SAST scan of every
+  in-scope repo has zero unsuppressed findings in the rule set covering
+  authorisation, IDOR and privilege-escalation patterns.
 
-scf_anchor_id: SEA-05
-control_family: SEA
+  What runs today: a SQL query over the payloads of `sast.scan_result.v1`
+  records at schema 1.1.0 or 1.2.0, one per scan. No bundled connector
+  emits that kind: the pusher (a CI job running `atlas-cli evidence push`,
+  or the adopter's own scanner) sends each scan once, with its
+  `repository` and its `findings`, each finding with a `severity`, a
+  `rule_id`, whether it is `suppressed` and, from 1.2.0, its `cwe` ids.
+  The query takes each repository's latest in-window scan, keyed by
+  `repository`; scans without a `repository` are left out. That scan may
+  have no unsuppressed authorisation finding: one whose `rule_id` is
+  `authz.missing_check`, `authz.idor`, `authz.privilege_escalation` or
+  `authz.broken_object_level`, or whose `cwe` lists CWE-269, CWE-639 or
+  CWE-862. Both match exactly. The rule ids are platform ids, so a pusher
+  that sends no CWEs maps its scanner's rules onto them; a finding
+  matching neither is not read. A finding counts as suppressed only when
+  `suppressed` is true.
+
+  One repository whose latest scan has an unsuppressed authorisation
+  finding fails the control, whatever the other repositories report. A
+  scan with no `findings` array (a 1.0.0 record, or a pusher that sent
+  only `findings_count`) leaves the control inconclusive unless another
+  repository fails it, and so does an unsuppressed finding that is not
+  selected but has no string `rule_id`, or a `cwe` that is not a list.
+  An empty `findings` array is a clean scan. With no
+  scan that names a repository, the control is inconclusive. When two
+  scans of one repository tie on `observed_at`, the worse verdict
+  decides. The pusher's per-record verdict is not used.
+
+  Not checked: whether a repository holds processing-path code, and
+  whether the scanner's rule set actually covers these patterns; a
+  scanner that cannot find an IDOR reports none. How a finding came to be
+  suppressed is not read. Scan age is bounded only by the daily window of
+  7 days, so a repository whose scans stop drops out after that. Only the
+  scans the control receives are checked: every in-scope repo scanned
+  needs a repo inventory (#2834).
+
+scf_anchor_id: TDA-05
+scf_release: test-2026.3
+control_family: TDA
 implementation_type: automated
 owner_role: product-engineering
 lifecycle_state: active
@@ -17,29 +52,54 @@ freshness_class: daily
 
 evidence_queries:
   - id: authorization_taint_rules_clean
-    language: rego
+    language: sql
     evidence_kind: sast.scan_result.v1
-    description: "SAST scans show zero unsuppressed authorization/IDOR findings"
+    description: "Each repository's latest SAST scan has no unsuppressed finding under the authorisation rules"
     expression: |
-      package atlas.controls.soc2.pi1_3
-
-      default allow := false
-
-      authz_rule_ids := {
-        "authz.missing_check",
-        "authz.idor",
-        "authz.privilege_escalation",
-        "authz.broken_object_level"
-      }
-
-      allow if {
-        every s in input.scans {
-          relevant_count(s) == 0
-        }
-      }
-
-      relevant_count(s) := count([f |
-        some f in s.findings
-        f.rule_id in authz_rule_ids
-        f.suppressed != true
-      ])
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT repo, min(verdict) AS verdict
+        FROM (
+          SELECT repo,
+                 CASE
+                   WHEN jsonb_typeof(findings) IS DISTINCT FROM 'array' THEN 1
+                   ELSE (
+                     SELECT coalesce(min(
+                              CASE
+                                WHEN jsonb_typeof(finding) IS DISTINCT FROM 'object' THEN 1
+                                WHEN finding->'suppressed' = 'true'::jsonb THEN 2
+                                WHEN finding->>'rule_id' IN ('authz.missing_check',
+                                                             'authz.idor',
+                                                             'authz.privilege_escalation',
+                                                             'authz.broken_object_level') THEN 0
+                                WHEN jsonb_typeof(finding->'cwe') = 'array'
+                                     AND finding->'cwe' ?| ARRAY['CWE-269', 'CWE-639', 'CWE-862'] THEN 0
+                                -- Not selected, but it may be: a rule id that is not a
+                                -- string, or a cwe that is not a list.
+                                WHEN jsonb_typeof(finding->'rule_id') IS DISTINCT FROM 'string' THEN 1
+                                WHEN finding ? 'cwe' AND jsonb_typeof(finding->'cwe') IS DISTINCT FROM 'array' THEN 1
+                                ELSE 2
+                              END), 2)
+                     FROM jsonb_array_elements(
+                            CASE WHEN jsonb_typeof(findings) = 'array' THEN findings ELSE '[]'::jsonb END
+                          ) AS f(finding)
+                   )
+                 END AS verdict,
+                 rank() OVER (PARTITION BY repo ORDER BY observed_at DESC) AS recency
+          FROM (
+            SELECT payload->>'repository' AS repo,
+                   observed_at,
+                   payload->'findings' AS findings
+            FROM evidence
+            WHERE jsonb_typeof(payload->'repository') = 'string'
+              AND payload->>'repository' <> ''
+          ) AS keyed
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY repo
+      ) AS per_repo

@@ -21,18 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
-
-// Note: chromedpWSURLReadTimeout is declared in pdf.go (same package).
-// Slice 341 fans the slice 340 fix across packages; within package board
-// both renderers share the single declaration.
 
 // RenderPackPDF returns a PDF byte stream for the stored pack. The returned
 // bytes begin with the literal `%PDF-` magic header. Blocking; caller
@@ -45,62 +37,12 @@ func RenderPackPDF(ctx context.Context, sp StoredPack) ([]byte, error) {
 	}
 	htmlDoc := buildPackHTML(sp)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderPackBytes(ctx, htmlDoc)
-	})
-}
-
-// renderPackBytes performs the chromedp render under the deadline the limiter
-// has already applied to ctx.
-func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Run(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("board/pack-pdf: %w", err)
 		}
-		return nil, fmt.Errorf("board/pack-pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("board/pack-pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 // buildPackHTML renders the quarterly pack as a print-friendly HTML document
@@ -147,7 +89,7 @@ th { background: #f8fafc; font-weight: 600; }
 	}
 
 	// One numbered card per section.
-	for i, key := range SectionKeys {
+	for i, key := range p.Keys() {
 		sec := p.Sections[key]
 		w.WriteString(`<section>`)
 		fmt.Fprintf(&w, `<div class="sec-num">§ %02d</div>`, i+1)
@@ -176,12 +118,32 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		}
 		w.WriteString(`<div class="grid">`)
 		for _, fp := range d.Frameworks {
+			label := fp.Name
+			if fp.Version != "" {
+				label += " " + fp.Version
+			}
+			if fp.ScopeNotSet {
+				fmt.Fprintf(w,
+					`<div class="card"><div class="label">%s</div><div class="pct">Scope not set</div>`+
+						`<div class="muted">No framework scope is activated for this version</div></div>`,
+					html.EscapeString(label))
+				continue
+			}
+			trend := arrowGlyph(fp.TrendArrow) + " " + signedPts(fp.Delta) + " pts over 90 days"
+			if fp.NoTrendHistory {
+				trend = noBaselineText
+			}
+			// #2112: the share covered only by exception is reported beside
+			// the coverage, never folded silently into it.
+			exception := ""
+			if fp.CoveredByExceptionPct > 0 {
+				exception = `<div class="muted">` + formatPct(fp.CoveredByExceptionPct) + `% covered by exception</div>`
+			}
 			fmt.Fprintf(w,
-				`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
-					`<div class="muted">%s %s pts · %s</div></div>`,
-				html.EscapeString(fp.Name), fp.CoveragePct,
-				html.EscapeString(arrowGlyph(fp.TrendArrow)),
-				html.EscapeString(signedInt(fp.Delta)), html.EscapeString(fp.State))
+				`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
+					`<div class="muted">%s · %s</div>%s</div>`,
+				html.EscapeString(label), formatPct(fp.CoveragePct),
+				html.EscapeString(trend), html.EscapeString(fp.State), exception)
 		}
 		w.WriteString(`</div>`)
 
@@ -190,19 +152,37 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 			return
 		}
 		w.WriteString(`<table><thead><tr><th>#</th><th>Risk</th><th>Category</th>` +
-			`<th>Treatment</th><th>Residual severity</th><th>Age (days)</th></tr></thead><tbody>`)
+			`<th>Treatment</th><th>Residual (1-25, FAIR in $)</th><th>Age (days)</th></tr></thead><tbody>`)
 		for i, r := range d.TopRisks {
 			fmt.Fprintf(w,
-				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f</td><td>%d</td></tr>`,
-				i+1, html.EscapeString(r.Title), html.EscapeString(r.Category),
-				html.EscapeString(r.Treatment), r.ResidualSeverity, r.AgeDays)
+				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td></tr>`,
+				i+1, html.EscapeString(r.Title), html.EscapeString(r.CategoryLabel()),
+				html.EscapeString(r.Treatment), html.EscapeString(r.ResidualLabel()), r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)
 
 	case SectionCoverageTrend:
-		fmt.Fprintf(w,
-			`<div class="muted">Coverage %d%% · baseline %d%% · delta %s pts</div>`,
-			d.CoveragePct, d.BaselineCoveragePct, signedInt(d.CoverageDelta))
+		switch {
+		case d.NoScopedFrameworks():
+			w.WriteString(`<div class="muted">No framework has an activated scope.</div>`)
+		case d.NoBaseline:
+			fmt.Fprintf(w, `<div class="muted">Coverage %s%% · baseline n/a (%s)</div>`,
+				formatPct(d.CoveragePct), html.EscapeString(noBaselineText))
+		default:
+			fmt.Fprintf(w,
+				`<div class="muted">Coverage %s%% · baseline %s%% · delta %s pts</div>`,
+				formatPct(d.CoveragePct), formatPct(d.BaselineCoveragePct), signedPts(d.CoverageDelta))
+		}
+		// #2269: the share of each end that rests only on exceptions.
+		if d.ShowsExceptionShare() && !d.NoScopedFrameworks() {
+			if d.BaselineExceptionKnown && !d.NoBaseline {
+				fmt.Fprintf(w, `<div class="muted">Covered only by exception: %s%% · baseline %s%%</div>`,
+					formatPct(d.CoveredByExceptionPct), formatPct(d.BaselineCoveredByExceptionPct))
+			} else {
+				fmt.Fprintf(w, `<div class="muted">Covered only by exception: %s%%</div>`,
+					formatPct(d.CoveredByExceptionPct))
+			}
+		}
 
 	case SectionOpenFindings:
 		if len(d.Findings) == 0 {
@@ -250,9 +230,13 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		w.WriteString(`</tbody></table>`)
 
 	case SectionInvestment:
+		if d.NoBaseline {
+			fmt.Fprintf(w, `<div class="muted">Spend $%d · cost per coverage point n/a</div>`, d.SpendUSD)
+			return
+		}
 		fmt.Fprintf(w,
 			`<div class="muted">Spend $%d · coverage delta %s pts · ~$%.0f per coverage point</div>`,
-			d.SpendUSD, signedInt(d.CoverageDelta), d.CostPerCoveragePoint)
+			d.SpendUSD, signedPts(d.CoverageDelta), d.CostPerCoveragePoint)
 	}
 }
 

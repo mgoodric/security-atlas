@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -63,11 +64,11 @@ func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service
 		t.Fatalf("acquire admin conn: %v", err)
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781139)"); err != nil {
+	if err := advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceIngest); err != nil {
 		t.Fatalf("advisory lock: %v", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781139)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceIngest)
 	}()
 
 	// Defensive step: slice 014's TestMigration_RoundTrip can leave
@@ -181,7 +182,7 @@ func record(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
 		IdempotencyKey: "ci-" + uuid.NewString()[:8],
 		EvidenceKind:   "sast.scan_result.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "environment", Values: []string{"prod"}},
 		},
@@ -197,6 +198,27 @@ func record(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
 		o(r)
 	}
 	return r
+}
+
+// boundRecord is record() as a bound kind. sast.scan_result.v1, record()'s
+// kind, is routed by type since #2973, so a test of bound-kind rules
+// (control_id required, bundle-id linking) uses this instead.
+func boundRecord(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
+	t.Helper()
+	payload, err := structpb.NewStruct(map[string]any{
+		"review_id":      "q4-2026",
+		"completed_by":   "alice@example.com",
+		"reviewer_role":  "security-lead",
+		"users_reviewed": 12,
+	})
+	if err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	return record(t, append([]recordOpt{func(r *evidencev1.EvidenceRecord) {
+		r.EvidenceKind = "access_review.completion.v1"
+		r.SchemaVersion = "1.0.0"
+		r.Payload = payload
+	}}, opts...)...)
 }
 
 func mkCred(tenantID string, kinds []string, scopePred string) credstore.Credential {
@@ -254,7 +276,7 @@ func TestPushMissingFields_AC2(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := record(t, c.opt)
+			rec := boundRecord(t, c.opt)
 			_, decision, err := svc.Process(context.Background(), rec, cred)
 			if !errors.Is(err, ingest.ErrMissingField) {
 				t.Fatalf("err = %v, want ErrMissingField", err)
@@ -657,7 +679,7 @@ func pushBody(t *testing.T, idempotencyKey string) string {
         "idempotency_key":"%s",
         "evidence_kind":"sast.scan_result.v1",
         "schema_version":"1.0.0",
-        "control_id":"scf:VPM-04",
+        "control_id":"scf:VPM-06",
         "scope":[{"key":"environment","values":["prod"]}],
         "observed_at":"%s",
         "result":"pass",

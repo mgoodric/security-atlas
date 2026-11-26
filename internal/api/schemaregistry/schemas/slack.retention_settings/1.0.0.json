@@ -4,7 +4,7 @@
   "x-evidence-kind": "slack.retention_settings.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["DCH-01", "DCH-03"],
+  "x-default-scf-anchors": ["DCH-27"],
   "title": "Slack workspace message-retention settings",
   "description": "Workspace message- and file-retention posture from the Slack team-preferences API. SETTINGS only — the retention durations and policy flags, never any retained message or file (slice 443 threat-model I). One record per workspace per run. Feeds data-retention / data-handling evidence.",
   "type": "object",

@@ -4,9 +4,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
+	controlimportsapi "github.com/mgoodric/security-atlas/internal/api/controlimports"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
+	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/llm"
+	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
 // registerControls registers its domain's routes onto the shared root
@@ -54,6 +59,38 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// multi-product orgs are large.
 	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/controls/export", controlsExportH.ExportControls)
+	// #1775: the SCF remap queue — one proposal per control left on an
+	// older SCF release's anchor, filterable by class and status. Literal
+	// segment, ahead of the /v1/controls/{id}/... patterns.
+	root.Get("/v1/controls/remap-proposals", controlsapi.NewRemapProposalsHandler(controlsStore).List)
+	// #1776: a person approves (re-anchoring the control as a superseding
+	// revision), rejects or keeps legacy a proposal, or bulk-approves the
+	// open unchanged ones.
+	controlsapi.NewRemapDecisionsHandler(controlsStore).RegisterRoutes(root)
+	// #2358: stock controls whose shipped update the boot seed holds back
+	// behind a reviewed re-anchor (tenant admin only).
+	controlsapi.NewHeldBackHandler(controlsStore).RegisterRoutes(root)
+	// #2176: controls left on a legacy SCF release's anchor that the #1971
+	// D3 rule flags for re-anchoring, with remap notes, for the dashboard
+	// warning. Literal segment, ahead of the /v1/controls/{id}/... patterns.
+	root.Get("/v1/controls/needs-reanchoring", controlsapi.NewReanchoringHandler(controlsStore).List)
+	// #1779: bring-your-own-controls import — upload a CSV/XLSX control
+	// sheet and get back a staged import batch, every row staged or
+	// rejected with a reason. Literal /v1/controls/imports segment, so it
+	// sits ahead of the /v1/controls/{id}/... patterns like /export.
+	// #1781: candidates are LLM-reranked only for tenants whose cloud-LLM
+	// opt-in is on, or (#2079) who opted in to reranking on local Ollama.
+	importStore := controlimport.NewStore(s.dbPool)
+	stager := controlimport.NewStager(importStore).WithReranker(controlimport.NewReranker(
+		s.inferenceClient(),
+		controlimport.AuditRecorder(llm.NewAuditWriter(s.dbPool)),
+		s.importRerankAllowed(importStore),
+	))
+	// #1782: approve (creating a control through the bundle store) and
+	// reject staged rows; a person decides, never a machine credential.
+	// #1784: download the approved rows' controls as control.yaml bundles.
+	controlimportsapi.New(stager).WithSettings(importStore).WithDecisions(importStore).
+		WithExport(importStore).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +
@@ -69,7 +106,12 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// evidence records via that service). When the artifact store is
 	// also wired, attestations may cite an uploaded artifact_id.
 	if s.ingestService != nil {
+		// #2111: the handler evaluates the control after each attestation
+		// with the same engine Evaluate now uses.
 		attestH := controlsapi.NewAttestHandler(s.dbPool, s.ingestService, attestUploader(s.artifactStore))
+		if s.dbPool != nil {
+			attestH.WithEvaluator(eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)))
+		}
 		root.Get("/v1/controls/{id}/attest-form", attestH.AttestForm)
 		root.Post("/v1/controls/{id}/attestations", attestH.Submit)
 	}
@@ -87,6 +129,9 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// decision the single route does (the role gate is byte-identical).
 	ownerAssignH := controlsapi.NewOwnerAssignHandler(s.dbPool)
 	root.Post("/v1/controls/{id}/owner", ownerAssignH.AssignOwner)
+	// #2110: Download bundle — the control's control.yaml as a tarball
+	// POST /v1/controls:upload-bundle reads back (a read on controls).
+	root.Get("/v1/controls/{id}/bundle", controlsapi.NewBundleDownloadHandler(controlsStore).Download)
 	root.Post("/v1/controls:bulk-assign-owner", ownerAssignH.BulkAssignOwner)
 
 	// Saved filter-views — a per-user self-service surface (resource type

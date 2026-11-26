@@ -1,5 +1,9 @@
 // Slice 060 — /admin/api-keys (AC-4).
 //
+// #2088: the issue form builds a key's scope with pickers (evidence kinds,
+// scope dimensions) and keeps raw JSON as a fallback for predicates the
+// builder cannot show. Model in `scope-builder.ts`.
+//
 // Real bind to slice 034: list / issue / rotate / revoke. The bearer
 // plaintext returned by issue + rotate is shown EXACTLY ONCE in a
 // dismissible callout; subsequent renders of the page do not surface it.
@@ -25,7 +29,20 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ScopePicker } from "@/components/scope/scope-picker";
+import { EVERYTHING } from "@/components/scope/scope-picker-model";
+import { advancedText } from "@/app/(authed)/framework-scopes/wizard";
+import { fetchEvidenceKinds } from "@/lib/api/evidence-kinds";
+import {
+  kindOptions,
+  parseRaw,
+  predicateBody,
+  rawToPicker,
+  toggleKind,
+} from "./scope-builder";
+import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -46,6 +63,8 @@ import {
   AdminCredentialListResponse,
   AdminCredentialRotateResponse,
 } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -99,13 +118,29 @@ type FreshSecret =
       predecessor_expires_at: string;
     };
 
+// #2503: a tenant admin manages its own tenant's keys, but not an admin or
+// approver key: the platform refuses it the issue flags and a rotate or
+// revoke of such a key (admincreds.mintWithinCaller). `is_admin` here is the
+// super-admin bit. Fail-closed: a failed read hides the admin controls.
+async function fetchIsPlatformAdmin(): Promise<boolean> {
+  const res = await fetch(`/api/admin/me`, { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_admin?: unknown };
+  return body.is_admin === true;
+}
+
+const PLATFORM_KEY_REASON =
+  "Only a platform super-admin rotates or revokes an admin or approver key.";
+
 export default function APIKeysPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["admin-creds"], queryFn: fetchCreds });
+  const platformQ = useQuery({
+    queryKey: ["admin-me", "is-admin"],
+    queryFn: fetchIsPlatformAdmin,
+  });
+  const platform = platformQ.data === true;
   const [freshSecret, setFreshSecret] = useState<FreshSecret>({ kind: "none" });
-  const [revokeConfirm, setRevokeConfirm] = useState<AdminCredential | null>(
-    null,
-  );
 
   const issueMut = useMutation({
     mutationFn: issueCred,
@@ -137,28 +172,28 @@ export default function APIKeysPage() {
   const revokeMut = useMutation({
     mutationFn: revokeCred,
     onSuccess: () => {
-      setRevokeConfirm(null);
       qc.invalidateQueries({ queryKey: ["admin-creds"] });
     },
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">API keys</h1>
-        <p className="text-sm text-muted-foreground">
-          Issue, rotate, and revoke bearer credentials for connectors and the
-          CLI. The bearer plaintext is returned exactly once at issue and
-          rotate; this UI shows it and discards it.
-        </p>
-      </div>
-
+    <PageShell
+      title="API keys"
+      subtitle={
+        <>
+          Issue, rotate, and revoke <Term id="api-key">bearer credentials</Term>{" "}
+          for connectors and the CLI. The bearer plaintext is returned exactly
+          once at issue and rotate; this UI shows it and discards it.
+        </>
+      }
+    >
       <FreshSecretCallout
         value={freshSecret}
         onDismiss={() => setFreshSecret({ kind: "none" })}
       />
 
       <IssueForm
+        allowAdmin={platform}
         onSubmit={(body) => issueMut.mutate(body)}
         submitting={issueMut.isPending}
         error={issueMut.error ? (issueMut.error as Error).message : null}
@@ -172,7 +207,15 @@ export default function APIKeysPage() {
             the last 4 characters. Rotate to mint a successor; revoke kills it.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {revokeMut.error ? (
+            <Alert variant="destructive" aria-live="polite">
+              <AlertTitle>Revoke failed</AlertTitle>
+              <AlertDescription data-testid="cred-revoke-error">
+                {(revokeMut.error as Error).message}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {list.isLoading ? (
             <ListSkeleton />
           ) : list.error ? (
@@ -186,6 +229,7 @@ export default function APIKeysPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Label</TableHead>
                   <TableHead>ID</TableHead>
                   <TableHead className="w-24">Last 4</TableHead>
                   <TableHead>Allowed kinds</TableHead>
@@ -197,6 +241,24 @@ export default function APIKeysPage() {
               <TableBody>
                 {list.data.map((c) => (
                   <TableRow key={c.id}>
+                    <TableCell data-testid={`cred-label-${c.id}`}>
+                      {c.label ? (
+                        c.label
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                      {/* #2849: a purpose key is not an ordinary key; a
+                          policy-sync key may only sync policies. */}
+                      {c.purpose ? (
+                        <Badge
+                          variant="outline"
+                          className="ml-2"
+                          data-testid={`cred-purpose-${c.id}`}
+                        >
+                          {c.purpose}
+                        </Badge>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">
                       {c.id.slice(0, 12)}…
                     </TableCell>
@@ -212,7 +274,7 @@ export default function APIKeysPage() {
                     </TableCell>
                     <TableCell>
                       {c.is_admin ? (
-                        <Badge variant="destructive">admin</Badge>
+                        <Badge variant="secondary">admin</Badge>
                       ) : (
                         <Badge variant="outline">no</Badge>
                       )}
@@ -223,23 +285,43 @@ export default function APIKeysPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => rotateMut.mutate(c.id)}
-                          disabled={rotateMut.isPending}
-                        >
-                          Rotate
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => setRevokeConfirm(c)}
-                        >
-                          Revoke
-                        </Button>
-                      </div>
+                      {/* #2090: Rotate runs from the menu; Revoke is
+                          irreversible and confirms inline. */}
+                      <RowActions
+                        label={`Actions for credential ending ${c.last4}`}
+                        data-testid={`cred-actions-${c.id}`}
+                        items={[
+                          {
+                            id: "rotate",
+                            label: "Rotate",
+                            disabledReason:
+                              !platform && (c.is_admin || c.is_approver)
+                                ? PLATFORM_KEY_REASON
+                                : rotateMut.isPending
+                                  ? "A rotation is already running."
+                                  : undefined,
+                            onSelect: () => rotateMut.mutate(c.id),
+                            "data-testid": `cred-rotate-${c.id}`,
+                          },
+                          {
+                            id: "revoke",
+                            label: "Revoke",
+                            destructive: true,
+                            disabledReason:
+                              !platform && (c.is_admin || c.is_approver)
+                                ? PLATFORM_KEY_REASON
+                                : undefined,
+                            confirmPrompt: `Revoke the credential ending ${
+                              c.last4
+                            }? Revocation is immediate: any connector using this bearer fails on its next push. Last used: ${
+                              c.last_used_at ?? "never"
+                            }.`,
+                            confirmLabel: "Revoke now",
+                            onSelect: () => revokeMut.mutate(c.id),
+                            "data-testid": `cred-revoke-${c.id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -252,16 +334,7 @@ export default function APIKeysPage() {
           )}
         </CardContent>
       </Card>
-
-      {revokeConfirm ? (
-        <RevokeConfirmModal
-          cred={revokeConfirm}
-          onCancel={() => setRevokeConfirm(null)}
-          onConfirm={() => revokeMut.mutate(revokeConfirm.id)}
-          submitting={revokeMut.isPending}
-        />
-      ) : null}
-    </div>
+    </PageShell>
   );
 }
 
@@ -278,7 +351,7 @@ function FreshSecretCallout({
       ? "API key issued — copy it now"
       : "API key rotated — copy the new bearer now";
   return (
-    <Alert variant="destructive" data-testid="fresh-secret-callout">
+    <Alert variant="info" data-testid="fresh-secret-callout">
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="font-medium">
@@ -326,37 +399,73 @@ function FreshSecretCallout({
 }
 
 function IssueForm({
+  allowAdmin,
   onSubmit,
   submitting,
   error,
 }: {
+  /** #2503: only a platform super-admin may mint an admin key. */
+  allowAdmin: boolean;
   onSubmit: (body: AdminCredentialIssueRequest) => void;
   submitting: boolean;
   error: string | null;
 }) {
-  const [scopePredicate, setScopePredicate] = useState("");
-  const [allowedKinds, setAllowedKinds] = useState("");
+  const [allowedKinds, setAllowedKinds] = useState<string[]>([]);
+  const [predicate, setPredicate] = useState<unknown>(EVERYTHING);
+  const [raw, setRaw] = useState(false);
+  const [rawText, setRawText] = useState("");
+  const [rawError, setRawError] = useState<string | null>(null);
   const [ttlDays, setTtlDays] = useState(90);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [label, setLabel] = useState("");
 
   // Slice 363 — form-error association. errorId points every input
   // (via aria-describedby) at the Alert when it's mounted; undefined
   // when the alert is absent so React strips the attribute cleanly.
   // See `web/components/ui/checkbox.tsx` for the convention.
   const errorId = error ? "issue-credential-error" : undefined;
+  let rawDescribedBy = errorId ?? "issue-scope-json-hint";
+  if (rawError) rawDescribedBy = "issue-scope-json-error";
+
+  function openRaw() {
+    setRawText(advancedText(predicate));
+    setRawError(null);
+    setRaw(true);
+  }
+
+  function closeRaw() {
+    const r = rawToPicker(rawText);
+    if (!r.ok) {
+      setRawError(r.error);
+      return;
+    }
+    setPredicate(r.predicate);
+    setRaw(false);
+  }
+
+  // Under raw JSON the predicate is the editor's text as written, so a
+  // predicate the builder cannot show can still be issued. Text that is
+  // not a JSON object blocks submit, as does an unfinished picker choice.
+  const rawParse = raw ? parseRaw(rawText) : null;
+  const predicateToSend: unknown = rawParse
+    ? rawParse.ok
+      ? rawParse.predicate
+      : null
+    : predicate;
 
   function submit() {
-    const kinds = allowedKinds
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    if (predicateToSend === null) {
+      if (rawParse && !rawParse.ok) setRawError(rawParse.error);
+      return;
+    }
     onSubmit({
-      scope_predicate: scopePredicate.trim() || "{}",
-      allowed_kinds: kinds,
+      scope_predicate: predicateBody(predicateToSend),
+      allowed_kinds: allowedKinds,
       ttl_seconds: ttlDays * 86400,
-      is_admin: isAdmin,
+      is_admin: allowAdmin && isAdmin,
       is_approver: false,
       owner_roles: [],
+      label: label.trim() || undefined,
     });
   }
 
@@ -365,30 +474,99 @@ function IssueForm({
       <CardHeader>
         <CardTitle>Issue a new credential</CardTitle>
         <CardDescription>
-          Scope predicate narrows which evidence kinds and scope cells the
-          bearer can push to. TTL is in days; the bearer auto-expires.
+          Choose which evidence kinds the bearer may push and which scope cells
+          it may push for. TTL is in days; the bearer auto-expires.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
+        {/* #2384: pages name the key by this label instead of its id. */}
+        <Field label="Label (optional)" htmlFor="issue-label">
+          <Input
+            id="issue-label"
+            value={label}
+            maxLength={100}
+            placeholder="e.g. CI deploy"
+            onChange={(e) => setLabel(e.target.value)}
+            aria-describedby={
+              errorId ? `issue-label-hint ${errorId}` : "issue-label-hint"
+            }
+            data-testid="issue-label"
+          />
+          <p
+            id="issue-label-hint"
+            className="text-xs text-muted-foreground"
+            data-testid="issue-label-hint"
+          >
+            Every member of your organisation can see this label wherever the
+            key is named.
+          </p>
+        </Field>
+
+        <KindsPicker value={allowedKinds} onChange={setAllowedKinds} />
+
+        <div className="space-y-2" data-testid="issue-scope">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">Scope</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={raw}
+              // An unfinished picker choice has no JSON to open; opening
+              // it as Everything would silently widen the key.
+              disabled={!raw && predicate === null}
+              onClick={raw ? closeRaw : openRaw}
+              data-testid="issue-scope-raw-toggle"
+            >
+              {raw ? "Back to the builder" : "Raw JSON"}
+            </Button>
+          </div>
+          {raw ? (
+            <div className="space-y-1">
+              <label htmlFor="issue-scope-predicate" className="text-sm">
+                Scope predicate (JSON)
+              </label>
+              <textarea
+                id="issue-scope-predicate"
+                value={rawText}
+                onChange={(e) => {
+                  setRawText(e.target.value);
+                  setRawError(null);
+                }}
+                rows={8}
+                spellCheck={false}
+                className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                data-testid="issue-scope-json"
+                aria-invalid={rawError ? true : undefined}
+                aria-describedby={rawDescribedBy}
+              />
+              <p
+                id="issue-scope-json-hint"
+                className="text-xs text-muted-foreground"
+                data-testid="issue-scope-json-hint"
+              >
+                Blank means Everything (unrestricted).
+              </p>
+              {rawError ? (
+                <p
+                  id="issue-scope-json-error"
+                  className="text-xs text-rose-600"
+                  role="alert"
+                  data-testid="issue-scope-json-error"
+                >
+                  {rawError}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <ScopePicker value={predicate} onChange={setPredicate} />
+          )}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Scope predicate (JSON)">
+          <Field label="TTL (days)" htmlFor="issue-ttl-days">
             <Input
-              value={scopePredicate}
-              onChange={(e) => setScopePredicate(e.target.value)}
-              placeholder='{"connector":"aws"}'
-              aria-describedby={errorId}
-            />
-          </Field>
-          <Field label="Allowed kinds (comma-separated)">
-            <Input
-              value={allowedKinds}
-              onChange={(e) => setAllowedKinds(e.target.value)}
-              placeholder="aws.s3.encryption.v1, aws.iam.user.v1"
-              aria-describedby={errorId}
-            />
-          </Field>
-          <Field label="TTL (days)">
-            <Input
+              id="issue-ttl-days"
               type="number"
               min={1}
               max={3650}
@@ -397,20 +575,28 @@ function IssueForm({
               aria-describedby={errorId}
             />
           </Field>
-          <Field label="Admin credential">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isAdmin}
-                onChange={(e) => setIsAdmin(e.target.checked)}
-                className="h-4 w-4"
-                aria-describedby={errorId}
-              />
-              Grant admin privileges on this credential
-            </label>
-          </Field>
+          {allowAdmin ? (
+            <Field label="Admin credential">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={isAdmin}
+                  onChange={(e) => setIsAdmin(e.target.checked)}
+                  className="h-4 w-4"
+                  aria-describedby={errorId}
+                />
+                Grant admin privileges on this credential
+              </label>
+            </Field>
+          ) : null}
         </div>
-        <Button onClick={submit} disabled={submitting}>
+        <Button
+          onClick={submit}
+          // An unfinished picker choice says so under the picker; under raw
+          // JSON a click shows why the text cannot be sent.
+          disabled={submitting || (!raw && predicateToSend === null)}
+          data-testid="issue-credential-submit"
+        >
           {submitting ? "Issuing…" : "Issue credential"}
         </Button>
         {error ? (
@@ -430,65 +616,119 @@ function IssueForm({
   );
 }
 
-function RevokeConfirmModal({
-  cred,
-  onCancel,
-  onConfirm,
-  submitting,
+// The evidence kinds the key may push, from the tenant's schema registry.
+// None picked means any kind. A kind the registry does not list (a
+// connector's private kind not registered yet) can be added by name.
+function KindsPicker({
+  value,
+  onChange,
 }: {
-  cred: AdminCredential;
-  onCancel: () => void;
-  onConfirm: () => void;
-  submitting: boolean;
+  value: string[];
+  onChange: (kinds: string[]) => void;
 }) {
+  const schemas = useQuery({
+    queryKey: ["evidence-kinds"],
+    queryFn: fetchEvidenceKinds,
+    staleTime: 60_000,
+  });
+  const [filter, setFilter] = useState("");
+  const [extra, setExtra] = useState("");
+  const options = kindOptions(schemas.data?.schemas ?? [], value);
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? options.filter((k) => k.toLowerCase().includes(q))
+    : options;
+
+  function addExtra() {
+    const k = extra.trim();
+    if (k === "") return;
+    if (!value.includes(k)) onChange([...value, k]);
+    setExtra("");
+  }
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    >
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Revoke credential?</CardTitle>
-          <CardDescription>
-            Last 4 <code>{cred.last4}</code> · ID{" "}
-            <code className="text-xs">{cred.id.slice(0, 12)}…</code>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p>
-            Revocation is immediate. Any connector currently using this bearer
-            will start failing on its next push. Best-effort last-seen:{" "}
-            <code>{cred.last_used_at ?? "never"}</code>.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onCancel} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={onConfirm}
-              disabled={submitting}
-            >
-              {submitting ? "Revoking…" : "Revoke now"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <fieldset className="space-y-2" data-testid="issue-kinds">
+      <legend className="text-sm font-medium">Evidence kinds</legend>
+      <p className="text-xs text-muted-foreground">
+        {value.length === 0
+          ? "None picked: the key may push any kind."
+          : `${value.length} picked: the key may push only these.`}
+      </p>
+      <Input
+        aria-label="Filter evidence kinds"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter kinds"
+        data-testid="issue-kinds-filter"
+      />
+      {schemas.isPending ? (
+        <p className="text-sm text-muted-foreground">Loading evidence kinds…</p>
+      ) : schemas.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          Could not load evidence kinds: {schemas.error.message}. Add kinds by
+          name below.
+        </p>
+      ) : null}
+      <div className="max-h-48 space-y-1 overflow-auto rounded border p-2">
+        {shown.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No kinds match.</p>
+        ) : (
+          shown.map((k) => (
+            <label key={k} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={value.includes(k)}
+                onCheckedChange={() => onChange(toggleKind(value, k, options))}
+                data-testid={`issue-kind-${k}`}
+              />
+              <span className="font-mono text-xs">{k}</span>
+            </label>
+          ))
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          aria-label="Add an evidence kind by name"
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addExtra();
+            }
+          }}
+          placeholder="Add a kind by name"
+          data-testid="issue-kinds-add-input"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addExtra}
+          data-testid="issue-kinds-add"
+        >
+          Add
+        </Button>
+      </div>
+    </fieldset>
   );
 }
 
 function Field({
   label,
+  htmlFor,
   children,
 }: {
   label: string;
+  // The control this label names. Without it the label is a caption only
+  // and the input has no accessible name (axe `label`).
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium">{label}</label>
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {label}
+      </label>
       {children}
     </div>
   );

@@ -24,7 +24,10 @@ package eval
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
+
+	"github.com/mgoodric/security-atlas/internal/control/attestation"
 )
 
 // ResultPass / Fail / NA / Inconclusive mirror the `evidence_result` Postgres
@@ -34,6 +37,9 @@ const (
 	ResultFail         = "fail"
 	ResultNA           = "na"
 	ResultInconclusive = "inconclusive"
+	// ResultExcepted is written when an active exception covers the cell
+	// (#2112). It never comes from evidence and is never a pass.
+	ResultExcepted = "excepted"
 )
 
 // FreshnessFresh / Stale / NoEvidence mirror the `freshness_status` CHECK
@@ -63,8 +69,8 @@ var freshnessMaxAgeTable = map[string]time.Duration{
 }
 
 // freshnessMaxAge returns the max acceptable evidence age for a freshness
-// class. An unknown or empty class (e.g. a bundle that declares "hourly",
-// which the evidence enum lacks) falls back to the monthly default; `ok` is
+// class. An unknown or empty class (e.g. "hourly", which the evidence enum
+// lacks and the bundle parser refuses since #2826) falls back to the monthly default; `ok` is
 // always true so callers do not have to special-case the fallback, but the
 // distinction is available for logging.
 func freshnessMaxAge(class string) (time.Duration, bool) {
@@ -77,8 +83,9 @@ func freshnessMaxAge(class string) (time.Duration, bool) {
 // FreshnessMaxAge is the exported accessor for the canvas §2.3 freshness
 // model — the class -> max-acceptable-evidence-age mapping. It exists so
 // sibling packages (slice 016's freshness read model) reuse the SAME mapping
-// rather than redefining it: the table lives in exactly one place,
-// freshnessMaxAgeTable above. An unknown or empty class falls back to the
+// rather than redefining it. The one other copy is the CASE blocks in
+// internal/db/queries/calendar.sql, pinned to this table by
+// calendar_freshness_sync_test.go (#2868). An unknown or empty class falls back to the
 // `monthly` (90d) default; the returned bool reports whether the class was a
 // known member of the table. Callers may surface that in logging but never
 // need to special-case it — the returned duration is always usable.
@@ -86,6 +93,20 @@ func FreshnessMaxAge(class string) (time.Duration, bool) {
 	_, known := freshnessMaxAgeTable[class]
 	d, _ := freshnessMaxAge(class)
 	return d, known
+}
+
+// FreshnessClasses returns every class freshnessMaxAgeTable maps, shortest
+// window first. The control-bundle parser derives its allowed set from it, so
+// a bundle cannot declare a class the engine has no window for (#2896).
+func FreshnessClasses() []string {
+	classes := make([]string, 0, len(freshnessMaxAgeTable))
+	for c := range freshnessMaxAgeTable {
+		classes = append(classes, c)
+	}
+	sort.Slice(classes, func(i, j int) bool {
+		return freshnessMaxAgeTable[classes[i]] < freshnessMaxAgeTable[classes[j]]
+	})
+	return classes
 }
 
 // inWindowRecord is one evidence record that fell INSIDE the freshness window.
@@ -99,10 +120,17 @@ func FreshnessMaxAge(class string) (time.Duration, bool) {
 // each in-window record. The Rego path ignores payload (it sees only result);
 // keeping the fields on the in-window struct lets all three evaluators share
 // one record set without a second DB read.
+//
+// kind, ingestedAt and id identify the record for latestAttestationWins
+// (#2111): kind picks out attestations, and (observedAt, ingestedAt, id)
+// orders them.
 type inWindowRecord struct {
 	result     string
 	observedAt time.Time
 	payload    []byte
+	kind       string
+	ingestedAt time.Time
+	id         string
 }
 
 // allRecord is one evidence record before the freshness filter — the full
@@ -114,6 +142,9 @@ type allRecord struct {
 	observedAt time.Time
 	result     string
 	payload    []byte
+	kind       string
+	ingestedAt time.Time
+	id         string
 }
 
 // inWindowRecords filters a full ledger slice down to the records whose
@@ -125,7 +156,99 @@ func inWindowRecords(all []allRecord, class string, now time.Time) []inWindowRec
 	out := make([]inWindowRecord, 0, len(all))
 	for _, r := range all {
 		if !r.observedAt.Before(cutoff) {
-			out = append(out, inWindowRecord{result: r.result, observedAt: r.observedAt, payload: r.payload})
+			out = append(out, inWindowRecord{
+				result:     r.result,
+				observedAt: r.observedAt,
+				payload:    r.payload,
+				kind:       r.kind,
+				ingestedAt: r.ingestedAt,
+				id:         r.id,
+			})
+		}
+	}
+	return out
+}
+
+// latestAttestationWins keeps only the latest manual attestation in an
+// in-window record set and passes every other record through unchanged, in
+// its original order (#2111). An attestation is a person's current word on
+// the control, so a later pass supersedes an earlier fail and a later fail
+// supersedes an earlier pass. Automated evidence is not collapsed: any fail
+// among it still fails the control through computeResult.
+//
+// "Latest" is decided by, in order:
+//
+//  1. min(observed_at, ingested_at), later wins;
+//  2. ingested_at, later wins, when that is equal (two attestations
+//     stamped the same moment, or a client clock that repeats);
+//  3. id, the greater string wins, when both are equal.
+//
+// The comparison is explicit, so the outcome does not depend on the order
+// the records arrive in. A backdated attestation is ordered by the moment
+// it claims, so backdating can only make it lose. A future-dated one is
+// capped at the moment the platform received it (#2509): ingest accepts
+// observed_at up to MaxObservedAtSkew ahead, and without the cap a pusher
+// could date a pass a day ahead and outvote every honest later fail.
+func latestAttestationWins(records []inWindowRecord) []inWindowRecord {
+	latest := -1
+	for i, r := range records {
+		if r.kind != attestation.Kind {
+			continue
+		}
+		if latest < 0 || attestationAfter(r, records[latest]) {
+			latest = i
+		}
+	}
+	if latest < 0 {
+		return records
+	}
+	out := make([]inWindowRecord, 0, len(records))
+	for i, r := range records {
+		if r.kind == attestation.Kind && i != latest {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// attestationAfter reports whether a is later than b under the
+// latestAttestationWins order.
+func attestationAfter(a, b inWindowRecord) bool {
+	if ae, be := attestedAt(a), attestedAt(b); !ae.Equal(be) {
+		return ae.After(be)
+	}
+	if !a.ingestedAt.Equal(b.ingestedAt) {
+		return a.ingestedAt.After(b.ingestedAt)
+	}
+	return a.id > b.id
+}
+
+// attestedAt is the moment an attestation counts from:
+// min(observed_at, ingested_at). A record with no ingested_at (a fixture
+// record) counts from observed_at.
+func attestedAt(r inWindowRecord) time.Time {
+	if !r.ingestedAt.IsZero() && r.ingestedAt.Before(r.observedAt) {
+		return r.ingestedAt
+	}
+	return r.observedAt
+}
+
+// recordsOfKind returns the records one evidence query evaluates over (ADR
+// 0028 decision 5, #2818): those of the evidence_kind its manifest declares,
+// in their original order. A query that declares no kind sees every record,
+// as every query did before #2818; the bundle validator warns on it. A record
+// with no kind reaches only such a query, except under matchUnkinded, which
+// the fixture runner sets so a test record that omits evidence_kind stands
+// for a record of whatever kind the query reads.
+func recordsOfKind(records []inWindowRecord, kind string, matchUnkinded bool) []inWindowRecord {
+	if kind == "" {
+		return records
+	}
+	out := make([]inWindowRecord, 0, len(records))
+	for _, r := range records {
+		if r.kind == kind || (matchUnkinded && r.kind == "") {
+			out = append(out, r)
 		}
 	}
 	return out

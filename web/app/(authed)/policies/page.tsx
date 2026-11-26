@@ -34,7 +34,8 @@
 //     instead until backend extension lands.
 //   - P0-A3: NO invented columns — every column derives from
 //     `policyWire` (title, version, status, owner_role, published_at,
-//     updated_at) + the joined PolicyAckRate cell when available.
+//     updated_at, imported, warnings) + the joined PolicyAckRate cell
+//     when available.
 //   - P0-A4: NO policy-create UI bundled. Slice 242 closes the
 //     forward-looking-UI claim by replacing the lying CTA
 //     ("Scaffold five foundational policies" → /admin/credentials)
@@ -67,6 +68,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   fetchPoliciesList,
   type PoliciesListResponse,
@@ -93,26 +95,38 @@ import {
   clearFilters,
   DEFAULT_FILTERS,
   isDefault,
+  REVIEW_DUE_SOON,
+  REVIEW_OVERDUE,
   setFilter,
   uniqueOwners,
   type PolicyFilters,
 } from "./filters";
 import { statusCountsLabel } from "./header-counts";
+import { MyAcksCallout } from "./my-acks-callout";
 import {
   POLICIES_ACK_REPORT_FUTURE_REASON,
   POLICIES_ACK_REPORT_FUTURE_TESTID,
-  POLICIES_NEW_POLICY_FUTURE_REASON,
-  POLICIES_NEW_POLICY_FUTURE_TESTID,
 } from "./header-cta-future";
 import {
   POLICIES_SCAFFOLD_FUTURE_BODY,
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2154: the subtitle names the module's key terms.
+const SUBTITLE = (
+  <>
+    Versioned policies · <Term id="policy-acknowledgment">acknowledgment</Term>{" "}
+    tracked against the current version
+  </>
+);
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
   "owner_role",
   "ack_status",
+  "review",
 ];
 
 // Slice 240 — page-size default per AC-3.
@@ -157,6 +171,29 @@ const ACK_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ACK_STATUS_LT_50, label: "< 50% acknowledged" },
 ];
 
+// #1806 — review pill. Values equal the API's `review_status`, so
+// `?review=overdue` on this page names the same set as the API filter.
+const REVIEW_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All review dates" },
+  { value: REVIEW_OVERDUE, label: "Review overdue" },
+  { value: REVIEW_DUE_SOON, label: "Review due within 30 days" },
+];
+
+// #1806 — marker next to the review date. `upcoming` and undated rows get
+// no marker; the date alone says enough.
+function reviewMarker(
+  status: Policy["review_status"],
+): { label: string; className: string } | null {
+  switch (status) {
+    case "overdue":
+      return { label: "Overdue", className: "bg-red-50 text-red-700" };
+    case "due-soon":
+      return { label: "Due soon", className: "bg-amber-50 text-amber-700" };
+    default:
+      return null;
+  }
+}
+
 function statusPillClass(status: string): string {
   switch (status) {
     case "published":
@@ -170,13 +207,6 @@ function statusPillClass(status: string): string {
     default:
       return "bg-muted text-muted-foreground";
   }
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  // Take YYYY-MM-DD prefix only (matches mockup mono-spaced "2026-01-15"
-  // shape). Avoids any locale drift from new Date().toLocaleDateString.
-  return iso.slice(0, 10);
 }
 
 function PoliciesPageInner() {
@@ -306,6 +336,12 @@ function PoliciesPageInner() {
       value: filters.ack_status,
       options: ACK_STATUS_OPTIONS,
     },
+    {
+      id: "review",
+      label: "Review",
+      value: filters.review,
+      options: REVIEW_OPTIONS,
+    },
   ];
 
   const meta = (
@@ -350,6 +386,34 @@ function PoliciesPageInner() {
       ),
     },
     {
+      // #1747 — flags. "No linked controls" mirrors the API's
+      // orphan_policy warning; "Imported" marks a policy brought in by
+      // the policy library import. Imported policies may be published
+      // without linked controls, so this is where that shows.
+      id: "flags",
+      header: "",
+      cell: (row) => (
+        <span className="inline-flex flex-wrap gap-1">
+          {row.imported ? (
+            <span
+              data-testid="policies-row-imported"
+              className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md border text-muted-foreground"
+            >
+              Imported
+            </span>
+          ) : null}
+          {row.warnings?.includes("orphan_policy") ? (
+            <span
+              data-testid="policies-row-no-linked-controls"
+              className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700"
+            >
+              No linked controls
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
       id: "version",
       header: "Version",
       cell: (row) => (
@@ -383,12 +447,57 @@ function PoliciesPageInner() {
       header: "Published",
       cell: (row) =>
         row.published_at ? (
-          <span className="font-mono text-xs text-muted-foreground">
-            {formatDate(row.published_at)}
-          </span>
+          <Timestamp
+            value={row.published_at}
+            style="date"
+            className="text-xs text-muted-foreground"
+          />
         ) : (
           <span className="text-xs text-muted-foreground italic">—</span>
         ),
+    },
+    {
+      // #1806 — next review date with an overdue / due-soon marker. Only
+      // published policies have a review due (the API omits
+      // review_status otherwise), so a draft's date shows without one.
+      // #2009 — a superseded version keeps the date it was due, as
+      // history; it has no next review, so the column shows none.
+      id: "next_review_at",
+      header: "Next review",
+      cell: (row) => {
+        if (!row.next_review_at || row.status === "superseded") {
+          return (
+            <span
+              className="text-xs text-muted-foreground italic"
+              data-testid="policies-row-next-review-missing"
+            >
+              —
+            </span>
+          );
+        }
+        const marker = reviewMarker(row.review_status);
+        return (
+          <span className="inline-flex items-center gap-2">
+            <Timestamp
+              value={row.next_review_at}
+              style="date"
+              className="text-xs text-muted-foreground"
+              testId="policies-row-next-review"
+            />
+            {marker ? (
+              <span
+                data-testid="policies-row-review-marker"
+                className={
+                  "inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md " +
+                  marker.className
+                }
+              >
+                {marker.label}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "ack_rate",
@@ -437,9 +546,10 @@ function PoliciesPageInner() {
       header: "Updated",
       align: "right",
       cell: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {formatDate(row.updated_at)}
-        </span>
+        <Timestamp
+          value={row.updated_at}
+          className="text-xs text-muted-foreground"
+        />
       ),
     },
   ];
@@ -466,26 +576,10 @@ function PoliciesPageInner() {
           </a>
         ))}
       </div>
-      {/* Slice 241 — formerly two `<Button disabled>` actions
-          ("Acknowledgment report" + "New policy"), both inert with
-          no tooltip / no link / no signposting (slice 178 honesty
-          audit class F-178-241). Replaced with non-button `<span>`
-          affordances carrying `title` + `aria-label` + a stable
-          test-id, mirroring the slice 217 pattern (see
-          `web/app/(authed)/audits/oscal-export-future.ts` +
-          `audits/page.tsx`). Visible copy + tooltip + aria-label
-          all read the same line; the disclosure IS the affordance.
-
-          Slice 247's enable-via-`<Link>` shape was the alternative
-          considered but rejected: it presupposes the destination
-          route exists. `/policies/new` does NOT exist on main
-          today; an acknowledgment-report-generation surface does
-          NOT exist at all. Building either inline blows the 0.5d
-          budget for both buttons combined (P0-241-1 / P0-241-2).
-          When the in-app `/policies/new` form ships, this header
-          flips to a `<Link>` matching the slice 247 / risks pattern;
-          this `<span>` deletes in that same PR. Same applies to
-          the ack-report surface when it lands. */}
+      {/* Slice 241 replaced the inert "Acknowledgment report" button with
+          a labelled `<span>` disclosure (the slice 217 pattern); the
+          report surface does not exist yet. #2116 shipped `/policies/new`,
+          so "New policy" is a real link (the slice 247 / risks shape). */}
       <span
         title={POLICIES_ACK_REPORT_FUTURE_REASON}
         aria-label={POLICIES_ACK_REPORT_FUTURE_REASON}
@@ -494,22 +588,21 @@ function PoliciesPageInner() {
       >
         {POLICIES_ACK_REPORT_FUTURE_REASON}
       </span>
-      <span
-        title={POLICIES_NEW_POLICY_FUTURE_REASON}
-        aria-label={POLICIES_NEW_POLICY_FUTURE_REASON}
-        data-testid={POLICIES_NEW_POLICY_FUTURE_TESTID}
-        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      <Link
+        href="/policies/new"
+        className={buttonVariants({ size: "sm" })}
+        data-testid="policies-new"
       >
-        {POLICIES_NEW_POLICY_FUTURE_REASON}
-      </span>
+        New policy
+      </Link>
     </>
   );
 
   if (policiesQ.isLoading) {
     return (
       <ListPage
-        title="Policy library"
-        subtitle="Versioned policies · acknowledgment tracked against the current version"
+        title={pageTitle("/policies")}
+        subtitle={SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -523,8 +616,8 @@ function PoliciesPageInner() {
   if (policiesQ.isError) {
     return (
       <ListPage
-        title="Policy library"
-        subtitle="Versioned policies · acknowledgment tracked against the current version"
+        title={pageTitle("/policies")}
+        subtitle={SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="policies-load-error">
@@ -569,7 +662,7 @@ function PoliciesPageInner() {
       {POLICIES_SCAFFOLD_FUTURE_BODY}
     </span>
   ) : (
-    "Try widening the status, owner-role, or ack-status filters."
+    "Try widening the status, owner-role, ack-status, or review filters."
   );
   const emptyState = (
     <EmptyState
@@ -607,9 +700,9 @@ function PoliciesPageInner() {
 
   return (
     <ListPage
-      title="Policy library"
+      title={pageTitle("/policies")}
       titleAdornment={titleAdornment}
-      subtitle="Versioned policies · acknowledgment tracked against the current version"
+      subtitle={SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
@@ -619,6 +712,7 @@ function PoliciesPageInner() {
         />
       }
     >
+      <MyAcksCallout />
       <ListTable<Policy>
         columns={columns}
         rows={pagedRows}

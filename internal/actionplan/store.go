@@ -1,10 +1,12 @@
 package actionplan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -49,6 +52,10 @@ type ActionPlan struct {
 	TombstonedAt    *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// ControlsFailing: the plan is completed and its linked controls do not
+	// all pass their latest evaluation (#2109). Set by Get and
+	// GetWithLinkage.
+	ControlsFailing bool
 }
 
 // Link is one M2M linkage row (a risk or a control target).
@@ -71,17 +78,22 @@ type PlanRef struct {
 	Title   string
 	Status  string
 	DueDate *time.Time
+	// ControlsFailing: completed, with linked controls still failing (#2109).
+	ControlsFailing bool
 }
 
 // AuditEntry is the public shape of an action_plan_audit_log row.
 type AuditEntry struct {
 	ID           uuid.UUID
 	ActionPlanID uuid.UUID
-	ActorID      uuid.UUID
-	ActionType   string
-	BeforeState  json.RawMessage
-	AfterState   json.RawMessage
-	CreatedAt    time.Time
+	// ActorID is the person, uuid.Nil on a row the system wrote.
+	ActorID uuid.UUID
+	// SystemActor is SystemActor on a row the system wrote, else empty.
+	SystemActor string
+	ActionType  string
+	BeforeState json.RawMessage
+	AfterState  json.RawMessage
+	CreatedAt   time.Time
 }
 
 // Store wraps the sqlc Queries with the tenancy plumbing required for RLS.
@@ -187,7 +199,8 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (ActionPlan, error) {
 			return fmt.Errorf("get action plan: %w", err)
 		}
 		out = planFromRow(row)
-		return nil
+		out.ControlsFailing, err = controlsFailing(ctx, q, tenantID, id)
+		return err
 	})
 	return out, err
 }
@@ -209,6 +222,9 @@ func (s *Store) GetWithLinkage(ctx context.Context, id uuid.UUID) (ActionPlan, L
 			return fmt.Errorf("get action plan: %w", err)
 		}
 		pOut = planFromRow(row)
+		if pOut.ControlsFailing, err = controlsFailing(ctx, q, tenantID, id); err != nil {
+			return err
+		}
 		lk, err := loadLinkage(ctx, q, tenantID, id)
 		if err != nil {
 			return err
@@ -222,6 +238,8 @@ func (s *Store) GetWithLinkage(ctx context.Context, id uuid.UUID) (ActionPlan, L
 // ListFilter narrows List. Empty fields are ignored.
 type ListFilter struct {
 	Status string
+	// Query narrows to plans whose title contains it, ignoring case (#2618).
+	Query string
 	// Limit is the page size (already clamped by the handler, but clamped
 	// again here for defense in depth).
 	Limit int
@@ -240,6 +258,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ActionPlan, erro
 		rows, err := q.ListActionPlans(ctx, dbx.ListActionPlansParams{
 			TenantID:        pgUUID(tenantID),
 			Status:          nilIfEmpty(filter.Status),
+			Q:               nilIfEmpty(filter.Query),
 			CursorCreatedAt: pgTimestamptzPtr(filter.CursorCreatedAt),
 			CursorID:        pgUUIDPtr(uuidPtrOrNilDefault(filter.CursorID)),
 			RowLimit:        int32(limit),
@@ -331,7 +350,193 @@ type UpdateInput struct {
 // Update applies the non-nil fields and writes an audit row. A status change
 // writes a `status_changed` row; a non-status edit writes `updated`. An
 // illegal transition returns ErrIllegalTransition (422) before any write.
+//
+// Update never moves a plan to verified: an approver verifies a plan with
+// no linked controls through Verify (#2108), and the platform verifies the
+// rest from their controls' evaluations (#2109). Nor does it move a plan
+// out of verified: verified -> completed is the system's, when a linked
+// control fails (ReconcileVerification).
 func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (ActionPlan, error) {
+	if in.Status != nil && *in.Status == StatusVerified {
+		return ActionPlan{}, ErrVerifyThroughVerify
+	}
+	var guard func(context.Context, *dbx.Queries, uuid.UUID, ActionPlan) error
+	if in.Status != nil {
+		guard = func(_ context.Context, _ *dbx.Queries, _ uuid.UUID, cur ActionPlan) error {
+			if cur.Status == StatusVerified && *in.Status != StatusVerified {
+				return ErrIllegalTransition
+			}
+			return nil
+		}
+	}
+	return s.update(ctx, id, in, guard)
+}
+
+// ReconcileVerification makes the system's completed <-> verified moves for
+// the plans linked to controlID, inside the caller's transaction q (#2109).
+// The control evaluator calls it after appending an evaluation. A completed
+// plan whose linked controls all pass their latest evaluation becomes
+// verified; a verified plan with a linked control that does not pass
+// returns to completed. A plan with no linked control is never touched: a
+// person verifies it. Each move writes a status_changed audit row under
+// SystemActor in the same transaction. The work is
+// action_plans_reconcile_verification, the only path the DB trigger admits
+// for verified -> completed; it reads the tenant from app.current_tenant,
+// which the caller's transaction must have set. Returns the plans moved.
+func ReconcileVerification(ctx context.Context, q *dbx.Queries, controlID uuid.UUID) (int, error) {
+	n, err := q.ReconcileActionPlanVerification(ctx, pgUUID(controlID))
+	if err != nil {
+		return 0, fmt.Errorf("actionplan: reconcile verification for control %s: %w", controlID, err)
+	}
+	return int(n), nil
+}
+
+func controlsFailing(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID) (bool, error) {
+	failing, err := q.ActionPlanControlsFailing(ctx, dbx.ActionPlanControlsFailingParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(id),
+	})
+	if err != nil {
+		return false, fmt.Errorf("action plan controls failing: %w", err)
+	}
+	return failing, nil
+}
+
+// Verify moves a completed plan with no linked controls to verified (#2108).
+// approver is the person verifying, and the role check is the caller's.
+// The plan's owner never verifies it, whatever the organisation's
+// self-approval setting: the rule is approval.Check with self-approval off.
+// Nor does whoever completed it, or anyone who owned it since, per its
+// audit trail (involvedSinceCompletion, #2434).
+// A plan with linked controls is refused with ErrVerifyHasControls; its
+// controls' evaluations verify it. The status change writes one
+// status_changed audit row, in the same transaction, actor the approver.
+func (s *Store) Verify(ctx context.Context, id uuid.UUID, approver approval.Approver) (ActionPlan, error) {
+	actor, err := uuid.Parse(approver.UserID)
+	if err != nil {
+		return ActionPlan{}, ErrVerifierNotPerson
+	}
+	status := StatusVerified
+	in := UpdateInput{Status: &status, Actor: actor}
+	return s.update(ctx, id, in, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, cur ActionPlan) error {
+		if cur.Status != StatusCompleted {
+			return ErrIllegalTransition
+		}
+		n, err := q.CountActionPlanControls(ctx, dbx.CountActionPlanControlsParams{
+			TenantID:     pgUUID(tenantID),
+			ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("count linked controls (verify): %w", err)
+		}
+		if n > 0 {
+			return ErrVerifyHasControls
+		}
+		if _, err := approval.Check(cur.OwnerID.String(), approver, false); err != nil {
+			if errors.Is(err, approval.ErrNotPerson) {
+				return ErrVerifierNotPerson
+			}
+			return ErrOwnerCannotVerify
+		}
+		trail, err := q.ListActionPlanAuditLog(ctx, dbx.ListActionPlanAuditLogParams{
+			TenantID:     pgUUID(tenantID),
+			ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("%w: read audit trail: %w", ErrVerifierInvolved, err)
+		}
+		involved, err := involvedSinceCompletion(trail)
+		if err != nil {
+			return err
+		}
+		if involved[actor] {
+			return ErrVerifierInvolved
+		}
+		return nil
+	})
+}
+
+// involvedSinceCompletion returns the people the owner rule refuses as a
+// plan's verifier, read from its audit trail (#2434): everyone who moved
+// it to completed, and everyone who owned it at any point from its first
+// completion onwards. Checking only the owner at verification time let an
+// owner hand the plan to a colleague, verify, and take it back.
+//
+// The window opens at the first completion, not the latest, so a plan
+// reopened and completed again keeps everyone from its first round: the
+// wider set is the safe side to be wrong on. It fails closed: a trail
+// with no person's completion row, or a row whose state does not parse,
+// is ErrVerifierInvolved. trail is in ListActionPlanAuditLog order, but
+// the result does not rest on it: an owner on a row whose before- or
+// after-status is completed or verified counts wherever the row sorts
+// (#2639).
+func involvedSinceCompletion(trail []dbx.ActionPlanAuditLog) (map[uuid.UUID]bool, error) {
+	type state struct {
+		Status  string `json:"status"`
+		OwnerID string `json:"owner_id"`
+	}
+	parse := func(raw []byte) (state, error) {
+		var st state
+		if len(raw) == 0 {
+			return st, nil
+		}
+		err := json.Unmarshal(raw, &st)
+		return st, err
+	}
+	involved := map[uuid.UUID]bool{}
+	completed := false
+	for _, row := range trail {
+		rowID := uuid.UUID(row.ID.Bytes)
+		before, err := parse(row.BeforeState)
+		if err != nil {
+			return nil, fmt.Errorf("%w: audit row %s: %w", ErrVerifierInvolved, rowID, err)
+		}
+		after, err := parse(row.AfterState)
+		if err != nil {
+			return nil, fmt.Errorf("%w: audit row %s: %w", ErrVerifierInvolved, rowID, err)
+		}
+		// A person's move into completed. verified -> completed is the
+		// system's (ReconcileVerification), and names no person.
+		if row.ActionType == ActionStatusChanged && after.Status == StatusCompleted && before.Status != StatusVerified {
+			if !row.ActorID.Valid {
+				return nil, fmt.Errorf("%w: completion row %s names no person", ErrVerifierInvolved, rowID)
+			}
+			involved[uuid.UUID(row.ActorID.Bytes)] = true
+			completed = true
+		}
+		// The window is the first completion onwards. A row whose before-
+		// or after-status is completed or verified is inside it wherever
+		// it sorts: the trail orders by created_at, and a row can sort
+		// before the completion it followed (#2639).
+		if !completed && !closedState(before.Status) && !closedState(after.Status) {
+			continue
+		}
+		// Link and unlink rows carry a target, not a plan state: no owner.
+		for _, o := range []string{before.OwnerID, after.OwnerID} {
+			if o == "" {
+				continue
+			}
+			owner, err := uuid.Parse(o)
+			if err != nil {
+				return nil, fmt.Errorf("%w: audit row %s owner: %w", ErrVerifierInvolved, rowID, err)
+			}
+			involved[owner] = true
+		}
+	}
+	if !completed {
+		return nil, fmt.Errorf("%w: no completion in the audit trail", ErrVerifierInvolved)
+	}
+	return involved, nil
+}
+
+// closedState reports whether a plan in status has been completed.
+func closedState(status string) bool {
+	return status == StatusCompleted || status == StatusVerified
+}
+
+// update applies in, after guard (when set) accepts the current row inside
+// the same transaction.
+func (s *Store) update(ctx context.Context, id uuid.UUID, in UpdateInput, guard func(context.Context, *dbx.Queries, uuid.UUID, ActionPlan) error) (ActionPlan, error) {
 	if in.Title != nil {
 		if err := ValidateTitle(*in.Title); err != nil {
 			return ActionPlan{}, err
@@ -356,7 +561,9 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (Actio
 
 	var out ActionPlan
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		before, err := q.GetActionPlanByID(ctx, dbx.GetActionPlanByIDParams{
+		// FOR UPDATE (#2434): guard reads the plan, its links and its
+		// audit trail under the row lock held until the UPDATE commits.
+		before, err := q.GetActionPlanByIDForUpdate(ctx, dbx.GetActionPlanByIDForUpdateParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
 		})
@@ -367,6 +574,11 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (Actio
 			return fmt.Errorf("get action plan (update): %w", err)
 		}
 		cur := planFromRow(before)
+		if guard != nil {
+			if err := guard(ctx, q, tenantID, cur); err != nil {
+				return err
+			}
+		}
 
 		next := cur
 		statusChanged := false
@@ -450,9 +662,21 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (Actio
 
 // Tombstone soft-deletes the plan (P0-384-6 — never hard-deleted) and writes
 // a `tombstoned` audit row. A subsequent GET returns ErrNotFound (AC-14).
+//
+// A live plan can be what keeps a mitigate risk valid (a linked control or
+// a live linked action plan, #1746). Tombstone refuses with
+// ErrMitigationRequired (409) when any linked open risk would be left with
+// neither, and then tombstones nothing (#2449).
+//
+// Lock order: the plan row (FOR UPDATE, so no risk link can be added
+// while the risk set is read), then each linked risk row (LockRiskByID)
+// in ascending id order, so two writes over overlapping risk sets lock in
+// the same order. The risk row is the last step of the #2335 order; this
+// path takes no rule or category lock, because neither the plan nor its
+// links are an aggregation input.
 func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) error {
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		before, err := q.GetActionPlanByID(ctx, dbx.GetActionPlanByIDParams{
+		before, err := q.GetActionPlanByIDForUpdate(ctx, dbx.GetActionPlanByIDForUpdateParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
 		})
@@ -463,6 +687,20 @@ func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) er
 			return fmt.Errorf("get action plan (tombstone): %w", err)
 		}
 		cur := planFromRow(before)
+		riskRows, err := q.ListActionPlanRisks(ctx, dbx.ListActionPlanRisksParams{
+			TenantID: pgUUID(tenantID), ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("list action plan risks (tombstone): %w", err)
+		}
+		riskIDs := make([]uuid.UUID, len(riskRows))
+		for i, r := range riskRows {
+			riskIDs[i] = uuid.UUID(r.RiskID.Bytes)
+		}
+		locked, err := lockRisks(ctx, q, tenantID, riskIDs)
+		if err != nil {
+			return err
+		}
 		row, err := q.TombstoneActionPlan(ctx, dbx.TombstoneActionPlanParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
@@ -472,6 +710,9 @@ func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) er
 				return ErrNotFound
 			}
 			return fmt.Errorf("tombstone action plan: %w", err)
+		}
+		if err := checkMitigation(ctx, q, tenantID, locked); err != nil {
+			return err
 		}
 		after := planFromRow(row)
 		beforeJSON, _ := json.Marshal(planSnapshot(cur))
@@ -515,11 +756,26 @@ func (s *Store) LinkRisk(ctx context.Context, planID, riskID, actor uuid.UUID) e
 }
 
 // UnlinkRisk removes a risk link (AC-18). ErrNotLinked (404) if absent.
+// It refuses with ErrMitigationRequired (409) when the risk is mitigate
+// and this plan is the last of its linked controls and live plans (#2449).
+//
+// Lock order: the risk row only (LockRiskByID), the last step of the
+// #2335 order, as the risk-side control unlink takes it. A concurrent
+// unlink or tombstone that would remove the risk's other mitigation waits
+// on the same row and re-counts after this one commits.
 func (s *Store) UnlinkRisk(ctx context.Context, planID, riskID, actor uuid.UUID) error {
 	return s.unlink(ctx, planID, actor, ActionRiskUnlinked, riskID, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (int64, error) {
-		return q.UnlinkActionPlanRisk(ctx, dbx.UnlinkActionPlanRiskParams{
+		locked, err := lockRisks(ctx, q, tenantID, []uuid.UUID{riskID})
+		if err != nil {
+			return 0, err
+		}
+		n, err := q.UnlinkActionPlanRisk(ctx, dbx.UnlinkActionPlanRiskParams{
 			TenantID: pgUUID(tenantID), ActionPlanID: pgUUID(planID), RiskID: pgUUID(riskID),
 		})
+		if err != nil || n == 0 {
+			return n, err
+		}
+		return n, checkMitigation(ctx, q, tenantID, locked)
 	})
 }
 
@@ -576,7 +832,7 @@ func (s *Store) PlansForRisk(ctx context.Context, riskID uuid.UUID) ([]PlanRef, 
 		}
 		out = make([]PlanRef, len(rows))
 		for i, r := range rows {
-			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate)}
+			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate), ControlsFailing: r.ControlsFailing}
 		}
 		return nil
 	})
@@ -595,7 +851,7 @@ func (s *Store) PlansForControl(ctx context.Context, controlID uuid.UUID) ([]Pla
 		}
 		out = make([]PlanRef, len(rows))
 		for i, r := range rows {
-			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate)}
+			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate), ControlsFailing: r.ControlsFailing}
 		}
 		return nil
 	})
@@ -619,6 +875,7 @@ func (s *Store) ListAuditLog(ctx context.Context, planID uuid.UUID) ([]AuditEntr
 				ActionPlanID: uuid.UUID(r.ActionPlanID.Bytes),
 				ActorID:      uuid.UUID(r.ActorID.Bytes),
 				ActionType:   r.ActionType,
+				SystemActor:  derefStr(r.SystemActor),
 				BeforeState:  append(json.RawMessage(nil), r.BeforeState...),
 				AfterState:   append(json.RawMessage(nil), r.AfterState...),
 				CreatedAt:    tsTime(r.CreatedAt),
@@ -718,6 +975,76 @@ func (s *Store) unlink(ctx context.Context, planID, actor uuid.UUID, action stri
 		detail, _ := json.Marshal(map[string]string{"target_id": targetID.String()})
 		return s.writeAudit(ctx, q, tenantID, planID, actor, action, detail, nil)
 	})
+}
+
+// MitigationRequiredError names the mitigate risk a write would leave with
+// no linked control and no live action plan. errors.Is matches
+// ErrMitigationRequired.
+type MitigationRequiredError struct {
+	RiskID uuid.UUID
+}
+
+func (e *MitigationRequiredError) Error() string {
+	return fmt.Sprintf("risk %s is mitigate and would be left with no linked control or live action plan; link a control or another action plan to it, or change its treatment, first", e.RiskID)
+}
+
+func (e *MitigationRequiredError) Unwrap() error { return ErrMitigationRequired }
+
+// MitigationHeld reports whether a risk with this treatment and these link
+// counts meets the mitigate rule: a mitigate risk keeps at least one linked
+// control or live action plan; other treatments do not count links. It
+// mirrors the mitigate case of risk.ValidateTreatment, which this package
+// cannot import (risk imports eval, which imports actionplan). A test in
+// internal/risk checks the two agree.
+func MitigationHeld(t dbx.RiskTreatment, controls, plans int) bool {
+	return t != dbx.RiskTreatmentMitigate || controls > 0 || plans > 0
+}
+
+// lockRisks locks each risk row (LockRiskByID) in ascending id order and
+// returns the locked rows. A risk not visible in the tenant is skipped:
+// a linked risk always resolves (composite FK), and an unlink of an absent
+// risk falls through to ErrNotLinked.
+func lockRisks(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ids []uuid.UUID) ([]dbx.Risk, error) {
+	sorted := slices.Clone(ids)
+	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	sorted = slices.Compact(sorted)
+	out := make([]dbx.Risk, 0, len(sorted))
+	for _, id := range sorted {
+		row, err := q.LockRiskByID(ctx, dbx.LockRiskByIDParams{TenantID: pgUUID(tenantID), ID: pgUUID(id)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lock risk %s: %w", id, err)
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// checkMitigation re-counts, after the caller's write and under the risk
+// row locks, the links of every locked open mitigate risk, and refuses the
+// first one left with neither a linked control nor a live action plan. A
+// closed risk is exempt: it is retired, so it does not block a plan
+// tombstone or unlink.
+func checkMitigation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, risks []dbx.Risk) error {
+	for _, r := range risks {
+		if r.Treatment != dbx.RiskTreatmentMitigate || r.Status == dbx.RiskStatusClosed {
+			continue
+		}
+		controls, err := q.CountRiskControlLinks(ctx, dbx.CountRiskControlLinksParams{TenantID: pgUUID(tenantID), RiskID: r.ID})
+		if err != nil {
+			return fmt.Errorf("count risk control links: %w", err)
+		}
+		plans, err := q.CountRiskActionPlanLinks(ctx, dbx.CountRiskActionPlanLinksParams{TenantID: pgUUID(tenantID), RiskID: r.ID})
+		if err != nil {
+			return fmt.Errorf("count risk action plan links: %w", err)
+		}
+		if !MitigationHeld(r.Treatment, int(controls), int(plans)) {
+			return &MitigationRequiredError{RiskID: uuid.UUID(r.ID.Bytes)}
+		}
+	}
+	return nil
 }
 
 func loadLinkage(ctx context.Context, q *dbx.Queries, tenantID, planID uuid.UUID) (Linkage, error) {
@@ -883,6 +1210,13 @@ func tsTime(t pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return t.Time
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func strPtr(s string) *string {

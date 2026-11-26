@@ -1,0 +1,6375 @@
+{
+  "$comment": "SCF control IDs and titles, verbatim and unmodified, extracted from the pinned SCF workbook for the scf-sample.json guard (issue #1717). IDs and titles only: descriptions and every other column are omitted (OQ #1: the project does not bundle SCF content). Regenerate with TestRegenerateSCFPin; never hand-edit.",
+  "attribution": "Secure Controls Framework (SCF) 2026.3, (c) Secure Controls Framework Council, LLC. https://securecontrolsframework.com",
+  "license": "CC BY-ND 4.0, https://creativecommons.org/licenses/by-nd/4.0/ (SCF EULA: https://securecontrolsframework.com/terms-conditions/)",
+  "release_version": "2026.3",
+  "source_url": "https://github.com/securecontrolsframework/securecontrolsframework/blob/main/secure-controls-framework-scf-2026-3.xlsx",
+  "workbook_sha256": "5a89bf2d3c106a9a87d4b6e3d62dd3e147d0e960d4c07473045a10aa8a7df697",
+  "workbook_sheet": "SCF 2026.3",
+  "controls": [
+    {
+      "scf_id": "GOV-01",
+      "title": "Security, Compliance \u0026 Resilience Governance Policy"
+    },
+    {
+      "scf_id": "GOV-02",
+      "title": "Security, Compliance \u0026 Resilience Program (SCRP)"
+    },
+    {
+      "scf_id": "GOV-03",
+      "title": "Centralized Management of Security, Compliance \u0026 Resilience Controls"
+    },
+    {
+      "scf_id": "GOV-03.1",
+      "title": "Secure Practices Alignment Justification"
+    },
+    {
+      "scf_id": "GOV-03.2",
+      "title": "Standardized Terminology"
+    },
+    {
+      "scf_id": "GOV-03.3",
+      "title": "Control Objectives"
+    },
+    {
+      "scf_id": "GOV-03.4",
+      "title": "Assessment Objectives (AO)"
+    },
+    {
+      "scf_id": "GOV-04",
+      "title": "Publishing Security, Compliance \u0026 Resilience Documentation"
+    },
+    {
+      "scf_id": "GOV-04.1",
+      "title": "Periodic Review \u0026 Update of Security, Compliance \u0026 Resilience Program"
+    },
+    {
+      "scf_id": "GOV-04.2",
+      "title": "Exception Management"
+    },
+    {
+      "scf_id": "GOV-04.3",
+      "title": "Periodic Review of Exceptions"
+    },
+    {
+      "scf_id": "GOV-05",
+      "title": "Assigned Security, Compliance \u0026 Resilience Responsibilities"
+    },
+    {
+      "scf_id": "GOV-05.1",
+      "title": "Stakeholder Accountability Structure"
+    },
+    {
+      "scf_id": "GOV-05.2",
+      "title": "Authoritative Chain of Command"
+    },
+    {
+      "scf_id": "GOV-06",
+      "title": "Defining Business Context \u0026 Mission"
+    },
+    {
+      "scf_id": "GOV-07",
+      "title": "Materiality Determination"
+    },
+    {
+      "scf_id": "GOV-08",
+      "title": "High Value Assets (HVAs)"
+    },
+    {
+      "scf_id": "GOV-09",
+      "title": "Steering Committee \u0026 Program Oversight"
+    },
+    {
+      "scf_id": "GOV-09.1",
+      "title": "Status Reporting To Governing Body"
+    },
+    {
+      "scf_id": "GOV-10",
+      "title": "Business As Usual (BAU) Security, Compliance \u0026 Resilience Practices"
+    },
+    {
+      "scf_id": "GOV-11",
+      "title": "Operationalizing Security, Compliance \u0026 Resilience Capabilities"
+    },
+    {
+      "scf_id": "GOV-11.1",
+      "title": "Select Controls"
+    },
+    {
+      "scf_id": "GOV-11.2",
+      "title": "Implement Controls"
+    },
+    {
+      "scf_id": "GOV-11.3",
+      "title": "Assess Controls"
+    },
+    {
+      "scf_id": "GOV-11.4",
+      "title": "Authorize Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "GOV-11.5",
+      "title": "Monitor Controls"
+    },
+    {
+      "scf_id": "GOV-12",
+      "title": "Measures of Performance"
+    },
+    {
+      "scf_id": "GOV-12.1",
+      "title": "Key Performance Indicators (KPIs)"
+    },
+    {
+      "scf_id": "GOV-12.2",
+      "title": "Key Risk Indicators (KRIs)"
+    },
+    {
+      "scf_id": "GOV-13",
+      "title": "Forced Technology Transfer (FTT)"
+    },
+    {
+      "scf_id": "GOV-14",
+      "title": "State-Sponsored Espionage"
+    },
+    {
+      "scf_id": "GOV-15",
+      "title": "Contacts With Authorities"
+    },
+    {
+      "scf_id": "GOV-16",
+      "title": "Contacts With Groups \u0026 Associations"
+    },
+    {
+      "scf_id": "GOV-17",
+      "title": "Quality Management System (QMS)"
+    },
+    {
+      "scf_id": "GOV-18",
+      "title": "Assurance"
+    },
+    {
+      "scf_id": "GOV-19",
+      "title": "Mergers, Acquisitions \u0026 Divestitures (MA\u0026D)"
+    },
+    {
+      "scf_id": "GOV-19.1",
+      "title": "Virtual Data Room (VDR)"
+    },
+    {
+      "scf_id": "AAT-01",
+      "title": "Artificial Intelligence \u0026 Autonomous Technologies Policy"
+    },
+    {
+      "scf_id": "AAT-02",
+      "title": "Artificial Intelligence (AI) \u0026 Autonomous Technologies Governance"
+    },
+    {
+      "scf_id": "AAT-03",
+      "title": "AI \u0026 Autonomous Technologies Mission and Goals Definition"
+    },
+    {
+      "scf_id": "AAT-03.1",
+      "title": "AI \u0026 Autonomous Technologies Value Sustainment"
+    },
+    {
+      "scf_id": "AAT-04",
+      "title": "AI \u0026 Autonomous Technologies Context Definition"
+    },
+    {
+      "scf_id": "AAT-04.1",
+      "title": "AI \u0026 Autonomous Technologies-Related Legal Requirements Identification"
+    },
+    {
+      "scf_id": "AAT-05",
+      "title": "Assigned Responsibilities for AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-06",
+      "title": "Trustworthy AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-06.1",
+      "title": "AI \u0026 Autonomous Technologies Continuous Improvements"
+    },
+    {
+      "scf_id": "AAT-07",
+      "title": "Situational Awareness of AI \u0026 Autonomous Technologies In Use"
+    },
+    {
+      "scf_id": "AAT-07.1",
+      "title": "AI Model \u0026 Agent Inventory \u0026 Lifecycle Management"
+    },
+    {
+      "scf_id": "AAT-07.2",
+      "title": "Artificial Intelligence and Autonomous Technologies (AAT) \u0026 AI Agent Categorization"
+    },
+    {
+      "scf_id": "AAT-08",
+      "title": "AI \u0026 Autonomous Technologies Internal Controls"
+    },
+    {
+      "scf_id": "AAT-08.1",
+      "title": "Adequate Protections For AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-09",
+      "title": "AI \u0026 Autonomous Technologies Impact Assessment"
+    },
+    {
+      "scf_id": "AAT-10",
+      "title": "AI \u0026 Autonomous Technologies Risk Profiling"
+    },
+    {
+      "scf_id": "AAT-10.1",
+      "title": "AI \u0026 Autonomous Technologies Risk Mapping"
+    },
+    {
+      "scf_id": "AAT-11",
+      "title": "AI \u0026 Autonomous Technologies Risk Management Decisions"
+    },
+    {
+      "scf_id": "AAT-11.1",
+      "title": "AI \u0026 Autonomous Technologies Likelihood \u0026 Impact Risk Analysis"
+    },
+    {
+      "scf_id": "AAT-11.2",
+      "title": "AI \u0026 Autonomous Technologies High Risk Designations"
+    },
+    {
+      "scf_id": "AAT-12",
+      "title": "AI Threat Modeling \u0026 Risk Assessment"
+    },
+    {
+      "scf_id": "AAT-12.1",
+      "title": "Novel Risk Assessment Methods \u0026 Technologies"
+    },
+    {
+      "scf_id": "AAT-13",
+      "title": "AI \u0026 Autonomous Technologies Risk Response"
+    },
+    {
+      "scf_id": "AAT-13.1",
+      "title": "AI \u0026 Autonomous Technologies Risk Tracking Approaches"
+    },
+    {
+      "scf_id": "AAT-13.2",
+      "title": "Fine Tuning Risk Mitigation"
+    },
+    {
+      "scf_id": "AAT-13.3",
+      "title": "Responsibility To Supersede, Deactivate and/or Disengage AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-14",
+      "title": "AI \u0026 Autonomous Technologies Business Case"
+    },
+    {
+      "scf_id": "AAT-14.1",
+      "title": "AI \u0026 Autonomous Technologies Potential Benefits Analysis"
+    },
+    {
+      "scf_id": "AAT-14.2",
+      "title": "AI \u0026 Autonomous Technologies Potential Costs Analysis"
+    },
+    {
+      "scf_id": "AAT-14.3",
+      "title": "AI \u0026 Autonomous Technologies Targeted Application Scope"
+    },
+    {
+      "scf_id": "AAT-14.4",
+      "title": "AI \u0026 Autonomous Technologies Cost / Benefit Mapping"
+    },
+    {
+      "scf_id": "AAT-15",
+      "title": "Model \u0026 AI Agent Documentation"
+    },
+    {
+      "scf_id": "AAT-16",
+      "title": "AI \u0026 Autonomous Technologies Output Marking"
+    },
+    {
+      "scf_id": "AAT-17",
+      "title": "Release Owner Gate (ROG) For AI-Augmented Content"
+    },
+    {
+      "scf_id": "AAT-17.1",
+      "title": "AI \u0026 Autonomous Technologies Output Filtering"
+    },
+    {
+      "scf_id": "AAT-17.2",
+      "title": "Human Moderation of AI \u0026 Autonomous Technologies-Generated Content"
+    },
+    {
+      "scf_id": "AAT-18",
+      "title": "AI \u0026 Autonomous Technologies Intellectual Property Infringement Protections"
+    },
+    {
+      "scf_id": "AAT-18.1",
+      "title": "Data Source Identification"
+    },
+    {
+      "scf_id": "AAT-18.2",
+      "title": "Data Source Integrity"
+    },
+    {
+      "scf_id": "AAT-18.3",
+      "title": "Data Source Lineage \u0026 Origin Disclosure"
+    },
+    {
+      "scf_id": "AAT-18.4",
+      "title": "Digital Content Modification Logging"
+    },
+    {
+      "scf_id": "AAT-18.5",
+      "title": "Training Data Source \u0026 Integrity"
+    },
+    {
+      "scf_id": "AAT-18.6",
+      "title": "Prohibit Training"
+    },
+    {
+      "scf_id": "AAT-19",
+      "title": "AI \u0026 Autonomous Technologies Harm Prevention"
+    },
+    {
+      "scf_id": "AAT-19.1",
+      "title": "AI \u0026 Autonomous Technologies Human Subject Protections"
+    },
+    {
+      "scf_id": "AAT-19.2",
+      "title": "AI \u0026 Autonomous Technologies Environmental Impact \u0026 Sustainability"
+    },
+    {
+      "scf_id": "AAT-19.3",
+      "title": "Previously Unknown AI \u0026 Autonomous Technologies Threats \u0026 Risks"
+    },
+    {
+      "scf_id": "AAT-20",
+      "title": "AI \u0026 Autonomous Technologies Conformity"
+    },
+    {
+      "scf_id": "AAT-20.1",
+      "title": "Manipulative or Deceptive Techniques"
+    },
+    {
+      "scf_id": "AAT-20.2",
+      "title": "Materially Distorting Behaviors"
+    },
+    {
+      "scf_id": "AAT-20.3",
+      "title": "Social Scoring"
+    },
+    {
+      "scf_id": "AAT-20.4",
+      "title": "Detrimental or Unfavorable Treatment"
+    },
+    {
+      "scf_id": "AAT-20.5",
+      "title": "Risk and Criminal Profiling"
+    },
+    {
+      "scf_id": "AAT-20.6",
+      "title": "Populating Facial Recognition Databases"
+    },
+    {
+      "scf_id": "AAT-20.7",
+      "title": "Emotion Inference"
+    },
+    {
+      "scf_id": "AAT-20.8",
+      "title": "Biometric Categorization"
+    },
+    {
+      "scf_id": "AAT-21",
+      "title": "AI \u0026 Autonomous Technologies Requirements Definitions"
+    },
+    {
+      "scf_id": "AAT-22",
+      "title": "AI \u0026 Autonomous Technologies Fairness \u0026 Bias"
+    },
+    {
+      "scf_id": "AAT-23",
+      "title": "AI \u0026 Autonomous Technologies Knowledge Limits"
+    },
+    {
+      "scf_id": "AAT-24",
+      "title": "AI \u0026 Autonomous Technologies Development Practices"
+    },
+    {
+      "scf_id": "AAT-24.1",
+      "title": "AI \u0026 Autonomous Technologies Transparency"
+    },
+    {
+      "scf_id": "AAT-24.2",
+      "title": "AI \u0026 Autonomous Technologies Implementation Documentation"
+    },
+    {
+      "scf_id": "AAT-24.3",
+      "title": "AI \u0026 Autonomous Technologies Human Domain Knowledge Reliance"
+    },
+    {
+      "scf_id": "AAT-25",
+      "title": "AI \u0026 Autonomous Technologies Implementation Tasks Definition"
+    },
+    {
+      "scf_id": "AAT-26",
+      "title": "Real World Testing of AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-27",
+      "title": "AI \u0026 Autonomous Technologies Testing Techniques"
+    },
+    {
+      "scf_id": "AAT-27.1",
+      "title": "Generative Artificial Intelligence (GAI) Identification"
+    },
+    {
+      "scf_id": "AAT-27.2",
+      "title": "AI \u0026 Autonomous Technologies Capabilities Testing"
+    },
+    {
+      "scf_id": "AAT-27.3",
+      "title": "Real-World Testing"
+    },
+    {
+      "scf_id": "AAT-27.4",
+      "title": "Documenting Testing Guidance"
+    },
+    {
+      "scf_id": "AAT-28",
+      "title": "Artificial Intelligence Test, Evaluation, Validation \u0026 Verification (AI TEVV)"
+    },
+    {
+      "scf_id": "AAT-28.1",
+      "title": "AI TEVV Trustworthiness Assessment"
+    },
+    {
+      "scf_id": "AAT-28.2",
+      "title": "AI TEVV Tools"
+    },
+    {
+      "scf_id": "AAT-28.3",
+      "title": "AI TEVV Trustworthiness Demonstration"
+    },
+    {
+      "scf_id": "AAT-28.4",
+      "title": "AI TEVV Safety Demonstration"
+    },
+    {
+      "scf_id": "AAT-28.5",
+      "title": "AI TEVV Security \u0026 Resiliency Assessment"
+    },
+    {
+      "scf_id": "AAT-28.6",
+      "title": "AI TEVV Transparency \u0026 Accountability Assessment"
+    },
+    {
+      "scf_id": "AAT-28.7",
+      "title": "AI TEVV Privacy Assessment"
+    },
+    {
+      "scf_id": "AAT-28.8",
+      "title": "AI TEVV Fairness \u0026 Bias Assessment"
+    },
+    {
+      "scf_id": "AAT-28.9",
+      "title": "AI \u0026 Autonomous Technologies Model Validation"
+    },
+    {
+      "scf_id": "AAT-28.10",
+      "title": "AI TEVV Comparable Deployment Settings"
+    },
+    {
+      "scf_id": "AAT-28.11",
+      "title": "AI TEVV Empirically Validated Methods"
+    },
+    {
+      "scf_id": "AAT-28.12",
+      "title": "AI TEVV Benchmarking Content Provenance"
+    },
+    {
+      "scf_id": "AAT-28.13",
+      "title": "AI TEVV Model Collapse Mitigations"
+    },
+    {
+      "scf_id": "AAT-28.14",
+      "title": "AI TEVV Third-Party Risk Management"
+    },
+    {
+      "scf_id": "AAT-29",
+      "title": "AI TEVV Results Evaluation"
+    },
+    {
+      "scf_id": "AAT-29.1",
+      "title": "AI TEVV Effectiveness"
+    },
+    {
+      "scf_id": "AAT-30",
+      "title": "AI TEVV Reporting"
+    },
+    {
+      "scf_id": "AAT-30.1",
+      "title": "AI \u0026 Autonomous Technologies Residual Risks"
+    },
+    {
+      "scf_id": "AAT-30.2",
+      "title": "AI \u0026 Autonomous Technologies Viability Decisions"
+    },
+    {
+      "scf_id": "AAT-31",
+      "title": "AI TEVV Post-Deployment Monitoring"
+    },
+    {
+      "scf_id": "AAT-32",
+      "title": "Updating AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-33",
+      "title": "Robust Stakeholder Engagement for AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-33.1",
+      "title": "AI \u0026 Autonomous Technologies Stakeholder Feedback Integration"
+    },
+    {
+      "scf_id": "AAT-33.2",
+      "title": "AI \u0026 Autonomous Technologies Ongoing Assessments"
+    },
+    {
+      "scf_id": "AAT-33.3",
+      "title": "AI \u0026 Autonomous Technologies End User Feedback"
+    },
+    {
+      "scf_id": "AAT-33.4",
+      "title": "AI \u0026 Autonomous Technologies Incident \u0026 Error Reporting"
+    },
+    {
+      "scf_id": "AAT-34",
+      "title": "AI \u0026 Autonomous Technologies Stakeholder Diversity"
+    },
+    {
+      "scf_id": "AAT-34.1",
+      "title": "AI \u0026 Autonomous Technologies Stakeholder Competencies"
+    },
+    {
+      "scf_id": "AAT-35",
+      "title": "AI \u0026 Autonomous Technologies Deployment"
+    },
+    {
+      "scf_id": "AAT-35.1",
+      "title": "AI \u0026 Autonomous Technologies Human Oversight"
+    },
+    {
+      "scf_id": "AAT-35.2",
+      "title": "AI \u0026 Autonomous Technologies Oversight Measures"
+    },
+    {
+      "scf_id": "AAT-35.3",
+      "title": "AI \u0026 Autonomous Technologies Separate Verification"
+    },
+    {
+      "scf_id": "AAT-35.4",
+      "title": "AI \u0026 Autonomous Technologies Oversight Functions Competency"
+    },
+    {
+      "scf_id": "AAT-35.5",
+      "title": "AI \u0026 Autonomous Technologies Data Relevance"
+    },
+    {
+      "scf_id": "AAT-35.6",
+      "title": "AI \u0026 Autonomous Technologies Irregularity Reporting"
+    },
+    {
+      "scf_id": "AAT-35.7",
+      "title": "AI \u0026 Autonomous Technologies Use Notification To Employees"
+    },
+    {
+      "scf_id": "AAT-35.8",
+      "title": "AI \u0026 Autonomous Technologies Use Notification To Users"
+    },
+    {
+      "scf_id": "AAT-36",
+      "title": "AI \u0026 Autonomous Technologies Production Monitoring"
+    },
+    {
+      "scf_id": "AAT-36.1",
+      "title": "AI \u0026 Autonomous Technologies Measurement Approaches"
+    },
+    {
+      "scf_id": "AAT-36.2",
+      "title": "Measuring AI \u0026 Autonomous Technologies Effectiveness"
+    },
+    {
+      "scf_id": "AAT-36.3",
+      "title": "Unmeasurable AI \u0026 Autonomous Technologies Risks"
+    },
+    {
+      "scf_id": "AAT-36.4",
+      "title": "Efficacy of AI \u0026 Autonomous Technologies Measurement"
+    },
+    {
+      "scf_id": "AAT-36.5",
+      "title": "AI \u0026 Autonomous Technologies Domain Expert Reviews"
+    },
+    {
+      "scf_id": "AAT-36.6",
+      "title": "AI \u0026 Autonomous Technologies Performance Changes"
+    },
+    {
+      "scf_id": "AAT-36.7",
+      "title": "Pre-Trained AI \u0026 Autonomous Technologies Models"
+    },
+    {
+      "scf_id": "AAT-36.8",
+      "title": "AI \u0026 Autonomous Technologies Event Logging"
+    },
+    {
+      "scf_id": "AAT-36.9",
+      "title": "Serious Incident Reporting For AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-36.10",
+      "title": "Serious Incident Root Cause Analysis (RCA) For AI \u0026 Autonomous Technologies"
+    },
+    {
+      "scf_id": "AAT-36.11",
+      "title": "Anomaly Detection \u0026 Human Oversight"
+    },
+    {
+      "scf_id": "AAT-36.12",
+      "title": "Human-in-the-Loop \u0026 Escalation"
+    },
+    {
+      "scf_id": "AAT-36.13",
+      "title": "Emergent Behavior \u0026 Collusion Protections"
+    },
+    {
+      "scf_id": "AAT-36.14",
+      "title": "Multi-Agent Trust \u0026 Communication Validation"
+    },
+    {
+      "scf_id": "AAT-37",
+      "title": "AI \u0026 Autonomous Technologies System Value Chain"
+    },
+    {
+      "scf_id": "AAT-37.1",
+      "title": "AI \u0026 Autonomous Technologies System Value Chain Fallbacks"
+    },
+    {
+      "scf_id": "AAT-38",
+      "title": "AI Model Resilience"
+    },
+    {
+      "scf_id": "AAT-38.1",
+      "title": "AI Model Pollution"
+    },
+    {
+      "scf_id": "AAT-38.2",
+      "title": "Cascading Hallucination Defense"
+    },
+    {
+      "scf_id": "AAT-38.3",
+      "title": "Resource Exhaustion \u0026 Denial of Service (DoS) Resilience"
+    },
+    {
+      "scf_id": "AAT-39",
+      "title": "AI Agent Governance"
+    },
+    {
+      "scf_id": "AAT-39.1",
+      "title": "Infrastructure Hardening \u0026 Isolation"
+    },
+    {
+      "scf_id": "AAT-39.2",
+      "title": "AI Agent Limitations"
+    },
+    {
+      "scf_id": "AAT-39.3",
+      "title": "Tool \u0026 Application Programming Interface (API) Invocation Controls"
+    },
+    {
+      "scf_id": "AAT-39.4",
+      "title": "AI Agent Orchestration Protocol Safeguards"
+    },
+    {
+      "scf_id": "AAT-39.5",
+      "title": "AI Agent Data Pipeline \u0026 Input Integrity"
+    },
+    {
+      "scf_id": "AAT-39.6",
+      "title": "AI Agent Privileged Role \u0026 Delegation Boundaries"
+    },
+    {
+      "scf_id": "AAT-39.7",
+      "title": "AI Agent Data Access Restrictions"
+    },
+    {
+      "scf_id": "AAT-39.8",
+      "title": "AI Agent Data Extraction"
+    },
+    {
+      "scf_id": "AAT-39.9",
+      "title": "AI Agent Identity \u0026 Impersonation Defense"
+    },
+    {
+      "scf_id": "AAT-39.10",
+      "title": "AI Agent Logic Integrity"
+    },
+    {
+      "scf_id": "AAT-39.11",
+      "title": "Sandboxing AI Agents"
+    },
+    {
+      "scf_id": "AAT-39.12",
+      "title": "AI Agent Prompt Injection Defense"
+    },
+    {
+      "scf_id": "AAT-39.13",
+      "title": "AI Agent Kill Switch / User Control"
+    },
+    {
+      "scf_id": "AAT-39.14",
+      "title": "AI Agent Adversarial \u0026 Red Team Testing"
+    },
+    {
+      "scf_id": "AAT-39.15",
+      "title": "AI Agent Self-Modification Controls"
+    },
+    {
+      "scf_id": "AAT-39.16",
+      "title": "Purging AI Agent Data"
+    },
+    {
+      "scf_id": "AAT-39.17",
+      "title": "AI Agent Delegation and Chaining Control"
+    },
+    {
+      "scf_id": "AAT-39.18",
+      "title": "AI Agent Behavioral Drift Detection"
+    },
+    {
+      "scf_id": "AAT-39.19",
+      "title": "AI Agent Action Authentication \u0026 Authorization"
+    },
+    {
+      "scf_id": "AAT-39.20",
+      "title": "AI Agent Transparency \u0026 Audit"
+    },
+    {
+      "scf_id": "AAT-39.21",
+      "title": "AI Agent Explainability"
+    },
+    {
+      "scf_id": "AAT-39.22",
+      "title": "AI Agent Ethics, Fairness \u0026 Bias Detection"
+    },
+    {
+      "scf_id": "AAT-39.23",
+      "title": "AI Agent Output Integrity \u0026 Verification"
+    },
+    {
+      "scf_id": "AAT-39.24",
+      "title": "AI Agent Resource Limiting"
+    },
+    {
+      "scf_id": "AAT-40",
+      "title": "Agentic Output Traceability \u0026 Repudiation"
+    },
+    {
+      "scf_id": "AAT-40.1",
+      "title": "AI Agent Logging"
+    },
+    {
+      "scf_id": "AAT-40.2",
+      "title": "AI Agent Session Management"
+    },
+    {
+      "scf_id": "AAT-41",
+      "title": "Human-in-the-Loop Workload \u0026 Manipulation"
+    },
+    {
+      "scf_id": "AAT-42",
+      "title": "Robotic Process Automation (RPA)"
+    },
+    {
+      "scf_id": "AAT-43",
+      "title": "Business Process Task Enumeration"
+    },
+    {
+      "scf_id": "AST-01",
+      "title": "Asset Management Policy"
+    },
+    {
+      "scf_id": "AST-02",
+      "title": "Asset Governance"
+    },
+    {
+      "scf_id": "AST-03",
+      "title": "Standardized Naming Convention"
+    },
+    {
+      "scf_id": "AST-04",
+      "title": "Asset Inventories"
+    },
+    {
+      "scf_id": "AST-04.1",
+      "title": "Updates During Installations / Removals"
+    },
+    {
+      "scf_id": "AST-04.2",
+      "title": "Component Duplication Avoidance"
+    },
+    {
+      "scf_id": "AST-05",
+      "title": "Identify Critical Assets"
+    },
+    {
+      "scf_id": "AST-05.1",
+      "title": "Technology Assets, Applications, Services and/or Data (TAASD) Criticality Ratings"
+    },
+    {
+      "scf_id": "AST-06",
+      "title": "Asset-Service Dependencies"
+    },
+    {
+      "scf_id": "AST-07",
+      "title": "Stakeholder Identification \u0026 Involvement"
+    },
+    {
+      "scf_id": "AST-07.1",
+      "title": "Technology Assets, Applications, Services and/or Data (TAASD) Ownership Assignment"
+    },
+    {
+      "scf_id": "AST-07.2",
+      "title": "Accountability Information"
+    },
+    {
+      "scf_id": "AST-08",
+      "title": "Comprehensive Asset Inventory Management"
+    },
+    {
+      "scf_id": "AST-08.1",
+      "title": "Configuration Management Database (CMDB)"
+    },
+    {
+      "scf_id": "AST-08.2",
+      "title": "Component Assignment"
+    },
+    {
+      "scf_id": "AST-09",
+      "title": "Asset Discovery"
+    },
+    {
+      "scf_id": "AST-09.1",
+      "title": "Dynamic Host Configuration Protocol (DHCP) Server Logging"
+    },
+    {
+      "scf_id": "AST-09.2",
+      "title": "Automated Network Asset Discovery"
+    },
+    {
+      "scf_id": "AST-09.3",
+      "title": "Automated Location\nTracking"
+    },
+    {
+      "scf_id": "AST-10",
+      "title": "Approved Technologies"
+    },
+    {
+      "scf_id": "AST-10.1",
+      "title": "Authorized To Connect"
+    },
+    {
+      "scf_id": "AST-11",
+      "title": "Automated Unauthorized Component Detection"
+    },
+    {
+      "scf_id": "AST-12",
+      "title": "Prohibited Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "AST-13",
+      "title": "Software Licensing Restrictions"
+    },
+    {
+      "scf_id": "AST-14",
+      "title": "Provenance"
+    },
+    {
+      "scf_id": "AST-15",
+      "title": "Asset Categorization"
+    },
+    {
+      "scf_id": "AST-15.1",
+      "title": "High-Risk Technology Assets, Applications and/or Services (TAAS) Categorization"
+    },
+    {
+      "scf_id": "AST-15.2",
+      "title": "Categorize Artificial Intelligence (AI)-Related Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "AST-15.3",
+      "title": "Asset Attributes"
+    },
+    {
+      "scf_id": "AST-16",
+      "title": "Asset Scope Classification"
+    },
+    {
+      "scf_id": "AST-16.1",
+      "title": "Compliance-Specific Asset Identification"
+    },
+    {
+      "scf_id": "AST-17",
+      "title": "Network Diagrams \u0026 Data Flow Diagrams (DFDs)"
+    },
+    {
+      "scf_id": "AST-17.1",
+      "title": "Control Applicability Boundary Graphical Representation"
+    },
+    {
+      "scf_id": "AST-17.2",
+      "title": "Data Action Mapping"
+    },
+    {
+      "scf_id": "AST-18",
+      "title": "Security of Assets \u0026 Media"
+    },
+    {
+      "scf_id": "AST-18.1",
+      "title": "Management Approval For External Media Transfer"
+    },
+    {
+      "scf_id": "AST-19",
+      "title": "Technology Assets, Applications, Services and/or Data (TAASD) Storage"
+    },
+    {
+      "scf_id": "AST-19.1",
+      "title": "Temporary Asset Storage In Automobiles"
+    },
+    {
+      "scf_id": "AST-20",
+      "title": "Unattended End-User Equipment"
+    },
+    {
+      "scf_id": "AST-21",
+      "title": "Kiosks \u0026 Point of Interaction (PoI) Devices"
+    },
+    {
+      "scf_id": "AST-22",
+      "title": "Secure Disposal, Destruction or Re-Use of Equipment"
+    },
+    {
+      "scf_id": "AST-23",
+      "title": "Return of Assets"
+    },
+    {
+      "scf_id": "AST-24",
+      "title": "Removal of Assets"
+    },
+    {
+      "scf_id": "AST-25",
+      "title": "Use of Personal Devices"
+    },
+    {
+      "scf_id": "AST-26",
+      "title": "Use of Third-Party Devices"
+    },
+    {
+      "scf_id": "AST-27",
+      "title": "Bring Your Own Device (BYOD) Usage"
+    },
+    {
+      "scf_id": "AST-28",
+      "title": "Usage Parameters"
+    },
+    {
+      "scf_id": "AST-29",
+      "title": "Technology Asset Inspections"
+    },
+    {
+      "scf_id": "AST-29.1",
+      "title": "Physical Tampering Detection"
+    },
+    {
+      "scf_id": "AST-29.2",
+      "title": "Logical Tampering Protection"
+    },
+    {
+      "scf_id": "AST-30",
+      "title": "Roots of Trust Protection"
+    },
+    {
+      "scf_id": "AST-31",
+      "title": "Telecommunications Equipment"
+    },
+    {
+      "scf_id": "AST-32",
+      "title": "Travel-Only Devices"
+    },
+    {
+      "scf_id": "AST-33",
+      "title": "Re-Imaging Devices After Travel"
+    },
+    {
+      "scf_id": "AST-34",
+      "title": "Jump Server"
+    },
+    {
+      "scf_id": "AST-35",
+      "title": "Database Management System (DBMS)"
+    },
+    {
+      "scf_id": "AST-36",
+      "title": "Decommissioning"
+    },
+    {
+      "scf_id": "AST-37",
+      "title": "Technology Lifecycle Management"
+    },
+    {
+      "scf_id": "AST-37.1",
+      "title": "Stable Versions"
+    },
+    {
+      "scf_id": "AST-37.2",
+      "title": "Removal of Previous Versions"
+    },
+    {
+      "scf_id": "AST-38",
+      "title": "Technical Debt Reviews"
+    },
+    {
+      "scf_id": "AST-39",
+      "title": "Unsupported Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "AST-39.1",
+      "title": "Alternate Sources for Continued Support"
+    },
+    {
+      "scf_id": "AST-40",
+      "title": "Predictable Failure Analysis"
+    },
+    {
+      "scf_id": "BCD-01",
+      "title": "Business Continuity \u0026 Disaster Recovery Policy"
+    },
+    {
+      "scf_id": "BCD-02",
+      "title": "Business Continuity Management System (BCMS)"
+    },
+    {
+      "scf_id": "BCD-02.1",
+      "title": "Defined Operational Resilience Requirements"
+    },
+    {
+      "scf_id": "BCD-03",
+      "title": "Operational Resilience Capabilities"
+    },
+    {
+      "scf_id": "BCD-04",
+      "title": "Business Continuity \u0026 Disaster Recovery (BC/DR) Plans"
+    },
+    {
+      "scf_id": "BCD-04.1",
+      "title": "Recovery Time / Point Objectives (RTO / RPO)"
+    },
+    {
+      "scf_id": "BCD-05",
+      "title": "Recovery Operations Criteria"
+    },
+    {
+      "scf_id": "BCD-06",
+      "title": "Recovery Operations Communications"
+    },
+    {
+      "scf_id": "BCD-06.1",
+      "title": "Alternate Communications Channels"
+    },
+    {
+      "scf_id": "BCD-07",
+      "title": "Ongoing Contingency Planning"
+    },
+    {
+      "scf_id": "BCD-07.1",
+      "title": "Contingency Planning Components"
+    },
+    {
+      "scf_id": "BCD-07.2",
+      "title": "Contingency Plan Update Notifications"
+    },
+    {
+      "scf_id": "BCD-07.3",
+      "title": "Coordinate with Related Plans"
+    },
+    {
+      "scf_id": "BCD-07.4",
+      "title": "Coordinate With External Service Providers"
+    },
+    {
+      "scf_id": "BCD-08",
+      "title": "Resume All Missions \u0026 Business Functions"
+    },
+    {
+      "scf_id": "BCD-08.1",
+      "title": "Continue Essential Mission \u0026 Business Functions"
+    },
+    {
+      "scf_id": "BCD-08.2",
+      "title": "Resume Essential Missions \u0026 Business Functions"
+    },
+    {
+      "scf_id": "BCD-09",
+      "title": "Contingency Training"
+    },
+    {
+      "scf_id": "BCD-09.1",
+      "title": "Simulated Events"
+    },
+    {
+      "scf_id": "BCD-09.2",
+      "title": "Automated Training Environments"
+    },
+    {
+      "scf_id": "BCD-10",
+      "title": "Contingency Plan Testing \u0026 Exercises"
+    },
+    {
+      "scf_id": "BCD-10.1",
+      "title": "Coordinated Testing with Related Plans"
+    },
+    {
+      "scf_id": "BCD-10.2",
+      "title": "Contingency Plan Testing For Alternate Storage \u0026 Processing Sites"
+    },
+    {
+      "scf_id": "BCD-11",
+      "title": "Contingency Plan Root Cause Analysis (RCA) \u0026 Lessons Learned"
+    },
+    {
+      "scf_id": "BCD-12",
+      "title": "Alternate Storage Site"
+    },
+    {
+      "scf_id": "BCD-12.1",
+      "title": "Separation from Primary Storage Site"
+    },
+    {
+      "scf_id": "BCD-12.2",
+      "title": "Primary Storage Site Accessibility"
+    },
+    {
+      "scf_id": "BCD-13",
+      "title": "Alternate Processing Site"
+    },
+    {
+      "scf_id": "BCD-13.1",
+      "title": "Separation from Primary Processing Site"
+    },
+    {
+      "scf_id": "BCD-13.2",
+      "title": "Alternate Processing Site Accessibility"
+    },
+    {
+      "scf_id": "BCD-14",
+      "title": "Alternate Site Priority of Service"
+    },
+    {
+      "scf_id": "BCD-15",
+      "title": "Preparation for Use"
+    },
+    {
+      "scf_id": "BCD-16",
+      "title": "Inability to Return to Primary Site"
+    },
+    {
+      "scf_id": "BCD-16.1",
+      "title": "Personnel Transfer to Alternate Processing / Storage Site"
+    },
+    {
+      "scf_id": "BCD-17",
+      "title": "Telecommunications Services Availability"
+    },
+    {
+      "scf_id": "BCD-17.1",
+      "title": "Telecommunications Priority of Service Provisions"
+    },
+    {
+      "scf_id": "BCD-17.2",
+      "title": "Separation of Primary / Alternate Providers"
+    },
+    {
+      "scf_id": "BCD-18",
+      "title": "Technology Assets, Applications and/or Services (TAAS) Recovery \u0026 Reconstitution"
+    },
+    {
+      "scf_id": "BCD-18.1",
+      "title": "Restore Within Time Period"
+    },
+    {
+      "scf_id": "BCD-18.2",
+      "title": "Recovery Images"
+    },
+    {
+      "scf_id": "BCD-19",
+      "title": "Isolated Recovery Environment"
+    },
+    {
+      "scf_id": "BCD-20",
+      "title": "Reserve Hardware"
+    },
+    {
+      "scf_id": "BCD-21",
+      "title": "Redundant Secondary System"
+    },
+    {
+      "scf_id": "BCD-22",
+      "title": "Failover Capability"
+    },
+    {
+      "scf_id": "BCD-23",
+      "title": "Resilient Data Backup Architecture"
+    },
+    {
+      "scf_id": "BCD-24",
+      "title": "Data Backups"
+    },
+    {
+      "scf_id": "BCD-24.1",
+      "title": "Transfer to Alternate Storage Site"
+    },
+    {
+      "scf_id": "BCD-24.2",
+      "title": "Separate Storage for Critical Information"
+    },
+    {
+      "scf_id": "BCD-24.3",
+      "title": "Cryptographic Protection"
+    },
+    {
+      "scf_id": "BCD-25",
+      "title": "Redundant Copies of Business-Critical Data"
+    },
+    {
+      "scf_id": "BCD-26",
+      "title": "Transaction Recovery"
+    },
+    {
+      "scf_id": "BCD-27",
+      "title": "Data Replication"
+    },
+    {
+      "scf_id": "BCD-28",
+      "title": "Data Archiving"
+    },
+    {
+      "scf_id": "BCD-29",
+      "title": "Continuous Data Protection (CDP)"
+    },
+    {
+      "scf_id": "BCD-30",
+      "title": "Data Backup Access"
+    },
+    {
+      "scf_id": "BCD-31",
+      "title": "Data Backup \u0026 Restoration Hardware Protection"
+    },
+    {
+      "scf_id": "BCD-31.1",
+      "title": "Restoration Integrity Verification"
+    },
+    {
+      "scf_id": "BCD-32",
+      "title": "Testing for Reliability \u0026 Integrity"
+    },
+    {
+      "scf_id": "BCD-32.1",
+      "title": "Test Restoration Using Sampling"
+    },
+    {
+      "scf_id": "BCD-33",
+      "title": "Data Backup Modification and/or Destruction"
+    },
+    {
+      "scf_id": "BCD-33.1",
+      "title": "Dual Authorization For Sensitive / Regulated Backup Media Destruction"
+    },
+    {
+      "scf_id": "CAP-01",
+      "title": "Capacity \u0026 Performance Planning Policy"
+    },
+    {
+      "scf_id": "CAP-02",
+      "title": "Capacity \u0026 Performance Management"
+    },
+    {
+      "scf_id": "CAP-03",
+      "title": "Capacity Planning"
+    },
+    {
+      "scf_id": "CAP-04",
+      "title": "Resource Priority"
+    },
+    {
+      "scf_id": "CAP-05",
+      "title": "Performance Monitoring"
+    },
+    {
+      "scf_id": "CAP-06",
+      "title": "Elastic Expansion"
+    },
+    {
+      "scf_id": "CAP-07",
+      "title": "Regional Delivery"
+    },
+    {
+      "scf_id": "CAP-08",
+      "title": "Resiliency Planning For Alternate Sites"
+    },
+    {
+      "scf_id": "CHG-01",
+      "title": "Change Management Policy"
+    },
+    {
+      "scf_id": "CHG-02",
+      "title": "Change Management Program"
+    },
+    {
+      "scf_id": "CHG-03",
+      "title": "Configuration Change Control"
+    },
+    {
+      "scf_id": "CHG-04",
+      "title": "Prohibition Of Changes"
+    },
+    {
+      "scf_id": "CHG-04.1",
+      "title": "Access Restriction For Change"
+    },
+    {
+      "scf_id": "CHG-04.2",
+      "title": "Role-Based Permissions To Implement Changes"
+    },
+    {
+      "scf_id": "CHG-04.3",
+      "title": "Dual Authorization for Changes To Critical / Sensitive Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "CHG-04.4",
+      "title": "Dual Approval For High-Impact Environments"
+    },
+    {
+      "scf_id": "CHG-05",
+      "title": "Security, Compliance \u0026 Resilience Representative for Asset Lifecycle Changes"
+    },
+    {
+      "scf_id": "CHG-06",
+      "title": "Security Impact Analysis for Changes"
+    },
+    {
+      "scf_id": "CHG-07",
+      "title": "Test, Validate \u0026 Document Changes"
+    },
+    {
+      "scf_id": "CHG-08",
+      "title": "Stakeholder Notification of Changes"
+    },
+    {
+      "scf_id": "CHG-09",
+      "title": "Control Functionality Verification"
+    },
+    {
+      "scf_id": "CHG-09.1",
+      "title": "Report Verification Results"
+    },
+    {
+      "scf_id": "CHG-10",
+      "title": "Emergency Changes"
+    },
+    {
+      "scf_id": "CHG-10.1",
+      "title": "Documenting Emergency Changes"
+    },
+    {
+      "scf_id": "CHG-11",
+      "title": "Post Configuration Change Reviews"
+    },
+    {
+      "scf_id": "CHG-11.1",
+      "title": "Automated Security Response"
+    },
+    {
+      "scf_id": "CHG-12",
+      "title": "Unauthorized Software Installation Alerts"
+    },
+    {
+      "scf_id": "CHG-13",
+      "title": "Signed Components"
+    },
+    {
+      "scf_id": "CLD-01",
+      "title": "Cloud Security Policy"
+    },
+    {
+      "scf_id": "CLD-02",
+      "title": "Cloud Services"
+    },
+    {
+      "scf_id": "CLD-03",
+      "title": "Cloud Infrastructure Onboarding"
+    },
+    {
+      "scf_id": "CLD-03.1",
+      "title": "Customer Responsibility Matrix (CRM)"
+    },
+    {
+      "scf_id": "CLD-04",
+      "title": "Cloud Infrastructure Offboarding"
+    },
+    {
+      "scf_id": "CLD-05",
+      "title": "Cloud Security Architecture"
+    },
+    {
+      "scf_id": "CLD-06",
+      "title": "Cloud Infrastructure Security Subnet"
+    },
+    {
+      "scf_id": "CLD-07",
+      "title": "Multi-Tenant Environments"
+    },
+    {
+      "scf_id": "CLD-07.1",
+      "title": "Multi-Tenant Event Logging Capabilities"
+    },
+    {
+      "scf_id": "CLD-07.2",
+      "title": "Multi-Tenant Forensics Capabilities"
+    },
+    {
+      "scf_id": "CLD-07.3",
+      "title": "Multi-Tenant Incident Response Capabilities"
+    },
+    {
+      "scf_id": "CLD-08",
+      "title": "Data Handling \u0026 Portability"
+    },
+    {
+      "scf_id": "CLD-09",
+      "title": "Standardized Virtualization Formats"
+    },
+    {
+      "scf_id": "CLD-10",
+      "title": "Sensitive Data In Public Cloud Providers"
+    },
+    {
+      "scf_id": "CLD-11",
+      "title": "Cloud Access Security Broker (CASB)"
+    },
+    {
+      "scf_id": "CLD-12",
+      "title": "Hosted Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "CLD-12.1",
+      "title": "Authorized Individuals For Hosted Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "CLD-12.2",
+      "title": "Sensitive / Regulated Data On Hosted Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "CLD-13",
+      "title": "Prohibition On Unverified Hosted Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "CPL-01",
+      "title": "Compliance Policy"
+    },
+    {
+      "scf_id": "CPL-02",
+      "title": "Statutory, Regulatory \u0026 Contractual Compliance"
+    },
+    {
+      "scf_id": "CPL-03",
+      "title": "Compliance Scope"
+    },
+    {
+      "scf_id": "CPL-04",
+      "title": "Ability To Demonstrate Conformity"
+    },
+    {
+      "scf_id": "CPL-04.1",
+      "title": "Conformity Assessment"
+    },
+    {
+      "scf_id": "CPL-04.2",
+      "title": "Designated Certifying Official"
+    },
+    {
+      "scf_id": "CPL-04.3",
+      "title": "Conformity Attestations"
+    },
+    {
+      "scf_id": "CPL-04.4",
+      "title": "Declaration of Conformity"
+    },
+    {
+      "scf_id": "CPL-05",
+      "title": "Conformity Monitoring"
+    },
+    {
+      "scf_id": "CPL-05.1",
+      "title": "Functional Review Of Security, Compliance \u0026 Resilience Controls"
+    },
+    {
+      "scf_id": "CPL-06",
+      "title": "Non-Conformity Oversight"
+    },
+    {
+      "scf_id": "CPL-06.1",
+      "title": "Non-Conformity Corrective Action"
+    },
+    {
+      "scf_id": "CPL-07",
+      "title": "Executive Leadership Oversight of Security, Compliance \u0026 Resilience Controls"
+    },
+    {
+      "scf_id": "CPL-07.1",
+      "title": "Internal Audit Function"
+    },
+    {
+      "scf_id": "CPL-07.2",
+      "title": "Periodic Audits"
+    },
+    {
+      "scf_id": "CPL-07.3",
+      "title": "Audit Planning Activities"
+    },
+    {
+      "scf_id": "CPL-08",
+      "title": "Independent Assessors"
+    },
+    {
+      "scf_id": "CPL-09",
+      "title": "Assessment Team Subject Matter Expertise"
+    },
+    {
+      "scf_id": "CPL-10",
+      "title": "Assessor Access"
+    },
+    {
+      "scf_id": "CPL-11",
+      "title": "Assessment Methods"
+    },
+    {
+      "scf_id": "CPL-12",
+      "title": "Assessment Rigor"
+    },
+    {
+      "scf_id": "CPL-13",
+      "title": "Assurance Levels (AL)"
+    },
+    {
+      "scf_id": "CPL-14",
+      "title": "Control Reciprocity"
+    },
+    {
+      "scf_id": "CPL-15",
+      "title": "Control Inheritance"
+    },
+    {
+      "scf_id": "CPL-16",
+      "title": "Evidence Request List (ERL)"
+    },
+    {
+      "scf_id": "CPL-17",
+      "title": "Evidence Sampling"
+    },
+    {
+      "scf_id": "CPL-18",
+      "title": "Continuous Control Monitoring (CCM)"
+    },
+    {
+      "scf_id": "CPL-19",
+      "title": "Legal Assessment of Investigative Inquires"
+    },
+    {
+      "scf_id": "CPL-19.1",
+      "title": "Investigation Request Notifications"
+    },
+    {
+      "scf_id": "CPL-19.2",
+      "title": "Investigation Access Restrictions"
+    },
+    {
+      "scf_id": "CPL-20",
+      "title": "Government Surveillance"
+    },
+    {
+      "scf_id": "CPL-21",
+      "title": "Potential Human Rights Abuses"
+    },
+    {
+      "scf_id": "CPL-22",
+      "title": "Grievances"
+    },
+    {
+      "scf_id": "CPL-22.1",
+      "title": "Grievance Response"
+    },
+    {
+      "scf_id": "CPL-23",
+      "title": "Localized Representation"
+    },
+    {
+      "scf_id": "CPL-23.1",
+      "title": "Representative Powers"
+    },
+    {
+      "scf_id": "CPL-24",
+      "title": "Dual Use Technology"
+    },
+    {
+      "scf_id": "CPL-24.1",
+      "title": "USML or CCL Identification"
+    },
+    {
+      "scf_id": "CPL-24.2",
+      "title": "Export-Controlled Access Restrictions"
+    },
+    {
+      "scf_id": "CPL-24.3",
+      "title": "Export Activities Documentation"
+    },
+    {
+      "scf_id": "CPL-25",
+      "title": "Statement of Applicability (SOA)"
+    },
+    {
+      "scf_id": "CPL-26",
+      "title": "Work Products"
+    },
+    {
+      "scf_id": "CPL-26.1",
+      "title": "Defensible Evidence of Due Diligence"
+    },
+    {
+      "scf_id": "CPL-26.2",
+      "title": "Defensible Evidence of Due Care"
+    },
+    {
+      "scf_id": "CPL-27",
+      "title": "Security, Compliance \u0026 Resilience Status Reporting"
+    },
+    {
+      "scf_id": "CPL-28",
+      "title": "AI \u0026 Autonomous Technologies Registration"
+    },
+    {
+      "scf_id": "CPL-29",
+      "title": "Control Assurance Automation (CAA) Oversight"
+    },
+    {
+      "scf_id": "CPL-30",
+      "title": "Control Assurance Automation (CAA) Evidence Integrity \u0026 Provenance"
+    },
+    {
+      "scf_id": "CFG-01",
+      "title": "Configuration Management Policy"
+    },
+    {
+      "scf_id": "CFG-02",
+      "title": "Configuration Management Program"
+    },
+    {
+      "scf_id": "CFG-03",
+      "title": "Least Functionality"
+    },
+    {
+      "scf_id": "CFG-03.1",
+      "title": "Baseline Tailoring"
+    },
+    {
+      "scf_id": "CFG-03.2",
+      "title": "Development \u0026 Test Environment Configurations"
+    },
+    {
+      "scf_id": "CFG-04",
+      "title": "Secure Baseline Configurations"
+    },
+    {
+      "scf_id": "CFG-04.1",
+      "title": "Account Lockout"
+    },
+    {
+      "scf_id": "CFG-04.2",
+      "title": "Concurrent Session Control"
+    },
+    {
+      "scf_id": "CFG-04.3",
+      "title": "Session Lock"
+    },
+    {
+      "scf_id": "CFG-04.4",
+      "title": "Pattern-Hiding Displays"
+    },
+    {
+      "scf_id": "CFG-04.5",
+      "title": "Session Termination"
+    },
+    {
+      "scf_id": "CFG-04.6",
+      "title": "User-Initiated Logouts / Message Displays"
+    },
+    {
+      "scf_id": "CFG-04.7",
+      "title": "Non-Console Administrative Access"
+    },
+    {
+      "scf_id": "CFG-04.8",
+      "title": "Wireless Access Authentication \u0026 Encryption"
+    },
+    {
+      "scf_id": "CFG-04.9",
+      "title": "Bluetooth \u0026 Wireless Devices"
+    },
+    {
+      "scf_id": "CFG-04.10",
+      "title": "Infrared Communications"
+    },
+    {
+      "scf_id": "CFG-04.11",
+      "title": "Microphones \u0026 Web Cameras"
+    },
+    {
+      "scf_id": "CFG-04.12",
+      "title": "Multi-Function Devices (MFD)"
+    },
+    {
+      "scf_id": "CFG-04.13",
+      "title": "Radio Frequency Identification (RFID) Security"
+    },
+    {
+      "scf_id": "CFG-04.14",
+      "title": "Contactless Access Control Systems"
+    },
+    {
+      "scf_id": "CFG-04.15",
+      "title": "Thin Nodes"
+    },
+    {
+      "scf_id": "CFG-04.16",
+      "title": "Video Teleconference (VTC) Security"
+    },
+    {
+      "scf_id": "CFG-04.17",
+      "title": "Voice Over Internet Protocol (VoIP) Security"
+    },
+    {
+      "scf_id": "CFG-04.18",
+      "title": "Disable Wireless Networking"
+    },
+    {
+      "scf_id": "CFG-05",
+      "title": "Configure Technology Assets, Applications and/or Services (TAAS) for High-Risk Areas"
+    },
+    {
+      "scf_id": "CFG-05.1",
+      "title": "Physically Disable or Remove Capabilities"
+    },
+    {
+      "scf_id": "CFG-06",
+      "title": "Approved Configuration Deviations"
+    },
+    {
+      "scf_id": "CFG-07",
+      "title": "Baseline Configuration Reviews \u0026 Updates"
+    },
+    {
+      "scf_id": "CFG-07.1",
+      "title": "Automated Baseline Configuration Management \u0026 Verification"
+    },
+    {
+      "scf_id": "CFG-08",
+      "title": "Periodic Configuration Reviews"
+    },
+    {
+      "scf_id": "CFG-08.1",
+      "title": "Respond To Unauthorized Changes"
+    },
+    {
+      "scf_id": "CFG-08.2",
+      "title": "Integrity Assurance \u0026 Enforcement (IAE)"
+    },
+    {
+      "scf_id": "CFG-09",
+      "title": "Retention Of Previous Configurations"
+    },
+    {
+      "scf_id": "CFG-10",
+      "title": "Network Device Configuration File Synchronization"
+    },
+    {
+      "scf_id": "CFG-11",
+      "title": "Software Usage Restrictions"
+    },
+    {
+      "scf_id": "CFG-12",
+      "title": "Restrict Roles Permitted To Install Software"
+    },
+    {
+      "scf_id": "CFG-12.1",
+      "title": "Configuration Management Role Assignment"
+    },
+    {
+      "scf_id": "CFG-13",
+      "title": "Open Source Software"
+    },
+    {
+      "scf_id": "CFG-14",
+      "title": "Prevent Unauthorized Software Execution"
+    },
+    {
+      "scf_id": "CFG-14.1",
+      "title": "Explicitly Allow / Deny Applications"
+    },
+    {
+      "scf_id": "CFG-15",
+      "title": "Unsupported Internet Browsers \u0026 Email Clients"
+    },
+    {
+      "scf_id": "CFG-16",
+      "title": "Zero-Touch Provisioning (ZTP)"
+    },
+    {
+      "scf_id": "CFG-17",
+      "title": "Production Software Repository"
+    },
+    {
+      "scf_id": "CFG-17.1",
+      "title": "Third-Party Libraries"
+    },
+    {
+      "scf_id": "CFG-17.2",
+      "title": "Software Repository Protections"
+    },
+    {
+      "scf_id": "CFG-17.3",
+      "title": "Software Development Repository"
+    },
+    {
+      "scf_id": "CFG-18",
+      "title": "Embedded Sensor Capability"
+    },
+    {
+      "scf_id": "CFG-18.1",
+      "title": "Embedded Sensor Data Use Restrictions"
+    },
+    {
+      "scf_id": "CFG-18.2",
+      "title": "Notice of Embedded Sensor Data Collection"
+    },
+    {
+      "scf_id": "CFG-18.3",
+      "title": "Embedded Sensor Data Collection Minimization"
+    },
+    {
+      "scf_id": "CFG-18.4",
+      "title": "Embedded Sensor Configuration Verification"
+    },
+    {
+      "scf_id": "CFG-19",
+      "title": "Refresh from Trusted Sources"
+    },
+    {
+      "scf_id": "CFG-20",
+      "title": "Hypervisor Access"
+    },
+    {
+      "scf_id": "CFG-21",
+      "title": "Restrict Access To Security Functions"
+    },
+    {
+      "scf_id": "CFG-22",
+      "title": "Host-Based Security Function Isolation"
+    },
+    {
+      "scf_id": "CFG-23",
+      "title": "Control Assurance Automation (CAA) Change Control"
+    },
+    {
+      "scf_id": "CFG-24",
+      "title": "Control Assurance Automation (CAA) Unauthorized Change Detection"
+    },
+    {
+      "scf_id": "CFG-25",
+      "title": "Control Assurance Automation (CAA) Separation of Duties"
+    },
+    {
+      "scf_id": "MON-01",
+      "title": "Continuous Monitoring Policy"
+    },
+    {
+      "scf_id": "MON-02",
+      "title": "Continuous Monitoring"
+    },
+    {
+      "scf_id": "MON-03",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Monitoring"
+    },
+    {
+      "scf_id": "MON-03.1",
+      "title": "Centralized Management of Event Log \u0026 Security-Relevant Telemetry Content"
+    },
+    {
+      "scf_id": "MON-03.2",
+      "title": "Analyze and Prioritize Monitoring Requirements"
+    },
+    {
+      "scf_id": "MON-03.3",
+      "title": "Audit Level Adjustments"
+    },
+    {
+      "scf_id": "MON-04",
+      "title": "System Generated Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-04.1",
+      "title": "System-Wide / Time-Correlated Audit Trail"
+    },
+    {
+      "scf_id": "MON-05",
+      "title": "Centralized Collection of Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-05.1",
+      "title": "Centralized Event Log \u0026 Security-Relevant Telemetry Review \u0026 Analysis"
+    },
+    {
+      "scf_id": "MON-05.2",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Analysis \u0026 Triage"
+    },
+    {
+      "scf_id": "MON-05.3",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Review Escalation Matrix"
+    },
+    {
+      "scf_id": "MON-05.4",
+      "title": "Automated Tools for Real-Time Event Log \u0026 Security-Relevant Telemetry Analysis"
+    },
+    {
+      "scf_id": "MON-05.5",
+      "title": "Automated Incident Responder Alerting"
+    },
+    {
+      "scf_id": "MON-06",
+      "title": "Monitoring Reporting"
+    },
+    {
+      "scf_id": "MON-06.1",
+      "title": "Trend Analysis Reporting"
+    },
+    {
+      "scf_id": "MON-07",
+      "title": "Alert Threshold Tuning"
+    },
+    {
+      "scf_id": "MON-08",
+      "title": "Correlate Monitoring Information"
+    },
+    {
+      "scf_id": "MON-08.1",
+      "title": "Integration of Scanning \u0026 Other Monitoring Information"
+    },
+    {
+      "scf_id": "MON-08.2",
+      "title": "Correlation with Physical Monitoring"
+    },
+    {
+      "scf_id": "MON-09",
+      "title": "Content of Event Logs"
+    },
+    {
+      "scf_id": "MON-09.1",
+      "title": "Audit Trails"
+    },
+    {
+      "scf_id": "MON-10",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Storage Capacity"
+    },
+    {
+      "scf_id": "MON-10.1",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Storage Capacity Alerting"
+    },
+    {
+      "scf_id": "MON-11",
+      "title": "Time Stamps"
+    },
+    {
+      "scf_id": "MON-11.1",
+      "title": "Synchronization With Authoritative Time Source"
+    },
+    {
+      "scf_id": "MON-12",
+      "title": "Protection of Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-12.1",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Backup on Separate Physical Systems / Components"
+    },
+    {
+      "scf_id": "MON-12.2",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Access by Subset of Privileged Users"
+    },
+    {
+      "scf_id": "MON-12.3",
+      "title": "Cryptographic Protection of Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-12.4",
+      "title": "Dual Authorization for Event Log \u0026 Security-Relevant Telemetry Movement"
+    },
+    {
+      "scf_id": "MON-12.5",
+      "title": "Write Once Read Many (WORM) Event Log Generation"
+    },
+    {
+      "scf_id": "MON-13",
+      "title": "Event Log \u0026 Security-Relevant Telemetry Retention"
+    },
+    {
+      "scf_id": "MON-14",
+      "title": "Privileged Functions Logging"
+    },
+    {
+      "scf_id": "MON-14.1",
+      "title": "Account Creation and Modification Logging"
+    },
+    {
+      "scf_id": "MON-14.2",
+      "title": "Privileged User Oversight"
+    },
+    {
+      "scf_id": "MON-15",
+      "title": "Inventory of Technology Asset Event Logging"
+    },
+    {
+      "scf_id": "MON-16",
+      "title": "Anomalous Behavior"
+    },
+    {
+      "scf_id": "MON-16.1",
+      "title": "Unusual Transactions"
+    },
+    {
+      "scf_id": "MON-17",
+      "title": "Monitoring for Indicators of Compromise (IOC)"
+    },
+    {
+      "scf_id": "MON-17.1",
+      "title": "Deactivated Account Activity"
+    },
+    {
+      "scf_id": "MON-17.2",
+      "title": "Automated Response to Suspicious Events"
+    },
+    {
+      "scf_id": "MON-17.3",
+      "title": "Insider Threats"
+    },
+    {
+      "scf_id": "MON-17.4",
+      "title": "Third-Party Threats"
+    },
+    {
+      "scf_id": "MON-18",
+      "title": "Individuals Posing Greater Risk"
+    },
+    {
+      "scf_id": "MON-18.1",
+      "title": "Session Audit"
+    },
+    {
+      "scf_id": "MON-18.2",
+      "title": "Real-Time Session Monitoring"
+    },
+    {
+      "scf_id": "MON-19",
+      "title": "Monitoring For Information Disclosure"
+    },
+    {
+      "scf_id": "MON-19.1",
+      "title": "Monitoring for Third-Party Information Disclosure"
+    },
+    {
+      "scf_id": "MON-20",
+      "title": "Covert Channel Analysis"
+    },
+    {
+      "scf_id": "MON-20.1",
+      "title": "Analyze Traffic for Covert Exfiltration"
+    },
+    {
+      "scf_id": "MON-21",
+      "title": "Unauthorized Activities"
+    },
+    {
+      "scf_id": "MON-21.1",
+      "title": "Unauthorized Network Services"
+    },
+    {
+      "scf_id": "MON-22",
+      "title": "Inbound \u0026 Outbound Communications Traffic"
+    },
+    {
+      "scf_id": "MON-22.1",
+      "title": "Proxy Logging"
+    },
+    {
+      "scf_id": "MON-23",
+      "title": "Network Intrusion Detection \u0026 Prevention Systems (NIDS \u0026 NIPS) Monitoring"
+    },
+    {
+      "scf_id": "MON-24",
+      "title": "Host Intrusion Detection \u0026 Prevention Systems (HIDS \u0026 HIPS) Monitoring"
+    },
+    {
+      "scf_id": "MON-25",
+      "title": "De-Militarized Zone (DMZ) Monitoring"
+    },
+    {
+      "scf_id": "MON-26",
+      "title": "Wireless Network Monitoring"
+    },
+    {
+      "scf_id": "MON-27",
+      "title": "File Integrity Monitoring (FIM)"
+    },
+    {
+      "scf_id": "MON-28",
+      "title": "File Activity Monitoring (FAM)"
+    },
+    {
+      "scf_id": "MON-29",
+      "title": "Permitted Monitoring Actions"
+    },
+    {
+      "scf_id": "MON-29.1",
+      "title": "Changes by Authorized Individuals"
+    },
+    {
+      "scf_id": "MON-29.2",
+      "title": "Query Parameter Audits of Personal Data (PD)"
+    },
+    {
+      "scf_id": "MON-30",
+      "title": "Sensitive Event Log \u0026 Security-Relevant Telemetry Data"
+    },
+    {
+      "scf_id": "MON-30.1",
+      "title": "Limit Personal Data (PD) In Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-31",
+      "title": "Verbosity Logging for Boundary Devices"
+    },
+    {
+      "scf_id": "MON-32",
+      "title": "Database Logging"
+    },
+    {
+      "scf_id": "MON-33",
+      "title": "Response To Event Log Processing Failures"
+    },
+    {
+      "scf_id": "MON-33.1",
+      "title": "Real-Time Alerts of Event Logging Failure"
+    },
+    {
+      "scf_id": "MON-34",
+      "title": "Non-Repudiation"
+    },
+    {
+      "scf_id": "MON-34.1",
+      "title": "Identity Binding"
+    },
+    {
+      "scf_id": "MON-35",
+      "title": "Alternate Event Logging Capability"
+    },
+    {
+      "scf_id": "MON-36",
+      "title": "Sharing of Event Logs \u0026 Security-Relevant Telemetry"
+    },
+    {
+      "scf_id": "MON-36.1",
+      "title": "Cross-Organizational Monitoring"
+    },
+    {
+      "scf_id": "MON-37",
+      "title": "Control Assurance Automation (CAA) Data Feed Identification"
+    },
+    {
+      "scf_id": "CRY-01",
+      "title": "Cryptographic Protections Policy"
+    },
+    {
+      "scf_id": "CRY-02",
+      "title": "Use of Cryptographic Controls"
+    },
+    {
+      "scf_id": "CRY-03",
+      "title": "Cryptographic Management"
+    },
+    {
+      "scf_id": "CRY-03.1",
+      "title": "Alternate Physical Protection"
+    },
+    {
+      "scf_id": "CRY-03.2",
+      "title": "Pre/Post Transmission Handling"
+    },
+    {
+      "scf_id": "CRY-04",
+      "title": "Cryptographic Cipher Suites and Protocols Inventory"
+    },
+    {
+      "scf_id": "CRY-05",
+      "title": "Encrypting Data In Transit"
+    },
+    {
+      "scf_id": "CRY-06",
+      "title": "Integrity of Data In Transit"
+    },
+    {
+      "scf_id": "CRY-07",
+      "title": "Encrypting Data At Rest"
+    },
+    {
+      "scf_id": "CRY-07.1",
+      "title": "Encrypting Storage Media"
+    },
+    {
+      "scf_id": "CRY-07.2",
+      "title": "Encrypting Offline Storage"
+    },
+    {
+      "scf_id": "CRY-08",
+      "title": "Database Encryption"
+    },
+    {
+      "scf_id": "CRY-09",
+      "title": "Public Key Infrastructure (PKI)"
+    },
+    {
+      "scf_id": "CRY-09.1",
+      "title": "Public Key Infrastructure (PKI) Availability"
+    },
+    {
+      "scf_id": "CRY-10",
+      "title": "Cryptographic Key Management"
+    },
+    {
+      "scf_id": "CRY-10.1",
+      "title": "Symmetric Keys"
+    },
+    {
+      "scf_id": "CRY-10.2",
+      "title": "Asymmetric Keys"
+    },
+    {
+      "scf_id": "CRY-10.3",
+      "title": "Cryptographic Key Loss or Change"
+    },
+    {
+      "scf_id": "CRY-10.4",
+      "title": "Control \u0026 Distribution of Cryptographic Keys"
+    },
+    {
+      "scf_id": "CRY-10.5",
+      "title": "Assigned Cryptographic Key Owners"
+    },
+    {
+      "scf_id": "CRY-10.6",
+      "title": "Third-Party Cryptographic Keys"
+    },
+    {
+      "scf_id": "CRY-10.7",
+      "title": "External System Cryptographic Key Control"
+    },
+    {
+      "scf_id": "CRY-11",
+      "title": "Transmission of Cybersecurity \u0026 Data Protection Attributes"
+    },
+    {
+      "scf_id": "CRY-12",
+      "title": "Certificate Authorities"
+    },
+    {
+      "scf_id": "CRY-13",
+      "title": "Certificate Monitoring"
+    },
+    {
+      "scf_id": "CRY-14",
+      "title": "Cryptographic Hash"
+    },
+    {
+      "scf_id": "CRY-15",
+      "title": "Export-Controlled Cryptography"
+    },
+    {
+      "scf_id": "DCH-01",
+      "title": "Data Classification \u0026 Handling Policy"
+    },
+    {
+      "scf_id": "DCH-02",
+      "title": "Data Protection"
+    },
+    {
+      "scf_id": "DCH-03",
+      "title": "Sensitive / Regulated Data Governance"
+    },
+    {
+      "scf_id": "DCH-03.1",
+      "title": "Data Catalog"
+    },
+    {
+      "scf_id": "DCH-04",
+      "title": "Data \u0026 Asset Classification"
+    },
+    {
+      "scf_id": "DCH-04.1",
+      "title": "Highest Classification Level"
+    },
+    {
+      "scf_id": "DCH-04.2",
+      "title": "Data Reclassification"
+    },
+    {
+      "scf_id": "DCH-05",
+      "title": "Sensitive Data Inventories"
+    },
+    {
+      "scf_id": "DCH-05.1",
+      "title": "Periodic Scans for Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-06",
+      "title": "Data Stewardship"
+    },
+    {
+      "scf_id": "DCH-06.1",
+      "title": "Defining Access Authorizations for Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-07",
+      "title": "Sensitive / Regulated Data Protection"
+    },
+    {
+      "scf_id": "DCH-07.1",
+      "title": "Restrict Sensitive / Regulated Data Access To Authorized Individuals"
+    },
+    {
+      "scf_id": "DCH-08",
+      "title": "Limitations on Use \u0026 Distribution of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-08.1",
+      "title": "Sensitive / Regulated Data Sharing Decisions"
+    },
+    {
+      "scf_id": "DCH-08.2",
+      "title": "Disclosure of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-08.3",
+      "title": "Controlled Release of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-08.4",
+      "title": "Sensitive / Regulated Data Release Sanitization"
+    },
+    {
+      "scf_id": "DCH-09",
+      "title": "Sensitive / Regulated Data Access Mapping"
+    },
+    {
+      "scf_id": "DCH-10",
+      "title": "Sensitive / Regulated Media Records"
+    },
+    {
+      "scf_id": "DCH-11",
+      "title": "Media Marking"
+    },
+    {
+      "scf_id": "DCH-11.1",
+      "title": "Automated Marking"
+    },
+    {
+      "scf_id": "DCH-12",
+      "title": "Masking Displayed Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-12.1",
+      "title": "Making Sensitive / Regulated Data Unreadable In Storage"
+    },
+    {
+      "scf_id": "DCH-13",
+      "title": "Media Storage"
+    },
+    {
+      "scf_id": "DCH-13.1",
+      "title": "Data Storage Location Reviews"
+    },
+    {
+      "scf_id": "DCH-14",
+      "title": "Physically Secure All Media Containing Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-15",
+      "title": "Storing Authentication Data"
+    },
+    {
+      "scf_id": "DCH-16",
+      "title": "Media Transportation"
+    },
+    {
+      "scf_id": "DCH-16.1",
+      "title": "Media Transportation Custodians"
+    },
+    {
+      "scf_id": "DCH-16.2",
+      "title": "Encrypting Data Outside of Controlled Areas"
+    },
+    {
+      "scf_id": "DCH-17",
+      "title": "Digital \u0026 Non-Digital Media Disposal"
+    },
+    {
+      "scf_id": "DCH-17.1",
+      "title": "Dual Authorization for Sensitive / Regulated Data Destruction"
+    },
+    {
+      "scf_id": "DCH-18",
+      "title": "Digital Media Sanitization"
+    },
+    {
+      "scf_id": "DCH-18.1",
+      "title": "Sanitization of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-18.2",
+      "title": "Digital Media Sanitization Documentation"
+    },
+    {
+      "scf_id": "DCH-18.3",
+      "title": "Digital Media Sanitization Equipment Testing"
+    },
+    {
+      "scf_id": "DCH-18.4",
+      "title": "First Time Use Sanitization"
+    },
+    {
+      "scf_id": "DCH-19",
+      "title": "Digital Media Use Restrictions"
+    },
+    {
+      "scf_id": "DCH-20",
+      "title": "Portable Storage Devices"
+    },
+    {
+      "scf_id": "DCH-20.1",
+      "title": "Prohibit Portable Storage Devices Use Without Owner"
+    },
+    {
+      "scf_id": "DCH-21",
+      "title": "Removable Media Security"
+    },
+    {
+      "scf_id": "DCH-22",
+      "title": "Use of External Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "DCH-22.1",
+      "title": "Limits of Authorized Use To Process, Store and/or Transmit Data"
+    },
+    {
+      "scf_id": "DCH-22.2",
+      "title": "Protecting Sensitive / Regulated Data on External Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "DCH-22.3",
+      "title": "Non-Organizationally Owned Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "DCH-23",
+      "title": "Information Search \u0026 Retrieval"
+    },
+    {
+      "scf_id": "DCH-23.1",
+      "title": "Electronic Discovery (eDiscovery)"
+    },
+    {
+      "scf_id": "DCH-24",
+      "title": "Publicly Accessible Content"
+    },
+    {
+      "scf_id": "DCH-24.1",
+      "title": "Data Mining Protection"
+    },
+    {
+      "scf_id": "DCH-25",
+      "title": "Ad-Hoc Transfers"
+    },
+    {
+      "scf_id": "DCH-26",
+      "title": "Transfer Authorizations"
+    },
+    {
+      "scf_id": "DCH-27",
+      "title": "Media \u0026 Data Retention"
+    },
+    {
+      "scf_id": "DCH-27.1",
+      "title": "Minimize Sensitive / Regulated Data Exposure"
+    },
+    {
+      "scf_id": "DCH-27.2",
+      "title": "Archived Data Set Retention"
+    },
+    {
+      "scf_id": "DCH-27.3",
+      "title": "Archiving Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-27.4",
+      "title": "Mobile Device Data Retention Limitations"
+    },
+    {
+      "scf_id": "DCH-28",
+      "title": "Limit Sensitive / Regulated Data In Testing, Training \u0026 Research"
+    },
+    {
+      "scf_id": "DCH-29",
+      "title": "Logical Data Location"
+    },
+    {
+      "scf_id": "DCH-29.1",
+      "title": "Automated Tools to Support Logical Data Location"
+    },
+    {
+      "scf_id": "DCH-30",
+      "title": "Geographic Data Location"
+    },
+    {
+      "scf_id": "DCH-30.1",
+      "title": "Geolocation Requirements for Processing, Storage and Service Locations"
+    },
+    {
+      "scf_id": "DCH-31",
+      "title": "Data Localization"
+    },
+    {
+      "scf_id": "DCH-32",
+      "title": "External Transfer of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-33",
+      "title": "Data Quality Operations"
+    },
+    {
+      "scf_id": "DCH-33.1",
+      "title": "Data Management Board"
+    },
+    {
+      "scf_id": "DCH-33.2",
+      "title": "Data Quality Management"
+    },
+    {
+      "scf_id": "DCH-33.3",
+      "title": "Data Quality Automation"
+    },
+    {
+      "scf_id": "DCH-34",
+      "title": "Data Modeling Guidelines"
+    },
+    {
+      "scf_id": "DCH-34.1",
+      "title": "Data Tags"
+    },
+    {
+      "scf_id": "DCH-35",
+      "title": "Data Analytics Bias"
+    },
+    {
+      "scf_id": "DCH-36",
+      "title": "De-Identification (Anonymization)"
+    },
+    {
+      "scf_id": "DCH-36.1",
+      "title": "Automated De-Identification of Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "DCH-36.2",
+      "title": "De-Identify Dataset Upon Collection"
+    },
+    {
+      "scf_id": "DCH-36.3",
+      "title": "Removal, Masking, Encryption, Hashing or Replacement of Direct Identifiers"
+    },
+    {
+      "scf_id": "DCH-36.4",
+      "title": "Statistical Disclosure Control"
+    },
+    {
+      "scf_id": "DCH-36.5",
+      "title": "Motivated Intruder"
+    },
+    {
+      "scf_id": "DCH-36.6",
+      "title": "Differential Privacy"
+    },
+    {
+      "scf_id": "DCH-37",
+      "title": "Cybersecurity \u0026 Data Protection Attributes"
+    },
+    {
+      "scf_id": "DCH-37.1",
+      "title": "Dynamic Attribute Association"
+    },
+    {
+      "scf_id": "DCH-37.2",
+      "title": "Attribute Value Changes By Authorized Individuals"
+    },
+    {
+      "scf_id": "DCH-37.3",
+      "title": "Maintenance of Attribute Associations By System"
+    },
+    {
+      "scf_id": "DCH-37.4",
+      "title": "Association of Attributes By Authorized Individuals"
+    },
+    {
+      "scf_id": "DCH-37.5",
+      "title": "Attribute Displays for Output Devices"
+    },
+    {
+      "scf_id": "DCH-37.6",
+      "title": "Data Subject Attribute Associations"
+    },
+    {
+      "scf_id": "DCH-37.7",
+      "title": "Consistent Attribute Interpretation"
+    },
+    {
+      "scf_id": "DCH-37.8",
+      "title": "Identity Association Techniques \u0026 Technologies"
+    },
+    {
+      "scf_id": "DCH-37.9",
+      "title": "Attribute Reassignment"
+    },
+    {
+      "scf_id": "DCH-37.10",
+      "title": "Attribute Configuration By Authorized Individuals"
+    },
+    {
+      "scf_id": "DCH-37.11",
+      "title": "Audit Changes"
+    },
+    {
+      "scf_id": "DCH-38",
+      "title": "Code Names"
+    },
+    {
+      "scf_id": "DCH-39",
+      "title": "Data Rights Management (DRM)"
+    },
+    {
+      "scf_id": "DCH-40",
+      "title": "Data Loss Prevention (DLP)"
+    },
+    {
+      "scf_id": "DCH-41",
+      "title": "Control Assurance Automation (CAA) Aggregated Telemetry"
+    },
+    {
+      "scf_id": "EMB-01",
+      "title": "Embedded Technology Policy"
+    },
+    {
+      "scf_id": "EMB-02",
+      "title": "Embedded Technology Security Program"
+    },
+    {
+      "scf_id": "EMB-03",
+      "title": "Separate Operating Environments For Embedded Technologies"
+    },
+    {
+      "scf_id": "EMB-04",
+      "title": "Embedded Technology Inventory Management"
+    },
+    {
+      "scf_id": "EMB-05",
+      "title": "Internet of Things (IOT)"
+    },
+    {
+      "scf_id": "EMB-06",
+      "title": "Operational Technology (OT)"
+    },
+    {
+      "scf_id": "EMB-07",
+      "title": "Interface Security"
+    },
+    {
+      "scf_id": "EMB-08",
+      "title": "Embedded Technology Configuration Monitoring"
+    },
+    {
+      "scf_id": "EMB-09",
+      "title": "Prevent Alterations"
+    },
+    {
+      "scf_id": "EMB-10",
+      "title": "Embedded Technology Maintenance"
+    },
+    {
+      "scf_id": "EMB-11",
+      "title": "Resilience To Outages"
+    },
+    {
+      "scf_id": "EMB-12",
+      "title": "Power Level Monitoring"
+    },
+    {
+      "scf_id": "EMB-13",
+      "title": "Embedded Technology Reviews"
+    },
+    {
+      "scf_id": "EMB-14",
+      "title": "Message Queuing Telemetry Transport (MQTT) Security"
+    },
+    {
+      "scf_id": "EMB-15",
+      "title": "Remote Management of Embedded Technologies"
+    },
+    {
+      "scf_id": "EMB-16",
+      "title": "Restrict Communications"
+    },
+    {
+      "scf_id": "EMB-17",
+      "title": "Authorized Communications"
+    },
+    {
+      "scf_id": "EMB-18",
+      "title": "Operating Environment Certification"
+    },
+    {
+      "scf_id": "EMB-19",
+      "title": "Safety Assessment"
+    },
+    {
+      "scf_id": "EMB-20",
+      "title": "Certificate-Based Authentication"
+    },
+    {
+      "scf_id": "EMB-21",
+      "title": "Chip-To-Cloud Security"
+    },
+    {
+      "scf_id": "EMB-22",
+      "title": "Real-Time Operating System (RTOS) Security"
+    },
+    {
+      "scf_id": "EMB-23",
+      "title": "Safe Operations"
+    },
+    {
+      "scf_id": "EMB-24",
+      "title": "Proximity Sensor"
+    },
+    {
+      "scf_id": "EMB-25",
+      "title": "Safety Instrumented System (SIS)"
+    },
+    {
+      "scf_id": "EMB-26",
+      "title": "Safety Instrumented Function (SIF)"
+    },
+    {
+      "scf_id": "EMB-27",
+      "title": "Safety Integrity Level (SIL)"
+    },
+    {
+      "scf_id": "END-01",
+      "title": "Endpoint Security Policy"
+    },
+    {
+      "scf_id": "END-02",
+      "title": "Endpoint Device Management (EDM)"
+    },
+    {
+      "scf_id": "END-03",
+      "title": "Endpoint Protection Mechanisms"
+    },
+    {
+      "scf_id": "END-03.1",
+      "title": "Centralized Management of Endpoint Protection Mechanisms"
+    },
+    {
+      "scf_id": "END-03.2",
+      "title": "Automatic Endpoint Protection Mechanism Updates"
+    },
+    {
+      "scf_id": "END-03.3",
+      "title": "Evolving Endpoint Protection Threats"
+    },
+    {
+      "scf_id": "END-03.4",
+      "title": "Binary or Machine-Executable Code"
+    },
+    {
+      "scf_id": "END-04",
+      "title": "Malicious Code Protection (Antimalware)"
+    },
+    {
+      "scf_id": "END-04.1",
+      "title": "Always On Antimalware Protection"
+    },
+    {
+      "scf_id": "END-04.2",
+      "title": "Heuristic / Nonsignature-Based Malware Detection"
+    },
+    {
+      "scf_id": "END-05",
+      "title": "Antimalware Protection Mechanism Testing"
+    },
+    {
+      "scf_id": "END-06",
+      "title": "Documented Endpoint Security Protection Measures"
+    },
+    {
+      "scf_id": "END-07",
+      "title": "Software Firewall"
+    },
+    {
+      "scf_id": "END-08",
+      "title": "Unified Endpoint Device Management (UEDM)"
+    },
+    {
+      "scf_id": "END-09",
+      "title": "Endpoint Detection \u0026 Response (EDR)"
+    },
+    {
+      "scf_id": "END-10",
+      "title": "Extended Detection \u0026 Response (XDR)"
+    },
+    {
+      "scf_id": "END-11",
+      "title": "Endpoint File Integrity Monitoring (FIM)"
+    },
+    {
+      "scf_id": "END-11.1",
+      "title": "Endpoint Integrity Checks"
+    },
+    {
+      "scf_id": "END-11.2",
+      "title": "Automated Notifications of Integrity Violations"
+    },
+    {
+      "scf_id": "END-11.3",
+      "title": "Automated Response to Integrity Violations"
+    },
+    {
+      "scf_id": "END-11.4",
+      "title": "Boot Process Integrity"
+    },
+    {
+      "scf_id": "END-11.5",
+      "title": "Protection of Boot Firmware"
+    },
+    {
+      "scf_id": "END-12",
+      "title": "Host Intrusion Detection and Prevention Systems (HIDS / HIPS)"
+    },
+    {
+      "scf_id": "END-13",
+      "title": "Mobile Code"
+    },
+    {
+      "scf_id": "END-14",
+      "title": "Collaborative Computing Devices"
+    },
+    {
+      "scf_id": "END-14.1",
+      "title": "Collaborative Computing Capability Disabling / Removal In Secure Work Areas"
+    },
+    {
+      "scf_id": "END-14.2",
+      "title": "Explicitly Indicate Current Participants"
+    },
+    {
+      "scf_id": "END-14.3",
+      "title": "Participant Identity Verification"
+    },
+    {
+      "scf_id": "END-14.4",
+      "title": "Participant Connection Management"
+    },
+    {
+      "scf_id": "END-14.5",
+      "title": "Malicious Link \u0026 File Protections"
+    },
+    {
+      "scf_id": "END-14.6",
+      "title": "Explicit Indication Of Use"
+    },
+    {
+      "scf_id": "HRS-01",
+      "title": "Human Resources Security Policy"
+    },
+    {
+      "scf_id": "HRS-02",
+      "title": "Human Resources Security Management"
+    },
+    {
+      "scf_id": "HRS-03",
+      "title": "Position Categorization"
+    },
+    {
+      "scf_id": "HRS-03.1",
+      "title": "Users With Elevated Privileges"
+    },
+    {
+      "scf_id": "HRS-03.2",
+      "title": "Competency Requirements for Security, Compliance \u0026 Resilience-Related Positions"
+    },
+    {
+      "scf_id": "HRS-04",
+      "title": "Defined Roles \u0026 Responsibilities"
+    },
+    {
+      "scf_id": "HRS-04.1",
+      "title": "Assigned Roles \u0026 Responsibilities Awareness"
+    },
+    {
+      "scf_id": "HRS-05",
+      "title": "Personnel Screening"
+    },
+    {
+      "scf_id": "HRS-05.1",
+      "title": "Roles With Special Protection Measures"
+    },
+    {
+      "scf_id": "HRS-05.2",
+      "title": "Citizenship Requirements"
+    },
+    {
+      "scf_id": "HRS-06",
+      "title": "Terms of Employment"
+    },
+    {
+      "scf_id": "HRS-06.1",
+      "title": "Rules of Behavior"
+    },
+    {
+      "scf_id": "HRS-06.2",
+      "title": "Social Media \u0026 Social Networking Restrictions"
+    },
+    {
+      "scf_id": "HRS-06.3",
+      "title": "Technology Use Restrictions"
+    },
+    {
+      "scf_id": "HRS-06.4",
+      "title": "Use of Critical Technologies"
+    },
+    {
+      "scf_id": "HRS-06.5",
+      "title": "Use of Mobile Devices"
+    },
+    {
+      "scf_id": "HRS-06.6",
+      "title": "Security-Minded Dress Code"
+    },
+    {
+      "scf_id": "HRS-07",
+      "title": "Access Agreements"
+    },
+    {
+      "scf_id": "HRS-07.1",
+      "title": "Confidentiality Agreements"
+    },
+    {
+      "scf_id": "HRS-08",
+      "title": "Onboarding, Transferring \u0026 Offboarding Personnel"
+    },
+    {
+      "scf_id": "HRS-08.1",
+      "title": "Formal Indoctrination"
+    },
+    {
+      "scf_id": "HRS-08.2",
+      "title": "Policy Familiarization \u0026 Acknowledgement"
+    },
+    {
+      "scf_id": "HRS-08.3",
+      "title": "Post-Employment Requirements Awareness"
+    },
+    {
+      "scf_id": "HRS-08.4",
+      "title": "Post-Employment Requirements Notification"
+    },
+    {
+      "scf_id": "HRS-09",
+      "title": "Probationary Periods"
+    },
+    {
+      "scf_id": "HRS-10",
+      "title": "Personnel Sanctions"
+    },
+    {
+      "scf_id": "HRS-10.1",
+      "title": "Workplace Investigations"
+    },
+    {
+      "scf_id": "HRS-10.2",
+      "title": "Updating Disciplinary Processes"
+    },
+    {
+      "scf_id": "HRS-10.3",
+      "title": "Preventative Access Restriction"
+    },
+    {
+      "scf_id": "HRS-11",
+      "title": "Personnel Transfer"
+    },
+    {
+      "scf_id": "HRS-12",
+      "title": "Personnel Termination"
+    },
+    {
+      "scf_id": "HRS-12.1",
+      "title": "Automated Employment Status Notifications"
+    },
+    {
+      "scf_id": "HRS-12.2",
+      "title": "Asset Collection"
+    },
+    {
+      "scf_id": "HRS-12.3",
+      "title": "High-Risk Terminations"
+    },
+    {
+      "scf_id": "HRS-13",
+      "title": "Third-Party Personnel"
+    },
+    {
+      "scf_id": "HRS-14",
+      "title": "Separation of Duties (SoD)"
+    },
+    {
+      "scf_id": "HRS-15",
+      "title": "Incompatible Roles"
+    },
+    {
+      "scf_id": "HRS-16",
+      "title": "Identify Critical Skills \u0026 Gaps"
+    },
+    {
+      "scf_id": "HRS-16.1",
+      "title": "Remediate Identified Skills Deficiencies"
+    },
+    {
+      "scf_id": "HRS-16.2",
+      "title": "Identify Vital Security, Compliance \u0026 Resilience Staff"
+    },
+    {
+      "scf_id": "HRS-16.3",
+      "title": "Establish Redundancy for Vital Security, Compliance \u0026 Resilience Staff"
+    },
+    {
+      "scf_id": "HRS-16.4",
+      "title": "Perform Succession Planning"
+    },
+    {
+      "scf_id": "HRS-17",
+      "title": "Identifying Authorized Work Locations"
+    },
+    {
+      "scf_id": "HRS-17.1",
+      "title": "Communicating Authorized Work Locations"
+    },
+    {
+      "scf_id": "HRS-18",
+      "title": "Reporting Suspicious Activities"
+    },
+    {
+      "scf_id": "IAC-01",
+      "title": "Identification \u0026 Authentication Policy"
+    },
+    {
+      "scf_id": "IAC-02",
+      "title": "Identity \u0026 Access Management (IAM)"
+    },
+    {
+      "scf_id": "IAC-03",
+      "title": "Authenticate, Authorize and Audit (AAA)"
+    },
+    {
+      "scf_id": "IAC-03.1",
+      "title": "Replay-Resistant Authentication"
+    },
+    {
+      "scf_id": "IAC-03.2",
+      "title": "Retain Access Records"
+    },
+    {
+      "scf_id": "IAC-03.3",
+      "title": "Identity Providers (IdP) \u0026 Authorization Servers"
+    },
+    {
+      "scf_id": "IAC-04",
+      "title": "User Provisioning \u0026 De-Provisioning"
+    },
+    {
+      "scf_id": "IAC-04.1",
+      "title": "Change of Roles \u0026 Duties"
+    },
+    {
+      "scf_id": "IAC-04.2",
+      "title": "Termination of Employment"
+    },
+    {
+      "scf_id": "IAC-05",
+      "title": "Identity Proofing (Identity Verification)"
+    },
+    {
+      "scf_id": "IAC-05.1",
+      "title": "In-Person or Trusted Third-Party Registration"
+    },
+    {
+      "scf_id": "IAC-05.2",
+      "title": "Identity Evidence"
+    },
+    {
+      "scf_id": "IAC-05.3",
+      "title": "Identity Evidence Validation \u0026 Verification"
+    },
+    {
+      "scf_id": "IAC-05.4",
+      "title": "In-Person Validation \u0026 Verification"
+    },
+    {
+      "scf_id": "IAC-05.5",
+      "title": "Address Confirmation"
+    },
+    {
+      "scf_id": "IAC-06",
+      "title": "Role-Based Access Control (RBAC)"
+    },
+    {
+      "scf_id": "IAC-07",
+      "title": "Attribute-Based Access Control (ABAC)"
+    },
+    {
+      "scf_id": "IAC-07.1",
+      "title": "Real-Time Access Decisions"
+    },
+    {
+      "scf_id": "IAC-07.2",
+      "title": "Access Profile Rules"
+    },
+    {
+      "scf_id": "IAC-08",
+      "title": "Account Management"
+    },
+    {
+      "scf_id": "IAC-08.1",
+      "title": "Automated System Account Management (Directory Services)"
+    },
+    {
+      "scf_id": "IAC-08.2",
+      "title": "Authorized Accounts"
+    },
+    {
+      "scf_id": "IAC-08.3",
+      "title": "User \u0026 Service Account Inventories"
+    },
+    {
+      "scf_id": "IAC-08.4",
+      "title": "Disable Inactive Accounts"
+    },
+    {
+      "scf_id": "IAC-08.5",
+      "title": "Account Disabling for High Risk Individuals"
+    },
+    {
+      "scf_id": "IAC-08.6",
+      "title": "Automated Audit Actions"
+    },
+    {
+      "scf_id": "IAC-08.7",
+      "title": "Account Separation Between Infrastructure Environments"
+    },
+    {
+      "scf_id": "IAC-08.8",
+      "title": "Multiple System Accounts"
+    },
+    {
+      "scf_id": "IAC-09",
+      "title": "Management Approval For New or Changed Accounts"
+    },
+    {
+      "scf_id": "IAC-09.1",
+      "title": "Management Approval For Privileged Accounts"
+    },
+    {
+      "scf_id": "IAC-10",
+      "title": "Privileged Account Management (PAM)"
+    },
+    {
+      "scf_id": "IAC-10.1",
+      "title": "Privileged Account Inventories"
+    },
+    {
+      "scf_id": "IAC-10.2",
+      "title": "Privileged Account Separation"
+    },
+    {
+      "scf_id": "IAC-10.3",
+      "title": "Dedicated Privileged Account"
+    },
+    {
+      "scf_id": "IAC-10.4",
+      "title": "Privileged Command Execution"
+    },
+    {
+      "scf_id": "IAC-10.5",
+      "title": "Manual Override"
+    },
+    {
+      "scf_id": "IAC-11",
+      "title": "Emergency Accounts"
+    },
+    {
+      "scf_id": "IAC-11.1",
+      "title": "Removal of Temporary / Emergency Accounts"
+    },
+    {
+      "scf_id": "IAC-12",
+      "title": "Periodic Review of Individual \u0026 Service Account Privileges"
+    },
+    {
+      "scf_id": "IAC-12.1",
+      "title": "System Account Reviews"
+    },
+    {
+      "scf_id": "IAC-13",
+      "title": "User Identity (ID) Management"
+    },
+    {
+      "scf_id": "IAC-13.1",
+      "title": "Standardized Identifier Management (User Names)"
+    },
+    {
+      "scf_id": "IAC-13.2",
+      "title": "Employment Status Identification"
+    },
+    {
+      "scf_id": "IAC-13.3",
+      "title": "Citizenship Identification"
+    },
+    {
+      "scf_id": "IAC-13.4",
+      "title": "Dynamic Management"
+    },
+    {
+      "scf_id": "IAC-13.5",
+      "title": "Cross-Organization Management"
+    },
+    {
+      "scf_id": "IAC-13.6",
+      "title": "Privileged Account Identifiers"
+    },
+    {
+      "scf_id": "IAC-13.7",
+      "title": "Pairwise Pseudonymous Identifiers (PPID)"
+    },
+    {
+      "scf_id": "IAC-14",
+      "title": "Authenticator Management"
+    },
+    {
+      "scf_id": "IAC-14.1",
+      "title": "Events Requiring Authenticator Change"
+    },
+    {
+      "scf_id": "IAC-14.2",
+      "title": "Protection of Authenticators"
+    },
+    {
+      "scf_id": "IAC-14.3",
+      "title": "No Embedded Unencrypted Static Authenticators"
+    },
+    {
+      "scf_id": "IAC-14.4",
+      "title": "Default Authenticators"
+    },
+    {
+      "scf_id": "IAC-14.5",
+      "title": "Expiration of Cached Authenticators"
+    },
+    {
+      "scf_id": "IAC-15",
+      "title": "Password-Based Authentication"
+    },
+    {
+      "scf_id": "IAC-15.1",
+      "title": "Automated Support For Password Strength"
+    },
+    {
+      "scf_id": "IAC-15.2",
+      "title": "Password Managers"
+    },
+    {
+      "scf_id": "IAC-16",
+      "title": "Passkeys"
+    },
+    {
+      "scf_id": "IAC-17",
+      "title": "Biometric Authentication"
+    },
+    {
+      "scf_id": "IAC-18",
+      "title": "PKI-Based Authentication"
+    },
+    {
+      "scf_id": "IAC-19",
+      "title": "Hardware Token-Based Authentication"
+    },
+    {
+      "scf_id": "IAC-20",
+      "title": "Authenticator Feedback"
+    },
+    {
+      "scf_id": "IAC-21",
+      "title": "Restrictions on Shared Groups / Accounts"
+    },
+    {
+      "scf_id": "IAC-21.1",
+      "title": "Group Authentication"
+    },
+    {
+      "scf_id": "IAC-22",
+      "title": "User Responsibilities for Account Management"
+    },
+    {
+      "scf_id": "IAC-23",
+      "title": "Credential Sharing"
+    },
+    {
+      "scf_id": "IAC-24",
+      "title": "Reference Monitor"
+    },
+    {
+      "scf_id": "IAC-25",
+      "title": "Access Enforcement"
+    },
+    {
+      "scf_id": "IAC-25.1",
+      "title": "Access To Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "IAC-25.2",
+      "title": "Database Access"
+    },
+    {
+      "scf_id": "IAC-26",
+      "title": "Use of Privileged Utility Programs"
+    },
+    {
+      "scf_id": "IAC-27",
+      "title": "Dedicated Administrative Machines"
+    },
+    {
+      "scf_id": "IAC-28",
+      "title": "Dual Authorization for Privileged Commands"
+    },
+    {
+      "scf_id": "IAC-29",
+      "title": "Revocation of Access Authorizations"
+    },
+    {
+      "scf_id": "IAC-30",
+      "title": "Least Privilege"
+    },
+    {
+      "scf_id": "IAC-30.1",
+      "title": "Prohibit Non-Privileged Users from Executing Privileged Functions"
+    },
+    {
+      "scf_id": "IAC-30.2",
+      "title": "Authorize Access to Security Functions"
+    },
+    {
+      "scf_id": "IAC-30.3",
+      "title": "Non-Privileged Access for Non-Security Functions"
+    },
+    {
+      "scf_id": "IAC-30.4",
+      "title": "Auditing Use of Privileged Functions"
+    },
+    {
+      "scf_id": "IAC-30.5",
+      "title": "Network Access to Privileged Commands"
+    },
+    {
+      "scf_id": "IAC-30.6",
+      "title": "Privilege Levels for Code Execution"
+    },
+    {
+      "scf_id": "IAC-31",
+      "title": "Permitted Actions Without Identification or Authorization"
+    },
+    {
+      "scf_id": "IAC-32",
+      "title": "Identification \u0026 Authentication for Organizational Users"
+    },
+    {
+      "scf_id": "IAC-32.1",
+      "title": "Out-of-Band Authentication (OOBA)"
+    },
+    {
+      "scf_id": "IAC-32.2",
+      "title": "Acceptance of PIV Credentials"
+    },
+    {
+      "scf_id": "IAC-33",
+      "title": "Identification \u0026 Authentication for Non-Organizational Users"
+    },
+    {
+      "scf_id": "IAC-33.1",
+      "title": "Acceptance of Third-Party Credentials"
+    },
+    {
+      "scf_id": "IAC-33.2",
+      "title": "Acceptance of External Authenticators"
+    },
+    {
+      "scf_id": "IAC-33.3",
+      "title": "Disassociability"
+    },
+    {
+      "scf_id": "IAC-33.4",
+      "title": "Acceptance of PIV Credentials from Other Organizations"
+    },
+    {
+      "scf_id": "IAC-33.5",
+      "title": "Use of FICAM-Issued Profiles"
+    },
+    {
+      "scf_id": "IAC-34",
+      "title": "Identification \u0026 Authentication for Devices"
+    },
+    {
+      "scf_id": "IAC-34.1",
+      "title": "Device Attestation"
+    },
+    {
+      "scf_id": "IAC-34.2",
+      "title": "Device Authorization Enforcement"
+    },
+    {
+      "scf_id": "IAC-35",
+      "title": "Access Control For Mobile Devices"
+    },
+    {
+      "scf_id": "IAC-36",
+      "title": "Identification \u0026 Authentication for Third-Party Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "IAC-36.1",
+      "title": "Sharing Identification \u0026 Authentication Information"
+    },
+    {
+      "scf_id": "IAC-36.2",
+      "title": "Privileged Access by Non-Organizational Users"
+    },
+    {
+      "scf_id": "IAC-37",
+      "title": "Multi-Factor Authentication (MFA)"
+    },
+    {
+      "scf_id": "IAC-37.1",
+      "title": "Replay-Resistant Multi-Factor Authentication (MFA)"
+    },
+    {
+      "scf_id": "IAC-37.2",
+      "title": "Phishing-Resistant Multi-Factor Authentication (MFA)"
+    },
+    {
+      "scf_id": "IAC-37.3",
+      "title": "Out-of-Band (OOB) Multi-Factor Authentication (MFA)"
+    },
+    {
+      "scf_id": "IAC-37.4",
+      "title": "Alternative Multi-Factor Authentication (MFA)"
+    },
+    {
+      "scf_id": "IAC-37.5",
+      "title": "Multi-Factor Authentication (MFA) For Network Access to Privileged Accounts"
+    },
+    {
+      "scf_id": "IAC-37.6",
+      "title": "Multi-Factor Authentication (MFA) For Network Access to Non-Privileged Accounts"
+    },
+    {
+      "scf_id": "IAC-37.7",
+      "title": "Multi-Factor Authentication (MFA) For Local Access to Privileged Accounts"
+    },
+    {
+      "scf_id": "IAC-38",
+      "title": "Cryptographic Module Authentication"
+    },
+    {
+      "scf_id": "IAC-39",
+      "title": "Hardware Security Modules (HSM)"
+    },
+    {
+      "scf_id": "IAC-40",
+      "title": "Single Sign-On (SSO) Transparent Authentication"
+    },
+    {
+      "scf_id": "IAC-41",
+      "title": "Adaptive Identification \u0026 Authentication"
+    },
+    {
+      "scf_id": "IAC-42",
+      "title": "Continuous Authentication"
+    },
+    {
+      "scf_id": "IAC-43",
+      "title": "Re-Authentication"
+    },
+    {
+      "scf_id": "IAC-44",
+      "title": "Mutual Authentication (MA)"
+    },
+    {
+      "scf_id": "IAC-45",
+      "title": "Federated Credential Management"
+    },
+    {
+      "scf_id": "IAC-46",
+      "title": "Invalidate Session Identifiers at Logout"
+    },
+    {
+      "scf_id": "IAC-47",
+      "title": "Unique System-Generated Session Identifiers"
+    },
+    {
+      "scf_id": "IAC-48",
+      "title": "Software Defined Storage (SDS) Data Access Control"
+    },
+    {
+      "scf_id": "IAC-49",
+      "title": "Sensitive / Regulated Data Access Enforcement"
+    },
+    {
+      "scf_id": "IAC-49.1",
+      "title": "Sensitive / Regulated Data Actions"
+    },
+    {
+      "scf_id": "IAC-50",
+      "title": "Compliance As Code (CAC) Identity Governance"
+    },
+    {
+      "scf_id": "IAC-51",
+      "title": "Compliance As Code (CAC) Least Privileges"
+    },
+    {
+      "scf_id": "IAC-52",
+      "title": "Compliance As Code (CAC) Credential Lifecycle Management"
+    },
+    {
+      "scf_id": "IAC-53",
+      "title": "Compliance As Code (CAC) Credentials Management"
+    },
+    {
+      "scf_id": "IRO-01",
+      "title": "Incident Response Policy"
+    },
+    {
+      "scf_id": "IRO-02",
+      "title": "Incident Response Operations"
+    },
+    {
+      "scf_id": "IRO-03",
+      "title": "Continuous Incident Response Improvements"
+    },
+    {
+      "scf_id": "IRO-04",
+      "title": "Incident Classification \u0026 Prioritization"
+    },
+    {
+      "scf_id": "IRO-05",
+      "title": "Indicators of Compromise (IOC)"
+    },
+    {
+      "scf_id": "IRO-06",
+      "title": "Incident Handling"
+    },
+    {
+      "scf_id": "IRO-06.1",
+      "title": "Correlation with External Organizations"
+    },
+    {
+      "scf_id": "IRO-07",
+      "title": "Automated Incident Handling Processes"
+    },
+    {
+      "scf_id": "IRO-07.1",
+      "title": "Automated Reporting"
+    },
+    {
+      "scf_id": "IRO-07.2",
+      "title": "Automated Tracking, Data Collection \u0026 Analysis"
+    },
+    {
+      "scf_id": "IRO-07.3",
+      "title": "Dynamic Reconfiguration"
+    },
+    {
+      "scf_id": "IRO-07.4",
+      "title": "Automatic Disabling of Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "IRO-08",
+      "title": "Incident Response Plan (IRP)"
+    },
+    {
+      "scf_id": "IRO-08.1",
+      "title": "Incident Response Plan (IRP) Update"
+    },
+    {
+      "scf_id": "IRO-09",
+      "title": "Incident Response Capabilities Testing"
+    },
+    {
+      "scf_id": "IRO-09.1",
+      "title": "Incident Response Capabilities Testing Coordination with Related Plans"
+    },
+    {
+      "scf_id": "IRO-10",
+      "title": "Incident Response Training"
+    },
+    {
+      "scf_id": "IRO-10.1",
+      "title": "Simulated Incidents"
+    },
+    {
+      "scf_id": "IRO-10.2",
+      "title": "Automated Incident Response Training Environments"
+    },
+    {
+      "scf_id": "IRO-11",
+      "title": "Integrated Security Incident Response Team (ISIRT)"
+    },
+    {
+      "scf_id": "IRO-12",
+      "title": "Public Relations \u0026 Reputation Repair"
+    },
+    {
+      "scf_id": "IRO-13",
+      "title": "Chain of Custody \u0026 Forensics"
+    },
+    {
+      "scf_id": "IRO-13.1",
+      "title": "Licensed Forensic Investigators"
+    },
+    {
+      "scf_id": "IRO-14",
+      "title": "Root Cause Analysis (RCA) \u0026 Lessons Learned"
+    },
+    {
+      "scf_id": "IRO-15",
+      "title": "Regulatory \u0026 Law Enforcement Contacts"
+    },
+    {
+      "scf_id": "IRO-16",
+      "title": "Incident Stakeholder Reporting"
+    },
+    {
+      "scf_id": "IRO-16.1",
+      "title": "Situational Awareness For Incidents"
+    },
+    {
+      "scf_id": "IRO-16.2",
+      "title": "Cyber Incident Reporting for Sensitive / Regulated Data"
+    },
+    {
+      "scf_id": "IRO-16.3",
+      "title": "Serious Incident Reporting"
+    },
+    {
+      "scf_id": "IRO-16.4",
+      "title": "Vulnerabilities Related To Incidents"
+    },
+    {
+      "scf_id": "IRO-17",
+      "title": "Incident Tracking Repository"
+    },
+    {
+      "scf_id": "IRO-17.1",
+      "title": "Incident Pattern Analysis"
+    },
+    {
+      "scf_id": "IRO-17.2",
+      "title": "Recurring Incident Analysis"
+    },
+    {
+      "scf_id": "IRO-18",
+      "title": "Incident Reporting Assistance"
+    },
+    {
+      "scf_id": "IRO-18.1",
+      "title": "Automation Support of Availability of Information / Support"
+    },
+    {
+      "scf_id": "IRO-19",
+      "title": "Supply Chain Coordination"
+    },
+    {
+      "scf_id": "IRO-19.1",
+      "title": "Coordination With External Providers"
+    },
+    {
+      "scf_id": "IRO-20",
+      "title": "Sensitive / Regulated Data Spill Response"
+    },
+    {
+      "scf_id": "IRO-20.1",
+      "title": "Sensitive / Regulated Data Spill Responsible Personnel"
+    },
+    {
+      "scf_id": "IRO-20.2",
+      "title": "Sensitive / Regulated Data Spill Training"
+    },
+    {
+      "scf_id": "IRO-20.3",
+      "title": "Post-Sensitive / Regulated Data Spill Operations"
+    },
+    {
+      "scf_id": "IRO-20.4",
+      "title": "Sensitive / Regulated Data Exposure to Unauthorized Personnel"
+    },
+    {
+      "scf_id": "IRO-21",
+      "title": "Detonation Chambers (Sandboxes)"
+    },
+    {
+      "scf_id": "IRO-22",
+      "title": "Data Breach"
+    },
+    {
+      "scf_id": "IRO-23",
+      "title": "Artificial Intelligence (AI) \u0026 Autonomous Technologies (AAT) Incidents"
+    },
+    {
+      "scf_id": "IRO-24",
+      "title": "Cryptographic Incident Response (Emergency Algorithm Transition)"
+    },
+    {
+      "scf_id": "IRO-25",
+      "title": "Embedded Technology Incidents"
+    },
+    {
+      "scf_id": "IRO-26",
+      "title": "Post-Incident Technology Assets, Applications and Services (TAAS) Validation"
+    },
+    {
+      "scf_id": "IAO-01",
+      "title": "Information Assurance Policy"
+    },
+    {
+      "scf_id": "IAO-02",
+      "title": "Information Assurance (IA) Operations"
+    },
+    {
+      "scf_id": "IAO-03",
+      "title": "Assessment Boundaries"
+    },
+    {
+      "scf_id": "IAO-04",
+      "title": "Control Validation Testing (CVT)"
+    },
+    {
+      "scf_id": "IAO-04.1",
+      "title": "Plan / Coordinate with Other Organizational Entities"
+    },
+    {
+      "scf_id": "IAO-05",
+      "title": "Specialized Assessments"
+    },
+    {
+      "scf_id": "IAO-06",
+      "title": "Assessor Independence"
+    },
+    {
+      "scf_id": "IAO-07",
+      "title": "Third-Party Assessment Reciprocity"
+    },
+    {
+      "scf_id": "IAO-08",
+      "title": "Adequate Security for Sensitive / Regulated Data In Support of Contracts"
+    },
+    {
+      "scf_id": "IAO-09",
+      "title": "Applied Security, Compliance and Resilience Controls Documentation"
+    },
+    {
+      "scf_id": "IAO-10",
+      "title": "Threat Analysis \u0026 Flaw Remediation During Development"
+    },
+    {
+      "scf_id": "IAO-11",
+      "title": "Technical Verification"
+    },
+    {
+      "scf_id": "IAO-12",
+      "title": "Capabilities Deficiency Tracking"
+    },
+    {
+      "scf_id": "IAO-12.1",
+      "title": "Deficiency Tracking Automation"
+    },
+    {
+      "scf_id": "IAO-13",
+      "title": "Security Assessment Report (SAR)"
+    },
+    {
+      "scf_id": "IAO-14",
+      "title": "Security Authorization"
+    },
+    {
+      "scf_id": "IAO-15",
+      "title": "Control Assurance Automation (CAA) Automation"
+    },
+    {
+      "scf_id": "MNT-01",
+      "title": "Maintenance Policy"
+    },
+    {
+      "scf_id": "MNT-02",
+      "title": "Maintenance Operations"
+    },
+    {
+      "scf_id": "MNT-03",
+      "title": "Controlled Maintenance"
+    },
+    {
+      "scf_id": "MNT-04",
+      "title": "Timely Maintenance"
+    },
+    {
+      "scf_id": "MNT-05",
+      "title": "Preventative Maintenance"
+    },
+    {
+      "scf_id": "MNT-06",
+      "title": "Predictive Maintenance"
+    },
+    {
+      "scf_id": "MNT-07",
+      "title": "Maintenance Validation"
+    },
+    {
+      "scf_id": "MNT-08",
+      "title": "Maintenance Monitoring"
+    },
+    {
+      "scf_id": "MNT-09",
+      "title": "Prevent Unauthorized Removal"
+    },
+    {
+      "scf_id": "MNT-10",
+      "title": "Automated Maintenance Activities"
+    },
+    {
+      "scf_id": "MNT-10.1",
+      "title": "Automated Support For Predictive Maintenance"
+    },
+    {
+      "scf_id": "MNT-11",
+      "title": "Maintenance Tools"
+    },
+    {
+      "scf_id": "MNT-11.1",
+      "title": "Inspect Tools"
+    },
+    {
+      "scf_id": "MNT-11.2",
+      "title": "Inspect Media"
+    },
+    {
+      "scf_id": "MNT-11.3",
+      "title": "Restrict Tool Usage"
+    },
+    {
+      "scf_id": "MNT-12",
+      "title": "Remote Maintenance"
+    },
+    {
+      "scf_id": "MNT-12.1",
+      "title": "Remote Maintenance Notifications"
+    },
+    {
+      "scf_id": "MNT-12.2",
+      "title": "Remote Maintenance Pre-Approval"
+    },
+    {
+      "scf_id": "MNT-12.3",
+      "title": "Remote Maintenance Disconnect Verification"
+    },
+    {
+      "scf_id": "MNT-12.4",
+      "title": "Remote Maintenance Cryptographic Protection"
+    },
+    {
+      "scf_id": "MNT-12.5",
+      "title": "Auditing Remote Maintenance"
+    },
+    {
+      "scf_id": "MNT-13",
+      "title": "Remote Maintenance Comparable Security \u0026 Sanitization"
+    },
+    {
+      "scf_id": "MNT-13.1",
+      "title": "Separation of Maintenance Sessions"
+    },
+    {
+      "scf_id": "MNT-14",
+      "title": "Authorized Maintenance Personnel"
+    },
+    {
+      "scf_id": "MNT-14.1",
+      "title": "Maintenance Personnel Without Appropriate Access"
+    },
+    {
+      "scf_id": "MNT-15",
+      "title": "Non-System Related Maintenance"
+    },
+    {
+      "scf_id": "MNT-16",
+      "title": "Maintain Configuration Control During Maintenance"
+    },
+    {
+      "scf_id": "MNT-17",
+      "title": "Field Maintenance"
+    },
+    {
+      "scf_id": "MNT-18",
+      "title": "Off-Site Maintenance"
+    },
+    {
+      "scf_id": "MDM-01",
+      "title": "Mobile Device Management Policy"
+    },
+    {
+      "scf_id": "MDM-02",
+      "title": "Centralized Management Of Mobile Devices"
+    },
+    {
+      "scf_id": "MDM-03",
+      "title": "Restricting Access To Authorized Technology Assets, Applications and/or Services (TAAS)"
+    },
+    {
+      "scf_id": "MDM-04",
+      "title": "Full Device \u0026 Container-Based Encryption"
+    },
+    {
+      "scf_id": "MDM-05",
+      "title": "Separate Mobile Device Profiles"
+    },
+    {
+      "scf_id": "MDM-06",
+      "title": "Personally-Owned Mobile Devices"
+    },
+    {
+      "scf_id": "MDM-07",
+      "title": "Organization-Owned Mobile Devices"
+    },
+    {
+      "scf_id": "MDM-08",
+      "title": "Mobile Device Geofencing"
+    },
+    {
+      "scf_id": "MDM-09",
+      "title": "Remote Purging"
+    },
+    {
+      "scf_id": "MDM-10",
+      "title": "Mobile Device Tampering"
+    },
+    {
+      "scf_id": "NET-01",
+      "title": "Network Security Policy"
+    },
+    {
+      "scf_id": "NET-02",
+      "title": "Network Security Controls (NSC)"
+    },
+    {
+      "scf_id": "NET-03",
+      "title": "Boundary Protection"
+    },
+    {
+      "scf_id": "NET-03.1",
+      "title": "Limit Network Connections"
+    },
+    {
+      "scf_id": "NET-03.2",
+      "title": "External Telecommunications Services"
+    },
+    {
+      "scf_id": "NET-03.3",
+      "title": "Prevent Discovery of Internal Information"
+    },
+    {
+      "scf_id": "NET-03.4",
+      "title": "Direct Internet Access Restrictions"
+    },
+    {
+      "scf_id": "NET-03.5",
+      "title": "Prevent Unauthorized Exfiltration"
+    },
+    {
+      "scf_id": "NET-03.6",
+      "title": "Protocol Compliance Enforcement"
+    },
+    {
+      "scf_id": "NET-03.7",
+      "title": "Domain Name Verification"
+    },
+    {
+      "scf_id": "NET-03.8",
+      "title": "Bandwidth Control"
+    },
+    {
+      "scf_id": "NET-03.9",
+      "title": "Internet Address Denylisting"
+    },
+    {
+      "scf_id": "NET-03.10",
+      "title": "Certificate Denylisting"
+    },
+    {
+      "scf_id": "NET-03.11",
+      "title": "Content Disarm and Reconstruction (CDR)"
+    },
+    {
+      "scf_id": "NET-03.12",
+      "title": "Network Processing Rules For Personal Data (PD)"
+    },
+    {
+      "scf_id": "NET-03.13",
+      "title": "Split Tunneling"
+    },
+    {
+      "scf_id": "NET-04",
+      "title": "Data Flow Enforcement – Access Control Lists (ACLs)"
+    },
+    {
+      "scf_id": "NET-04.1",
+      "title": "Deny Traffic by Default \u0026 Allow Traffic by Exception"
+    },
+    {
+      "scf_id": "NET-04.2",
+      "title": "Human Reviews"
+    },
+    {
+      "scf_id": "NET-05",
+      "title": "Interconnection Security Agreements (ISAs)"
+    },
+    {
+      "scf_id": "NET-05.1",
+      "title": "External System Connections"
+    },
+    {
+      "scf_id": "NET-05.2",
+      "title": "Internal System Connections"
+    },
+    {
+      "scf_id": "NET-06",
+      "title": "Network Segmentation (macrosegmentation)"
+    },
+    {
+      "scf_id": "NET-06.1",
+      "title": "Security Management Subnets"
+    },
+    {
+      "scf_id": "NET-07",
+      "title": "Out-of-Band Channels"
+    },
+    {
+      "scf_id": "NET-08",
+      "title": "Separate Subnets To Isolate Functions"
+    },
+    {
+      "scf_id": "NET-08.1",
+      "title": "Sensitive / Regulated Data Enclave (Secure Zone)"
+    },
+    {
+      "scf_id": "NET-08.2",
+      "title": "Segregation From Enterprise Services"
+    },
+    {
+      "scf_id": "NET-09",
+      "title": "Network Device Plane Segmentation"
+    },
+    {
+      "scf_id": "NET-10",
+      "title": "Virtual Local Area Network (VLAN) Separation"
+    },
+    {
+      "scf_id": "NET-11",
+      "title": "Microsegmentation"
+    },
+    {
+      "scf_id": "NET-12",
+      "title": "Software Defined Networking (SDN)"
+    },
+    {
+      "scf_id": "NET-13",
+      "title": "Domain Name Service (DNS) Resolution"
+    },
+    {
+      "scf_id": "NET-13.1",
+      "title": "Architecture \u0026 Provisioning for Name / Address Resolution Service"
+    },
+    {
+      "scf_id": "NET-13.2",
+      "title": "Secure Name / Address Resolution Service (Recursive or Caching Resolver)"
+    },
+    {
+      "scf_id": "NET-13.3",
+      "title": "Domain Registrar Security"
+    },
+    {
+      "scf_id": "NET-14",
+      "title": "Zero Trust Architecture (ZTA)"
+    },
+    {
+      "scf_id": "NET-15",
+      "title": "Policy Decision Point (PDP)"
+    },
+    {
+      "scf_id": "NET-16",
+      "title": "Network Access Control (NAC)"
+    },
+    {
+      "scf_id": "NET-17",
+      "title": "DNS \u0026 Content Filtering"
+    },
+    {
+      "scf_id": "NET-18",
+      "title": "Authenticated Proxy"
+    },
+    {
+      "scf_id": "NET-18.1",
+      "title": "Route Internal Traffic to Proxy Servers"
+    },
+    {
+      "scf_id": "NET-18.2",
+      "title": "Route Privileged Network Access"
+    },
+    {
+      "scf_id": "NET-19",
+      "title": "Application Proxy"
+    },
+    {
+      "scf_id": "NET-20",
+      "title": "Visibility of Encrypted Communications"
+    },
+    {
+      "scf_id": "NET-20.1",
+      "title": "Content Check for Encrypted Data"
+    },
+    {
+      "scf_id": "NET-21",
+      "title": "Denial of Service (DoS) Protection"
+    },
+    {
+      "scf_id": "NET-22",
+      "title": "Guest Networks"
+    },
+    {
+      "scf_id": "NET-23",
+      "title": "Intranets"
+    },
+    {
+      "scf_id": "NET-24",
+      "title": "Wireless Networking"
+    },
+    {
+      "scf_id": "NET-24.1",
+      "title": "Wireless Networking Authentication \u0026 Encryption"
+    },
+    {
+      "scf_id": "NET-24.2",
+      "title": "Wireless Boundaries"
+    },
+    {
+      "scf_id": "NET-25",
+      "title": "Rogue Wireless Detection"
+    },
+    {
+      "scf_id": "NET-26",
+      "title": "Remote Access"
+    },
+    {
+      "scf_id": "NET-26.1",
+      "title": "Remote Access Pathways"
+    },
+    {
+      "scf_id": "NET-26.2",
+      "title": "Expeditious Remote Access Disconnect / Disable Capability"
+    },
+    {
+      "scf_id": "NET-26.3",
+      "title": "Remote Access Endpoint Security Validation"
+    },
+    {
+      "scf_id": "NET-26.4",
+      "title": "Remote Access Monitoring \u0026 Control"
+    },
+    {
+      "scf_id": "NET-26.5",
+      "title": "Remote Access Cryptographic Protections"
+    },
+    {
+      "scf_id": "NET-26.6",
+      "title": "Remote Access Privileged Commands \u0026 Sensitive Data Access"
+    },
+    {
+      "scf_id": "NET-27",
+      "title": "Work From Anywhere (WFA) - Telecommuting Security"
+    },
+    {
+      "scf_id": "NET-28",
+      "title": "Network Connection Termination"
+    },
+    {
+      "scf_id": "NET-29",
+      "title": "Session Integrity"
+    },
+    {
+      "scf_id": "NET-30",
+      "title": "Third-Party Remote Access Governance"
+    },
+    {
+      "scf_id": "NET-31",
+      "title": "Network Intrusion Detection / Prevention Systems (NIDS / NIPS)"
+    },
+    {
+      "scf_id": "NET-32",
+      "title": "Wireless Intrusion Detection / Prevention Systems (WIDS / WIPS) Deployment"
+    },
+    {
+      "scf_id": "NET-33",
+      "title": "Demilitarized Zones (DMZ)"
+    },
+    {
+      "scf_id": "NET-34",
+      "title": "Web Application Firewall (WAF)"
+    },
+    {
+      "scf_id": "NET-35",
+      "title": "Application Programming Interface (API) Security"
+    },
+    {
+      "scf_id": "NET-36",
+      "title": "API Gateway"
+    },
+    {
+      "scf_id": "NET-37",
+      "title": "Safeguarding Data Over Open Networks"
+    },
+    {
+      "scf_id": "NET-38",
+      "title": "Wireless Link Protection"
+    },
+    {
+      "scf_id": "NET-39",
+      "title": "Email Domain Reputation Protections"
+    },
+    {
+      "scf_id": "NET-39.1",
+      "title": "Domain-Based Message Authentication Reporting and Conformance (DMARC)"
+    },
+    {
+      "scf_id": "NET-39.2",
+      "title": "Sender Policy Framework (SPF)"
+    },
+    {
+      "scf_id": "NET-39.3",
+      "title": "Authenticated Received Chain (ARC)"
+    },
+    {
+      "scf_id": "NET-39.4",
+      "title": "Sender Denylisting"
+    },
+    {
+      "scf_id": "NET-40",
+      "title": "End-User Messaging Technologies"
+    },
+    {
+      "scf_id": "NET-40.1",
+      "title": "Electronic Messaging"
+    },
+    {
+      "scf_id": "NET-40.2",
+      "title": "Phishing \u0026 Spam Protection"
+    },
+    {
+      "scf_id": "NET-40.3",
+      "title": "Email Content Protections"
+    },
+    {
+      "scf_id": "NET-40.4",
+      "title": "Adaptive Email Protections"
+    },
+    {
+      "scf_id": "NET-40.5",
+      "title": "Email Labeling"
+    },
+    {
+      "scf_id": "NET-40.6",
+      "title": "User Digital Signatures for Outgoing Email"
+    },
+    {
+      "scf_id": "NET-40.7",
+      "title": "Encryption for Outgoing Email"
+    },
+    {
+      "scf_id": "NET-40.8",
+      "title": "User Threat Reporting"
+    },
+    {
+      "scf_id": "NET-41",
+      "title": "Cross Domain Solution (CDS)"
+    },
+    {
+      "scf_id": "NET-41.1",
+      "title": "Separate Subnet for Connecting to Different Security Domains"
+    },
+    {
+      "scf_id": "NET-41.2",
+      "title": "Cross Domain Authentication"
+    },
+    {
+      "scf_id": "NET-41.3",
+      "title": "Data Type Identifiers"
+    },
+    {
+      "scf_id": "NET-41.4",
+      "title": "Decomposition Into Policy-Related Subcomponents"
+    },
+    {
+      "scf_id": "NET-41.5",
+      "title": "Detection of Unsanctioned Information"
+    },
+    {
+      "scf_id": "NET-42",
+      "title": "Cross Domain Content Transfer"
+    },
+    {
+      "scf_id": "NET-42.1",
+      "title": "Isolation of System Components"
+    },
+    {
+      "scf_id": "NET-42.2",
+      "title": "Dynamic Isolation \u0026 Segregation (Sandboxing)"
+    },
+    {
+      "scf_id": "NET-43",
+      "title": "Host Containment"
+    },
+    {
+      "scf_id": "NET-44",
+      "title": "Resource Containment"
+    },
+    {
+      "scf_id": "NET-45",
+      "title": "Conceal / Randomize Communications"
+    },
+    {
+      "scf_id": "NET-45.1",
+      "title": "Object Security Attributes"
+    },
+    {
+      "scf_id": "NET-45.2",
+      "title": "Embedded Data Types"
+    },
+    {
+      "scf_id": "NET-46",
+      "title": "Metadata"
+    },
+    {
+      "scf_id": "NET-46.1",
+      "title": "Metadata Validation"
+    },
+    {
+      "scf_id": "NET-47",
+      "title": "Side Channel Attack Prevention"
+    },
+    {
+      "scf_id": "PES-01",
+      "title": "Physical \u0026 Environmental Security Policy"
+    },
+    {
+      "scf_id": "PES-02",
+      "title": "Physical \u0026 Environmental Protections"
+    },
+    {
+      "scf_id": "PES-03",
+      "title": "Physical Security Plan (PSP)"
+    },
+    {
+      "scf_id": "PES-04",
+      "title": "Zone-Based Physical Security"
+    },
+    {
+      "scf_id": "PES-05",
+      "title": "Alternate Work Site"
+    },
+    {
+      "scf_id": "PES-06",
+      "title": "Physical Access Authorizations"
+    },
+    {
+      "scf_id": "PES-07",
+      "title": "Role-Based Physical Access"
+    },
+    {
+      "scf_id": "PES-07.1",
+      "title": "Dual Authorization for Physical Access"
+    },
+    {
+      "scf_id": "PES-08",
+      "title": "Physical Access Control"
+    },
+    {
+      "scf_id": "PES-08.1",
+      "title": "Physical Access Device Inventories"
+    },
+    {
+      "scf_id": "PES-09",
+      "title": "Controlled Ingress \u0026 Egress Points"
+    },
+    {
+      "scf_id": "PES-09.1",
+      "title": "Physical Access Logs"
+    },
+    {
+      "scf_id": "PES-09.2",
+      "title": "Personnel Searches"
+    },
+    {
+      "scf_id": "PES-10",
+      "title": "Physical Security of Offices, Rooms \u0026 Facilities"
+    },
+    {
+      "scf_id": "PES-11",
+      "title": "Working in Secure Areas"
+    },
+    {
+      "scf_id": "PES-11.1",
+      "title": "On-Site Client Segregation"
+    },
+    {
+      "scf_id": "PES-12",
+      "title": "Access To Critical Systems"
+    },
+    {
+      "scf_id": "PES-12.1",
+      "title": "Lockable Physical Casings"
+    },
+    {
+      "scf_id": "PES-13",
+      "title": "Monitoring Physical Access"
+    },
+    {
+      "scf_id": "PES-13.1",
+      "title": "Intrusion Alarms / Surveillance Equipment"
+    },
+    {
+      "scf_id": "PES-13.2",
+      "title": "Monitoring Physical Access To Critical Systems"
+    },
+    {
+      "scf_id": "PES-14",
+      "title": "Visitor Control"
+    },
+    {
+      "scf_id": "PES-14.1",
+      "title": "Distinguish Visitors from On-Site Personnel"
+    },
+    {
+      "scf_id": "PES-14.2",
+      "title": "Identification Requirement"
+    },
+    {
+      "scf_id": "PES-14.3",
+      "title": "Restrict Unescorted Access"
+    },
+    {
+      "scf_id": "PES-14.4",
+      "title": "Automated Records Management \u0026 Review"
+    },
+    {
+      "scf_id": "PES-14.5",
+      "title": "Minimize Visitor Personal Data (PD)"
+    },
+    {
+      "scf_id": "PES-14.6",
+      "title": "Visitor Access Revocation"
+    },
+    {
+      "scf_id": "PES-15",
+      "title": "Delivery \u0026 Removal"
+    },
+    {
+      "scf_id": "PES-15.1",
+      "title": "Temporary Storage"
+    },
+    {
+      "scf_id": "PES-16",
+      "title": "Equipment Siting \u0026 Protection"
+    },
+    {
+      "scf_id": "PES-16.1",
+      "title": "Transmission Medium Security"
+    },
+    {
+      "scf_id": "PES-17",
+      "title": "Access Control for Output Devices"
+    },
+    {
+      "scf_id": "PES-18",
+      "title": "Component Marking"
+    },
+    {
+      "scf_id": "PES-19",
+      "title": "Asset Monitoring and Tracking"
+    },
+    {
+      "scf_id": "PES-20",
+      "title": "Supporting Utilities"
+    },
+    {
+      "scf_id": "PES-20.1",
+      "title": "Automatic Voltage Controls"
+    },
+    {
+      "scf_id": "PES-21",
+      "title": "Emergency Shutoff"
+    },
+    {
+      "scf_id": "PES-22",
+      "title": "Emergency Power"
+    },
+    {
+      "scf_id": "PES-23",
+      "title": "Emergency Lighting"
+    },
+    {
+      "scf_id": "PES-24",
+      "title": "Water Damage Protection"
+    },
+    {
+      "scf_id": "PES-24.1",
+      "title": "Automation Support for Water Damage Protection"
+    },
+    {
+      "scf_id": "PES-25",
+      "title": "Redundant Cabling"
+    },
+    {
+      "scf_id": "PES-26",
+      "title": "Fire Protection"
+    },
+    {
+      "scf_id": "PES-27",
+      "title": "Fire Detection Devices"
+    },
+    {
+      "scf_id": "PES-28",
+      "title": "Fire Suppression Devices"
+    },
+    {
+      "scf_id": "PES-28.1",
+      "title": "Automatic Fire Suppression"
+    },
+    {
+      "scf_id": "PES-29",
+      "title": "Temperature \u0026 Humidity Controls Monitoring"
+    },
+    {
+      "scf_id": "PES-29.1",
+      "title": "Temperature \u0026 Humidity Controls Alerting"
+    },
+    {
+      "scf_id": "PES-30",
+      "title": "Information Leakage Due To Electromagnetic Signals Emanations"
+    },
+    {
+      "scf_id": "PES-31",
+      "title": "Electromagnetic Pulse (EMP) Protection"
+    },
+    {
+      "scf_id": "PRI-01",
+      "title": "Data Privacy Policy"
+    },
+    {
+      "scf_id": "PRI-02",
+      "title": "Data Privacy Program"
+    },
+    {
+      "scf_id": "PRI-03",
+      "title": "Data Privacy Accountability Structure"
+    },
+    {
+      "scf_id": "PRI-03.1",
+      "title": "Chief Privacy Officer (CPO)"
+    },
+    {
+      "scf_id": "PRI-03.2",
+      "title": "Data Protection Officer (DPO)"
+    },
+    {
+      "scf_id": "PRI-03.3",
+      "title": "Personal Data Process Manager (PDPM)"
+    },
+    {
+      "scf_id": "PRI-03.4",
+      "title": "Data Fiduciary"
+    },
+    {
+      "scf_id": "PRI-04",
+      "title": "Privacy-Aware Design"
+    },
+    {
+      "scf_id": "PRI-05",
+      "title": "Documenting Data Processing Activities"
+    },
+    {
+      "scf_id": "PRI-05.1",
+      "title": "Personal Data (PD) Lineage"
+    },
+    {
+      "scf_id": "PRI-06",
+      "title": "Personal Data (PD) Categories"
+    },
+    {
+      "scf_id": "PRI-07",
+      "title": "Inventory of Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-07.1",
+      "title": "Personal Data (PD) Inventory Automation Support"
+    },
+    {
+      "scf_id": "PRI-08",
+      "title": "Updating Personal Data (PD) Process"
+    },
+    {
+      "scf_id": "PRI-08.1",
+      "title": "Updating \u0026 Correcting Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-08.2",
+      "title": "Flaw Remediation with Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-09",
+      "title": "Reasonable Data Privacy Practices"
+    },
+    {
+      "scf_id": "PRI-10",
+      "title": "Security of Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-11",
+      "title": "Personal Data (PD) Control Testing, Training \u0026 Monitoring"
+    },
+    {
+      "scf_id": "PRI-12",
+      "title": "Authority To Collect, Process, Store \u0026 Share Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-13",
+      "title": "Product or Service Delivery Restrictions"
+    },
+    {
+      "scf_id": "PRI-14",
+      "title": "Data Privacy Requirements for Contractors \u0026 Service Providers"
+    },
+    {
+      "scf_id": "PRI-15",
+      "title": "Binding Corporate Rules (BCR)"
+    },
+    {
+      "scf_id": "PRI-16",
+      "title": "Information Sharing With Third Parties"
+    },
+    {
+      "scf_id": "PRI-17",
+      "title": "Limiting Personal Data (PD) Disclosures"
+    },
+    {
+      "scf_id": "PRI-17.1",
+      "title": "Accounting of Disclosures"
+    },
+    {
+      "scf_id": "PRI-18",
+      "title": "Notification of Disclosure Requests To Data Subject"
+    },
+    {
+      "scf_id": "PRI-18.1",
+      "title": "Disclosure Request Rejections"
+    },
+    {
+      "scf_id": "PRI-18.2",
+      "title": "Justification To Reject Disclosure Requests"
+    },
+    {
+      "scf_id": "PRI-19",
+      "title": "Financial Incentives For Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-19.1",
+      "title": "Notice of Financial Incentive"
+    },
+    {
+      "scf_id": "PRI-20",
+      "title": "Dissemination of Data Privacy Program Information"
+    },
+    {
+      "scf_id": "PRI-20.1",
+      "title": "Privacy Act Statements"
+    },
+    {
+      "scf_id": "PRI-20.2",
+      "title": "Privacy Act Exemptions"
+    },
+    {
+      "scf_id": "PRI-20.3",
+      "title": "System of Records Notice (SORN)"
+    },
+    {
+      "scf_id": "PRI-20.4",
+      "title": "System of Records Notice (SORN) Review Process"
+    },
+    {
+      "scf_id": "PRI-20.5",
+      "title": "Computer Matching Agreements (CMA)"
+    },
+    {
+      "scf_id": "PRI-21",
+      "title": "Data Privacy Notice"
+    },
+    {
+      "scf_id": "PRI-21.1",
+      "title": "Privacy Notice Formatting"
+    },
+    {
+      "scf_id": "PRI-21.2",
+      "title": "Conspicuous Link To Data Privacy Notice"
+    },
+    {
+      "scf_id": "PRI-21.3",
+      "title": "Alternative Means To Deliver Privacy Notice"
+    },
+    {
+      "scf_id": "PRI-21.4",
+      "title": "Notice of Right To Limit"
+    },
+    {
+      "scf_id": "PRI-21.5",
+      "title": "Real-Time or Layered Notice"
+    },
+    {
+      "scf_id": "PRI-22",
+      "title": "Purpose Specification"
+    },
+    {
+      "scf_id": "PRI-22.1",
+      "title": "Purpose Compatibility"
+    },
+    {
+      "scf_id": "PRI-23",
+      "title": "Choice Architecture"
+    },
+    {
+      "scf_id": "PRI-23.1",
+      "title": "Symmetry In Choice"
+    },
+    {
+      "scf_id": "PRI-23.2",
+      "title": "Choice Architecture Testing"
+    },
+    {
+      "scf_id": "PRI-24",
+      "title": "Data Subject Consent"
+    },
+    {
+      "scf_id": "PRI-24.1",
+      "title": "Active Participation For Consent By Data Subjects"
+    },
+    {
+      "scf_id": "PRI-24.2",
+      "title": "Tailored Consent"
+    },
+    {
+      "scf_id": "PRI-24.3",
+      "title": "Revoke Consent"
+    },
+    {
+      "scf_id": "PRI-24.4",
+      "title": "Just-In-Time Notice \u0026 Updated Consent"
+    },
+    {
+      "scf_id": "PRI-24.5",
+      "title": "Prohibition of Selling, Processing and/or Sharing Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-25",
+      "title": "Cookie Management"
+    },
+    {
+      "scf_id": "PRI-26",
+      "title": "Data Subject Right To Opt-Out"
+    },
+    {
+      "scf_id": "PRI-26.1",
+      "title": "Opt-Out Links"
+    },
+    {
+      "scf_id": "PRI-26.2",
+      "title": "Alternative Opt-Out Link"
+    },
+    {
+      "scf_id": "PRI-26.3",
+      "title": "Global Privacy Control (GPC)"
+    },
+    {
+      "scf_id": "PRI-27",
+      "title": "Data Subject Opt-In Consent"
+    },
+    {
+      "scf_id": "PRI-27.1",
+      "title": "Parent or Guardian Opt-In Consent For Minors"
+    },
+    {
+      "scf_id": "PRI-28",
+      "title": "Authorized Agent"
+    },
+    {
+      "scf_id": "PRI-29",
+      "title": "Usage Restrictions of Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-29.1",
+      "title": "Continued Use of Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-29.2",
+      "title": "Cease Processing, Storing and/or Sharing Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-29.3",
+      "title": "Internal Use of Personal Data (PD) For Testing, Training and Research"
+    },
+    {
+      "scf_id": "PRI-30",
+      "title": "Personal Data (PD) Retention \u0026 Disposal"
+    },
+    {
+      "scf_id": "PRI-30.1",
+      "title": "Personal Data (PD) Formats"
+    },
+    {
+      "scf_id": "PRI-30.2",
+      "title": "Temporary Files Containing Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-31",
+      "title": "Personal Data (PD) Collection Methods"
+    },
+    {
+      "scf_id": "PRI-31.1",
+      "title": "Restrict Collection, Processing \u0026 Sharing To Identified Purpose"
+    },
+    {
+      "scf_id": "PRI-32",
+      "title": "Primary Source Collection For Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-33",
+      "title": "Identifiable Image Collection"
+    },
+    {
+      "scf_id": "PRI-34",
+      "title": "Acquired Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-34.1",
+      "title": "Data Brokers"
+    },
+    {
+      "scf_id": "PRI-35",
+      "title": "Personal Data (PD) Accuracy \u0026 Integrity"
+    },
+    {
+      "scf_id": "PRI-35.1",
+      "title": "Validate Collected Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-35.2",
+      "title": "Re-Validate Collected Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-36",
+      "title": "Automated Decision-Making Technology (ADMT)"
+    },
+    {
+      "scf_id": "PRI-36.1",
+      "title": "Automated Decision-Making Technology (ADMT) For Data Subject Actions"
+    },
+    {
+      "scf_id": "PRI-36.2",
+      "title": "Automated Decision-Making Technology (ADMT) Use Notification"
+    },
+    {
+      "scf_id": "PRI-36.3",
+      "title": "Automated Decision-Making Technology (ADMT) Opt-Out Consent"
+    },
+    {
+      "scf_id": "PRI-36.4",
+      "title": "Automated Decision-Making Technology (ADMT) Transparency"
+    },
+    {
+      "scf_id": "PRI-37",
+      "title": "Data Subject Communications"
+    },
+    {
+      "scf_id": "PRI-37.1",
+      "title": "Communicating Processing Changes"
+    },
+    {
+      "scf_id": "PRI-37.2",
+      "title": "Data Subject Communications Documentation"
+    },
+    {
+      "scf_id": "PRI-37.3",
+      "title": "Data Subject Communications Metrics"
+    },
+    {
+      "scf_id": "PRI-37.4",
+      "title": "Data Subject Communications Disclosure"
+    },
+    {
+      "scf_id": "PRI-38",
+      "title": "Data Subject Authentication"
+    },
+    {
+      "scf_id": "PRI-39",
+      "title": "Data Subject Rights Management"
+    },
+    {
+      "scf_id": "PRI-39.1",
+      "title": "Data Subject Empowerment"
+    },
+    {
+      "scf_id": "PRI-39.2",
+      "title": "Enabling Data Subjects To Update Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-39.3",
+      "title": "Correcting Inaccurate Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-39.4",
+      "title": "Notice of Correction or Processing Change"
+    },
+    {
+      "scf_id": "PRI-39.5",
+      "title": "Appeal Adverse Decision"
+    },
+    {
+      "scf_id": "PRI-40",
+      "title": "Right to Erasure"
+    },
+    {
+      "scf_id": "PRI-41",
+      "title": "Data Portability"
+    },
+    {
+      "scf_id": "PRI-41.1",
+      "title": "Personal Data (PD) Exports"
+    },
+    {
+      "scf_id": "PRI-42",
+      "title": "Obligation To Inform Third-Parties"
+    },
+    {
+      "scf_id": "PRI-43",
+      "title": "Joint Processing of Personal Data (PD)"
+    },
+    {
+      "scf_id": "PRI-44",
+      "title": "Data Controller Communications"
+    },
+    {
+      "scf_id": "PRI-45",
+      "title": "Register As A Data Controller and/or Data Processor"
+    },
+    {
+      "scf_id": "PRM-01",
+      "title": "Project \u0026 Resource Management Policy"
+    },
+    {
+      "scf_id": "PRM-02",
+      "title": "Strategic Plan \u0026 Objectives"
+    },
+    {
+      "scf_id": "PRM-03",
+      "title": "Targeted Capability Maturity Levels"
+    },
+    {
+      "scf_id": "PRM-04",
+      "title": "Security, Compliance \u0026 Resilience Protection Portfolio Management"
+    },
+    {
+      "scf_id": "PRM-04.1",
+      "title": "Purpose Validation"
+    },
+    {
+      "scf_id": "PRM-05",
+      "title": "Security, Compliance \u0026 Resilience Resource Management"
+    },
+    {
+      "scf_id": "PRM-05.1",
+      "title": "Commitment To Continual Improvements"
+    },
+    {
+      "scf_id": "PRM-05.2",
+      "title": "Prioritization To Address Evolving Risks \u0026 Threats"
+    },
+    {
+      "scf_id": "PRM-06",
+      "title": "Allocation of Resources"
+    },
+    {
+      "scf_id": "PRM-07",
+      "title": "Secure Development Life Cycle (SDLC) Management"
+    },
+    {
+      "scf_id": "PRM-08",
+      "title": "Security, Compliance \u0026 Resilience In Project Management"
+    },
+    {
+      "scf_id": "PRM-08.1",
+      "title": "Project Management Stage Gates"
+    },
+    {
+      "scf_id": "PRM-09",
+      "title": "Security, Compliance \u0026 Resilience Requirements Definition"
+    },
+    {
+      "scf_id": "PRM-10",
+      "title": "Business Process Definition"
+    },
+    {
+      "scf_id": "PRM-11",
+      "title": "Manage Organizational Knowledge"
+    },
+    {
+      "scf_id": "QTS-01",
+      "title": "Quantum Security Policy"
+    },
+    {
+      "scf_id": "QTS-02",
+      "title": "Quantum Risk Governance"
+    },
+    {
+      "scf_id": "QTS-03",
+      "title": "Data Shelf-Life Classification for Post-Quantum Cryptography (PQC) Prioritization"
+    },
+    {
+      "scf_id": "QTS-03.1",
+      "title": "Long-Lived Data Identification"
+    },
+    {
+      "scf_id": "QTS-04",
+      "title": "Cryptographic Agility Risk Assessment (CARA)"
+    },
+    {
+      "scf_id": "QTS-04.1",
+      "title": "Cryptographic Exception Register"
+    },
+    {
+      "scf_id": "QTS-04.2",
+      "title": "Compensating Controls for Quantum-Vulnerable Systems"
+    },
+    {
+      "scf_id": "QTS-04.3",
+      "title": "Crypto Agility Maturity Assessment"
+    },
+    {
+      "scf_id": "QTS-05",
+      "title": "Harvest Now, Decrypt Later (HNDL) Mitigation"
+    },
+    {
+      "scf_id": "QTS-06",
+      "title": "Post-Quantum Cryptography Agility Plan (PQCAP)"
+    },
+    {
+      "scf_id": "QTS-06.1",
+      "title": "Post-Quantum Cryptography (PQC) Transition Planning \u0026 Hybrid Mode Support"
+    },
+    {
+      "scf_id": "QTS-06.2",
+      "title": "Post-Quantum Cryptography (PQC) Migration Progress Oversight"
+    },
+    {
+      "scf_id": "QTS-06.3",
+      "title": "Post-Quantum Cryptography (PQC) Supply Chain Visibility"
+    },
+    {
+      "scf_id": "QTS-06.4",
+      "title": "Post-Quantum Cryptography (PQC) Supply Chain Flow-Down Requirements"
+    },
+    {
+      "scf_id": "QTS-07",
+      "title": "Post-Quantum Cryptography (PQC) Discovery \u0026 Visibility"
+    },
+    {
+      "scf_id": "QTS-07.1",
+      "title": "Post-Quantum Cryptography (PQC) Asset Inventory"
+    },
+    {
+      "scf_id": "QTS-07.2",
+      "title": "Post-Quantum Cryptography Exposure"
+    },
+    {
+      "scf_id": "QTS-08",
+      "title": "Quantum Threat Intelligence Monitoring"
+    },
+    {
+      "scf_id": "QTS-08.1",
+      "title": "Collaboration \u0026 Information Sharing"
+    },
+    {
+      "scf_id": "QTS-09",
+      "title": "Crypto-Agility Architecture"
+    },
+    {
+      "scf_id": "QTS-09.1",
+      "title": "Entropy Source \u0026 Random Bit Generation"
+    },
+    {
+      "scf_id": "QTS-09.2",
+      "title": "Stateful Hash-Based Signatures for Firmware \u0026 Code Signing"
+    },
+    {
+      "scf_id": "QTS-09.3",
+      "title": "Approved Post-Quantum Cryptography (PQC) Algorithm Use"
+    },
+    {
+      "scf_id": "QTS-09.4",
+      "title": "Post-Quantum Cryptography (PQC) Validation Requirements"
+    },
+    {
+      "scf_id": "QTS-09.5",
+      "title": "Deprecated Cryptographic Algorithms"
+    },
+    {
+      "scf_id": "QTS-09.6",
+      "title": "Post-Quantum Cryptography (PQC) Key Management"
+    },
+    {
+      "scf_id": "QTS-09.7",
+      "title": "Quantum-Safe Public Key Infrastructure (PKI) Transition"
+    },
+    {
+      "scf_id": "QTS-09.8",
+      "title": "Algorithm Negotiation Integrity"
+    },
+    {
+      "scf_id": "QTS-09.9",
+      "title": "Hybrid / Composite Cryptography"
+    },
+    {
+      "scf_id": "QTS-09.10",
+      "title": "Cryptographic Application Programming Interface (API) Abstraction"
+    },
+    {
+      "scf_id": "QTS-10",
+      "title": "Post-Quantum Cryptography (PQC) Implementation Validation \u0026 Interoperability Testing"
+    },
+    {
+      "scf_id": "RSK-01",
+      "title": "Risk Management Policy"
+    },
+    {
+      "scf_id": "RSK-02",
+      "title": "Risk Management Program"
+    },
+    {
+      "scf_id": "RSK-03",
+      "title": "Risk Management Resourcing"
+    },
+    {
+      "scf_id": "RSK-04",
+      "title": "Risk Culture"
+    },
+    {
+      "scf_id": "RSK-05",
+      "title": "Risk Framing"
+    },
+    {
+      "scf_id": "RSK-05.1",
+      "title": "Risk Tolerance"
+    },
+    {
+      "scf_id": "RSK-05.2",
+      "title": "Risk Threshold"
+    },
+    {
+      "scf_id": "RSK-05.3",
+      "title": "Risk Appetite"
+    },
+    {
+      "scf_id": "RSK-06",
+      "title": "Material Risks"
+    },
+    {
+      "scf_id": "RSK-06.1",
+      "title": "Executive Leadership Approval For Managing Material Risk"
+    },
+    {
+      "scf_id": "RSK-06.2",
+      "title": "Documented Justification For Material Risk Management Decisions"
+    },
+    {
+      "scf_id": "RSK-07",
+      "title": "Risk-Based Security Categorization"
+    },
+    {
+      "scf_id": "RSK-07.1",
+      "title": "Impact-Level Prioritization"
+    },
+    {
+      "scf_id": "RSK-08",
+      "title": "Business Impact Analysis (BIA)"
+    },
+    {
+      "scf_id": "RSK-09",
+      "title": "Risk Identification"
+    },
+    {
+      "scf_id": "RSK-10",
+      "title": "Risk Catalog"
+    },
+    {
+      "scf_id": "RSK-11",
+      "title": "Risk Owner"
+    },
+    {
+      "scf_id": "RSK-12",
+      "title": "Risk Assessment Methodology"
+    },
+    {
+      "scf_id": "RSK-13",
+      "title": "Risk Assessment"
+    },
+    {
+      "scf_id": "RSK-13.1",
+      "title": "Instances Requiring A Risk Assessment"
+    },
+    {
+      "scf_id": "RSK-13.2",
+      "title": "Risk Assessment Update"
+    },
+    {
+      "scf_id": "RSK-13.3",
+      "title": "Risk Assessment Stakeholder Involvement"
+    },
+    {
+      "scf_id": "RSK-14",
+      "title": "Risk Register"
+    },
+    {
+      "scf_id": "RSK-15",
+      "title": "Risk Ranking"
+    },
+    {
+      "scf_id": "RSK-16",
+      "title": "Risk Response"
+    },
+    {
+      "scf_id": "RSK-16.1",
+      "title": "Risk Treatment Options"
+    },
+    {
+      "scf_id": "RSK-17",
+      "title": "Risk Remediation"
+    },
+    {
+      "scf_id": "RSK-17.1",
+      "title": "Risk Treatment Plan (RTP)"
+    },
+    {
+      "scf_id": "RSK-17.2",
+      "title": "Documented Alternatives"
+    },
+    {
+      "scf_id": "RSK-18",
+      "title": "Compensating Countermeasures"
+    },
+    {
+      "scf_id": "RSK-19",
+      "title": "Data Protection Impact Assessment (DPIA)"
+    },
+    {
+      "scf_id": "RSK-20",
+      "title": "Supply Chain Risk Management (SCRM) Plan"
+    },
+    {
+      "scf_id": "RSK-20.1",
+      "title": "AI \u0026 Autonomous Technologies Supply Chain Impacts"
+    },
+    {
+      "scf_id": "RSK-21",
+      "title": "Supply Chain Risk Assessment (SCRA)"
+    },
+    {
+      "scf_id": "RSK-22",
+      "title": "Risk Monitoring"
+    },
+    {
+      "scf_id": "SEA-01",
+      "title": "Secure Engineering \u0026 Architecture Policy"
+    },
+    {
+      "scf_id": "SEA-02",
+      "title": "Security, Compliance \u0026 Resilience Aware Design"
+    },
+    {
+      "scf_id": "SEA-02.1",
+      "title": "Achieving Security, Compliance \u0026 Resilience Requirements"
+    },
+    {
+      "scf_id": "SEA-02.2",
+      "title": "Flexible Technology Stack"
+    },
+    {
+      "scf_id": "SEA-03",
+      "title": "Secure Architecture Principles"
+    },
+    {
+      "scf_id": "SEA-04",
+      "title": "Alignment With Enterprise Architecture"
+    },
+    {
+      "scf_id": "SEA-05",
+      "title": "Secure Engineering Principles"
+    },
+    {
+      "scf_id": "SEA-06",
+      "title": "Defense-In-Depth (DiD) Architecture"
+    },
+    {
+      "scf_id": "SEA-07",
+      "title": "System Partitioning"
+    },
+    {
+      "scf_id": "SEA-08",
+      "title": "Application Partitioning"
+    },
+    {
+      "scf_id": "SEA-09",
+      "title": "Process Isolation"
+    },
+    {
+      "scf_id": "SEA-10",
+      "title": "Security Function Isolation"
+    },
+    {
+      "scf_id": "SEA-11",
+      "title": "Hardware Separation"
+    },
+    {
+      "scf_id": "SEA-12",
+      "title": "Thread Separation"
+    },
+    {
+      "scf_id": "SEA-13",
+      "title": "System Privileges Isolation"
+    },
+    {
+      "scf_id": "SEA-14",
+      "title": "Information In Shared Resources"
+    },
+    {
+      "scf_id": "SEA-15",
+      "title": "Fail Secure"
+    },
+    {
+      "scf_id": "SEA-16",
+      "title": "Fail Safe"
+    },
+    {
+      "scf_id": "SEA-17",
+      "title": "Non-Persistence"
+    },
+    {
+      "scf_id": "SEA-17.1",
+      "title": "Non-Persistent Information"
+    },
+    {
+      "scf_id": "SEA-18",
+      "title": "Information Output Filtering"
+    },
+    {
+      "scf_id": "SEA-19",
+      "title": "Memory Protection"
+    },
+    {
+      "scf_id": "SEA-20",
+      "title": "Honeypots"
+    },
+    {
+      "scf_id": "SEA-21",
+      "title": "Honeyclients"
+    },
+    {
+      "scf_id": "SEA-22",
+      "title": "Heterogeneity"
+    },
+    {
+      "scf_id": "SEA-23",
+      "title": "Virtualization Techniques"
+    },
+    {
+      "scf_id": "SEA-23.1",
+      "title": "Virtual Machine Images"
+    },
+    {
+      "scf_id": "SEA-24",
+      "title": "Concealment \u0026 Misdirection"
+    },
+    {
+      "scf_id": "SEA-24.1",
+      "title": "Randomness"
+    },
+    {
+      "scf_id": "SEA-24.2",
+      "title": "Change Processing \u0026 Storage Locations"
+    },
+    {
+      "scf_id": "SEA-25",
+      "title": "Distributed Processing \u0026 Storage"
+    },
+    {
+      "scf_id": "SEA-26",
+      "title": "Non-Modifiable Executable Programs"
+    },
+    {
+      "scf_id": "SEA-27",
+      "title": "Secure Log-On Procedures (Trusted Path)"
+    },
+    {
+      "scf_id": "SEA-28",
+      "title": "System Use Notification (Logon Banner)"
+    },
+    {
+      "scf_id": "SEA-28.1",
+      "title": "Standardized Microsoft Windows Banner"
+    },
+    {
+      "scf_id": "SEA-28.2",
+      "title": "Truncated Banner"
+    },
+    {
+      "scf_id": "SEA-29",
+      "title": "Previous Logon Notification"
+    },
+    {
+      "scf_id": "SEA-30",
+      "title": "Clock Synchronization"
+    },
+    {
+      "scf_id": "SEA-31",
+      "title": "Application Container"
+    },
+    {
+      "scf_id": "SEA-32",
+      "title": "Privileged Environments"
+    },
+    {
+      "scf_id": "OPS-01",
+      "title": "Security Operations Policy"
+    },
+    {
+      "scf_id": "OPS-02",
+      "title": "Operations Security"
+    },
+    {
+      "scf_id": "OPS-03",
+      "title": "Security Concept Of Operations (CONOPS)"
+    },
+    {
+      "scf_id": "OPS-04",
+      "title": "Standardized Operating Procedures (SOP)"
+    },
+    {
+      "scf_id": "OPS-04.1",
+      "title": "System Administrative Processes"
+    },
+    {
+      "scf_id": "OPS-04.2",
+      "title": "Database Administrative Processes"
+    },
+    {
+      "scf_id": "OPS-05",
+      "title": "Service Delivery\n(Business Process Support)"
+    },
+    {
+      "scf_id": "OPS-06",
+      "title": "Secure Practices Guidelines"
+    },
+    {
+      "scf_id": "OPS-07",
+      "title": "Security Operations Center (SOC)"
+    },
+    {
+      "scf_id": "OPS-08",
+      "title": "Security Orchestration, Automation, and Response (SOAR)"
+    },
+    {
+      "scf_id": "OPS-09",
+      "title": "Shadow Information Technology Detection"
+    },
+    {
+      "scf_id": "SAT-01",
+      "title": "Security Awareness \u0026 Training Policy"
+    },
+    {
+      "scf_id": "SAT-02",
+      "title": "Security, Compliance \u0026 Resilience-Minded Workforce"
+    },
+    {
+      "scf_id": "SAT-03",
+      "title": "Maintaining Workforce Development Relevancy"
+    },
+    {
+      "scf_id": "SAT-04",
+      "title": "Security, Compliance \u0026 Resilience Awareness Training"
+    },
+    {
+      "scf_id": "SAT-04.1",
+      "title": "Simulated Cyber Attack Scenario Training"
+    },
+    {
+      "scf_id": "SAT-05",
+      "title": "Role-Based Security, Compliance \u0026 Resilience Training"
+    },
+    {
+      "scf_id": "SAT-05.1",
+      "title": "Sensitive / Regulated Data Storage, Handling \u0026 Processing"
+    },
+    {
+      "scf_id": "SAT-05.2",
+      "title": "Privileged User Training"
+    },
+    {
+      "scf_id": "SAT-05.3",
+      "title": "AI \u0026 Autonomous Technologies Risk Management Training"
+    },
+    {
+      "scf_id": "SAT-05.4",
+      "title": "Vendor-Specific Security, Compliance \u0026 Resilience Training"
+    },
+    {
+      "scf_id": "SAT-06",
+      "title": "Cyber Threat Environment Situational Awareness"
+    },
+    {
+      "scf_id": "SAT-06.1",
+      "title": "Social Engineering \u0026 Mining"
+    },
+    {
+      "scf_id": "SAT-06.2",
+      "title": "Suspicious Communications \u0026 Anomalous System Behavior"
+    },
+    {
+      "scf_id": "SAT-06.3",
+      "title": "Counterintelligence Training"
+    },
+    {
+      "scf_id": "SAT-06.4",
+      "title": "Anti-Counterfeit Training"
+    },
+    {
+      "scf_id": "SAT-06.5",
+      "title": "Quantum Security Awareness"
+    },
+    {
+      "scf_id": "SAT-07",
+      "title": "Continuing Professional Education (CPE) - Security, Compliance \u0026 Resilience Personnel"
+    },
+    {
+      "scf_id": "SAT-08",
+      "title": "Continuing Professional Education (CPE) - DevOps Personnel"
+    },
+    {
+      "scf_id": "SAT-09",
+      "title": "Practical Security Training Exercises"
+    },
+    {
+      "scf_id": "SAT-10",
+      "title": "Security, Compliance \u0026 Resilience Training Records"
+    },
+    {
+      "scf_id": "SAT-11",
+      "title": "Training Feedback"
+    },
+    {
+      "scf_id": "SAT-12",
+      "title": "Security, Compliance \u0026 Resilience Knowledge Sharing"
+    },
+    {
+      "scf_id": "TDA-01",
+      "title": "Technology Development \u0026 Acquisition Policy"
+    },
+    {
+      "scf_id": "TDA-02",
+      "title": "Technology Development \u0026 Acquisition"
+    },
+    {
+      "scf_id": "TDA-03",
+      "title": "Development Methods, Techniques \u0026 Processes"
+    },
+    {
+      "scf_id": "TDA-03.1",
+      "title": "Software Assurance Maturity Model (SAMM)"
+    },
+    {
+      "scf_id": "TDA-03.2",
+      "title": "Secure Settings By Default"
+    },
+    {
+      "scf_id": "TDA-04",
+      "title": "Developer Architecture \u0026 Design"
+    },
+    {
+      "scf_id": "TDA-04.1",
+      "title": "Programming Language Selection"
+    },
+    {
+      "scf_id": "TDA-05",
+      "title": "Secure Software Development Practices (SSDP)"
+    },
+    {
+      "scf_id": "TDA-05.1",
+      "title": "Criticality Analysis During Development"
+    },
+    {
+      "scf_id": "TDA-05.2",
+      "title": "Threat Modeling"
+    },
+    {
+      "scf_id": "TDA-05.3",
+      "title": "Supporting Toolchain"
+    },
+    {
+      "scf_id": "TDA-05.4",
+      "title": "Software Design Review"
+    },
+    {
+      "scf_id": "TDA-05.5",
+      "title": "Software Design Root Cause Analysis (RCA)"
+    },
+    {
+      "scf_id": "TDA-06",
+      "title": "Product Management"
+    },
+    {
+      "scf_id": "TDA-06.1",
+      "title": "Product Conformity Governance"
+    },
+    {
+      "scf_id": "TDA-06.2",
+      "title": "Continuous Monitoring Plan"
+    },
+    {
+      "scf_id": "TDA-06.3",
+      "title": "Ongoing Product Security Support"
+    },
+    {
+      "scf_id": "TDA-06.4",
+      "title": "Integrity Mechanisms for Software / Firmware Updates"
+    },
+    {
+      "scf_id": "TDA-06.5",
+      "title": "Software Release Integrity Verification"
+    },
+    {
+      "scf_id": "TDA-06.6",
+      "title": "Information Assurance Enabled Products"
+    },
+    {
+      "scf_id": "TDA-07",
+      "title": "Disclosure of Vulnerabilities"
+    },
+    {
+      "scf_id": "TDA-07.1",
+      "title": "Reporting Exploitable Vulnerabilities"
+    },
+    {
+      "scf_id": "TDA-08",
+      "title": "Technical Documentation Artifacts"
+    },
+    {
+      "scf_id": "TDA-08.1",
+      "title": "Product-Specific Risk Assessment Artifacts"
+    },
+    {
+      "scf_id": "TDA-08.2",
+      "title": "Functional Properties"
+    },
+    {
+      "scf_id": "TDA-08.3",
+      "title": "Administrator Documentation"
+    },
+    {
+      "scf_id": "TDA-08.4",
+      "title": "Identification \u0026 Justification of Ports, Protocols \u0026 Services"
+    },
+    {
+      "scf_id": "TDA-08.5",
+      "title": "Products With Digital Elements"
+    },
+    {
+      "scf_id": "TDA-09",
+      "title": "Product Tampering and Counterfeiting (PTC)"
+    },
+    {
+      "scf_id": "TDA-10",
+      "title": "Customized Development of Critical Components"
+    },
+    {
+      "scf_id": "TDA-11",
+      "title": "DevSecOps"
+    },
+    {
+      "scf_id": "TDA-11.1",
+      "title": "Minimum Viable Product (MVP) Security Requirements"
+    },
+    {
+      "scf_id": "TDA-11.2",
+      "title": "Insecure Ports, Protocols \u0026 Services"
+    },
+    {
+      "scf_id": "TDA-11.3",
+      "title": "Commercial Off-The-Shelf (COTS) Security Solutions"
+    },
+    {
+      "scf_id": "TDA-11.4",
+      "title": "Logging Syntax"
+    },
+    {
+      "scf_id": "TDA-11.5",
+      "title": "Physical Diagnostic \u0026 Test Interfaces"
+    },
+    {
+      "scf_id": "TDA-11.6",
+      "title": "Diagnostic \u0026 Test Interface Monitoring"
+    },
+    {
+      "scf_id": "TDA-12",
+      "title": "Input Data Validation"
+    },
+    {
+      "scf_id": "TDA-12.1",
+      "title": "Error Handling"
+    },
+    {
+      "scf_id": "TDA-12.2",
+      "title": "Designated Roles To View Error Messages"
+    },
+    {
+      "scf_id": "TDA-13",
+      "title": "Minimizing Attack Surfaces"
+    },
+    {
+      "scf_id": "TDA-13.1",
+      "title": "Pre-Established Secure Configurations"
+    },
+    {
+      "scf_id": "TDA-13.2",
+      "title": "Malware Testing Prior to Release"
+    },
+    {
+      "scf_id": "TDA-14",
+      "title": "Product Testing \u0026 Reviews"
+    },
+    {
+      "scf_id": "TDA-14.1",
+      "title": "Security, Compliance \u0026 Resilience Representatives For Product Changes"
+    },
+    {
+      "scf_id": "TDA-15",
+      "title": "Secure Development Environments"
+    },
+    {
+      "scf_id": "TDA-15.1",
+      "title": "Separation of Development, Testing and Operational Environments"
+    },
+    {
+      "scf_id": "TDA-15.2",
+      "title": "Secure Migration Practices"
+    },
+    {
+      "scf_id": "TDA-16",
+      "title": "Library Privileges"
+    },
+    {
+      "scf_id": "TDA-16.1",
+      "title": "Access to Program Source Code"
+    },
+    {
+      "scf_id": "TDA-16.2",
+      "title": "Approved Code"
+    },
+    {
+      "scf_id": "TDA-16.3",
+      "title": "Archiving Software Releases"
+    },
+    {
+      "scf_id": "TDA-16.4",
+      "title": "Software Escrow"
+    },
+    {
+      "scf_id": "TDA-17",
+      "title": "Security, Compliance \u0026 Resilience Testing Throughout Development"
+    },
+    {
+      "scf_id": "TDA-17.1",
+      "title": "Static Code Analysis"
+    },
+    {
+      "scf_id": "TDA-17.2",
+      "title": "Dynamic Code Analysis"
+    },
+    {
+      "scf_id": "TDA-17.3",
+      "title": "Malformed Input Testing"
+    },
+    {
+      "scf_id": "TDA-17.4",
+      "title": "Application Penetration Testing"
+    },
+    {
+      "scf_id": "TDA-17.5",
+      "title": "Manual Code Review"
+    },
+    {
+      "scf_id": "TDA-18",
+      "title": "Use of Live Data"
+    },
+    {
+      "scf_id": "TDA-18.1",
+      "title": "Test Data Integrity"
+    },
+    {
+      "scf_id": "TDA-19",
+      "title": "Developer Screening"
+    },
+    {
+      "scf_id": "TDA-19.1",
+      "title": "Developer Knowledge \u0026 Skills Register"
+    },
+    {
+      "scf_id": "TDA-19.2",
+      "title": "Requisite Developer Training"
+    },
+    {
+      "scf_id": "TDA-20",
+      "title": "Developer Configuration Management"
+    },
+    {
+      "scf_id": "TDA-20.1",
+      "title": "Developer Threat Analysis \u0026 Flaw Remediation"
+    },
+    {
+      "scf_id": "TDA-20.2",
+      "title": "Developer-Provided Training"
+    },
+    {
+      "scf_id": "TDA-20.3",
+      "title": "Software / Firmware Integrity Verification"
+    },
+    {
+      "scf_id": "TDA-20.4",
+      "title": "Hardware Integrity Verification"
+    },
+    {
+      "scf_id": "TDA-21",
+      "title": "Bills of Material (BOMs)"
+    },
+    {
+      "scf_id": "TDA-21.1",
+      "title": "Cryptographic Bill of Materials (CBOM)"
+    },
+    {
+      "scf_id": "TDA-21.2",
+      "title": "Hardware Bill of Materials (HBOM)"
+    },
+    {
+      "scf_id": "TDA-21.3",
+      "title": "Indentured Bill of Materials (IBOM)"
+    },
+    {
+      "scf_id": "TDA-21.4",
+      "title": "Software Bill of Materials (SBOM)"
+    },
+    {
+      "scf_id": "TPM-01",
+      "title": "Third-Party Management Policy"
+    },
+    {
+      "scf_id": "TPM-02",
+      "title": "Third-Party Management"
+    },
+    {
+      "scf_id": "TPM-03",
+      "title": "Acquisition Strategies, Tools \u0026 Methods"
+    },
+    {
+      "scf_id": "TPM-04",
+      "title": "Supply Chain Risk Management (SCRM)"
+    },
+    {
+      "scf_id": "TPM-04.1",
+      "title": "Processes To Address Weaknesses or Deficiencies"
+    },
+    {
+      "scf_id": "TPM-04.2",
+      "title": "Limit Potential Harm"
+    },
+    {
+      "scf_id": "TPM-05",
+      "title": "Security, Compliance \u0026 Resilience Outsourcing Limitations"
+    },
+    {
+      "scf_id": "TPM-05.1",
+      "title": "Outsourcing Non-Essential Functions or Services"
+    },
+    {
+      "scf_id": "TPM-06",
+      "title": "Supplier Diversity"
+    },
+    {
+      "scf_id": "TPM-07",
+      "title": "Adequate Supply"
+    },
+    {
+      "scf_id": "TPM-08",
+      "title": "Third-Party Inventories"
+    },
+    {
+      "scf_id": "TPM-09",
+      "title": "Third-Party Criticality Assessments"
+    },
+    {
+      "scf_id": "TPM-10",
+      "title": "Third-Party Risk Assessments \u0026 Approvals"
+    },
+    {
+      "scf_id": "TPM-11",
+      "title": "Responsible, Accountable, Supportive, Consulted \u0026 Informed (RASCI) Matrix"
+    },
+    {
+      "scf_id": "TPM-12",
+      "title": "Third-Party Services"
+    },
+    {
+      "scf_id": "TPM-12.1",
+      "title": "Conflict of Interests"
+    },
+    {
+      "scf_id": "TPM-12.2",
+      "title": "Third-Party Processing, Storage and Service Locations"
+    },
+    {
+      "scf_id": "TPM-12.3",
+      "title": "Third-Party Authentication Practices"
+    },
+    {
+      "scf_id": "TPM-12.4",
+      "title": "External Connectivity Requirements - Identification of Ports, Protocols \u0026 Services"
+    },
+    {
+      "scf_id": "TPM-13",
+      "title": "Third-Party Personnel Security"
+    },
+    {
+      "scf_id": "TPM-14",
+      "title": "Third-Party Contract Requirements"
+    },
+    {
+      "scf_id": "TPM-14.1",
+      "title": "Contract Flow-Down Requirements"
+    },
+    {
+      "scf_id": "TPM-14.2",
+      "title": "Provider Contingency Plan"
+    },
+    {
+      "scf_id": "TPM-15",
+      "title": "Review of Third-Party Services"
+    },
+    {
+      "scf_id": "TPM-16",
+      "title": "Third-Party Scope Review"
+    },
+    {
+      "scf_id": "TPM-17",
+      "title": "Managing Changes To Third-Party Services"
+    },
+    {
+      "scf_id": "TPM-18",
+      "title": "Third-Party Deficiency Remediation"
+    },
+    {
+      "scf_id": "TPM-19",
+      "title": "Break Clauses"
+    },
+    {
+      "scf_id": "TPM-20",
+      "title": "Foreign Ownership, Control or Influence (FOCI)"
+    },
+    {
+      "scf_id": "TPM-20.1",
+      "title": "Ownership Change Monitoring"
+    },
+    {
+      "scf_id": "TPM-20.2",
+      "title": "Ownership Change Provisions"
+    },
+    {
+      "scf_id": "TPM-21",
+      "title": "Third-Party Incident Response \u0026 Recovery Capabilities"
+    },
+    {
+      "scf_id": "TPM-21.1",
+      "title": "Security Compromise Notification Agreements"
+    },
+    {
+      "scf_id": "TPM-22",
+      "title": "First-Party Declaration (1PD)"
+    },
+    {
+      "scf_id": "TPM-23",
+      "title": "Third-Party Attestation (3PA)"
+    },
+    {
+      "scf_id": "TPM-24",
+      "title": "Terminating Third-Party Relationships"
+    },
+    {
+      "scf_id": "TPM-24.1",
+      "title": "Third-Party Transition Planning"
+    },
+    {
+      "scf_id": "TPM-24.2",
+      "title": "Technology Assets, Applications, Services and Data (TAASD) Portability"
+    },
+    {
+      "scf_id": "TPM-24.3",
+      "title": "Technology Assets, Applications, Services and Data (TAASD) Disposition"
+    },
+    {
+      "scf_id": "TPM-24.4",
+      "title": "Third-Party Access Revocation"
+    },
+    {
+      "scf_id": "TPM-24.5",
+      "title": "Third-Party Knowledge \u0026 Operational Transfer"
+    },
+    {
+      "scf_id": "TPM-24.6",
+      "title": "Third-Party Exit Obligations Management"
+    },
+    {
+      "scf_id": "TPM-24.7",
+      "title": "Third-Party Exit Contingencies"
+    },
+    {
+      "scf_id": "THR-01",
+      "title": "Threat Management Policy"
+    },
+    {
+      "scf_id": "THR-02",
+      "title": "Threat Intelligence Program"
+    },
+    {
+      "scf_id": "THR-03",
+      "title": "Dynamic Threat Awareness"
+    },
+    {
+      "scf_id": "THR-04",
+      "title": "Threat Intelligence Feeds"
+    },
+    {
+      "scf_id": "THR-05",
+      "title": "Threat Intelligence Reporting"
+    },
+    {
+      "scf_id": "THR-06",
+      "title": "Threat Catalog"
+    },
+    {
+      "scf_id": "THR-07",
+      "title": "Material Threats"
+    },
+    {
+      "scf_id": "THR-08",
+      "title": "Threat Analysis"
+    },
+    {
+      "scf_id": "THR-09",
+      "title": "Behavioral Baselining"
+    },
+    {
+      "scf_id": "THR-10",
+      "title": "Predictive Cyber Analytics"
+    },
+    {
+      "scf_id": "THR-11",
+      "title": "Indicators of Exposure (IOE)"
+    },
+    {
+      "scf_id": "THR-12",
+      "title": "Vulnerability Disclosure Program (VDP)"
+    },
+    {
+      "scf_id": "THR-12.1",
+      "title": "Security Disclosure Contact Information"
+    },
+    {
+      "scf_id": "THR-13",
+      "title": "Threat Hunting"
+    },
+    {
+      "scf_id": "THR-14",
+      "title": "Tainting"
+    },
+    {
+      "scf_id": "THR-15",
+      "title": "Insider Threat Program"
+    },
+    {
+      "scf_id": "THR-16",
+      "title": "Insider Threat Awareness"
+    },
+    {
+      "scf_id": "VPM-01",
+      "title": "Vulnerability \u0026 Patch Management Policy"
+    },
+    {
+      "scf_id": "VPM-02",
+      "title": "Vulnerability \u0026 Patch Management Program (VPMP)"
+    },
+    {
+      "scf_id": "VPM-03",
+      "title": "Attack Surface Scope"
+    },
+    {
+      "scf_id": "VPM-04",
+      "title": "Vulnerability Exploitation Analysis"
+    },
+    {
+      "scf_id": "VPM-05",
+      "title": "Vulnerability Ranking"
+    },
+    {
+      "scf_id": "VPM-06",
+      "title": "Vulnerability Remediation Process"
+    },
+    {
+      "scf_id": "VPM-06.1",
+      "title": "Centralized Management of Flaw Remediation Processes"
+    },
+    {
+      "scf_id": "VPM-06.2",
+      "title": "Continuous Vulnerability Remediation Activities"
+    },
+    {
+      "scf_id": "VPM-06.3",
+      "title": "Known Exploited Vulnerabilities (KEV) Mitigations"
+    },
+    {
+      "scf_id": "VPM-07",
+      "title": "Time To Remediate / Benchmarks For Corrective Action"
+    },
+    {
+      "scf_id": "VPM-08",
+      "title": "Software \u0026 Firmware Patching"
+    },
+    {
+      "scf_id": "VPM-08.1",
+      "title": "Automated Software \u0026 Firmware Updates"
+    },
+    {
+      "scf_id": "VPM-08.2",
+      "title": "Software Patch Integrity"
+    },
+    {
+      "scf_id": "VPM-08.3",
+      "title": "Automated Remediation Status"
+    },
+    {
+      "scf_id": "VPM-09",
+      "title": "Deferred Patching Decisions"
+    },
+    {
+      "scf_id": "VPM-10",
+      "title": "Pre-Deployment Patch Testing"
+    },
+    {
+      "scf_id": "VPM-11",
+      "title": "Out-of-Cycle Patching"
+    },
+    {
+      "scf_id": "VPM-12",
+      "title": "Vulnerability Scanning"
+    },
+    {
+      "scf_id": "VPM-12.1",
+      "title": "Update Vulnerability Scanning Tools"
+    },
+    {
+      "scf_id": "VPM-12.2",
+      "title": "Breadth / Depth of Coverage For Vulnerability Scanning"
+    },
+    {
+      "scf_id": "VPM-12.3",
+      "title": "Privileged Access For Vulnerability Scanning Tools"
+    },
+    {
+      "scf_id": "VPM-12.4",
+      "title": "Reviewing Vulnerability Scanner Usage"
+    },
+    {
+      "scf_id": "VPM-13",
+      "title": "Vulnerability Trend Analysis"
+    },
+    {
+      "scf_id": "VPM-13.1",
+      "title": "Review Historical Event logs"
+    },
+    {
+      "scf_id": "VPM-14",
+      "title": "External Vulnerability Assessment"
+    },
+    {
+      "scf_id": "VPM-15",
+      "title": "Internal Vulnerability Assessment"
+    },
+    {
+      "scf_id": "VPM-16",
+      "title": "Acceptable Discoverable Information"
+    },
+    {
+      "scf_id": "VPM-17",
+      "title": "Correlate Scanning Information"
+    },
+    {
+      "scf_id": "VPM-18",
+      "title": "Penetration Testing"
+    },
+    {
+      "scf_id": "VPM-19",
+      "title": "Independent Penetration Agent or Team"
+    },
+    {
+      "scf_id": "VPM-20",
+      "title": "Technical Surveillance Countermeasures Security"
+    },
+    {
+      "scf_id": "VPM-21",
+      "title": "Red Team Exercises"
+    },
+    {
+      "scf_id": "WEB-01",
+      "title": "Web Security Policy"
+    },
+    {
+      "scf_id": "WEB-02",
+      "title": "Web Security"
+    },
+    {
+      "scf_id": "WEB-03",
+      "title": "Web Security Standard"
+    },
+    {
+      "scf_id": "WEB-04",
+      "title": "Web Application Framework"
+    },
+    {
+      "scf_id": "WEB-05",
+      "title": "Unauthorized Code On Web Pages"
+    },
+    {
+      "scf_id": "WEB-06",
+      "title": "Client-Facing Web Services"
+    },
+    {
+      "scf_id": "WEB-07",
+      "title": "Strong Customer Authentication (SCA)"
+    },
+    {
+      "scf_id": "WEB-08",
+      "title": "Web Application Input Validation \u0026 Sanitization"
+    },
+    {
+      "scf_id": "WEB-09",
+      "title": "Secure Web Traffic"
+    },
+    {
+      "scf_id": "WEB-10",
+      "title": "Web Application Output Encoding"
+    },
+    {
+      "scf_id": "WEB-11",
+      "title": "Web Browser Security"
+    },
+    {
+      "scf_id": "WEB-12",
+      "title": "Website Change Detection"
+    },
+    {
+      "scf_id": "WEB-13",
+      "title": "Publicly Accessible Content Reviews"
+    }
+  ]
+}

@@ -9,10 +9,11 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Anchor } from "@/lib/api/anchors";
+import type { AnchorWithState } from "@/lib/api/anchors";
 
 import {
   ALL,
+  ALL_TIME_SINCE,
   NONE,
   SCOPE_CELL_CAP,
   SOURCE_DELIM,
@@ -41,7 +42,8 @@ describe("evidence filters", () => {
     expect(DEFAULT_FILTERS.sourceActorId).toBe(ALL);
     // Slice 234 — three new axes also default to ALL (no narrowing).
     expect(DEFAULT_FILTERS.scopeCellId).toBe(ALL);
-    expect(DEFAULT_FILTERS.since).toBe(ALL);
+    // #2794: Since defaults to the last 30 days; "All time" is explicit.
+    expect(DEFAULT_FILTERS.since).toBe("30d");
     expect(isNoneSelected(DEFAULT_FILTERS)).toBe(true);
     expect(isDefault(DEFAULT_FILTERS)).toBe(true);
   });
@@ -85,8 +87,10 @@ describe("evidence filters", () => {
     expect(cleared.sourceActorType).toBe(ALL);
     expect(cleared.sourceActorId).toBe(ALL);
     expect(cleared.scopeCellId).toBe(ALL);
-    expect(cleared.since).toBe(ALL);
+    expect(cleared.since).toBe("30d");
     expect(isDefault(cleared)).toBe(true);
+    // Picking "All time" is a non-default choice.
+    expect(isDefault({ ...cleared, since: ALL })).toBe(false);
   });
 
   test("ALL sentinel is distinct from NONE sentinel", () => {
@@ -98,30 +102,52 @@ describe("evidence filters", () => {
   });
 
   test("buildControlOptions prepends the 'All controls' sentinel (slice 106)", () => {
-    const anchors: Anchor[] = [
+    const anchors: AnchorWithState[] = [
       {
         id: "11111111-1111-1111-1111-111111111111",
-        scf_id: "SCF:IAC-06",
+        scf_id: "SCF:IAC-37",
         family: "IAC",
         name: "Multi-factor authentication",
         description: "",
+        state: null,
+        frameworks: [],
+        control_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       },
       {
         id: "22222222-2222-2222-2222-222222222222",
-        scf_id: "SCF:CRY-04",
+        scf_id: "SCF:CRY-07",
         family: "CRY",
         name: "Encryption at rest",
         description: "",
+        state: null,
+        frameworks: [],
+        control_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       },
     ];
     const opts = buildControlOptions(anchors);
     expect(opts).toHaveLength(3);
     // Slice 106: "All controls" replaces the slice-099 "Select a control…".
     expect(opts[0]).toEqual({ value: NONE, label: "All controls" });
-    // Sorted alphabetically by scf_id (CRY before IAC).
-    expect(opts[1]?.value).toBe("22222222-2222-2222-2222-222222222222");
-    expect(opts[1]?.label).toBe("SCF:CRY-04 · Encryption at rest");
-    expect(opts[2]?.value).toBe("11111111-1111-1111-1111-111111111111");
+    // Sorted alphabetically by scf_id (CRY before IAC). #2771: the value
+    // is the tenant control id the ledger filters on, not the anchor id.
+    expect(opts[1]?.value).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    expect(opts[1]?.label).toBe("SCF:CRY-07 · Encryption at rest");
+    expect(opts[2]?.value).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  });
+
+  test("buildControlOptions leaves out anchors with no tenant control (#2771)", () => {
+    const opts = buildControlOptions([
+      {
+        id: "33333333-3333-3333-3333-333333333333",
+        scf_id: "SCF:GOV-01",
+        family: "GOV",
+        name: "Governance program",
+        description: "",
+        state: null,
+        frameworks: [],
+      },
+    ]);
+    expect(opts).toEqual([{ value: NONE, label: "All controls" }]);
   });
 
   test("buildControlOptions handles an empty anchor list", () => {
@@ -141,6 +167,14 @@ describe("evidence filters", () => {
       "na",
       "inconclusive",
     ]);
+    // #2328: the values stay raw (URL + API param); the text is the label.
+    expect(opts.map((o) => o.label)).toEqual([
+      "All results",
+      "Pass",
+      "Fail",
+      "Not applicable",
+      "Inconclusive",
+    ]);
   });
 
   test("buildKindOptions sorts unique kinds + prepends ALL", () => {
@@ -157,9 +191,22 @@ describe("evidence filters", () => {
     ]);
   });
 
-  test("toFetchOptions drops sentinel values", () => {
-    const out = toFetchOptions(DEFAULT_FILTERS);
-    expect(out).toEqual({});
+  test("toFetchOptions drops sentinel values; the default sends the 30-day cutoff", () => {
+    expect(toFetchOptions(DEFAULT_FILTERS)).toEqual({});
+    expect(toFetchOptions(DEFAULT_FILTERS, "2026-04-23T10:00:00.000Z")).toEqual(
+      { since: "2026-04-23T10:00:00.000Z" },
+    );
+  });
+
+  // #2794: with no `since` the handler applies its 30-day default
+  // window, so "All time" has to send an explicit lower bound.
+  test("toFetchOptions sends ALL_TIME_SINCE for All time, ignoring resolvedSince", () => {
+    expect(ALL_TIME_SINCE).toBe("1970-01-01T00:00:00Z");
+    const out = toFetchOptions(
+      { ...DEFAULT_FILTERS, since: ALL },
+      "2026-05-16T10:00:00.000Z",
+    );
+    expect(out.since).toBe(ALL_TIME_SINCE);
   });
 
   test("toFetchOptions passes narrowing values through", () => {
@@ -179,6 +226,7 @@ describe("evidence filters", () => {
       result: "fail",
       sourceActorType: "connector",
       sourceActorID: "aws-connector",
+      since: ALL_TIME_SINCE,
     });
   });
 
@@ -203,6 +251,17 @@ describe("evidence filters", () => {
         label: "user · alice@example.com",
       },
     ]);
+  });
+
+  test("buildSourceOptions labels an actor by name, keeping the ID in the value (#2385)", () => {
+    const opts = buildSourceOptions(
+      [{ actor_type: "human", actor_id: "u-1" }],
+      (id) => (id === "u-1" ? "Alice Admin" : id),
+    );
+    expect(opts[1]).toEqual({
+      value: "human|u-1",
+      label: "human · Alice Admin",
+    });
   });
 
   test("buildSourceOptions handles an empty input", () => {

@@ -60,8 +60,8 @@ const (
 // seam. It returns deterministic rows with no Postgres.
 type stubRiskLister struct{ rows []risk.Risk }
 
-func (s stubRiskLister) List(_ context.Context, _ risk.ListFilter) ([]risk.Risk, error) {
-	return s.rows, nil
+func (s stubRiskLister) ListPage(_ context.Context, _ risk.PageFilter) ([]risk.Risk, int64, error) {
+	return s.rows, int64(len(s.rows)), nil
 }
 
 // contractRequest builds a GET carrying both the gates ListRisks enforces: an
@@ -121,23 +121,27 @@ func TestContract_Risks(t *testing.T) {
 	// Row 1 — fully populated: opaque inherent/residual blobs, a two-element
 	// linked_control_ids array, and the nullable review_due_at / accepted_until
 	// BOTH set (pins their present-on-wire shape).
+	fullExternalRef := "R-014"
 	full := risk.Risk{
 		ID:                  uuid.MustParse(contractRiskID),
 		Title:               "Unpatched perimeter dependency",
 		Description:         "A high-severity CVE in an internet-facing dependency.",
-		Category:            dbx.RiskCategory("technology"),
+		CategorySlug:        "technology",
 		Methodology:         dbx.RiskMethodologyNist80030,
 		InherentScore:       []byte(`{"likelihood":4,"impact":5,"severity":20}`),
 		Treatment:           dbx.RiskTreatmentMitigate,
+		Level:               dbx.RiskLevelOrg,
 		TreatmentOwner:      "security-eng",
 		ResidualScore:       []byte(`{"likelihood":2,"impact":4,"severity":8}`),
 		ReviewDueAt:         &reviewDue,
 		AcceptedUntil:       &acceptedUntil,
 		Accepter:            "ciso",
 		InstrumentReference: "JIRA-410",
+		ExternalRef:         &fullExternalRef,
 		LinkedControlIDs:    []uuid.UUID{uuid.MustParse(contractCtrlA), uuid.MustParse(contractCtrlB)},
 		CreatedAt:           created,
 		UpdatedAt:           updated,
+		Status:              dbx.RiskStatusOpen,
 	}
 
 	// Row 2 — minimal: empty opaque blobs (handler defaults to {}), NO linked
@@ -148,20 +152,70 @@ func TestContract_Risks(t *testing.T) {
 	minimal := risk.Risk{
 		ID:               uuid.MustParse(contractRiskID),
 		Title:            "Vendor SOC 2 report pending renewal",
-		Category:         dbx.RiskCategory("third_party"),
+		CategorySlug:     "third_party",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		Treatment:        dbx.RiskTreatmentMitigate,
 		LinkedControlIDs: nil,
 		CreatedAt:        created,
 		UpdatedAt:        updated,
+		Status:           dbx.RiskStatusOpen,
+	}
+
+	// #1746 — the treatment states with no side fields: an untreated risk
+	// (acceptance_status absent on the wire) and a proposed acceptance
+	// (acceptance_status present, no accepter or accepted_until).
+	untreated := risk.Risk{
+		ID:           uuid.MustParse(contractRiskID),
+		Title:        "Intake risk not yet triaged",
+		CategorySlug: "operational",
+		Methodology:  dbx.RiskMethodologyNist80030,
+		Treatment:    dbx.RiskTreatmentUntreated,
+		CreatedAt:    created,
+		UpdatedAt:    updated,
+		Status:       dbx.RiskStatusOpen,
+	}
+	proposedAccept := risk.Risk{
+		ID:               uuid.MustParse(contractRiskID),
+		Title:            "Legacy TLS endpoint, acceptance pending sign-off",
+		CategorySlug:     "technology",
+		Methodology:      dbx.RiskMethodologyNist80030,
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		CreatedAt:        created,
+		UpdatedAt:        updated,
+		Status:           dbx.RiskStatusOpen,
+	}
+
+	// #2107 — a closed risk carries its closure; GET /v1/risks returns it
+	// only with ?include_closed=true.
+	closedAt := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
+	closed := risk.Risk{
+		ID:           uuid.MustParse(contractRiskID),
+		Title:        "Retired data-centre lease risk",
+		CategorySlug: "operational",
+		Methodology:  dbx.RiskMethodologyNist80030,
+		Treatment:    dbx.RiskTreatmentMitigate,
+		CreatedAt:    created,
+		UpdatedAt:    updated,
+		Status:       dbx.RiskStatusClosed,
+		Closure: risk.Closure{
+			Reason: dbx.RiskClosureReasonNotApplicable,
+			Note:   "Lease ended; site decommissioned.",
+			At:     &closedAt,
+			By:     "user-2107",
+		},
 	}
 
 	populated := stubRiskLister{rows: []risk.Risk{full, minimal}}
 	empty := stubRiskLister{rows: []risk.Risk{}}
+	states := stubRiskLister{rows: []risk.Risk{untreated, proposedAccept}}
+	lifecycle := stubRiskLister{rows: []risk.Risk{untreated, closed}}
 
 	recorded := map[string]json.RawMessage{
-		"populated": recordVariant(t, newHandlerWithLister(populated).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
-		"empty":     recordVariant(t, newHandlerWithLister(empty).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"populated":        recordVariant(t, newHandlerWithLister(populated).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"empty":            recordVariant(t, newHandlerWithLister(empty).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"treatment_states": recordVariant(t, newHandlerWithLister(states).ListRisks, "/v1/risks"),
+		"lifecycle_states": recordVariant(t, newHandlerWithLister(lifecycle).ListRisks, "/v1/risks?include_closed=true"),
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/risks.golden.json"),

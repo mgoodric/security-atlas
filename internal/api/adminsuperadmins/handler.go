@@ -9,14 +9,14 @@
 //
 // Authority gate: super_admin only (slice 142 P0). The handler reads
 // `jwtmw.FromContext().SuperAdmin` as the load-bearing check; the
-// slice-035 OPA middleware via policies/authz/super_admin.rego is the
+// slice-035 OPA middleware via internal/authz/rego_bundle/super_admin.rego is the
 // second leg.
 //
 // LOAD-BEARING DESIGN: last-super_admin safety rail. The DELETE handler
 // wraps the demote in a single transaction that:
 //
-//  1. Acquires `pg_advisory_xact_lock(0x142142142142)` — a slice-142
-//     stable BIGINT advisory lock that serialises concurrent demotes so
+//  1. Acquires the advisorylock.SuperAdminDemote transaction lock
+//     (slice 142; namespaced in #2273), which serialises concurrent demotes so
 //     two callers cannot each see count=2 and proceed to DELETE both.
 //     Advisory locks were chosen over `SELECT ... FOR UPDATE` because
 //     atlas_app lacks the Postgres UPDATE privilege required for
@@ -71,6 +71,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -100,6 +101,10 @@ const (
 // Handler bundles the slice-142 routes.
 type Handler struct {
 	pool *pgxpool.Pool
+	// authPool is the BYPASSRLS `atlas_migrate` pool (optional, #2385).
+	// List reads super admins' names from it: a super admin's users row
+	// lives in their own tenant, which the session tenant's RLS hides.
+	authPool *pgxpool.Pool
 }
 
 // New constructs a Handler over a *pgxpool.Pool. The handler uses the
@@ -108,6 +113,14 @@ type Handler struct {
 // GUC. Single pool keeps the transaction surface simple.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool}
+}
+
+// SetAuthPool wires the BYPASSRLS pool List uses to name super admins
+// outside the session tenant (#2385). Nil keeps the session-tenant-only
+// names. Returns the handler so it composes with New(...).
+func (h *Handler) SetAuthPool(p *pgxpool.Pool) *Handler {
+	h.authPool = p
+	return h
 }
 
 // --- wire types ---
@@ -137,10 +150,10 @@ type grantRequest struct {
 //
 // Returns every super_admin row, joined LEFT to users (under the
 // caller's session tenant) so the display_name + email render on the
-// management page. Rows whose target_user_id has no users row in the
-// session tenant render as `null` for the display fields — this is the
-// expected case for a super_admin whose primary tenant is not the
-// session tenant.
+// management page. A row whose users row is in another tenant is named
+// from that tenant through the BYPASSRLS authPool when it is wired
+// (#2385), by display_name only (#2684: its email is never sent);
+// without it the display fields are `null`.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
 		return
@@ -185,6 +198,34 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httperr.WriteInternal(w, r, "list super_admins", err)
 		return
+	}
+
+	// #2385: a row the session tenant cannot name is named from the
+	// super admin's own tenant. The read is bounded to the super_admins
+	// user IDs. #2684: only a name crosses the tenant boundary, never the
+	// email; a blank display name falls back to the email's local part
+	// here, on the server, so the address is not on the wire.
+	if h.authPool != nil {
+		var unnamed []uuid.UUID
+		for _, rr := range rows {
+			if rr.DisplayName == nil && rr.Email == nil {
+				unnamed = append(unnamed, rr.UserID)
+			}
+		}
+		if len(unnamed) > 0 {
+			names, nErr := h.crossTenantNames(r.Context(), unnamed)
+			if nErr != nil {
+				httperr.WriteInternal(w, r, "name super_admins", nErr)
+				return
+			}
+			for i := range rows {
+				if n, ok := names[rows[i].UserID]; ok {
+					if name := crossTenantDisplayName(n); name != "" {
+						rows[i].DisplayName = &name
+					}
+				}
+			}
+		}
 	}
 
 	items := make([]superAdminWire, 0, len(rows))
@@ -396,22 +437,16 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 	var res result
 	err = h.inTx(r.Context(), func(ctx context.Context, tx pgx.Tx) error {
 		// LOAD-BEARING: serialise concurrent demotes via an advisory
-		// transaction lock keyed on a slice-142-stable bigint. The
-		// `pg_advisory_xact_lock(BIGINT)` call blocks until the
-		// lock is acquired; the lock is automatically released at
+		// transaction lock in the advisorylock.SuperAdminDemote
+		// namespace (#2273). The call blocks until the lock is
+		// acquired; the lock is automatically released at
 		// transaction commit. This is the slice-198 D1 candidate-#2
 		// pattern (advisory lock + count recheck) applied here
 		// because the table-row alternative `SELECT ... FOR UPDATE`
 		// requires UPDATE privilege on super_admins which atlas_app
 		// intentionally does NOT hold (the table is functionally
 		// append+delete only — no UPDATE writes).
-		//
-		// The key (142_142_142_142_142_1) is a slice-142-unique
-		// constant; future slices that need their own advisory locks
-		// must pick a distinct key to avoid cross-feature blocking.
-		if _, lErr := tx.Exec(ctx,
-			`SELECT pg_advisory_xact_lock(0x142142142142)`,
-		); lErr != nil {
+		if lErr := advisorylock.Lock(ctx, tx, advisorylock.SuperAdminDemote, 0); lErr != nil {
 			return fmt.Errorf("acquire super_admin lock: %w", lErr)
 		}
 
@@ -517,6 +552,43 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 
 // --- helpers ---
 
+type userName struct {
+	displayName string
+	email       string
+}
+
+// crossTenantDisplayName is the only name a super admin from another
+// tenant is shown by (#2684): the display name, else the email's local
+// part. The email itself is never returned for such a row.
+func crossTenantDisplayName(n userName) string {
+	if d := strings.TrimSpace(n.displayName); d != "" {
+		return d
+	}
+	local, _, _ := strings.Cut(n.email, "@")
+	return strings.TrimSpace(local)
+}
+
+// crossTenantNames reads the users rows for ids from the BYPASSRLS
+// pool, whatever their tenant. PK-bounded: only the given ids.
+func (h *Handler) crossTenantNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]userName, error) {
+	rows, err := h.authPool.Query(ctx,
+		`SELECT id, display_name, email FROM users WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query users: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]userName, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var n userName
+		if scanErr := rows.Scan(&id, &n.displayName, &n.email); scanErr != nil {
+			return nil, fmt.Errorf("scan user: %w", scanErr)
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 func (h *Handler) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -534,7 +606,7 @@ func (h *Handler) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) err
 
 // requireSuperAdmin returns true when the caller carries the
 // super_admin bit. Defense-in-depth on top of the OPA policy gate
-// (policies/authz/super_admin.rego).
+// (internal/authz/rego_bundle/super_admin.rego).
 //
 // The only authority that grants super_admin is the verified JWT's
 // `atlas:super_admin` claim — that bit can be set ONLY by the slice-

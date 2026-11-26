@@ -16,13 +16,15 @@ const insertControlEvaluation = `-- name: InsertControlEvaluation :one
 INSERT INTO control_evaluations (
     id, tenant_id, control_id, scope_cell_id, eval_run_id,
     evaluated_at, result, freshness_status,
-    evidence_count_in_window, last_observed_at, freshness_class, trigger
+    evidence_count_in_window, last_observed_at, freshness_class, trigger,
+    triggered_by, evaluated_as_of
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10, $11, $12
+    $9, $10, $11, $12,
+    $13, $14
 )
-RETURNING id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at
+RETURNING id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at, triggered_by, evaluated_as_of
 `
 
 type InsertControlEvaluationParams struct {
@@ -38,6 +40,8 @@ type InsertControlEvaluationParams struct {
 	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
+	TriggeredBy           *string            `json:"triggered_by"`
+	EvaluatedAsOf         pgtype.Timestamptz `json:"evaluated_as_of"`
 }
 
 // Slice 012 — control state evaluation engine queries.
@@ -71,6 +75,8 @@ func (q *Queries) InsertControlEvaluation(ctx context.Context, arg InsertControl
 		arg.LastObservedAt,
 		arg.FreshnessClass,
 		arg.Trigger,
+		arg.TriggeredBy,
+		arg.EvaluatedAsOf,
 	)
 	var i ControlEvaluation
 	err := row.Scan(
@@ -87,6 +93,8 @@ func (q *Queries) InsertControlEvaluation(ctx context.Context, arg InsertControl
 		&i.FreshnessClass,
 		&i.Trigger,
 		&i.CreatedAt,
+		&i.TriggeredBy,
+		&i.EvaluatedAsOf,
 	)
 	return i, err
 }
@@ -98,6 +106,7 @@ WHERE tenant_id = $1
   AND control_id = $2
   AND evaluated_at >= $3
   AND evaluated_at <= $4
+  AND evaluated_as_of IS NULL
 ORDER BY evaluated_at DESC
 `
 
@@ -145,19 +154,30 @@ func (q *Queries) ListControlEvaluationsForEffectiveness(ctx context.Context, ar
 
 const listEvidenceForControlAsOf = `-- name: ListEvidenceForControlAsOf :many
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, result, freshness_class, hash, payload
+       observed_at, result, freshness_class, hash, payload,
+       evidence_kind, ingested_at
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= $4
-ORDER BY observed_at DESC
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2
+       OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($5::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND observed_at <= $6
+  AND ingested_at <= $6
+ORDER BY observed_at DESC, ingested_at DESC, id DESC
 `
 
 type ListEvidenceForControlAsOfParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	RoutedKinds  []string           `json:"routed_kinds"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 }
 
 type ListEvidenceForControlAsOfRow struct {
@@ -171,18 +191,33 @@ type ListEvidenceForControlAsOfRow struct {
 	FreshnessClass EvidenceFreshnessClass `json:"freshness_class"`
 	Hash           string                 `json:"hash"`
 	Payload        []byte                 `json:"payload"`
+	EvidenceKind   *string                `json:"evidence_kind"`
+	IngestedAt     pgtype.Timestamptz     `json:"ingested_at"`
 }
 
 // The evaluation engine's read of the evidence ledger for one control,
 // bounded by the point-in-time horizon `as_of` (AC-1's `?as-of=` and AC-7's
 // replay both pass an explicit horizon; live evaluation passes 'infinity').
-// Ordered observed_at DESC so the engine sees the freshest record first.
+// Ordered observed_at DESC so the engine sees the freshest record first,
+// then ingested_at DESC and id DESC so records sharing an observed_at come
+// back in one fixed order (#2111: the latest attestation wins, and equal
+// timestamps must not make that choice depend on the plan).
+// unbound_kinds (#2817) adds the tenant's records of those kinds that are
+// bound to no control, when the control's evidence_queries declare the kind:
+// a policy acknowledgement names a policy, never a control. A record of such
+// a kind that IS bound reaches only its own control. internal/evidence/unbound
+// owns the list; every ledger reader below applies the same rule.
+// The horizon bounds ingested_at as well as observed_at (#1699, ISC-3): a
+// replay of T sees only the rows that were in the ledger at T, so a record
+// backdated to before T but written after it is not counted.
 // This is a pure SELECT — the engine never mutates the ledger.
 func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlAsOf,
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.RoutedKinds,
+		arg.UnboundKinds,
 		arg.ObservedAt,
 	)
 	if err != nil {
@@ -203,6 +238,8 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 			&i.FreshnessClass,
 			&i.Hash,
 			&i.Payload,
+			&i.EvidenceKind,
+			&i.IngestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -214,12 +251,143 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 	return items, nil
 }
 
+const listInconclusiveStreaks = `-- name: ListInconclusiveStreaks :many
+WITH RECURSIVE ids AS (
+    SELECT DISTINCT unnest($1::uuid[]) AS control_id
+),
+cells AS (
+    SELECT ids.control_id, f.scope_cell_id
+    FROM ids
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    UNION ALL
+    SELECT c.control_id, n.scope_cell_id
+    FROM cells c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+          AND ce.scope_cell_id > c.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+)
+SELECT c.control_id::uuid AS control_id, c.scope_cell_id, s.evaluated_at::timestamptz AS inconclusive_since
+FROM cells c
+LEFT JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+      AND ce.scope_cell_id = c.scope_cell_id
+      AND ce.result <> 'inconclusive'
+      AND ce.evaluated_at <= $3
+      AND ce.evaluated_as_of IS NULL
+    ORDER BY ce.evaluated_at DESC
+    LIMIT 1
+) b ON true
+CROSS JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = c.control_id
+      AND ce.scope_cell_id = c.scope_cell_id
+      AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
+      AND ce.evaluated_at <= $3
+      AND ce.evaluated_as_of IS NULL
+    ORDER BY ce.evaluated_at
+    LIMIT 1
+) s
+UNION ALL
+SELECT ids.control_id, NULL::uuid, s.evaluated_at::timestamptz
+FROM ids
+LEFT JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+      AND ce.scope_cell_id IS NULL
+      AND ce.result <> 'inconclusive'
+      AND ce.evaluated_at <= $3
+      AND ce.evaluated_as_of IS NULL
+    -- Leading scope_cell_id (constant here) lets the planner read the
+    -- index in order: IS NULL does not make it a pathkey constant.
+    ORDER BY ce.scope_cell_id, ce.evaluated_at DESC
+    LIMIT 1
+) b ON true
+CROSS JOIN LATERAL (
+    SELECT ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $2 AND ce.control_id = ids.control_id
+      AND ce.scope_cell_id IS NULL
+      AND ce.evaluated_at > COALESCE(b.evaluated_at, '-infinity'::timestamptz)
+      AND ce.evaluated_at <= $3
+      AND ce.evaluated_as_of IS NULL
+    -- DESC so a backward scan of the index (evaluated_at DESC) serves
+    -- the ascending evaluated_at with no sort.
+    ORDER BY ce.scope_cell_id DESC, ce.evaluated_at
+    LIMIT 1
+) s
+`
+
+type ListInconclusiveStreaksParams struct {
+	ControlIds []pgtype.UUID      `json:"control_ids"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+}
+
+type ListInconclusiveStreaksRow struct {
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ScopeCellID       pgtype.UUID        `json:"scope_cell_id"`
+	InconclusiveSince pgtype.Timestamptz `json:"inconclusive_since"`
+}
+
+// #2915: when each (control, scope_cell) that is inconclusive now became
+// inconclusive. The ledger is append-only and the scheduler writes a row
+// per run, so a cell's streak starts at its earliest evaluation after its
+// latest non-inconclusive one (or its first evaluation, if it has never
+// been anything else). A cell whose latest evaluation is not inconclusive
+// has no row after its last break, so it returns nothing. Callers pass the
+// controls they already know are inconclusive.
+//
+// #2985: the cost is index probes, not history length. Per cell, the last
+// break is one probe on the partial index
+// idx_control_evaluations_not_inconclusive and the streak start is one
+// probe on idx_control_evaluations_latest, so a year of hourly scheduler
+// rows costs what a day's does. The cells come from the skip scan
+// ListActiveControlsWithState uses (#2765). The NULL whole-tenant cell is
+// its own branch, because = cannot match NULL.
+func (q *Queries) ListInconclusiveStreaks(ctx context.Context, arg ListInconclusiveStreaksParams) ([]ListInconclusiveStreaksRow, error) {
+	rows, err := q.db.Query(ctx, listInconclusiveStreaks, arg.ControlIds, arg.TenantID, arg.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInconclusiveStreaksRow
+	for rows.Next() {
+		var i ListInconclusiveStreaksRow
+		if err := rows.Scan(&i.ControlID, &i.ScopeCellID, &i.InconclusiveSince); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestControlEvaluations = `-- name: ListLatestControlEvaluations :many
-SELECT DISTINCT ON (scope_cell_id) id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at
+SELECT DISTINCT ON (scope_cell_id) id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at, triggered_by, evaluated_as_of
 FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2
   AND evaluated_at <= $3
+  -- #3071: a replay of an earlier instant is not the control's state now.
+  AND evaluated_as_of IS NULL
 ORDER BY scope_cell_id, evaluated_at DESC, created_at DESC
 `
 
@@ -255,6 +423,8 @@ func (q *Queries) ListLatestControlEvaluations(ctx context.Context, arg ListLate
 			&i.FreshnessClass,
 			&i.Trigger,
 			&i.CreatedAt,
+			&i.TriggeredBy,
+			&i.EvaluatedAsOf,
 		); err != nil {
 			return nil, err
 		}

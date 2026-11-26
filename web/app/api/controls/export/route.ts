@@ -35,6 +35,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Headers the BFF forwards to the browser from the upstream response.
@@ -77,7 +78,7 @@ export async function GET(request: Request): Promise<Response> {
     };
     const ra = upstream.headers.get("Retry-After");
     if (ra) headers["Retry-After"] = ra;
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers,
     });

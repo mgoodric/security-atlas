@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This document covers the local dev set
 
 ## Prerequisites
 
-- Go 1.26+ (matches `go.mod`; slice 089/090 hardened the govulncheck pin under Go 1.26)
+- Go 1.27 toolchain (CI, images and releases build on 1.27; `go.mod` keeps the `go 1.26.0` language floor; slice 089/090 hardened the govulncheck pin under Go 1.26)
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker
@@ -38,9 +38,10 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | --------------------------- | -------------------------------------------------------------------------- |
 | `just`                      | List all recipes                                                           |
 | `just db-up`                | Start a local Postgres 16 in Docker                                        |
-| `just db-down`              | Tear down the local Postgres                                               |
-| `just migrate-up`           | Bootstrap roles + apply forward SQL migrations (requires `$DATABASE_URL`)  |
-| `just migrate-down`         | Apply the latest reverse migration                                         |
+| `just db-down`              | Tear down the local Postgres; with `db-up`, the reset (no `migrate-down`)  |
+| `just scratch-pg-up`        | Per-worktree Postgres on a free port, migrated; prints the two URLs        |
+| `just scratch-pg-down`      | Stop and delete that worktree's scratch cluster                            |
+| `just migrate-up`           | Apply unapplied migrations via `migrate.sh` ledger (needs `$DATABASE_URL`) |
 | `just sqlc-generate`        | Run `sqlc generate` against the schema                                     |
 | `just test-integration`     | Run integration tests (requires `$DATABASE_URL_APP`)                       |
 | `just build`                | Build all components (Go + frontend)                                       |
@@ -119,6 +120,26 @@ Scope is optional but recommended (`feat(evidence):`, `fix(ucf):`, `docs(canvas)
 ### Dependency updates
 
 Dependabot opens PRs every Monday with the `deps:` prefix (`deps(deps):`, `deps(deps-dev):`, `deps(actions):`, etc.) across all ecosystems (Go modules, npm, pip, Docker, GitHub Actions). Release-please surfaces them under the **Dependencies** section in `CHANGELOG.md`. Patch and minor bumps are reviewed individually; majors are investigated for breaking-change exposure before merge.
+
+### Changelog fragments
+
+Do not edit the top of `CHANGELOG.md`. A PR with a user-visible change adds
+one file, `changelog.d/<pr-or-issue>.<type>.md` (for example
+`changelog.d/2357.changed.md`), holding one Markdown bullet. `<type>` is one
+of `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`,
+`performance`, `documentation` or `quality`. Each PR touches only its own
+file, so parallel PRs no longer conflict on the changelog (#2357).
+
+The `changelog-fragment` CI check fails a PR that changes code and adds no
+fragment. A PR with nothing user-visible (tests, CI, refactors) takes the
+`no-changelog` label; re-run the failed job after adding it. Docs-only,
+Dependabot and release-please PRs are exempt without a label.
+
+`bash scripts/changelog.sh render` previews the assembled sections. At
+release time, on the release-please PR branch, `bash scripts/changelog.sh
+assemble <version>` writes the fragments under that release's heading and
+deletes them; commit the result to the release PR. Details:
+[`changelog.d/README.md`](changelog.d/README.md).
 
 ### Phantom dependencies
 
@@ -743,7 +764,7 @@ Every community schema PR requires a maintainer's approval before merge. There i
 
 - **JSON Schema correctness** (CI's `go test ./internal/api/schemaregistry/...` already covers this structurally)
 - **Semver discipline** (CI's `CheckAdditiveOver` in `internal/api/schemaregistry/additive.go` rejects non-additive minor bumps)
-- **`x-default-scf-anchors` accuracy** (THE manual checkpoint — does the contributor's claim "my schema covers IAC-06" actually hold? Loose anchor declarations weaken the UCF graph; maintainer review is the load-bearing mitigation)
+- **`x-default-scf-anchors` accuracy** (THE manual checkpoint — does the contributor's claim "my schema covers IAC-37" actually hold? Loose anchor declarations weaken the UCF graph; maintainer review is the load-bearing mitigation)
 - **Naming convention** (`<vendor>.<resource>.<observation>` for connector-produced; `manual.<observation>` for operator-attested)
 
 A "verified contributor" CODEOWNERS-style tier will be designed when **both** (a) >20 community-contributed schemas have landed **and** (b) ≥3 contributors have shipped >5 schemas each. The design happens with those contributors in the room, not speculatively.

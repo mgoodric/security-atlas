@@ -42,13 +42,17 @@ package dbtest
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -91,6 +95,60 @@ func NewAppPool(t *testing.T) *pgxpool.Pool {
 func NewMigratePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	return openPool(t, requireDSN(t, migrateDSNEnv))
+}
+
+// NewShadowMigratePool is NewMigratePool for a test that needs install-wide
+// state in tables every suite shares: "no tenants at all", "this is the
+// oldest user", an exact tenant count. Emptying the shared tables for that
+// would delete every other suite's rows on the shared CI database (#3094).
+// Instead it creates a schema of its own holding an empty copy of each of
+// tables (CREATE TABLE ... (LIKE public.<t> INCLUDING ALL): columns,
+// defaults, CHECK and NOT NULL constraints, indexes; no foreign keys, RLS
+// policies or triggers), and returns a migrate-role pool whose search_path
+// puts that schema before public. Unqualified reads and writes of tables
+// through the pool hit the copies; every other table is the real one. The
+// schema is dropped when the test ends.
+//
+// So only code that reaches the tables unqualified through this pool is
+// isolated. A query through any other pool, or a foreign key, trigger or
+// SECURITY DEFINER function pinned to public, still sees the shared table.
+func NewShadowMigratePool(t *testing.T, tables ...string) *pgxpool.Pool {
+	t.Helper()
+	dsn := requireDSN(t, migrateDSNEnv)
+	ctx := context.Background()
+	admin := openPool(t, dsn)
+	schema := "dbtest_shadow_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	ident := pgx.Identifier{schema}.Sanitize()
+	if _, err := admin.Exec(ctx, `CREATE SCHEMA `+ident); err != nil {
+		t.Fatalf("dbtest: create shadow schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DROP SCHEMA `+ident+` CASCADE`); err != nil {
+			t.Errorf("dbtest: drop shadow schema %s: %v", schema, err)
+		}
+	})
+	for _, table := range tables {
+		if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s (LIKE %s INCLUDING ALL)`,
+			pgx.Identifier{schema, table}.Sanitize(), pgx.Identifier{"public", table}.Sanitize())); err != nil {
+			t.Fatalf("dbtest: shadow %s: %v", table, err)
+		}
+	}
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("dbtest: parse %s: %v", migrateDSNEnv, err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = ident + ", public"
+	dialCtx, cancel := context.WithTimeout(ctx, poolDialTimeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
+	if err != nil {
+		t.Fatalf("dbtest: shadow pool: %v", err)
+	}
+	// Registered after the drop, so it runs first: the pool's connections
+	// are closed before the schema goes.
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 // requireDSN reads env and skips the test when it is unset — the canonical
@@ -142,6 +200,13 @@ func SeedTenant(t *testing.T, migrate *pgxpool.Pool, cleanupTables ...string) st
 		ctx, cancel := context.WithTimeout(context.Background(), poolDialTimeout)
 		defer cancel()
 		for _, table := range cleanupTables {
+			// A frozen period is deleted only with its trigger disabled (#3081).
+			if table == "audit_periods" {
+				if err := DeleteAuditPeriods(ctx, migrate, `tenant_id = $1`, tenant); err != nil {
+					t.Logf("dbtest cleanup audit_periods: %v", err)
+				}
+				continue
+			}
 			// Table names are caller-supplied compile-time constants, never
 			// user input; the tenant id is a bound parameter.
 			stmt := "DELETE FROM " + table + " WHERE tenant_id = $1"
@@ -170,4 +235,40 @@ func WithTenantCtx(t *testing.T, tenant string) context.Context {
 		t.Fatalf("dbtest: WithTenant(%q): %v", tenant, err)
 	}
 	return ctx
+}
+
+// FreezeRaw runs stmt, a raw INSERT or UPDATE that leaves audit period
+// periodID of tenant frozen without going through period.Store.Freeze, and
+// records the tenant's current control catalog for that period in the same
+// transaction. Since #3066 a deferred check refuses any commit that leaves a
+// frozen period without its recorded control set
+// (audit_periods_frozen_has_controls_trg). pool must be BYPASSRLS (the
+// migrate pool): the row is recorded with source 'seed', which atlas_app
+// may not write. tenant and periodID may be a string or a uuid.UUID.
+func FreezeRaw(ctx context.Context, pool *pgxpool.Pool, tenant, periodID any, stmt string, args ...any) error {
+	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, stmt, args...); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`SELECT audit_period_record_catalog_controls($1::text::uuid, $2::text::uuid, 'seed')`,
+			fmt.Sprint(tenant), fmt.Sprint(periodID))
+		return err
+	})
+}
+
+// DeleteAuditPeriods runs `DELETE FROM audit_periods WHERE <where>` through
+// period.OwnerDelete, which disables period.FrozenNoDeleteTrigger for that
+// transaction only, so a test cleanup can remove frozen periods. Since #3081
+// that trigger refuses to delete a frozen period for every role, the owner
+// included; the cascade to audit_period_frozen_controls still runs. pool
+// must be the table owner (the migrate pool): only the owner may disable a
+// trigger. The disable takes a SHARE ROW EXCLUSIVE lock on audit_periods,
+// held until the transaction ends, and no other session ever sees the
+// trigger disabled. No lock_timeout: a cleanup waits for the lock.
+func DeleteAuditPeriods(ctx context.Context, pool *pgxpool.Pool, where string, args ...any) error {
+	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		_, err := period.OwnerDelete(ctx, tx, 0, where, args...)
+		return err
+	})
 }

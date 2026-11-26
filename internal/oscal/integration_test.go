@@ -25,10 +25,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +36,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/oscal/bridgetest"
 )
 
 // Slice 435 / 742: the appDSN/adminDSN/openPool/ctxFor pool/DSN/tenant-context
@@ -46,7 +46,7 @@ import (
 // the privileged BYPASSRLS pool used only for cross-tenant seeding and the
 // freshTenant cleanup the app role cannot perform; dbtest.WithTenantCtx tags the
 // tenant GUC context. freshTenant stays suite-local because it carries a
-// load-bearing `UPDATE populations SET audit_period_id = NULL, frozen_at = NULL`
+// load-bearing `UPDATE populations SET audit_period_id = NULL`
 // FK-detach step that dbtest.SeedTenant's pure-DELETE loop cannot express; it
 // routes through the migrate pool exactly as before.
 
@@ -54,6 +54,7 @@ import (
 // slice 030 reads from.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
+	sweepGlobalFrameworks(t, admin)
 	tenant := uuid.NewString()
 	t.Cleanup(func() {
 		ctx := context.Background()
@@ -62,9 +63,8 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 			`DELETE FROM walkthroughs WHERE tenant_id = $1`,
 			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`UPDATE populations SET audit_period_id = NULL, frozen_at = NULL WHERE tenant_id = $1`,
+			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
 			`DELETE FROM populations WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 			`DELETE FROM policies WHERE tenant_id = $1`,
 			`DELETE FROM scope_cells WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
@@ -73,12 +73,53 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
 		}
+		if err := dbtest.DeleteAuditPeriods(ctx, admin, `tenant_id = $1`, tenant); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
+		}
 	})
 	return tenant
 }
 
+// globalFrameworks records, per test, the global (tenant_id IS NULL)
+// frameworks seedFrameworkVersion inserted, for sweepGlobalFrameworks to
+// delete. Left behind, they show up in every other package's framework
+// listings on a shared DB (#2525).
+var globalFrameworks = struct {
+	sync.Mutex
+	byTest map[*testing.T][]uuid.UUID
+}{byTest: map[*testing.T][]uuid.UUID{}}
+
+// sweepGlobalFrameworks registers, once per test, the cleanup that deletes
+// the test's global frameworks (versions and requirements cascade). The
+// audit_periods that reference a version do so ON DELETE RESTRICT, so the
+// sweep must run after every freshTenant cleanup in the test. Cleanups run
+// last-registered first, so it is registered by the first freshTenant
+// call, ahead of every tenant cleanup.
+func sweepGlobalFrameworks(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	globalFrameworks.Lock()
+	defer globalFrameworks.Unlock()
+	if _, ok := globalFrameworks.byTest[t]; ok {
+		return
+	}
+	globalFrameworks.byTest[t] = nil
+	t.Cleanup(func() {
+		globalFrameworks.Lock()
+		ids := globalFrameworks.byTest[t]
+		delete(globalFrameworks.byTest, t)
+		globalFrameworks.Unlock()
+		for _, id := range ids {
+			if _, err := admin.Exec(context.Background(),
+				`DELETE FROM frameworks WHERE id = $1 AND tenant_id IS NULL`, id); err != nil {
+				t.Errorf("cleanup global framework %s: %v", id, err)
+			}
+		}
+	})
+}
+
 func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
+	sweepGlobalFrameworks(t, admin)
 	fwID, versionID := uuid.New(), uuid.New()
 	slug := fmt.Sprintf("slice030-%s", uuid.NewString()[:8])
 	if _, err := admin.Exec(context.Background(),
@@ -86,6 +127,9 @@ func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 		 VALUES ($1, NULL, 'Slice 030 test framework', $2, 'test')`, fwID, slug); err != nil {
 		t.Fatalf("seed framework: %v", err)
 	}
+	globalFrameworks.Lock()
+	globalFrameworks.byTest[t] = append(globalFrameworks.byTest[t], fwID)
+	globalFrameworks.Unlock()
 	if _, err := admin.Exec(context.Background(),
 		`INSERT INTO framework_versions (id, tenant_id, framework_id, version)
 		 VALUES ($1, NULL, $2, '1.0')`, versionID, fwID); err != nil {
@@ -118,7 +162,7 @@ func seedPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fwVersion uuid
 		t.Fatalf("seed audit period: %v", err)
 	}
 	if frozen {
-		if _, err := admin.Exec(context.Background(),
+		if err := dbtest.FreezeRaw(context.Background(), admin, tenant, id,
 			`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 			        frozen_hash=decode('00','hex') WHERE id=$1`,
 			id, frozenAt); err != nil {
@@ -128,53 +172,12 @@ func seedPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fwVersion uuid
 	return id, frozenAt
 }
 
-// startBridge starts the Python oscal-bridge on a free loopback port.
-// Returns the address and a stop func. Skips the test if the bridge
-// cannot start (Python / trestle not installed) — decision D2.
-func startBridge(t *testing.T) (addr string, stop func()) {
+// startBridge starts the Python oscal-bridge on a free loopback port. It
+// skips when the bridge is unavailable, or fails under
+// ATLAS_REQUIRE_OSCAL_BRIDGE=1 (CI) — see internal/oscal/bridgetest.
+func startBridge(t *testing.T) (string, func()) {
 	t.Helper()
-	py := os.Getenv("OSCAL_BRIDGE_PYTHON")
-	if py == "" {
-		py = "python3"
-	}
-	// Pick a free port.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("pick port: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr = fmt.Sprintf("127.0.0.1:%d", port)
-
-	repoRoot, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	bridgeDir := filepath.Join(repoRoot, "oscal-bridge")
-
-	cmd := exec.Command(py, "-m", "atlas_oscal_bridge.server", "--address", addr)
-	cmd.Dir = bridgeDir
-	cmd.Env = append(os.Environ(), "PYTHONPATH="+bridgeDir)
-	if err := cmd.Start(); err != nil {
-		t.Skipf("oscal-bridge could not start (%s): %v — skipping bridge-dependent test", py, err)
-	}
-	// Poll the port until the gRPC server is accepting connections.
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, derr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-		if derr == nil {
-			_ = conn.Close()
-			return addr, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }
-		}
-		// If the process already exited, the bridge env is unusable.
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			t.Skipf("oscal-bridge exited during startup — skipping bridge-dependent test")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_ = cmd.Process.Kill()
-	t.Skipf("oscal-bridge did not become ready on %s — skipping bridge-dependent test", addr)
-	return "", func() {}
+	return bridgetest.Start(t)
 }
 
 // ===== Invariant 10: refuse a non-frozen period (no bridge needed) =====

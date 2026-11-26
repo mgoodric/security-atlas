@@ -1,8 +1,9 @@
 // Package admingroupmappings is the admin HTTP surface for managing IdP
 // group-to-role mappings (slice 509): /v1/admin/group-role-mappings.
 //
-// These routes live on the /v1 tree and require an ADMIN atlas credential
-// (cred.IsAdmin) — editing a mapping is a privilege-granting action (AC-8 /
+// These routes live on the /v1 tree and require an admin of the caller's
+// tenant (authz.IsTenantAdmin, #2503) — editing a mapping is a
+// privilege-granting action (AC-8 /
 // STRIDE-T). A non-admin caller gets 403. The handler validates that a mapping
 // only ever targets an EXISTING canonical atlas role (P0-509-4) before the
 // write; a non-existent role is a 400, never an auto-created role.
@@ -22,9 +23,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 const maxBody = 16 * 1024
@@ -93,7 +96,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		in.CreatedBy = &u
 	}
 
-	m, err := h.store.Create(r.Context(), in)
+	m, err := h.store.Create(r.Context(), in, cred.Actor)
+	if errors.Is(err, grouprole.ErrUnknownIDPConfig) {
+		// One message for a nonexistent id and another tenant's id (#2643).
+		httpresp.WriteError(w, http.StatusBadRequest, "idp_config_id is not an IdP config in this tenant")
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "create group-role mapping", err)
 		return
@@ -120,7 +128,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /v1/admin/group-role-mappings/{id} (AC-8).
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireAdmin(w, r); !ok {
+	cred, ok := requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -128,7 +137,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid mapping id")
 		return
 	}
-	if err := h.store.Delete(r.Context(), id); err != nil {
+	if err := h.store.Delete(r.Context(), id, cred.Actor); err != nil {
 		if errors.Is(err, grouprole.ErrMappingNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "unknown mapping id")
 			return
@@ -144,6 +153,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 type adminCred struct {
 	TenantID string
 	UserID   string
+	// Actor is who the audit row names (#2609): the users(id) behind the
+	// caller, uuid.Nil when it is not a user, and its principal (#2329).
+	Actor grouprole.Actor
 }
 
 // requireAdmin enforces the admin gate (AC-8). A missing credential is 401; a
@@ -155,11 +167,18 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return adminCred{}, false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles maps its own tenant's IdP
+	// groups to canonical roles; the store runs under that tenant's RLS.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return adminCred{}, false
 	}
-	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID}, true
+	actorID, _ := credstore.CallerUserID(cred)
+	return adminCred{
+		TenantID: cred.TenantID,
+		UserID:   cred.UserID,
+		Actor:    grouprole.Actor{UserID: actorID, Principal: credstore.PrincipalOf(cred)},
+	}, true
 }
 
 func parseUserID(s string) (uuid.UUID, error) {

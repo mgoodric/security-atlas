@@ -6,7 +6,12 @@ package ucfcoverage
 // integration tier in integration_test.go is the safety net for the
 // RLS-scoped DB behaviour AC-6 / AC-7).
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 func TestRollupCoverageStrength(t *testing.T) {
 	t.Parallel()
@@ -142,5 +147,44 @@ func TestClamp01(t *testing.T) {
 		if got := clamp01(in); got != want {
 			t.Fatalf("clamp01(%v) = %v; want %v", in, got, want)
 		}
+	}
+}
+
+// TestOverlayFrom covers the #1800 overlay provenance mapper: only an
+// overlay row with a joined source gets provenance; a catalog row never does.
+// #2240: an overlay row reports no mapping_tier; a catalog row reports its own.
+func TestTierFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ origin, tier, want string }{
+		{"overlay", "verified", ""},
+		{"catalog", "verified", "verified"},
+		{"catalog", "draft", "draft"},
+		{"", "under_review", "under_review"},
+	}
+	for _, tc := range tests {
+		if got := tierFor(tc.origin, tc.tier); got != tc.want {
+			t.Errorf("tierFor(%q, %q) = %q; want %q", tc.origin, tc.tier, got, tc.want)
+		}
+	}
+}
+
+func TestOverlayFrom(t *testing.T) {
+	t.Parallel()
+	src, by := "FY25 SOC 2 report, section 4", "user-1"
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.FixedZone("x", 3600))
+	ts := pgtype.Timestamptz{Time: at, Valid: true}
+
+	if got := overlayFrom("catalog", &src, &by, ts); got != nil {
+		t.Errorf("catalog row: got %+v, want nil", got)
+	}
+	if got := overlayFrom("overlay", nil, &by, ts); got != nil {
+		t.Errorf("overlay row without a joined source: got %+v, want nil", got)
+	}
+	got := overlayFrom("overlay", &src, &by, ts)
+	if got == nil || got.SourceRef != src || got.CreatedBy != by || !got.CreatedAt.Equal(at) || got.CreatedAt.Location() != time.UTC {
+		t.Errorf("overlay row: got %+v", got)
+	}
+	if got := overlayFrom("overlay", &src, nil, pgtype.Timestamptz{}); got == nil || got.CreatedBy != "" || !got.CreatedAt.IsZero() {
+		t.Errorf("overlay row with null author/date: got %+v", got)
 	}
 }

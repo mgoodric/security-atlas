@@ -27,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 )
 
 // Service is the gRPC handler. It is parameterized over either the
@@ -141,6 +142,9 @@ func decisionToGRPC(d ingest.Decision, err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ingest.ErrOversized):
 		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, ingest.ErrConcurrentFreeze):
+		// #3060: Process retried and a freeze refused every attempt.
+		return status.Error(codes.Aborted, err.Error())
 	}
 	return status.Errorf(codes.Internal, "ingest: decision=%s err=%v", d, err)
 }
@@ -157,7 +161,8 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 		return "evidence_kind is required"
 	case r.GetSchemaVersion() == "":
 		return "schema_version is required"
-	case r.GetControlId() == "":
+	case r.GetControlId() == "" && !routed.Kind(r.GetEvidenceKind()):
+		// #2924: a routed kind is bound to no control, so it may omit one.
 		return "control_id is required"
 	case len(r.GetScope()) == 0:
 		return "scope is required (at least one dimension)"

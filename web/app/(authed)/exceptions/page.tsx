@@ -23,8 +23,9 @@
 //
 // Anti-criteria honored (P0):
 //   - P0-A-176-1: NO inline edit affordances. The exception lifecycle
-//     (request / approve / deny / activate / expire) lives on the slice
-//     022 control-detail page; this list page is READ-ONLY.
+//     (request / approve / deny / activate / revoke) lives on the
+//     exception's own detail page, /exceptions/[id] (#2113), and a
+//     request starts from the control; this list page is READ-ONLY.
 //   - P0-A-176-2: NO invented columns. Every column derives from
 //     `exceptionWire`. Justification is shown truncated; the full text
 //     is only available via the row drawer (or future detail page).
@@ -46,6 +47,8 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
+import { Person } from "@/components/ui/person";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -70,12 +73,25 @@ import {
   uniqueControlIDs,
   type ExceptionFilters,
 } from "./filters";
+import { statusPillClass } from "./lifecycle";
+import { pageTitle } from "@/lib/page-titles";
+import { Timestamp } from "@/components/ui/timestamp";
+import { Term } from "@/components/help/term";
+
+// #2150 — the header names the page's key term, so its definition is one
+// hover away.
+const EXCEPTIONS_SUBTITLE = (
+  <>
+    Time-bounded <Term id="exception">waivers</Term> from active controls ·
+    approved deviations live here
+  </>
+);
 
 const FILTER_KEYS: (keyof ExceptionFilters)[] = ["status", "control_id"];
 
 // Status values mirror `internal/exception/store.go` State* constants.
 // Order is lifecycle order so the dropdown reads as a process:
-// requested → approved → active → (denied | expired).
+// requested → approved → active → (denied | expired | revoked).
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
   { value: "requested", label: "requested" },
@@ -83,23 +99,8 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "active", label: "active" },
   { value: "denied", label: "denied" },
   { value: "expired", label: "expired" },
+  { value: "revoked", label: "revoked" },
 ];
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "active":
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-    case "requested":
-    case "approved":
-      return "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-    case "denied":
-      return "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
-    case "expired":
-      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 /**
  * Truncate a justification string to a single-line preview. Sensitive
@@ -109,19 +110,6 @@ function statusPillClass(status: string): string {
 function truncate(s: string, max = 80): string {
   if (s.length <= max) return s;
   return s.slice(0, max).trimEnd() + "…";
-}
-
-/**
- * Format an ISO timestamp as a short YYYY-MM-DD date label. Same
- * shorthand the slice 099 evidence list uses.
- */
-function dateLabel(iso?: string | null): string {
-  if (!iso) return "—";
-  // Defensive — if upstream ever returns a malformed string, fall back
-  // to the raw string rather than throwing.
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -258,14 +246,20 @@ function ExceptionsPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
-          className={
-            "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-            statusPillClass(row.status)
-          }
-          data-testid="exceptions-row-status"
-        >
-          {row.status}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
+              statusPillClass(row.status)
+            }
+            data-testid="exceptions-row-status"
+          >
+            {row.status}
+          </span>
+          <SelfApprovedBadge
+            selfApproved={row.self_approved}
+            testId="exceptions-row-self-approved"
+          />
         </span>
       ),
     },
@@ -273,12 +267,11 @@ function ExceptionsPageInner() {
       id: "requested_by",
       header: "Requested by",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="exceptions-row-requested-by"
-        >
-          {row.requested_by}
-        </span>
+        <Person
+          id={row.requested_by}
+          className="text-xs text-muted-foreground"
+          testId="exceptions-row-requested-by"
+        />
       ),
     },
     {
@@ -289,7 +282,7 @@ function ExceptionsPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="exceptions-row-requested-at"
         >
-          {dateLabel(row.requested_at)}
+          <Timestamp value={row.requested_at} />
         </span>
       ),
     },
@@ -301,7 +294,7 @@ function ExceptionsPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="exceptions-row-expires-at"
         >
-          {dateLabel(row.expires_at)}
+          <Timestamp value={row.expires_at} style="date" />
         </span>
       ),
     },
@@ -394,8 +387,8 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isLoading) {
     return (
       <ListPage
-        title="Exceptions"
-        subtitle="Time-bounded waivers from active controls · approved deviations live here"
+        title={pageTitle("/exceptions")}
+        subtitle={EXCEPTIONS_SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -409,8 +402,8 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isError) {
     return (
       <ListPage
-        title="Exceptions"
-        subtitle="Time-bounded waivers from active controls · approved deviations live here"
+        title={pageTitle("/exceptions")}
+        subtitle={EXCEPTIONS_SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="exceptions-load-error">
@@ -425,8 +418,8 @@ function ExceptionsPageInner() {
 
   return (
     <ListPage
-      title="Exceptions"
-      subtitle="Time-bounded waivers from active controls · approved deviations live here"
+      title={pageTitle("/exceptions")}
+      subtitle={EXCEPTIONS_SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
@@ -441,13 +434,10 @@ function ExceptionsPageInner() {
         rows={visible}
         rowKey={(row) => row.id}
         onRowClick={(row) =>
-          // Per P0-A-176-1 the list view is read-only; clicking a row
-          // routes to the control detail page where the slice 022
-          // lifecycle workflow (approve / deny / activate / expire)
-          // lives. The drawer pattern would be nice but is deferred —
-          // navigating the operator to the control where the
-          // exception lives is the more honest interaction.
-          router.push(`/controls/${encodeURIComponent(row.control_id)}`)
+          // Per P0-A-176-1 the list view is read-only; a row opens the
+          // exception's detail page (#2113), where its lifecycle
+          // actions (approve / deny / activate / revoke) live.
+          router.push(`/exceptions/${encodeURIComponent(row.id)}`)
         }
         emptyFallback={emptyState}
       />

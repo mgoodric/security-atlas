@@ -115,11 +115,11 @@ func TestPlanReconcile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			st := reconcileState{
-				target:               setOf(tc.target),
-				current:              setOf(tc.current),
-				manual:               setOf(tc.manual),
-				tenantAdminCount:     tc.adminCount,
-				userHoldsManualAdmin: tc.manualAdmin,
+				target:           setOf(tc.target),
+				current:          setOf(tc.current),
+				manual:           setOf(tc.manual),
+				tenantAdminCount: tc.adminCount,
+				userKeepsAdmin:   tc.manualAdmin,
 			}
 			got := planReconcile(st)
 			if !eqSlice(got.grants, tc.wantGrants) {
@@ -162,7 +162,7 @@ func TestWouldStrandLastAdmin(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := wouldStrandLastAdmin(reconcileState{tenantAdminCount: tc.count, userHoldsManualAdmin: tc.manualAdmin})
+			got := wouldStrandLastAdmin(reconcileState{tenantAdminCount: tc.count, userKeepsAdmin: tc.manualAdmin})
 			if got != tc.want {
 				t.Errorf("wouldStrandLastAdmin = %v, want %v", got, tc.want)
 			}
@@ -176,4 +176,31 @@ func eqSlice(a, b []string) bool {
 		return true
 	}
 	return reflect.DeepEqual(a, b)
+}
+
+// TestRevokesAdmin pins when Derive takes the admin-roster lock (#2273): only
+// when the user holds group-derived admin and the new group set drops it.
+func TestRevokesAdmin(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name            string
+		target, current []string
+		want            bool
+	}{
+		{"admin dropped", nil, []string{"admin"}, true},
+		{"admin dropped with other roles", []string{"viewer"}, []string{"admin", "viewer"}, true},
+		{"admin kept", []string{"admin"}, []string{"admin"}, false},
+		{"admin newly granted", []string{"admin"}, nil, false},
+		{"non-admin revoke only", nil, []string{"viewer"}, false},
+		{"non-admin grant only", []string{"grc_engineer"}, []string{"viewer"}, false},
+		{"nothing held, nothing mapped", nil, nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := revokesAdmin(setOf(c.target), setOf(c.current)); got != c.want {
+				t.Fatalf("revokesAdmin(%v, %v) = %v, want %v", c.target, c.current, got, c.want)
+			}
+		})
+	}
 }

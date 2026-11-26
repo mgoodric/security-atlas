@@ -5,7 +5,7 @@
 // canvas invariant #2 / P0-512-1).
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 export type ClaimStatus = "asserted" | "accepted" | "rejected" | "needs_info";
 export type Disposition = "accept" | "reject" | "needs-info";
@@ -125,13 +125,15 @@ export async function dispositionClaim(
 }
 
 // Slice 620 — map an unmapped vendor claim to a canonical SCF anchor. The
-// scf_anchor_id is the SCF code (e.g. "IAC-06"); the platform validates it
-// against the bundled catalog. Requirement -> SCF anchor only (invariant #7);
+// scf_anchor_id is the SCF code (e.g. "IAC-37") and scf_release the SCF
+// release it is from (required, #1774); the platform validates the code
+// within that release. Requirement -> SCF anchor only (invariant #7);
 // this only sets the crosswalk and NEVER fabricates control coverage.
 export async function mapClaimScfAnchor(
   bearer: string,
   claimID: string,
   scfAnchorID: string,
+  scfRelease: string,
 ): Promise<MapScfAnchorResult> {
   const res = await fetch(
     `${apiBaseURL()}/v1/oscal/component-claims/${encodeURIComponent(
@@ -143,17 +145,14 @@ export async function mapClaimScfAnchor(
         Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ scf_anchor_id: scfAnchorID }),
+      body: JSON.stringify({
+        scf_anchor_id: scfAnchorID,
+        scf_release: scfRelease,
+      }),
     },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // keep status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as MapScfAnchorResult;

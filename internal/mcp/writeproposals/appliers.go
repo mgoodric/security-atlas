@@ -3,8 +3,15 @@
 // confirm transaction so a downstream-write failure rolls the proposal
 // back to state=ai_proposed.
 //
-// Applier SQL is HAND-WRITTEN here rather than routed through the sqlc-
-// wrapped domain stores. Two reasons:
+// The two evidence appliers (update_control_state, push_evidence) never
+// write evidence_records themselves. They hand the record to
+// ingest.Service.Process, the one ingestion stage every other evidence
+// path uses (#1751), so an approved proposal gets the same observed_at
+// skew check, schema validation, credential kind scope, provenance and
+// evidence_audit_log row as a REST or gRPC push.
+//
+// Risk applier SQL is HAND-WRITTEN here rather than routed through the
+// sqlc-wrapped domain stores. Two reasons:
 //
 //   1. The domain stores own their own transactions; calling them from
 //      inside our tx would either nest (pgx doesn't natively support
@@ -16,7 +23,7 @@
 //      domain-store CreateInput. Hand-writing the INSERT keeps the
 //      attack surface scoped to exactly what the tool advertises.
 //
-// All four appliers run as atlas_app, under the proposal's tenant GUC
+// The risk appliers run as atlas_app, under the proposal's tenant GUC
 // (already set by writeproposals.Store.inTx before the applier executes).
 // RLS therefore gates every INSERT/UPDATE; cross-tenant writes are
 // impossible at the DB layer.
@@ -26,28 +33,74 @@ package writeproposals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // CreateRiskInput is the bounded shape the create_risk MCP tool ships
 // in tool_input. A subset of risk.CreateInput — we accept only the
 // fields the LLM can reasonably propose (title, description, category,
-// methodology defaults, treatment with safe defaults). Score blocks are
+// methodology defaults, treatment defaulting to untreated). Score blocks are
 // JSON-RawMessage so the LLM can supply a 5x5 matrix or a NIST 800-30
-// envelope; defense-in-depth CHECK constraints on the risks table
-// catch malformed inputs.
+// envelope; createRiskScores holds them to the rule POST /v1/risks
+// applies (#2502).
 type CreateRiskInput struct {
-	Title          string          `json:"title"`
-	Description    string          `json:"description"`
-	Category       string          `json:"category"`
-	Methodology    string          `json:"methodology,omitempty"`
-	InherentScore  json.RawMessage `json:"inherent_score,omitempty"`
-	Treatment      string          `json:"treatment,omitempty"`
-	TreatmentOwner string          `json:"treatment_owner,omitempty"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	Category      string          `json:"category"`
+	Methodology   string          `json:"methodology,omitempty"`
+	InherentScore json.RawMessage `json:"inherent_score,omitempty"`
+	Treatment     string          `json:"treatment,omitempty"`
+	// AcceptanceStatus applies to treatment=accept only. create_risk cannot
+	// set an accepter or expiry, so only a proposed acceptance can pass.
+	AcceptanceStatus string `json:"acceptance_status,omitempty"`
+	// Justification and ProposedUntil (YYYY-MM-DD) are required with
+	// acceptance_status=proposed, as POST /v1/risks requires them (#2391).
+	Justification  string `json:"justification,omitempty"`
+	ProposedUntil  string `json:"proposed_until,omitempty"`
+	TreatmentOwner string `json:"treatment_owner,omitempty"`
+	// OwnerUserID is the owner, an active user of the tenant (#2450), as
+	// POST /v1/risks takes it. When set, treatment_owner is not stored.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+}
+
+// parseOwnerUserID is a proposal's owner_user_id: nil when omitted, an
+// ErrInvalidInput when it is not a UUID.
+func parseOwnerUserID(tool, raw string) (*uuid.UUID, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: owner_user_id must be a UUID", ErrInvalidInput, tool)
+	}
+	return &id, nil
+}
+
+// checkOwnerUser runs the REST owner check (risk.CheckOwnerUser) and
+// reports a refused owner as ErrInvalidInput, naming the field.
+func checkOwnerUser(ctx context.Context, q *dbx.Queries, tool string, tenantID uuid.UUID, owner *uuid.UUID) error {
+	err := risk.CheckOwnerUser(ctx, q, tenantID, owner)
+	if errors.Is(err, risk.ErrOwnerNotActiveUser) {
+		return fmt.Errorf("%w: apply %s: owner_user_id: %s", ErrInvalidInput, tool, err.Error())
+	}
+	if err != nil {
+		return fmt.Errorf("apply %s: %w", tool, err)
+	}
+	return nil
 }
 
 // ApplyCreateRisk inserts a new risk row using the proposal's tool_input.
@@ -63,39 +116,198 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	if in.Category == "" {
 		return "", fmt.Errorf("apply create_risk: category is required")
 	}
-	methodology := in.Methodology
-	if methodology == "" {
-		methodology = "nist_800_30"
+	inherent, residual, err := createRiskScores(in)
+	if err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
-	treatment := in.Treatment
+	owner, err := parseOwnerUserID("create_risk", in.OwnerUserID)
+	if err != nil {
+		return "", err
+	}
+	if err := checkOwnerUser(ctx, dbx.New(tx), "create_risk", p.TenantID, owner); err != nil {
+		return "", err
+	}
+	// A picked owner replaces the free text, as POST /v1/risks stores it.
+	treatmentOwner := in.TreatmentOwner
+	if owner != nil {
+		treatmentOwner = ""
+	}
+	// An omitted treatment is untreated: the applier never records a
+	// treatment decision the proposal did not make (#1746).
+	treatment := dbx.RiskTreatment(in.Treatment)
 	if treatment == "" {
-		treatment = "avoid" // safe default — no required side fields
+		treatment = dbx.RiskTreatmentUntreated
 	}
-	inherent := in.InherentScore
-	if len(inherent) == 0 {
-		inherent = json.RawMessage(`{}`)
+	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
+	if err := risk.ValidateCreateAcceptance(status, "", false); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
+	// A new risk has no linked controls or action plans and no accepter.
+	if err := risk.ValidateTreatment(risk.TreatmentInput{
+		Treatment:        treatment,
+		AcceptanceStatus: status,
+	}); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
+	// #1810: resolve the category here, as the risk API does, so an
+	// unknown, archived or deleted category is a client error naming the
+	// problem rather than a foreign-key violation.
+	category, err := risk.ResolveCategoryTx(ctx, dbx.New(tx), p.TenantID, in.Category)
+	if err != nil {
+		if risk.IsCategoryRefusal(err) {
+			return "", fmt.Errorf("%w: apply create_risk: %s", ErrInvalidInput, err.Error())
+		}
+		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
+
+	// A proposed acceptance records its proposer, so the approval rule can
+	// refuse them as approver (#2371). The proposer is the confirming
+	// person, not the proposal's created_by: created_by is the credential
+	// id the AI-assisted proposal was filed under (a per-session "jwt:" id
+	// for a browser caller), which names no person to compare with, and the
+	// confirmer is the person who decides to make the proposal.
+	proposal, err := createRiskProposal(in, status, p.Confirmer.Actor(), p.Confirmer.UserID != "")
+	if err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 
 	id := uuid.New()
-	_, err := tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
-			accepted_until, accepter, instrument_reference
+			accepted_until, accepter, instrument_reference, acceptance_status,
+			acceptance_proposed_by, acceptance_proposed_at,
+			acceptance_justification, acceptance_proposed_until, owner_user_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '')
-	`, id, p.TenantID, in.Title, in.Description, in.Category, methodology,
-		[]byte(inherent), treatment, in.TreatmentOwner)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13, $14, $15, $16)
+	`, id, p.TenantID, in.Title, in.Description, category.ID, createRiskMethodology(in),
+		inherent, treatment, treatmentOwner, residual, risk.NullAcceptanceStatus(status),
+		proposal.ProposedBy, proposal.ProposedAt, proposal.Justification, proposal.ProposedUntil, owner)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
+	}
+	// The hand-written insert bypasses risk.Store.Create, so it writes the
+	// same `created` row the store writes, naming the confirming person
+	// (#2835).
+	if err := risk.RecordCreatedTx(ctx, dbx.New(tx), p.TenantID, id, p.Confirmer.Actor(), risk.CreatedState{
+		Title:          in.Title,
+		CategoryID:     category.ID,
+		Treatment:      treatment,
+		OwnerUserID:    owner,
+		TreatmentOwner: treatmentOwner,
+	}); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 	return id.String(), nil
 }
 
+// createRiskProposal is the acceptance a create_risk proposal records,
+// under the rule POST /v1/risks applies (risk.CreateProposal, #2391).
+// proposer is the confirming person; when the proposal is filed there is
+// none yet, and validateToolInput passes a placeholder person. isPerson is
+// whether the confirmer is a user: a machine confirmer is refused (#2623).
+func createRiskProposal(in CreateRiskInput, status dbx.RiskAcceptanceStatus, proposer string, isPerson bool) (risk.Acceptance, error) {
+	var until time.Time
+	if in.ProposedUntil != "" {
+		var err error
+		if until, err = time.Parse(time.DateOnly, in.ProposedUntil); err != nil {
+			return risk.Acceptance{}, fmt.Errorf("%w: proposed_until must be YYYY-MM-DD", risk.ErrTransitionInput)
+		}
+	}
+	return risk.CreateProposal(status, risk.ProposeAcceptanceInput{
+		Justification:    in.Justification,
+		ProposedUntil:    until,
+		Proposer:         proposer,
+		ProposerIsPerson: isPerson,
+	}, time.Now().UTC())
+}
+
+// createRiskMethodology is the proposal's methodology, defaulting as
+// POST /v1/risks does.
+func createRiskMethodology(in CreateRiskInput) dbx.RiskMethodology {
+	if in.Methodology == "" {
+		return risk.DefaultMethodology
+	}
+	return dbx.RiskMethodology(in.Methodology)
+}
+
+// createRiskScores returns the inherent and residual scores a create_risk
+// proposal persists, through risk.PrepareCreateScores: the rule
+// POST /v1/risks applies, so MCP and REST store the same row and refuse
+// the same input (#2502). An omitted inherent_score is an unscored risk on
+// both paths (#2511). It runs when the proposal is filed
+// (validateToolInput) and again when it is confirmed.
+func createRiskScores(in CreateRiskInput) ([]byte, []byte, error) {
+	inherent, residual, err := risk.PrepareCreateScores(createRiskMethodology(in), in.InherentScore, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(residual) == 0 {
+		residual = []byte(`{}`)
+	}
+	return inherent, residual, nil
+}
+
+// validateToolInput refuses, when a proposal is filed, a tool_input its
+// applier would refuse, so the MCP tool call gets the error rather than
+// the person who confirms it later. Today that is create_risk: a
+// tool_input that does not decode (ErrInvalidInput, a 400), its scores
+// (#2502) and its proposed acceptance (#2391, also ErrInvalidInput).
+func validateToolInput(tool string, input json.RawMessage) error {
+	if tool != ToolCreateRisk {
+		return nil
+	}
+	var in CreateRiskInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
+	}
+	if _, _, err := createRiskScores(in); err != nil {
+		return err
+	}
+	// Whether the owner is an active user is checked when the proposal is
+	// confirmed, inside its transaction; only the shape is checked here.
+	if _, err := parseOwnerUserID("create_risk tool_input", in.OwnerUserID); err != nil {
+		return err
+	}
+	// The confirmer, recorded as proposer, is not known until confirm.
+	// Other treatments are left to the applier's treatment check, which
+	// names their fault.
+	if in.Treatment != string(dbx.RiskTreatmentAccept) {
+		return nil
+	}
+	if _, err := createRiskProposal(in, dbx.RiskAcceptanceStatus(in.AcceptanceStatus), "pending-confirmer", true); err != nil {
+		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
+	}
+	return nil
+}
+
+// EvidenceProcessor is the ingestion stage the evidence appliers hand
+// their record to. *ingest.Service satisfies it.
+type EvidenceProcessor interface {
+	Process(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (ingest.Receipt, ingest.Decision, error)
+}
+
+// ErrIngestUnavailable is returned by the evidence appliers when no ingest
+// service was wired. They fail closed rather than write the ledger
+// directly.
+var ErrIngestUnavailable = errors.New("ingest service not configured")
+
+// The override evidence kind, registered in the platform schema registry
+// (internal/api/schemaregistry/schemas/manual.control_state_override/).
+const (
+	ControlStateOverrideKind    = "manual.control_state_override.v1"
+	ControlStateOverrideVersion = "1.0.0"
+)
+
+// DefaultPushSchemaVersion is the schema version a push_evidence proposal
+// is validated against when it names none.
+const DefaultPushSchemaVersion = "1.0.0"
+
 // UpdateControlStateInput is the bounded shape the update_control_state
 // MCP tool ships. Constitutional invariant #2 forbids the AI from
 // directly writing control_evaluations; instead we synthesise an
-// evidence_records row with kind=`manual.control_state_override.v1` so
+// evidence record with kind=`manual.control_state_override.v1` so
 // the eval engine sees a valid evidence source and the override flows
 // through the existing pipeline.
 type UpdateControlStateInput struct {
@@ -104,48 +316,44 @@ type UpdateControlStateInput struct {
 	Rationale string `json:"rationale"`
 }
 
-// ApplyUpdateControlState appends a manual override evidence record.
-// Returns the new evidence_records row's UUID for applied_subject.
-func ApplyUpdateControlState(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
-	var in UpdateControlStateInput
-	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
-		return "", fmt.Errorf("apply update_control_state: parse input: %w", err)
+// NewUpdateControlStateApplier returns the update_control_state applier:
+// it ingests a manual override evidence record through ing and returns
+// the record id for applied_subject.
+func NewUpdateControlStateApplier(ing EvidenceProcessor) Applier {
+	return func(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+		var in UpdateControlStateInput
+		if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+			return "", fmt.Errorf("apply update_control_state: parse input: %w", err)
+		}
+		if in.ControlID == "" || in.State == "" {
+			return "", fmt.Errorf("apply update_control_state: control_id and state are required")
+		}
+		controlID, err := uuid.Parse(in.ControlID)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: control_id must be UUID: %w", err)
+		}
+		result, err := stateToProtoResult(in.State)
+		if err != nil {
+			return "", err
+		}
+		payload := map[string]any{
+			"override_state": in.State,
+			"ai_proposed":    true,
+		}
+		if in.Rationale != "" {
+			payload["rationale"] = in.Rationale
+		}
+		rec, err := proposalRecord(p, ToolUpdateControlState, ControlStateOverrideKind,
+			ControlStateOverrideVersion, controlID, time.Now().UTC(), result, payload)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: %w", err)
+		}
+		id, err := ingestProposalRecord(ctx, ing, tx, p, rec)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: %w", err)
+		}
+		return id, nil
 	}
-	if in.ControlID == "" || in.State == "" {
-		return "", fmt.Errorf("apply update_control_state: control_id and state are required")
-	}
-	controlID, err := uuid.Parse(in.ControlID)
-	if err != nil {
-		return "", fmt.Errorf("apply update_control_state: control_id must be UUID: %w", err)
-	}
-	result, err := stateToEvidenceResult(in.State)
-	if err != nil {
-		return "", err
-	}
-
-	payload, _ := json.Marshal(map[string]any{
-		"override_state": in.State,
-		"rationale":      in.Rationale,
-		"ai_proposed":    true,
-	})
-	id := uuid.New()
-	hash := "mcp-override-" + id.String()
-	_, err = tx.Exec(ctx, `
-		INSERT INTO evidence_records (
-			id, tenant_id, control_id, observed_at, ingested_at,
-			provenance, result, payload, hash, control_ref,
-			evidence_kind, ingestion_path, source_attribution
-		)
-		VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, 'manual_upload', $11)
-	`, id, p.TenantID, controlID, time.Now().UTC(),
-		[]byte(`{"source":"mcp.write_tool"}`), result, payload, hash,
-		"mcp/control_state_override",
-		"manual.control_state_override.v1",
-		[]byte(`{"actor":"mcp.update_control_state","ai_assisted":true}`))
-	if err != nil {
-		return "", fmt.Errorf("apply update_control_state: insert evidence: %w", err)
-	}
-	return id.String(), nil
 }
 
 // PushEvidenceInput is the bounded shape the push_evidence MCP tool
@@ -153,65 +361,167 @@ func ApplyUpdateControlState(ctx context.Context, tx pgx.Tx, p Proposal) (string
 // 003) but mediated by the HITL approval flow because the LLM is the
 // origin.
 type PushEvidenceInput struct {
-	ControlID  string          `json:"control_id"`
-	Kind       string          `json:"kind"`
-	Result     string          `json:"result"`
-	ObservedAt time.Time       `json:"observed_at,omitempty"`
-	Payload    json.RawMessage `json:"payload,omitempty"`
+	ControlID     string          `json:"control_id"`
+	Kind          string          `json:"kind"`
+	SchemaVersion string          `json:"schema_version,omitempty"`
+	Result        string          `json:"result"`
+	ObservedAt    time.Time       `json:"observed_at,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
 }
 
-// ApplyPushEvidence inserts an evidence record.
-func ApplyPushEvidence(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
-	var in PushEvidenceInput
-	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
-		return "", fmt.Errorf("apply push_evidence: parse input: %w", err)
+// NewPushEvidenceApplier returns the push_evidence applier. A proposal
+// whose observed_at is outside ingest.MaxObservedAtSkew fails at confirm
+// with ingest.ErrObservedAtSkew and leaves a rejected_observed_at_skew
+// row in evidence_audit_log, exactly as the same record pushed over REST.
+func NewPushEvidenceApplier(ing EvidenceProcessor) Applier {
+	return func(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+		var in PushEvidenceInput
+		if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+			return "", fmt.Errorf("apply push_evidence: parse input: %w", err)
+		}
+		if in.ControlID == "" || in.Kind == "" || in.Result == "" {
+			return "", fmt.Errorf("apply push_evidence: control_id, kind, result are required")
+		}
+		controlID, err := uuid.Parse(in.ControlID)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: control_id must be UUID: %w", err)
+		}
+		result, err := stateToProtoResult(in.Result)
+		if err != nil {
+			return "", err
+		}
+		observed := in.ObservedAt
+		if observed.IsZero() {
+			observed = time.Now().UTC()
+		}
+		version := in.SchemaVersion
+		if version == "" {
+			version = DefaultPushSchemaVersion
+		}
+		payload := map[string]any{}
+		if len(in.Payload) > 0 {
+			if err := json.Unmarshal(in.Payload, &payload); err != nil {
+				return "", fmt.Errorf("apply push_evidence: payload must be a JSON object: %w", err)
+			}
+		}
+		rec, err := proposalRecord(p, ToolPushEvidence, in.Kind, version, controlID, observed, result, payload)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: %w", err)
+		}
+		id, err := ingestProposalRecord(ctx, ing, tx, p, rec)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: %w", err)
+		}
+		return id, nil
 	}
-	if in.ControlID == "" || in.Kind == "" || in.Result == "" {
-		return "", fmt.Errorf("apply push_evidence: control_id, kind, result are required")
-	}
-	controlID, err := uuid.Parse(in.ControlID)
+}
+
+// proposalRecord builds the wire record for an approved proposal.
+//
+// The idempotency key derives from the proposal id. Ingest writes the
+// record in its own transaction, not the confirm tx (the audit row of a
+// rejection must survive the confirm rollback), so the key is how a
+// confirm that fails after ingest and is retried finds the first record
+// instead of writing a second one; see ingestProposalRecord.
+func proposalRecord(p Proposal, tool, kind, version string, controlID uuid.UUID, observed time.Time,
+	result evidencev1.Result, payload map[string]any) (*evidencev1.EvidenceRecord, error) {
+	st, err := structpb.NewStruct(payload)
 	if err != nil {
-		return "", fmt.Errorf("apply push_evidence: control_id must be UUID: %w", err)
+		return nil, fmt.Errorf("build payload: %w", err)
 	}
-	if _, err := stateToEvidenceResult(in.Result); err != nil {
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: "mcp-proposal:" + p.ID.String(),
+		EvidenceKind:   kind,
+		SchemaVersion:  version,
+		ControlId:      controlID.String(),
+		Scope: []*evidencev1.ScopeDimension{{
+			Key:    "mcp_tool",
+			Values: []string{tool},
+		}},
+		ObservedAt: timestamppb.New(observed),
+		Result:     result,
+		Payload:    st,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   "mcp." + tool,
+			SessionId: p.ID.String(),
+		},
+	}, nil
+}
+
+// ingestProposalRecord runs rec through ing under the approving
+// operator's credential, read from ctx. That credential must belong to the
+// proposal's tenant, and its kind scope applies as on any other push.
+//
+// An approver whose credential carries a restrictive ScopePredicate is
+// refused (ingest.ErrScopeViolation, 403 scope_violation at the handler):
+// the record's only scope dimension is the server-set mcp_tool, which a
+// predicate on cloud_account or the like cannot match. Confirming MCP
+// evidence needs an unrestricted approver credential ("" or the stored
+// default "{}", #2435).
+//
+// A record already ingested for this proposal (an earlier confirm whose
+// state flip rolled back after ingest committed) is returned as is. The
+// record's observed_at may default to the apply time, so re-ingesting
+// would hash differently and trip ingest's idempotency-mismatch reject.
+func ingestProposalRecord(ctx context.Context, ing EvidenceProcessor, tx pgx.Tx, p Proposal, rec *evidencev1.EvidenceRecord) (string, error) {
+	if ing == nil {
+		return "", ErrIngestUnavailable
+	}
+	cred, ok := authctx.CredentialFromContext(ctx)
+	if !ok || cred.TenantID != p.TenantID.String() {
+		return "", fmt.Errorf("%w: approver credential missing or outside the proposal's tenant", ErrInvalidInput)
+	}
+	var existing uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id FROM evidence_records
+		WHERE tenant_id = $1 AND idempotency_key = $2
+	`, p.TenantID, rec.IdempotencyKey).Scan(&existing)
+	switch {
+	case err == nil:
+		return existing.String(), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", fmt.Errorf("look up prior ingest: %w", err)
+	}
+	receipt, _, err := ing.Process(ctx, rec, cred)
+	if err != nil {
 		return "", err
 	}
-	observed := in.ObservedAt
-	if observed.IsZero() {
-		observed = time.Now().UTC()
-	}
-	payload := in.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	id := uuid.New()
-	hash := "mcp-push-" + id.String()
-	_, err = tx.Exec(ctx, `
-		INSERT INTO evidence_records (
-			id, tenant_id, control_id, observed_at, ingested_at,
-			provenance, result, payload, hash, control_ref,
-			evidence_kind, ingestion_path, source_attribution
-		)
-		VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, 'push', $11)
-	`, id, p.TenantID, controlID, observed,
-		[]byte(`{"source":"mcp.write_tool"}`), in.Result, []byte(payload),
-		hash, "mcp/push_evidence", in.Kind,
-		[]byte(`{"actor":"mcp.push_evidence","ai_assisted":true}`))
-	if err != nil {
-		return "", fmt.Errorf("apply push_evidence: insert: %w", err)
-	}
-	return id.String(), nil
+	return receipt.RecordID, nil
 }
 
 // UpdateRiskTreatmentInput is the bounded shape the update_risk_treatment
-// MCP tool ships.
+// MCP tool ships. A confirmed proposal runs the same transitions as the
+// REST routes (#2105):
+//
+//	treatment=accept, acceptance_status=proposed -> propose acceptance,
+//	    with justification and accepted_until as the proposed expiry
+//	treatment=accept, acceptance_status=approved -> approve the risk's
+//	    proposed acceptance until accepted_until; the confirming person is
+//	    the approver, under the approval rule
+//	any other treatment -> change treatment
+//
+// Accepter is refused: the approving person is the accepter.
 type UpdateRiskTreatmentInput struct {
-	RiskID         string `json:"risk_id"`
-	Treatment      string `json:"treatment"`
-	TreatmentOwner string `json:"treatment_owner"`
+	RiskID           string `json:"risk_id"`
+	Treatment        string `json:"treatment"`
+	AcceptanceStatus string `json:"acceptance_status"`
+	TreatmentOwner   string `json:"treatment_owner"`
+	// OwnerUserID is the risk's new owner, an active user of the tenant
+	// (#2450). It takes the place of treatment_owner, which is ignored
+	// when both are given.
+	OwnerUserID   string  `json:"owner_user_id,omitempty"`
+	Justification string  `json:"justification,omitempty"`
+	Accepter      *string `json:"accepter,omitempty"`
+	AcceptedUntil *string `json:"accepted_until,omitempty"`
 }
 
-// ApplyUpdateRiskTreatment updates an existing risk's treatment + owner.
+// ApplyUpdateRiskTreatment applies a confirmed update_risk_treatment
+// proposal through the risk's treatment and acceptance transitions, so it
+// writes the same audit events and is refused by the same state machine
+// and approval rule as the REST path. An owner_user_id or, without one, a
+// treatment_owner, when set, is changed as a record field and audit-logged
+// as PATCH logs it; the owner_user_id is checked as PATCH checks it.
 func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in UpdateRiskTreatmentInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -224,40 +534,173 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: risk_id must be UUID: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `
-		UPDATE risks
-		SET treatment = $3,
-			treatment_owner = $4,
-			updated_at = now()
-		WHERE tenant_id = $1 AND id = $2
-	`, p.TenantID, riskID, in.Treatment, in.TreatmentOwner)
-	if err != nil {
-		return "", fmt.Errorf("apply update_risk_treatment: update: %w", err)
+	if in.Accepter != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: %w: accepter is not proposed; the approving person is the accepter", risk.ErrTransitionInput)
 	}
-	if tag.RowsAffected() == 0 {
-		return "", fmt.Errorf("apply update_risk_treatment: risk %s not found in tenant", riskID)
+	owner, err := parseOwnerUserID("apply update_risk_treatment", in.OwnerUserID)
+	if err != nil {
+		return "", err
+	}
+	var until time.Time
+	if in.AcceptedUntil != nil {
+		if until, err = time.Parse(time.DateOnly, *in.AcceptedUntil); err != nil {
+			return "", fmt.Errorf("apply update_risk_treatment: %w: accepted_until must be YYYY-MM-DD", risk.ErrTransitionInput)
+		}
+	}
+	// The confirmer's principal, as REST's credstore.PrincipalOf records
+	// the actor and proposer (#2371). As with create_risk, a proposed
+	// acceptance's proposer is the confirming person, not created_by.
+	actor := p.Confirmer.Actor()
+	q := dbx.New(tx)
+	now := time.Now().UTC()
+	treatment := dbx.RiskTreatment(in.Treatment)
+	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
+	switch {
+	case treatment != dbx.RiskTreatmentAccept && status != "":
+		err = fmt.Errorf("%w: acceptance_status applies only to treatment=accept", risk.ErrTransitionInput)
+	case treatment != dbx.RiskTreatmentAccept:
+		_, err = risk.ChangeTreatmentTx(ctx, q, p.TenantID, riskID, risk.ChangeTreatmentInput{
+			Treatment: treatment,
+			Actor:     actor,
+		})
+	case status == dbx.RiskAcceptanceStatusProposed:
+		_, err = risk.ProposeAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ProposeAcceptanceInput{
+			Justification:    in.Justification,
+			ProposedUntil:    until,
+			Proposer:         actor,
+			ProposerIsPerson: p.Confirmer.UserID != "",
+		}, now)
+	case status == dbx.RiskAcceptanceStatusApproved:
+		_, err = risk.ApproveAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ApproveAcceptanceInput{
+			AcceptedUntil: until,
+			Approver:      p.Confirmer.Approver,
+		}, now)
+	default:
+		err = fmt.Errorf("%w: treatment=accept requires acceptance_status (proposed or approved)", risk.ErrTransitionInput)
+	}
+	if err != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
+	}
+	switch {
+	case owner != nil:
+		err = risk.SetOwnerUserTx(ctx, q, p.TenantID, riskID, *owner, actor)
+		if errors.Is(err, risk.ErrOwnerNotActiveUser) {
+			return "", fmt.Errorf("%w: apply update_risk_treatment: owner_user_id: %s", ErrInvalidInput, err.Error())
+		}
+	case in.TreatmentOwner != "":
+		err = risk.SetTreatmentOwnerTx(ctx, q, p.TenantID, riskID, in.TreatmentOwner, actor)
+	}
+	if err != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
 	}
 	return riskID.String(), nil
 }
 
-// RegisterDefaultAppliers wires all four canonical appliers onto the
-// store. Callers may register custom appliers (e.g., tests) BEFORE or
-// AFTER this — later registrations win.
-func RegisterDefaultAppliers(s *Store) *Store {
-	return s.
-		WithApplier(ToolCreateRisk, ApplyCreateRisk).
-		WithApplier(ToolUpdateControlState, ApplyUpdateControlState).
-		WithApplier(ToolPushEvidence, ApplyPushEvidence).
-		WithApplier(ToolUpdateRiskTreatment, ApplyUpdateRiskTreatment)
+// LinkChildRisksInput is the bounded shape the link_child_risks MCP tool
+// ships: an existing parent risk and the existing risks to attach under it.
+type LinkChildRisksInput struct {
+	ParentRiskID string   `json:"parent_risk_id"`
+	ChildRiskIDs []string `json:"child_risk_ids"`
 }
 
-// stateToEvidenceResult validates that a string is one of the four
-// evidence_result enum values. Returns the canonical lowercased form.
-func stateToEvidenceResult(s string) (string, error) {
+// ApplyLinkChildRisks attaches existing risks as children of an existing
+// risk (#1748). It runs risk.LinkChildrenTx, the validation
+// POST /v1/risks/{id}/children uses (level order, no cycle, same tenant),
+// inside the confirm transaction. Each new link is logged by the confirmer
+// (#2958). It returns the parent's id for applied_subject.
+func ApplyLinkChildRisks(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+	var in LinkChildRisksInput
+	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+		return "", fmt.Errorf("apply link_child_risks: parse input: %w", err)
+	}
+	parentID, err := uuid.Parse(in.ParentRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply link_child_risks: parent_risk_id must be UUID", ErrInvalidInput)
+	}
+	if len(in.ChildRiskIDs) == 0 {
+		return "", fmt.Errorf("%w: apply link_child_risks: child_risk_ids is required", ErrInvalidInput)
+	}
+	childIDs := make([]uuid.UUID, len(in.ChildRiskIDs))
+	for i, s := range in.ChildRiskIDs {
+		id, perr := uuid.Parse(s)
+		if perr != nil {
+			return "", fmt.Errorf("%w: apply link_child_risks: child_risk_ids[%d] must be UUID", ErrInvalidInput, i)
+		}
+		childIDs[i] = id
+	}
+	if _, err := risk.LinkChildrenTx(ctx, dbx.New(tx), p.TenantID, parentID, childIDs,
+		risk.HierarchyAudit{Actor: p.Confirmer.Actor()}); err != nil {
+		return "", fmt.Errorf("apply link_child_risks: %w", err)
+	}
+	return parentID.String(), nil
+}
+
+// UnlinkChildRiskInput is the bounded shape the unlink_child_risk MCP tool
+// ships: one parent and the child to detach from it.
+type UnlinkChildRiskInput struct {
+	ParentRiskID string `json:"parent_risk_id"`
+	ChildRiskID  string `json:"child_risk_id"`
+}
+
+// ApplyUnlinkChildRisk detaches one child from its parent (#1748) through
+// risk.UnlinkChildTx, as DELETE /v1/risks/{id}/children/{child_id} does,
+// logged by the confirmer (#2958). It returns the parent's id for
+// applied_subject.
+func ApplyUnlinkChildRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+	var in UnlinkChildRiskInput
+	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+		return "", fmt.Errorf("apply unlink_child_risk: parse input: %w", err)
+	}
+	parentID, err := uuid.Parse(in.ParentRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply unlink_child_risk: parent_risk_id must be UUID", ErrInvalidInput)
+	}
+	childID, err := uuid.Parse(in.ChildRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply unlink_child_risk: child_risk_id must be UUID", ErrInvalidInput)
+	}
+	if err := risk.UnlinkChildTx(ctx, dbx.New(tx), p.TenantID, parentID, childID,
+		risk.HierarchyAudit{Actor: p.Confirmer.Actor()}); err != nil {
+		return "", fmt.Errorf("apply unlink_child_risk: %w", err)
+	}
+	return parentID.String(), nil
+}
+
+// RegisterDefaultAppliers wires all six canonical appliers onto the
+// store. The evidence appliers ingest through ing — push_evidence under
+// ingestion_path=push, update_control_state under manual_upload — and a
+// nil ing makes them fail closed with ErrIngestUnavailable. Callers may
+// register custom appliers (e.g., tests) BEFORE or AFTER this — later
+// registrations win.
+func RegisterDefaultAppliers(s *Store, ing *ingest.Service) *Store {
+	var push, manual EvidenceProcessor
+	if ing != nil {
+		push = ing.WithPath("push")
+		manual = ing.WithPath("manual_upload")
+	}
+	return s.
+		WithApplier(ToolCreateRisk, ApplyCreateRisk).
+		WithApplier(ToolUpdateControlState, NewUpdateControlStateApplier(manual)).
+		WithApplier(ToolPushEvidence, NewPushEvidenceApplier(push)).
+		WithApplier(ToolUpdateRiskTreatment, ApplyUpdateRiskTreatment).
+		WithApplier(ToolLinkChildRisks, ApplyLinkChildRisks).
+		WithApplier(ToolUnlinkChildRisk, ApplyUnlinkChildRisk)
+}
+
+// stateToProtoResult validates that a string is one of the four
+// evidence_result enum values and maps it to the wire enum.
+func stateToProtoResult(s string) (evidencev1.Result, error) {
 	switch s {
-	case "pass", "fail", "na", "inconclusive":
-		return s, nil
+	case "pass":
+		return evidencev1.Result_RESULT_PASS, nil
+	case "fail":
+		return evidencev1.Result_RESULT_FAIL, nil
+	case "na":
+		return evidencev1.Result_RESULT_NA, nil
+	case "inconclusive":
+		return evidencev1.Result_RESULT_INCONCLUSIVE, nil
 	default:
-		return "", fmt.Errorf("invalid evidence result/state %q (want pass|fail|na|inconclusive)", s)
+		return evidencev1.Result_RESULT_UNSPECIFIED,
+			fmt.Errorf("invalid evidence result/state %q (want pass|fail|na|inconclusive)", s)
 	}
 }

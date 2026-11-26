@@ -2,14 +2,33 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc9_1_business_continuity
 title: "Business continuity plan reviewed annually"
 description: |
-  The entity identifies, selects, and develops risk mitigation
-  activities for risks arising from potential business disruptions (TSC
-  CC9.1). The control owner uploads the current business continuity /
-  disaster recovery plan annually, alongside a confirmation that the
-  document was reviewed and is current — including stated RTO / RPO
-  targets, leadership succession plan, and communication tree.
+  Plans exist to limit the damage a business disruption can do (TSC
+  CC9.1). The control owner uploads the current business continuity and
+  disaster recovery plan annually, with a confirmation that it was
+  reviewed and is current, including stated RTO and RPO targets,
+  leadership succession plan and communication tree.
 
-scf_anchor_id: BCD-02
+  What runs today: a SQL query over the `manual.upload.v1` records pushed
+  to this control. The control passes when any upload, keyed by
+  `filename`, has an `observed_at` within 365 days before the evaluation
+  instant (`evaluated_at`). It fails when every upload is older than that,
+  and no upload leaves it inconclusive. Records count for the annual
+  window of 400 days, so an upload from 366 to 400 days ago fails the
+  control and one older than that is not seen. The 365 days are counted as
+  8,760 hours, so the bound does not move with daylight saving or a leap
+  day. An `observed_at` more than
+  an hour after the evaluation instant is treated as unreadable, and
+  records without a `filename` are left out. The record's `result`, which
+  the manual connector writes as inconclusive for a person to judge, is
+  not used.
+
+  Not checked: what the upload contains. Any file pushed to this control
+  counts as the plan; the review date, reviewer, RTO and RPO in the schema
+  below are not read. `observed_at` is when the record was pushed, which
+  is not always when the plan was reviewed.
+
+scf_anchor_id: BCD-04
+scf_release: test-2026.3
 control_family: BCD
 implementation_type: semi_automated
 owner_role: ciso
@@ -17,20 +36,20 @@ lifecycle_state: active
 freshness_class: annual
 
 evidence_queries:
-  - id: bcp_reviewed_within_12mo
-    language: rego
+  - id: continuity_plan_uploaded_within_365d
+    language: sql
     evidence_kind: manual.upload.v1
-    description: "A BCP review upload exists within the last 365 days"
+    description: "An upload pushed to this control has an observed_at within 365 days of the evaluation instant"
     expression: |
-      package atlas.controls.soc2.cc9_1
-
-      default allow := false
-
-      allow if {
-        some u in input.uploads
-        u.control_bundle_id == "soc2_cc9_1_business_continuity"
-        time.parse_rfc3339_ns(u.observed_at) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
-      }
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(observed_at >= evaluated_at - interval '8760 hours'
+                            AND observed_at <= evaluated_at + interval '1 hour') THEN 'pass'
+               WHEN bool_or(observed_at > evaluated_at + interval '1 hour') THEN 'inconclusive'
+               ELSE 'fail'
+             END
+      FROM evidence
+      WHERE coalesce(payload->>'filename', '') <> ''
 
 manual_evidence_schema:
   type: object

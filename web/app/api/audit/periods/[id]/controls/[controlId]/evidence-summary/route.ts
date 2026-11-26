@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getPeriodEvidenceSummary } from "@/lib/api/control-detail";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 749 — server-side proxy for
 // GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary (the
@@ -21,12 +22,14 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string; controlId: string }> },
 ) {
+  const { id, controlId } = await ctx.params;
+  const bad = rejectNonUUID({ id, controlId });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id, controlId } = await ctx.params;
   try {
     const body = await getPeriodEvidenceSummary(bearer, id, controlId);
     return NextResponse.json(body);

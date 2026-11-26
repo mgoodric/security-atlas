@@ -103,6 +103,67 @@ func (q *Queries) ListAcceptedVendorClaimsForExport(ctx context.Context, tenantI
 	return items, nil
 }
 
+const listActivatedExceptionsForExport = `-- name: ListActivatedExceptionsForExport :many
+SELECT id, control_id, scope_cell_predicate, justification,
+       approved_by, approved_at, activated_at, effective_from,
+       expires_at, revoked_at, status
+FROM exceptions
+WHERE tenant_id = $1
+  AND activated_at IS NOT NULL
+ORDER BY control_id ASC, activated_at ASC, id ASC
+`
+
+type ListActivatedExceptionsForExportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	ScopeCellPredicate []byte             `json:"scope_cell_predicate"`
+	Justification      string             `json:"justification"`
+	ApprovedBy         *string            `json:"approved_by"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	ActivatedAt        pgtype.Timestamptz `json:"activated_at"`
+	EffectiveFrom      pgtype.Timestamptz `json:"effective_from"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	Status             string             `json:"status"`
+}
+
+// #2269: every exception that was ever activated, with what the export
+// needs to decide whether it was in force at an evaluation's instant
+// (activated_at, effective_from, expires_at, revoked_at) and whether its
+// predicate covers the cell. The evaluation row does not record which
+// exception excepted it (#2112 D3), so the aggregator reconstructs it.
+func (q *Queries) ListActivatedExceptionsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListActivatedExceptionsForExportRow, error) {
+	rows, err := q.db.Query(ctx, listActivatedExceptionsForExport, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActivatedExceptionsForExportRow
+	for rows.Next() {
+		var i ListActivatedExceptionsForExportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditNotesForPeriod = `-- name: ListAuditNotesForPeriod :many
 SELECT id, tenant_id, audit_period_id, author_user_id, scope_type,
        scope_id, body, visibility, created_at
@@ -164,15 +225,200 @@ func (q *Queries) ListAuditNotesForPeriod(ctx context.Context, arg ListAuditNote
 	return items, nil
 }
 
-const listFailingEvaluationsAsOf = `-- name: ListFailingEvaluationsAsOf :many
-SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
-    SELECT DISTINCT ON (control_id, scope_cell_id)
-        id, tenant_id, control_id, scope_cell_id, eval_run_id,
-        evaluated_at, result, freshness_status, last_observed_at
+const listExceptedEvaluationsAsOf = `-- name: ListExceptedEvaluationsAsOf :many
+WITH control_latest_run AS (
+    -- #3071: ranked by the instant a run judged, not the clock that wrote
+    -- it, so a replay of an earlier instant does not displace a later live
+    -- run. On a tie (a replay of a live run's own instant) the live run
+    -- wins. A run must still have been written by the horizon.
+    SELECT DISTINCT ON (control_id)
+        control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC,
+             (evaluated_as_of IS NULL) DESC, evaluated_at DESC, created_at DESC
+)
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, evaluated_as_of, result FROM (
+    SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+        ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
+        ce.evaluated_at, ce.evaluated_as_of, ce.result
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+) latest
+WHERE latest.result = 'excepted'
+ORDER BY latest.control_id ASC, latest.scope_cell_id ASC
+`
+
+type ListExceptedEvaluationsAsOfParams struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
+}
+
+type ListExceptedEvaluationsAsOfRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	ScopeCellID   pgtype.UUID        `json:"scope_cell_id"`
+	EvalRunID     pgtype.UUID        `json:"eval_run_id"`
+	EvaluatedAt   pgtype.Timestamptz `json:"evaluated_at"`
+	EvaluatedAsOf pgtype.Timestamptz `json:"evaluated_as_of"`
+	Result        EvidenceResult     `json:"result"`
+}
+
+// #2269: the AR's risk-accepted observations. The latest evaluation per
+// (control, scope_cell) as of the frozen horizon whose result is
+// 'excepted' (#2112). #2526: bounded to each control's latest run as of
+// the horizon, as ListFailingEvaluationsAsOf is, so a cell that stopped
+// applying while excepted is not a risk-accepted observation. That matches
+// the dashboard's control_excepted_now.
+// An excepted cell is never a finding: the export links it to the
+// exception that accepted the risk instead.
+// #3056: evaluated_as_of is the instant a replay row judged; the export
+// names the exception in force then, not at evaluated_at.
+func (q *Queries) ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error) {
+	rows, err := q.db.Query(ctx, listExceptedEvaluationsAsOf, arg.TenantID, arg.EvaluatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExceptedEvaluationsAsOfRow
+	for rows.Next() {
+		var i ListExceptedEvaluationsAsOfRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellID,
+			&i.EvalRunID,
+			&i.EvaluatedAt,
+			&i.EvaluatedAsOf,
+			&i.Result,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExcludedRequirementsAsOfForExport = `-- name: ListExcludedRequirementsAsOfForExport :many
+
+WITH in_force AS (
+    SELECT fs.id, fs.tenant_id
+    FROM framework_scopes fs
+    WHERE fs.tenant_id = $1
+      AND fs.framework_version_id = $2
+      AND fs.effective_from IS NOT NULL
+      AND fs.effective_from <= $3
+      AND fs.activated_at <= $3
+      AND (fs.superseded_at IS NULL OR fs.superseded_at > $3)
+    ORDER BY fs.effective_from DESC, fs.id ASC
+    LIMIT 1
+)
+SELECT
+    f.slug                       AS framework_slug,
+    fv.version                   AS framework_version,
+    r.code                       AS requirement_code,
+    r.title                      AS requirement_title,
+    a.justification              AS justification,
+    a.framework_scope_id         AS framework_scope_id
+FROM in_force s
+JOIN framework_scope_applicability a
+    ON a.framework_scope_id = s.id
+   AND a.tenant_id = s.tenant_id
+JOIN framework_requirements r ON r.id = a.framework_requirement_id
+JOIN framework_versions fv ON fv.id = r.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE a.decision = 'excluded'
+ORDER BY r.code ASC, r.id ASC
+`
+
+type ListExcludedRequirementsAsOfForExportParams struct {
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	FrozenAt           pgtype.Timestamptz `json:"frozen_at"`
+}
+
+type ListExcludedRequirementsAsOfForExportRow struct {
+	FrameworkSlug    string      `json:"framework_slug"`
+	FrameworkVersion string      `json:"framework_version"`
+	RequirementCode  string      `json:"requirement_code"`
+	RequirementTitle string      `json:"requirement_title"`
+	Justification    string      `json:"justification"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+}
+
+// ===== #1792: excluded requirements -> SSP not-applicable entries =====
+// The requirements excluded in the framework-scope revision that was in
+// force for a framework version at the audit period's frozen_at. The
+// revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
+// revision active at that time, activated by then, #2078); decisions on an activated or superseded
+// revision are frozen, so its rows are exactly what applied at the freeze.
+// A requirement excluded only after the freeze lives on a later revision
+// and is not returned. RLS scopes every table to the caller tenant; the
+// leading tenant predicates are defense-in-depth.
+func (q *Queries) ListExcludedRequirementsAsOfForExport(ctx context.Context, arg ListExcludedRequirementsAsOfForExportParams) ([]ListExcludedRequirementsAsOfForExportRow, error) {
+	rows, err := q.db.Query(ctx, listExcludedRequirementsAsOfForExport, arg.TenantID, arg.FrameworkVersionID, arg.FrozenAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExcludedRequirementsAsOfForExportRow
+	for rows.Next() {
+		var i ListExcludedRequirementsAsOfForExportRow
+		if err := rows.Scan(
+			&i.FrameworkSlug,
+			&i.FrameworkVersion,
+			&i.RequirementCode,
+			&i.RequirementTitle,
+			&i.Justification,
+			&i.FrameworkScopeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFailingEvaluationsAsOf = `-- name: ListFailingEvaluationsAsOf :many
+WITH control_latest_run AS (
+    -- #3071: ranked by the instant a run judged, not the clock that wrote
+    -- it, so a replay of an earlier instant does not displace a later live
+    -- run. On a tie (a replay of a live run's own instant) the live run
+    -- wins. A run must still have been written by the horizon.
+    SELECT DISTINCT ON (control_id)
+        control_id, eval_run_id
+    FROM control_evaluations
+    WHERE tenant_id = $1
+      AND evaluated_at <= $2
+    ORDER BY control_id, COALESCE(evaluated_as_of, evaluated_at) DESC,
+             (evaluated_as_of IS NULL) DESC, evaluated_at DESC, created_at DESC
+)
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, evaluated_as_of, result, freshness_status, last_observed_at FROM (
+    SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+        ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
+        ce.evaluated_at, ce.evaluated_as_of, ce.result, ce.freshness_status,
+        ce.last_observed_at
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ) latest
 WHERE latest.result = 'fail'
 ORDER BY latest.control_id ASC, latest.scope_cell_id ASC
@@ -190,6 +436,7 @@ type ListFailingEvaluationsAsOfRow struct {
 	ScopeCellID     pgtype.UUID        `json:"scope_cell_id"`
 	EvalRunID       pgtype.UUID        `json:"eval_run_id"`
 	EvaluatedAt     pgtype.Timestamptz `json:"evaluated_at"`
+	EvaluatedAsOf   pgtype.Timestamptz `json:"evaluated_as_of"`
 	Result          EvidenceResult     `json:"result"`
 	FreshnessStatus string             `json:"freshness_status"`
 	LastObservedAt  pgtype.Timestamptz `json:"last_observed_at"`
@@ -197,9 +444,19 @@ type ListFailingEvaluationsAsOfRow struct {
 
 // POA&M source (slice-030 decision D3): the latest evaluation per
 // (control, scope_cell) whose result is 'fail', bounded by the frozen
-// horizon. DISTINCT ON collapses the append-only control_evaluations
-// history to the current row per cell as of $3 (the period's frozen_at),
+// horizon $2 (the period's frozen_at). DISTINCT ON collapses the
+// append-only control_evaluations history to the current row per cell,
 // then the outer filter keeps only the failing ones.
+//
+// #2526: only cells in each control's latest evaluation run as of the
+// horizon count, the as-of counterpart of the dashboard's
+// control_latest_run (#2269 D1). One run writes one row per scope cell the
+// control's applicability_expr resolves to at that moment, so a cell that
+// stopped applying has no row in it, and its older failing row is not a
+// finding.
+//
+// #3087: evaluated_as_of is the instant a replay row judged; the POA&M
+// item carries it, and its due date counts from it.
 //
 // A failing control evaluation IS a finding for v1 — there is no separate
 // findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
@@ -219,6 +476,7 @@ func (q *Queries) ListFailingEvaluationsAsOf(ctx context.Context, arg ListFailin
 			&i.ScopeCellID,
 			&i.EvalRunID,
 			&i.EvaluatedAt,
+			&i.EvaluatedAsOf,
 			&i.Result,
 			&i.FreshnessStatus,
 			&i.LastObservedAt,

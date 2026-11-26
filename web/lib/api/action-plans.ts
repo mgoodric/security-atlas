@@ -7,12 +7,17 @@
 // isolation is enforced by RLS at the DB layer (invariant 6); the UI never
 // passes tenant_id.
 
+import { ENUM_LABELS } from "@/lib/labels/enum-labels";
+
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 /**
  * ActionPlan lifecycle status. Mirrors the constants in
  * `internal/actionplan/statemachine.go`:
- *   draft → in_progress → blocked → completed → verified
+ *   draft → in_progress → blocked → completed ⇄ verified
+ * verified → completed is the system's alone: a linked control failing
+ * its latest evaluation returns the plan to completed (#2109).
  */
 export type ActionPlanStatus =
   | "draft"
@@ -29,14 +34,9 @@ export const ACTION_PLAN_STATUSES: ActionPlanStatus[] = [
   "verified",
 ];
 
-/** Human labels for the lifecycle statuses. */
-export const ACTION_PLAN_STATUS_LABELS: Record<ActionPlanStatus, string> = {
-  draft: "Draft",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  completed: "Completed",
-  verified: "Verified",
-};
+/** Human labels for the lifecycle statuses, from the shared label module. */
+export const ACTION_PLAN_STATUS_LABELS: Record<ActionPlanStatus, string> =
+  ENUM_LABELS.ActionPlanStatus;
 
 /** ActionPlan is the canonical wire shape. Mirrors `planWire`. */
 export type ActionPlan = {
@@ -45,9 +45,13 @@ export type ActionPlan = {
   description: string;
   triggering_event: string;
   owner_id: string;
+  // #2174: present and true when the owner can no longer work in Risk.
+  owner_lacks_access?: boolean;
   due_date?: string;
   status: ActionPlanStatus;
   audit_period_id?: string;
+  /** Completed, and the linked controls do not all pass yet (#2109). */
+  controls_failing?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -81,6 +85,8 @@ export type ActionPlanRef = {
   title: string;
   status: ActionPlanStatus;
   due_date?: string;
+  /** Completed, and the linked controls do not all pass yet (#2109). */
+  controls_failing?: boolean;
 };
 
 export type ActionPlansRefListResponse = {
@@ -90,19 +96,15 @@ export type ActionPlansRefListResponse = {
 
 export type ActionPlansListFilters = {
   status?: ActionPlanStatus | "";
+  /** Titles containing this, ignoring case (#2618). */
+  q?: string;
   limit?: number;
   cursor?: string;
 };
 
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;
@@ -114,6 +116,7 @@ export async function fetchActionPlansList(
 ): Promise<ActionPlansListResponse> {
   const qs = new URLSearchParams();
   if (filters.status) qs.set("status", filters.status);
+  if (filters.q?.trim()) qs.set("q", filters.q.trim());
   if (filters.limit) qs.set("limit", String(filters.limit));
   if (filters.cursor) qs.set("cursor", filters.cursor);
   const url = qs.toString()
@@ -189,6 +192,24 @@ export async function createActionPlan(
   return { id };
 }
 
+/**
+ * Link one control to an action plan (#2141 bulk link). The platform
+ * checks the caller's role and that both records are in its tenant.
+ */
+export async function linkActionPlanControl(
+  planId: string,
+  controlId: string,
+): Promise<void> {
+  await parse(
+    await fetch(
+      `/api/action-plans/${encodeURIComponent(
+        planId,
+      )}/controls/${encodeURIComponent(controlId)}`,
+      { method: "POST" },
+    ),
+  );
+}
+
 /** Fetch the action plans linked to a risk (AC-25 read-only section). */
 export async function fetchActionPlansForRisk(
   riskId: string,
@@ -204,5 +225,49 @@ export async function fetchActionPlansForControl(
 ): Promise<ActionPlansRefListResponse> {
   return parse<ActionPlansRefListResponse>(
     await fetch(`/api/controls/${encodeURIComponent(controlId)}/action-plans`),
+  );
+}
+
+/**
+ * The fields the edit route sends (#2108), only the changed ones. A
+ * status is one transition; verified is not among them, because a plan
+ * is verified through `verifyActionPlan`. `due_date` is an RFC 3339
+ * timestamp; `clear_due_date` removes the date.
+ */
+export type UpdateActionPlanInput = {
+  title?: string;
+  description?: string;
+  owner_id?: string;
+  due_date?: string;
+  clear_due_date?: boolean;
+  status?: Exclude<ActionPlanStatus, "verified">;
+};
+
+/** PATCH an action plan: a record edit, or one status transition. */
+export async function updateActionPlan(
+  id: string,
+  body: UpdateActionPlanInput,
+): Promise<{ action_plan: ActionPlan }> {
+  return parse<{ action_plan: ActionPlan }>(
+    await fetch(`/api/action-plans/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+/**
+ * Verify a completed plan with no linked controls (#2108). The platform
+ * refuses the plan's owner, anyone without the approver role, and a plan
+ * with linked controls.
+ */
+export async function verifyActionPlan(
+  id: string,
+): Promise<{ action_plan: ActionPlan }> {
+  return parse<{ action_plan: ActionPlan }>(
+    await fetch(`/api/action-plans/${encodeURIComponent(id)}/verify`, {
+      method: "POST",
+    }),
   );
 }

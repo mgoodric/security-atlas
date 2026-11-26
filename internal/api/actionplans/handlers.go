@@ -6,6 +6,7 @@
 //	GET    /v1/action-plans                              list + pagination (AC-11)
 //	GET    /v1/action-plans/{id}                         get one + linkage (AC-12)
 //	PATCH  /v1/action-plans/{id}                         update + state machine (AC-13/AC-15)
+//	POST   /v1/action-plans/{id}/verify                  verify a plan with no linked controls (#2108)
 //	DELETE /v1/action-plans/{id}                         soft-delete (AC-14)
 //	POST   /v1/action-plans/{id}/risks/{risk_id}         link risk (AC-17)
 //	DELETE /v1/action-plans/{id}/risks/{risk_id}         unlink risk (AC-18)
@@ -46,17 +47,43 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler bundles the slice-384 routes over a single actionplan.Store.
 type Handler struct {
 	store *actionplan.Store
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
 func New(store *actionplan.Store) *Handler { return &Handler{store: store} }
+
+// WithModules wires the module views the owner_lacks_access flag reads
+// (#2174). Without them (a unit-test server) no owner is flagged.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// flagOwners sets owner_lacks_access on each plan from its owner's live
+// module access (action plans belong to Risk). An error fails the read
+// rather than drop the flag.
+func (h *Handler) flagOwners(r *http.Request, out []planWire) error {
+	check, err := h.views.Owners(r, "risk")
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		if out[i].OwnerLacksAccess, err = check.Lacks(out[i].OwnerID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // ----- wire shapes -----
 
@@ -91,14 +118,20 @@ type linkageWire struct {
 }
 
 type planWire struct {
-	ID              string    `json:"id"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	TriggeringEvent string    `json:"triggering_event"`
-	OwnerID         string    `json:"owner_id"`
-	DueDate         *string   `json:"due_date,omitempty"`
-	Status          string    `json:"status"`
-	AuditPeriodID   *string   `json:"audit_period_id,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	TriggeringEvent string `json:"triggering_event"`
+	OwnerID         string `json:"owner_id"`
+	// OwnerLacksAccess (#2174), computed at read time and present only
+	// when true: the owner can no longer work in Risk. The owner is kept.
+	OwnerLacksAccess bool    `json:"owner_lacks_access,omitempty"`
+	DueDate          *string `json:"due_date,omitempty"`
+	Status           string  `json:"status"`
+	AuditPeriodID    *string `json:"audit_period_id,omitempty"`
+	// ControlsFailing: completed, and the linked controls do not all pass
+	// their latest evaluation (#2109). Set on the single-plan read.
+	ControlsFailing bool      `json:"controls_failing"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -153,9 +186,14 @@ func (h *Handler) CreateActionPlan(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"action_plan": planWireFrom(created)})
 }
 
+// maxListQueryLen bounds ?q on the action-plan list (#2618): a title
+// search, not a document.
+const maxListQueryLen = 200
+
 // ListActionPlans handles GET /v1/action-plans (AC-11). Keyset pagination:
 //
 //	?status=draft|in_progress|blocked|completed|verified
+//	?q=<text>                                  (title contains, any case; #2618)
 //	?limit=25                                  (default 25, max 100)
 //	?cursor=<created_at_rfc3339>,<id>          (opaque "next" cursor)
 func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +205,16 @@ func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	filter := actionplan.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	filter := actionplan.ListFilter{
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Query:  strings.TrimSpace(r.URL.Query().Get("q")),
+	}
 	if filter.Status != "" && !actionplan.ValidStatus(filter.Status) {
 		httpresp.WriteError(w, http.StatusBadRequest, "status is not a valid action plan status")
+		return
+	}
+	if len(filter.Query) > maxListQueryLen {
+		httpresp.WriteError(w, http.StatusBadRequest, "q is too long")
 		return
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
@@ -197,6 +242,10 @@ func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
 	out := make([]planWire, len(rows))
 	for i, p := range rows {
 		out[i] = planWireFrom(p)
+	}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "action plan owner access", err)
+		return
 	}
 	body := map[string]any{"action_plans": out, "count": len(out)}
 	// Emit a next-cursor when the page is full (more rows may exist).
@@ -228,8 +277,13 @@ func (h *Handler) GetActionPlan(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get action plan", err)
 		return
 	}
+	plan := []planWire{planWireFrom(p)}
+	if err := h.flagOwners(r, plan); err != nil {
+		httperr.WriteInternal(w, r, "action plan owner access", err)
+		return
+	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
-		"action_plan": planWireFrom(p),
+		"action_plan": plan[0],
 		"linkage":     linkageWireFrom(lk),
 	})
 }
@@ -279,6 +333,38 @@ func (h *Handler) UpdateActionPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"action_plan": planWireFrom(updated)})
+}
+
+// VerifyActionPlan handles POST /v1/action-plans/{id}/verify (#2108): an
+// approver verifies a completed plan with no linked controls. OPA admits
+// only admin on action-plans writes, so the approver here is a tenant admin
+// (authz.IsTenantAdmin, #2428), checked here; the store refuses the plan's owner (whatever the
+// self-approval setting), a credential that is not a person, and a plan
+// with linked controls.
+func (h *Handler) VerifyActionPlan(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCtx(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	verified, err := h.store.Verify(ctx, id, approval.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
+	if err != nil {
+		h.writeStoreErr(w, r, "verify action plan", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"action_plan": planWireFrom(verified)})
 }
 
 // DeleteActionPlan handles DELETE /v1/action-plans/{id} (AC-14). Soft-delete.
@@ -387,20 +473,25 @@ func (h *Handler) unlinkHandler(w http.ResponseWriter, r *http.Request, param st
 // PlansForRisk handles GET /v1/risks/{id}/action-plans (AC-25 read-only
 // "Linked Action Plans" section). Returns the live plans linked to a risk.
 func (h *Handler) PlansForRisk(w http.ResponseWriter, r *http.Request) {
-	h.plansForTarget(w, r, func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	h.plansForTarget(w, r, ok && authz.IsTenantRiskReader(cred), func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
 		return h.store.PlansForRisk(ctx, target)
 	})
 }
 
 // PlansForControl handles GET /v1/controls/{id}/action-plans (AC-26).
 func (h *Handler) PlansForControl(w http.ResponseWriter, r *http.Request) {
-	h.plansForTarget(w, r, func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	h.plansForTarget(w, r, ok && authz.HasAnyTenantRole(cred), func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
 		return h.store.PlansForControl(ctx, target)
 	})
 }
 
-func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, fn func(context.Context, uuid.UUID) ([]actionplan.PlanRef, error)) {
-	if !requireProgramRead(w, r) {
+// plansForTarget serves a target's linked plans. canRead is the target's own
+// read gate: the plans list is a section of the risk or control page, so it
+// admits whoever reads that page (#2507).
+func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, canRead bool, fn func(context.Context, uuid.UUID) ([]actionplan.PlanRef, error)) {
+	if !admit(w, canRead, "role does not grant read access to this record") {
 		return
 	}
 	ctx, _, ok := h.tenantCtx(r)
@@ -419,14 +510,15 @@ func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, fn func
 		return
 	}
 	type refWire struct {
-		ID      string  `json:"id"`
-		Title   string  `json:"title"`
-		Status  string  `json:"status"`
-		DueDate *string `json:"due_date,omitempty"`
+		ID              string  `json:"id"`
+		Title           string  `json:"title"`
+		Status          string  `json:"status"`
+		DueDate         *string `json:"due_date,omitempty"`
+		ControlsFailing bool    `json:"controls_failing"`
 	}
 	out := make([]refWire, len(refs))
 	for i, ref := range refs {
-		rw := refWire{ID: ref.ID.String(), Title: ref.Title, Status: ref.Status}
+		rw := refWire{ID: ref.ID.String(), Title: ref.Title, Status: ref.Status, ControlsFailing: ref.ControlsFailing}
 		if ref.DueDate != nil {
 			d := ref.DueDate.Format("2006-01-02")
 			rw.DueDate = &d
@@ -441,7 +533,7 @@ func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, fn func
 // writeStoreErr maps actionplan.Store errors to HTTP status codes.
 //
 //	ErrNotFound / ErrLinkTargetNotFound / ErrNotLinked -> 404
-//	ErrAlreadyLinked                                   -> 409
+//	ErrAlreadyLinked / ErrMitigationRequired           -> 409
 //	ErrIllegalTransition / ErrLimitExceeded            -> 422
 //	validation errors                                  -> 400
 //	anything else                                      -> 500
@@ -457,8 +549,26 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 		httpresp.WriteError(w, http.StatusNotFound, "link does not exist")
 	case errors.Is(err, actionplan.ErrAlreadyLinked):
 		httpresp.WriteError(w, http.StatusConflict, "already linked")
+	case errors.Is(err, actionplan.ErrMitigationRequired):
+		// #2449: name the risk, without the store's wrapping.
+		var mr *actionplan.MitigationRequiredError
+		if errors.As(err, &mr) {
+			httpresp.WriteError(w, http.StatusConflict, mr.Error())
+		} else {
+			httpresp.WriteError(w, http.StatusConflict, actionplan.ErrMitigationRequired.Error())
+		}
 	case errors.Is(err, actionplan.ErrIllegalTransition):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "illegal status transition")
+	case errors.Is(err, actionplan.ErrVerifyThroughVerify):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, actionplan.ErrVerifyHasControls):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, actionplan.ErrOwnerCannotVerify),
+		errors.Is(err, actionplan.ErrVerifierNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, actionplan.ErrVerifierInvolved):
+		// The sentinel only: a wrapped audit-read failure stays server-side.
+		httpresp.WriteError(w, http.StatusForbidden, actionplan.ErrVerifierInvolved.Error())
 	case errors.Is(err, actionplan.ErrLimitExceeded):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "limit_exceeded")
 	case errors.Is(err, actionplan.ErrTitleRequired),
@@ -497,8 +607,8 @@ func (h *Handler) identity(w http.ResponseWriter, r *http.Request) (context.Cont
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return nil, uuid.Nil, false
 	}
-	actor, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	actor, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusForbidden, "action plan mutation requires a user credential")
 		return nil, uuid.Nil, false
 	}
@@ -513,6 +623,7 @@ func planWireFrom(p actionplan.ActionPlan) planWire {
 		TriggeringEvent: p.TriggeringEvent,
 		OwnerID:         p.OwnerID.String(),
 		Status:          p.Status,
+		ControlsFailing: p.ControlsFailing,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}

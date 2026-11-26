@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
@@ -108,7 +109,7 @@ func (s *Server) registerMe(root *chi.Mux) {
 	// SSRF-validated at construction (P0-543-2). These are SINKS only
 	// (P0-543-4) — the toggle just records the per-user opt-in.
 	slackCfg := slack.ConfigFromEnv()
-	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg, slack.SSRFPolicy()), slackCfg.BaseURL)
 	// Slice 585: slackCfg.Enabled() reports whether the operator-configured
 	// Slack webhook URL env is present (presence only — the URL/token never
 	// reaches the wire, P0-585 / P0-543-2). Drives the disabled toggle state.
@@ -148,12 +149,21 @@ func (s *Server) registerMe(root *chi.Mux) {
 	// renders honest tenant IDs without name enrichment.
 	meTenantsH := meapi.NewTenants(s.authPool)
 	root.Get("/v1/me/tenants", meTenantsH.ListTenants)
-	// Slice 144: PATCH /v1/tenants/{id} — rename a tenant.
-	// Gated on per-tenant admin (slice-034 cred.IsAdmin OR
-	// slice-187 JWT roles[CURRENT][admin]) OR super_admin
-	// (slice-187 JWT atlas:super_admin claim). RLS on the
-	// tenants table is the load-bearing second leg —
-	// cross-tenant rename is impossible at the DB layer
+	// #1763: GET /v1/me/tenancy — the install's tenant count, which
+	// drives tenant chrome in the web app (ADR 0023). platformStatus is
+	// read per request because cmd/atlas attaches it after construction.
+	root.Get("/v1/me/tenancy", func(w http.ResponseWriter, r *http.Request) {
+		var counter meapi.TenantCounter
+		if s.platformStatus != nil {
+			counter = s.platformStatus
+		}
+		meapi.NewTenancy(counter).Get(w, r)
+	})
+	// Slice 144: PATCH /v1/tenants/{id} — the organisation's own
+	// settings. Gated on authz.IsTenantAdmin (live tenant admin
+	// role, super_admin, or an admin-flagged key; #2443). RLS on
+	// the tenants table is the load-bearing second leg —
+	// cross-tenant patching is impossible at the DB layer
 	// regardless of the role gate.
 	tenantsH := tenantsapi.New(s.dbPool)
 	root.Patch("/v1/tenants/{id}", tenantsH.PatchTenant)

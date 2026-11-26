@@ -12,7 +12,7 @@
 //   - Write paths (POST) require IsAdmin OR OwnerRoles contains
 //     "grc_engineer". The slice-035 OPA middleware also enforces
 //     resource_type="walkthroughs" + the period-assignment ABAC predicate
-//     for auditors (per policies/authz/auditor.rego, added by this slice).
+//     for auditors (per internal/authz/rego_bundle/auditor.rego, added by this slice).
 //   - Read paths additionally allow the "auditor" role (period-scoped via
 //     the OPA layer).
 //
@@ -24,7 +24,6 @@ package walkthroughs
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -58,7 +58,7 @@ const MaxMultipartMemory = int64(8 * 1024 * 1024) // 8 MiB
 // slice-036 artifact store. Tests inject an in-memory fake; production
 // passes the real *artifact.Store via the adapter below.
 type ArtifactUploader interface {
-	Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error)
+	PutReader(ctx context.Context, in artifact.PutInput, body io.ReadSeeker) (artifact.Artifact, error)
 }
 
 // walkthroughReader is the per-route read seam the two GET read paths —
@@ -281,21 +281,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	body, err := io.ReadAll(file)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
-			return
-		}
-		httpresp.WriteError(w, http.StatusBadRequest, "read body: "+err.Error())
-		return
-	}
-	if int64(len(body)) > MaxAttachmentBytes {
-		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
-		return
-	}
-	if len(body) == 0 {
+	if header.Size == 0 {
 		httpresp.WriteError(w, http.StatusBadRequest, "empty file")
 		return
 	}
@@ -304,9 +290,6 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-
-	sum := sha256.Sum256(body)
-	hash := hex.EncodeToString(sum[:])
 
 	// Annotations JSON (optional). Validate that it parses; the schema
 	// is intentionally free-form (v1 ships with no canonical shape).
@@ -320,17 +303,23 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist the blob to the slice-036 artifact store FIRST. If the
+	// Reject a missing, finalized or frozen walkthrough BEFORE storing
+	// the blob, so a refused attach leaves no unreferenced artifact
+	// (#1939). AddAttachment re-checks inside its own transaction.
+	if err := h.store.CheckAttachable(ctx, id, cred.ID); err != nil {
+		h.writeStoreErr(w, r, "check walkthrough", err)
+		return
+	}
+
+	// Persist the blob to the slice-036 artifact store next. If the
 	// store-level write fails, we never wrote the walkthrough_attachments
 	// row, so the walkthrough's canonical_hash stays consistent with its
-	// current attachment set.
-	art, err := h.uploader.Put(ctx, artifact.PutInput{
+	// current attachment set. The part is streamed, not read into
+	// memory (#1939).
+	art, err := h.uploader.PutReader(ctx, artifact.PutInput{
 		ContentType: contentType,
-		SizeBytes:   int64(len(body)),
-		ContentHash: hash,
 		UploadedBy:  cred.ID,
-		Body:        body,
-	})
+	}, file)
 	if err != nil {
 		writeArtifactErr(w, r, "store attachment blob", err)
 		return
@@ -343,7 +332,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		StorageKey:     art.StorageKey,
 		ContentType:    art.ContentType,
 		SizeBytes:      art.SizeBytes,
-		SHA256Hex:      hash,
+		SHA256Hex:      art.ContentHash,
 		AnnotationsRaw: []byte(annotationsRaw),
 		UploadedBy:     cred.ID,
 	})
@@ -419,9 +408,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		// queue saturated) map to a deterministic 503 instead of a 500/hang.
 		buf, err := walkthrough.RenderPDF(r.Context(), wt)
 		if err != nil {
-			if status, msg, ok := pdfDegradation(err); ok {
-				logPDFDegradation(r, err)
-				httpresp.WriteError(w, status, msg)
+			if writePDFDegradation(w, r, err) {
 				return
 			}
 			httperr.WriteInternal(w, r, "render PDF", err)
@@ -449,21 +436,14 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 	return r.Context(), cred, true
 }
 
-// canWrite returns true when the credential is an admin or carries the
-// grc_engineer owner role. Mirrors the slice-028 (audit_periods)
+// canWrite returns true when the credential is a tenant admin or
+// grc_engineer, by flag or by live tenant role (authz.IsTenantApprover,
+// #2428). Mirrors the slice-028 (audit_periods)
 // defense-in-depth check. The slice-035 OPA middleware is the primary
 // gate; this handler-local check returns 403 even when the OPA
 // middleware is not wired (unit-test servers).
 func canWrite(cred credstore.Credential) bool {
-	if cred.IsAdmin {
-		return true
-	}
-	for _, role := range cred.OwnerRoles {
-		if role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
+	return authz.IsTenantApprover(cred)
 }
 
 func toWire(wt walkthrough.Walkthrough) walkthroughWire {

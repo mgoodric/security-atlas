@@ -9,9 +9,11 @@
 // ONLY tenant context is the cookie session, so a tenant can only ever
 // read its own risk (a cross-tenant id resolves to upstream 404).
 //
-// Read-only: only GET is exposed. Risk create / delete / link stay on
-// their existing routes (out of scope for the detail page per the slice
-// 681 anti-criteria).
+// GET reads the risk. #2104 adds PATCH: the Edit route saves the record
+// fields through it, forwarded to `PATCH /v1/risks/{id}` with the upstream
+// status and body passed through (a 400 refusal renders in the form).
+// #2311: an If-Match header is forwarded too, so the platform can refuse
+// (412) an edit made from a version someone else has since changed.
 //
 // Error mapping (slice 367 — never leak an internal error to the user):
 //   - missing bearer cookie       -> 401 { error: "unauthenticated" }
@@ -26,14 +28,40 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { APIError } from "@/lib/api/base";
+import { forwardJSON, noStore, rejectNonUUID } from "@/lib/api/bff";
 import { getRisk } from "@/lib/api/risks";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  const ifMatch = req.headers.get("If-Match");
+  return noStore(
+    await forwardJSON(`/v1/risks/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      jsonBody: body,
+      headers: ifMatch ? { "If-Match": ifMatch } : undefined,
+    }),
+  );
+}
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

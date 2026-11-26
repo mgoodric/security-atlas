@@ -255,13 +255,13 @@ func TestHandle_MissingTenantHeaderIsTerminated(t *testing.T) {
 
 func TestHandle_NonUUIDControlIDIsAckedNoEvalCall(t *testing.T) {
 	t.Parallel()
-	// control_id = "scf:VPM-04" is a valid SDK control_ref (the scheduled
+	// control_id = "scf:VPM-06" is a valid SDK control_ref (the scheduled
 	// sweep, not this subscriber, evaluates anchor-ref controls). handle()
 	// must Ack so the broker moves on; the engine must not be called.
 	eval := &fakeEvaluator{}
 	s := newSubscriberWithEvaluator(eval)
 
-	msg := newFakeMsg(validProtoRecord(t, "scf:VPM-04"), validTenantHeader())
+	msg := newFakeMsg(validProtoRecord(t, "scf:VPM-06"), validTenantHeader())
 	s.handle(context.Background(), msg)
 
 	if msg.acks != 1 {

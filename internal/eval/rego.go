@@ -5,10 +5,15 @@
 // expression over the evidence ledger. When the engine evaluates such a
 // control it runs the query here. The sandbox contract:
 //
-//   - The ONLY input is {records: [{result, observed_at, hash}, ...]} — the
-//     in-window evidence records for that (control, scope_cell). No DB
-//     handle, no other-tenant data, nothing else reaches the policy.
+//   - The ONLY input is {records: [{result, observed_at}, ...]} — the
+//     in-window evidence records for that (control, scope_cell), with
+//     observed_at as an RFC 3339 timestamp. No payload, no DB handle, no
+//     other-tenant data, nothing else reaches the policy (ADR 0028).
 //   - No rego.Store, no rego.Function.
+//   - time.now_ns() is the engine's evaluation instant, passed with
+//     rego.EvalTime (the as-of instant for a replay, the case's pinned
+//     instant for a bundle test), never the wall clock (#2890, #2911).
+//     observed_at is normalised to UTC.
 //   - The capability set is restricted via evalSandboxCapabilities() so the
 //     network / runtime / introspection builtins (http.send, net.*,
 //     opa.runtime, ...) are not even compilable. A query referencing one
@@ -73,8 +78,10 @@ func evalSandboxCapabilities() *ast.Capabilities {
 }
 
 // regoInputRecord is one in-window evidence record as the Rego policy sees
-// it. Deliberately minimal — the policy gets the result enum and nothing
-// that could identify another tenant's data.
+// it. Deliberately minimal — the policy gets the result enum and the
+// observation time, and nothing that could identify another tenant's data.
+// Payload checks belong in SQL (ADR 0028 decision 2), so no payload field is
+// copied here.
 type regoInputRecord struct {
 	Result     string    `json:"result"`
 	ObservedAt time.Time `json:"observed_at"`
@@ -109,38 +116,43 @@ var defaultRegoCache = regocache.New()
 // (policy, capabilities) pair compiles via PrepareForEval; subsequent
 // calls re-use the cached *rego.PreparedEvalQuery. Closes slice 332
 // audit F-OPA-1.
-func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord) (string, error) {
+func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord, evaluatedAt time.Time) (string, error) {
 	if policy == "" {
-		return "", fmt.Errorf("%w: policy is empty", ErrRegoQuery)
+		return "", unevaluable(fmt.Errorf("%w: policy is empty", ErrRegoQuery))
 	}
 
 	q, err := defaultRegoCache.GetOrPrepare(ctx, policy, evalSandboxCapabilities(), regoQuery, evidenceQueryModuleName)
 	if err != nil {
-		return "", fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
+		err = fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
+		if ctx.Err() != nil {
+			// Preparing was cut short, not refused: a retry may compile.
+			return "", err
+		}
+		return "", unevaluable(err)
 	}
 
 	inRecs := make([]regoInputRecord, len(records))
 	for i, r := range records {
-		inRecs[i] = regoInputRecord{Result: r.result}
+		inRecs[i] = regoInputRecord{Result: r.result, ObservedAt: r.observedAt.UTC()}
 	}
 	input := map[string]interface{}{"records": inRecs}
 
-	rs, err := q.Eval(ctx, rego.EvalInput(input))
+	rs, err := q.Eval(ctx, rego.EvalInput(input), rego.EvalTime(evaluatedAt))
 	if err != nil {
 		return "", fmt.Errorf("%w: eval: %v", ErrRegoQuery, err)
 	}
 	if len(rs) == 0 || len(rs[0].Expressions) == 0 {
-		return "", fmt.Errorf("%w: policy did not assign `result`", ErrRegoQuery)
+		return "", unevaluable(fmt.Errorf("%w: policy did not assign `result`", ErrRegoQuery))
 	}
 
 	s, ok := rs[0].Expressions[0].Value.(string)
 	if !ok {
-		return "", fmt.Errorf("%w: result is %T, want a string", ErrRegoQuery, rs[0].Expressions[0].Value)
+		return "", unevaluable(fmt.Errorf("%w: result is %T, want a string", ErrRegoQuery, rs[0].Expressions[0].Value))
 	}
 	switch s {
 	case ResultPass, ResultFail, ResultNA, ResultInconclusive:
 		return s, nil
 	default:
-		return "", fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive", ErrRegoQuery, s)
+		return "", unevaluable(fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive", ErrRegoQuery, s))
 	}
 }

@@ -28,6 +28,6 @@ func (s *Server) registerCalendar(root *chi.Mux) {
 	calendarH := calendarapi.New(
 		calendarapi.NewStore(s.dbPool),
 		s.credStore,
-	)
+	).WithAuthz(s.authzEngine).WithModules(s.moduleViews)
 	calendarH.RegisterRoutes(root)
 }

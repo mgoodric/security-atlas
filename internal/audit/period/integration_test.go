@@ -19,15 +19,20 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidencesummary"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Slice 435 / 742: the pool/DSN/tenant-seed/tenant-context boilerplate this
@@ -56,19 +61,21 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		ctx := context.Background()
 		for _, stmt := range []string{
 			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`UPDATE populations SET audit_period_id = NULL, frozen_at = NULL WHERE tenant_id = $1`,
+			`UPDATE populations SET audit_period_id = NULL WHERE tenant_id = $1`,
 			`DELETE FROM sample_audit_log WHERE tenant_id = $1`,
 			`DELETE FROM sample_annotations WHERE tenant_id = $1`,
 			`DELETE FROM sample_evidence WHERE tenant_id = $1`,
 			`DELETE FROM samples WHERE tenant_id = $1`,
 			`DELETE FROM populations WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
 			`DELETE FROM controls WHERE tenant_id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
 			}
+		}
+		if err := dbtest.DeleteAuditPeriods(ctx, admin, `tenant_id = $1`, tenant); err != nil {
+			t.Logf("cleanup audit_periods: %v", err)
 		}
 	})
 	return tenant
@@ -110,7 +117,9 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 }
 
 // seedEvidence inserts n evidence_records rows with observed_at evenly
-// spaced one hour apart starting at windowStart.
+// spaced one hour apart starting at windowStart, each ingested when it was
+// observed, so a freeze at a past instant finds the rows observed before it
+// in the ledger (#1699).
 func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, n int, windowStart time.Time) []uuid.UUID {
 	t.Helper()
 	out := make([]uuid.UUID, n)
@@ -123,7 +132,7 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 				id, tenant_id, control_id, observed_at, ingested_at,
 				provenance, result, payload, hash, control_ref
 			)
-			VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
+			VALUES ($1, $2, $3, $4, $4, '{}'::jsonb, 'pass', '{}'::jsonb, $5, 'test')
 		`, id, tenant, ctrlID, observed, fmt.Sprintf("hash-028-%03d", i)); err != nil {
 			t.Fatalf("seed evidence %d: %v", i, err)
 		}
@@ -474,19 +483,11 @@ func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
 	}
 	hash1 := append([]byte(nil), first.FrozenHash...)
 
-	// Admin-privileged rollback to 'open' so we can re-freeze (otherwise
+	// Owner-privileged rollback to 'open' so we can re-freeze (otherwise
 	// AC-6 prevents it). This simulates a recovery flow; ordinary users
-	// cannot reach this state.
-	if _, err := admin.Exec(context.Background(),
-		`UPDATE audit_periods
-		 SET status      = 'open',
-		     frozen_at   = NULL,
-		     frozen_hash = NULL,
-		     frozen_by   = NULL,
-		     updated_at  = now()
-		 WHERE id = $1`, p.ID); err != nil {
-		t.Fatalf("admin rollback: %v", err)
-	}
+	// cannot reach this state, and the freeze-immutability trigger (#3050)
+	// refuses it even for the owner unless the trigger is disabled.
+	reopenFrozenPeriod(t, admin, p.ID)
 
 	// Re-freeze at the SAME wall-clock and content. AC-7 holds because
 	// frozen_at is NOT in the hash input set (ADR 0003) -- but to make
@@ -513,6 +514,164 @@ func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
 	}
 	if allZero {
 		t.Fatalf("AC-7: freeze hash is all-zero; expected sha256 with content")
+	}
+}
+
+// ===== #1699: a backdated record ingested after the freeze is not frozen =====
+//
+// A late connector push or a backdated upload writes a record whose
+// observed_at is before frozen_at but whose ingested_at is after it. It was
+// not in the ledger when the period froze, so it must not reach the period's
+// control state, its sample population, or a recompute of frozen_hash.
+
+func TestFreeze_LateIngestedBackdatedEvidenceStaysOut(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	fwID := seedFrameworkVersion(t, admin)
+	ctrlID := seedControl(t, admin, tenant)
+	windowStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	_ = seedEvidence(t, admin, tenant, ctrlID, 24, windowStart)
+
+	periodStore := period.NewStore(app)
+	auditStore := audit.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	p, err := periodStore.Create(ctx, period.CreateInput{
+		Name:               "#1699 period",
+		FrameworkVersionID: fwID,
+		PeriodStart:        windowStart,
+		PeriodEnd:          windowStart.Add(48 * time.Hour),
+		CreatedBy:          "key_test_1699",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pop, err := auditStore.CreatePopulation(ctx, audit.CreatePopulationInput{
+		ControlID:       ctrlID,
+		TimeWindowStart: windowStart,
+		TimeWindowEnd:   windowStart.Add(48 * time.Hour),
+		CreatedBy:       "key_test_1699",
+	})
+	if err != nil {
+		t.Fatalf("CreatePopulation: %v", err)
+	}
+	if err := periodStore.AttachPopulation(ctx, p.ID, pop.ID, "key_test_1699"); err != nil {
+		t.Fatalf("AttachPopulation: %v", err)
+	}
+
+	// Freeze at hour 10: records 0..10 (11) were in the ledger then.
+	frozenAt := windowStart.Add(10 * time.Hour)
+	first, err := periodStore.Freeze(ctx, p.ID, "key_test_1699", frozenAt)
+	if err != nil {
+		t.Fatalf("Freeze: %v", err)
+	}
+	hashAtFreeze := append([]byte(nil), first.FrozenHash...)
+
+	// Observed at hour 5, written to the ledger now: long after the freeze.
+	late := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, observed_at, ingested_at,
+			provenance, result, payload, hash, control_ref
+		)
+		VALUES ($1, $2, $3, $4, now(), '{}'::jsonb, 'fail', '{}'::jsonb, $5, 'test')
+	`, late, tenant, ctrlID, windowStart.Add(5*time.Hour), "hash-1699-late"); err != nil {
+		t.Fatalf("seed late evidence: %v", err)
+	}
+
+	obs, err := periodStore.ControlState(ctx, p.ID, ctrlID)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(obs) != 11 {
+		t.Fatalf("control state: %d observations, want the 11 in the ledger at frozen_at", len(obs))
+	}
+	for _, o := range obs {
+		if o.EvidenceRecordID == late {
+			t.Fatalf("control state includes the record ingested after the freeze")
+		}
+	}
+
+	s, err := auditStore.DrawSample(ctx, audit.DrawSampleInput{
+		PopulationID: pop.ID, N: 100, Seed: "seed-1699", CreatedBy: "key_test_1699",
+	})
+	if err != nil {
+		t.Fatalf("DrawSample: %v", err)
+	}
+	if len(s.EvidenceRecordIDs) != 11 {
+		t.Fatalf("frozen population: %d records, want 11", len(s.EvidenceRecordIDs))
+	}
+	for _, id := range s.EvidenceRecordIDs {
+		if id == late {
+			t.Fatalf("frozen population includes the record ingested after the freeze")
+		}
+	}
+
+	// The population count under the frozen horizon. CountPopulationEvidence
+	// has no Store caller, so it is read directly, as the app role.
+	var count int64
+	err = func() error {
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+			return err
+		}
+		count, err = dbx.New(tx).CountPopulationEvidence(ctx, dbx.CountPopulationEvidenceParams{
+			TenantID:     pgtype.UUID{Bytes: uuid.MustParse(tenant), Valid: true},
+			ControlID:    pgtype.UUID{Bytes: ctrlID, Valid: true},
+			ObservedAt:   pgtype.Timestamptz{Time: windowStart, Valid: true},
+			ObservedAt_2: pgtype.Timestamptz{Time: windowStart.Add(48 * time.Hour), Valid: true},
+			UnboundKinds: []string{},
+			FrozenAt:     pgtype.Timestamptz{Time: frozenAt, Valid: true},
+		})
+		return err
+	}()
+	if err != nil {
+		t.Fatalf("CountPopulationEvidence: %v", err)
+	}
+	if count != 11 {
+		t.Fatalf("frozen population count: %d, want 11", count)
+	}
+
+	// The frozen-period evidence summary: its "of M" count and its citation
+	// resolver, which reads the whole frozen population.
+	summaries := evidencesummary.NewPeriodStore(app)
+	set, err := summaries.PeriodEvidenceSet(ctx, ctrlID, p.ID)
+	if err != nil {
+		t.Fatalf("PeriodEvidenceSet: %v", err)
+	}
+	if set.TotalCount != 11 {
+		t.Fatalf("frozen evidence summary: total %d, want 11", set.TotalCount)
+	}
+	if _, ok, err := summaries.ResolveBeforeHorizon(ctx, late, ctrlID, frozenAt); err != nil || ok {
+		t.Fatalf("frozen evidence summary resolves the late record: ok=%v err=%v, want false", ok, err)
+	}
+
+	// The auditor authz hydrator: the late record belongs to no frozen
+	// period, so an auditor scoped to p cannot open it.
+	scope, found, err := auditStore.EvidencePeriods(ctx, late)
+	if err != nil || !found {
+		t.Fatalf("EvidencePeriods(late): found=%v err=%v", found, err)
+	}
+	if slices.Contains(scope.Periods, p.ID) {
+		t.Fatalf("EvidencePeriods(late) lists the frozen period %s: %v", p.ID, scope.Periods)
+	}
+
+	// Recompute frozen_hash at the same horizon: the admin reopens the period
+	// (the AC-7 recovery path) and freezes again. The late record must not
+	// change the commitment.
+	reopenFrozenPeriod(t, admin, p.ID)
+	second, err := periodStore.Freeze(ctx, p.ID, "key_test_1699", frozenAt)
+	if err != nil {
+		t.Fatalf("re-Freeze: %v", err)
+	}
+	if hex.EncodeToString(second.FrozenHash) != hex.EncodeToString(hashAtFreeze) {
+		t.Fatalf("frozen_hash changed after a late, backdated record:\n  at freeze = %x\n  recompute = %x",
+			hashAtFreeze, second.FrozenHash)
 	}
 }
 

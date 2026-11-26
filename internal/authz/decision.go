@@ -25,6 +25,11 @@ type Decision struct {
 	Allow      bool
 	Reason     string
 	PolicyHits []string
+	// LiveRoles is the canonical subset of the caller's user_roles rows the
+	// resolver returned for this decision, without the credential-derived
+	// roles. authzmw hands it to handlers as credstore.Credential.TenantRoles
+	// (#2428), so a handler gate reads the same live assignment OPA did.
+	LiveRoles []Role
 }
 
 // Engine wraps a prepared OPA query. It is goroutine-safe and intended
@@ -56,7 +61,7 @@ type Engine struct {
 	attrsResolver AttrsResolver
 }
 
-// NewEngine constructs an Engine from the embedded policies/authz/*.rego
+// NewEngine constructs an Engine from the embedded internal/authz/rego_bundle/*.rego
 // bundle. resolver is the optional DB-backed role lookup; pass
 // NoopRolesResolver{} when DB lookup is not required.
 //
@@ -196,7 +201,7 @@ func (e *Engine) Reload(ctx context.Context, modules map[string]*ast.Module, sou
 }
 
 // ReloadFromEmbedded reloads the engine from the embedded
-// policies/authz/*.rego bundle. Convenience wrapper around Reload for
+// internal/authz/rego_bundle/*.rego bundle. Convenience wrapper around Reload for
 // the HTTP `POST /v1/admin/authz-bundle/reload` endpoint, which v1
 // scopes to the embedded bundle (slice 378 P0-4 — user-authored
 // bundles are v3+ work).
@@ -229,6 +234,7 @@ func (e *Engine) WithAttrsResolver(r AttrsResolver) *Engine {
 func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 	// Resolver hook: enrich roles from user_roles table when the input
 	// arrived without any (or with only credential-derived roles).
+	var liveRoles []Role
 	if in.TenantID != "" && in.User.ID != "" {
 		dbRoles, err := e.resolver.RolesFor(ctx, in.TenantID, in.User.ID)
 		if err != nil {
@@ -238,7 +244,14 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 			// answer 503 + retry_after instead of a misleading 500.
 			return Decision{}, wrapIfDependencyUnavailable(fmt.Errorf("authz: resolve roles: %w", err))
 		}
+		if in.roleCeiling != nil {
+			// #2431: a labelled key bound to a user holds no more than its
+			// label allows. Capping here, not in OPA, keeps LiveRoles (the
+			// handler gates' TenantRoles, #2428) under the same cap.
+			dbRoles = capRoles(in.roleCeiling, dbRoles)
+		}
 		if len(dbRoles) > 0 {
+			liveRoles = mergeRoles(nil, dbRoles)
 			in.User.Roles = mergeRoles(in.User.Roles, dbRoles)
 		}
 	}
@@ -308,8 +321,9 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 		}, nil
 	}
 	return Decision{
-		Allow:  true,
-		Reason: "allowed",
+		Allow:     true,
+		Reason:    "allowed",
+		LiveRoles: liveRoles,
 	}, nil
 }
 
@@ -391,11 +405,10 @@ var embeddedRegoFS embed.FS
 // source map feeds the SHA-256 fingerprint computation that the
 // slice-378 reload-audit path records.
 //
-// The bundle is populated by `just authz-sync` (or at build time by a
-// code-generation step); the source of truth lives at
-// policies/authz/*. We use an embedded FS so the binary is
-// self-contained and operators don't need to ship the policies
-// directory alongside the binary.
+// internal/authz/rego_bundle/ is the source of truth; there is no
+// other copy (#2677 removed the policies/authz/ mirror). We use an
+// embedded FS so the binary is self-contained and operators don't need
+// to ship the policies directory alongside the binary.
 func embeddedPoliciesWithSources() (map[string]*ast.Module, map[string][]byte, error) {
 	modules := map[string]*ast.Module{}
 	sources := map[string][]byte{}

@@ -47,12 +47,14 @@ describe("DELETE /api/saved-views/[id] — no-store cache header (slice 746)", (
     );
 
     const res = await DELETE(new Request("http://bff/api/saved-views/v1"), {
-      params: Promise.resolve({ id: "v1" }),
+      params: Promise.resolve({ id: "00000000-0000-0000-0000-000025580001" }),
     });
 
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(res.status).toBe(204);
     expect(capturedMethod).toBe("DELETE");
-    expect(capturedURL).toBe("http://atlas:8080/v1/saved-views/v1");
+    expect(capturedURL).toBe(
+      "http://atlas:8080/v1/saved-views/00000000-0000-0000-0000-000025580001",
+    );
   });
 });

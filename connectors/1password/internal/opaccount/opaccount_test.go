@@ -2,149 +2,248 @@ package opaccount_test
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mgoodric/security-atlas/connectors/1password/internal/opaccount"
 	"github.com/mgoodric/security-atlas/connectors/1password/internal/opauth"
 )
 
-func newFake1Password(t *testing.T, body string) *httptest.Server {
+const account = "M4E2SWNZAZFTRGQGDNS2E5A4MU"
+
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func creds(t *testing.T) opauth.Credentials {
+	t.Helper()
+	t.Setenv(opauth.EnvEventsToken, "test-events-token")
+	t.Setenv(opauth.EnvUsersClientID, "test-client-id")
+	t.Setenv(opauth.EnvUsersClientSecret, "test-client-secret")
+	c, err := opauth.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// fake serves both APIs from the documented fixtures and checks every
+// request carries the credential its API documents. Handlers can be
+// overridden per test.
+type fake struct {
+	introspect string
+	token      string
+	pages      map[string]string // page_token -> body
+	status     map[string]int    // path -> forced status
+	methods    []string
+	userCalls  atomic.Int32
+}
+
+func newFake(t *testing.T) *fake {
+	return &fake{
+		introspect: fixture(t, "introspect.json"),
+		token:      fixture(t, "token.json"),
+		pages:      map[string]string{"": fixture(t, "users_page1.json"), "CAIQAg": fixture(t, "users_page2.json")},
+		status:     map[string]int{},
+	}
+}
+
+func (f *fake) serve(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/account") {
+		f.methods = append(f.methods, r.Method+" "+r.URL.Path)
+		if code := f.status[r.URL.Path]; code != 0 {
+			http.Error(w, `{"code":"internal","message":"boom"}`, code)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/auth/introspect":
+			if r.Header.Get("Authorization") != "Bearer test-events-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(f.introspect))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/oauth/token":
+			id, secret, ok := r.BasicAuth()
+			if !ok || id != "test-client-id" || secret != "test-client-secret" {
+				http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
+				return
+			}
+			if err := r.ParseForm(); err != nil || r.PostForm.Get("grant_type") != "client_credentials" {
+				http.Error(w, `{"error":"unsupported_grant_type"}`, http.StatusBadRequest)
+				return
+			}
+			if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+				http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(f.token))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/accounts/"+account+"/users":
+			f.userCalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer op_o_c_test-access-token" {
+				http.Error(w, `{"code":"unauthenticated"}`, http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Query().Get("max_page_size") != "1000" {
+				http.Error(w, "max_page_size", http.StatusBadRequest)
+				return
+			}
+			body, ok := f.pages[r.URL.Query().Get("page_token")]
+			if !ok {
+				http.Error(w, "unknown page_token", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(body))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		if r.Header.Get("Authorization") == "" {
-			http.Error(w, "missing auth", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-func TestInspect_PassesOnStrongPolicy(t *testing.T) {
-	srv := newFake1Password(t, `{
-		"id": "acme-corp",
-		"name": "Acme Corp",
-		"two_factor_required": true,
-		"minimum_password_length": 14,
-		"domain_restrictions_enabled": true,
-		"active_member_count": 47
-	}`)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
+func client(t *testing.T, srv *httptest.Server) *opaccount.Client {
+	return opaccount.NewClient(srv.Client(), srv.URL, srv.URL, creds(t))
+}
 
-	state, err := opaccount.Inspect(context.Background(), c, nil)
+var fixed = func() time.Time { return time.Date(2026, 11, 22, 14, 5, 0, 0, time.UTC) }
+
+func TestInspect_DocumentedResponses(t *testing.T) {
+	f := newFake(t)
+	srv := f.serve(t)
+	s, err := opaccount.Inspect(context.Background(), client(t, srv), fixed)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.OrgID != "acme-corp" {
-		t.Errorf("OrgID = %q", state.OrgID)
+	if s.OrgID != account {
+		t.Errorf("OrgID = %q; want introspect account_uuid", s.OrgID)
 	}
-	if !state.TwoFactorRequired {
-		t.Error("TwoFactorRequired = false; want true")
+	if !s.AuditEventsEnabled {
+		t.Error("AuditEventsEnabled = false; features include auditevents")
 	}
-	if state.MinimumPasswordLength != 14 {
-		t.Errorf("MinimumPasswordLength = %d", state.MinimumPasswordLength)
+	// Page 1: one ACTIVE, one SUSPENDED. Page 2: one ACTIVE, one with state
+	// omitted, which is in neither count.
+	if s.ActiveMembers != 2 || s.SuspendedMembers != 1 {
+		t.Errorf("members = %d active, %d suspended; want 2, 1", s.ActiveMembers, s.SuspendedMembers)
 	}
-	if !state.DomainRestrictionsEnabled {
-		t.Error("DomainRestrictionsEnabled = false")
+	if s.Result != opaccount.ResultInconclusive {
+		t.Errorf("Result = %q; want inconclusive (the connector never passes)", s.Result)
 	}
-	if state.ActiveMembers != 47 {
-		t.Errorf("ActiveMembers = %d", state.ActiveMembers)
+	if !s.ObservedAt.Equal(fixed()) {
+		t.Errorf("ObservedAt = %v", s.ObservedAt)
 	}
-	if state.Result != opaccount.ResultPass {
-		t.Errorf("Result = %q; want pass", state.Result)
+	for _, m := range f.methods {
+		if !strings.HasPrefix(m, "GET ") && m != "POST /v1/oauth/token" {
+			t.Errorf("unexpected request %q; the connector is read-only", m)
+		}
 	}
 }
 
-func TestInspect_FailsWhenTwoFactorNotRequired(t *testing.T) {
-	srv := newFake1Password(t, `{
-		"id": "acme-corp",
-		"two_factor_required": false,
-		"minimum_password_length": 14
-	}`)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
-	state, err := opaccount.Inspect(context.Background(), c, nil)
+func TestInspect_FailsWithoutAuditEvents(t *testing.T) {
+	f := newFake(t)
+	f.introspect = fixture(t, "introspect_no_auditevents.json")
+	s, err := opaccount.Inspect(context.Background(), client(t, f.serve(t)), fixed)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Result != opaccount.ResultFail {
-		t.Errorf("Result = %q; want fail", state.Result)
+	if s.AuditEventsEnabled || s.Result != opaccount.ResultFail {
+		t.Errorf("state = %+v; want audit events off and fail", s)
+	}
+	if !strings.Contains(s.Reason, "auditevents") {
+		t.Errorf("Reason = %q", s.Reason)
 	}
 }
 
-func TestInspect_FailsWhenPasswordLengthBelow12(t *testing.T) {
-	srv := newFake1Password(t, `{
-		"id": "acme-corp",
-		"two_factor_required": true,
-		"minimum_password_length": 8
-	}`)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
-	state, err := opaccount.Inspect(context.Background(), c, nil)
+func TestInspect_EmptyAccount(t *testing.T) {
+	f := newFake(t)
+	f.pages = map[string]string{"": `{}`} // documented: an empty page is {}
+	s, err := opaccount.Inspect(context.Background(), client(t, f.serve(t)), fixed)
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if state.Result != opaccount.ResultFail {
-		t.Errorf("Result = %q; want fail (length 8 < 12)", state.Result)
+	if s.ActiveMembers != 0 || s.SuspendedMembers != 0 {
+		t.Errorf("members = %+v; want zero", s)
 	}
 }
 
-func TestInspect_ErrorsOnHTTP500(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "internal", http.StatusInternalServerError)
+func TestInspect_Errors(t *testing.T) {
+	cases := map[string]func(f *fake){
+		"introspect 401":      func(f *fake) { f.status["/api/v2/auth/introspect"] = http.StatusUnauthorized },
+		"no account_uuid":     func(f *fake) { f.introspect = `{"uuid":"x","features":["auditevents"]}` },
+		"token 401":           func(f *fake) { f.status["/v1/oauth/token"] = http.StatusUnauthorized },
+		"token not bearer":    func(f *fake) { f.token = `{"access_token":"x","token_type":"mac"}` },
+		"token empty":         func(f *fake) { f.token = `{"token_type":"Bearer"}` },
+		"users page 2 bad":    func(f *fake) { f.pages["CAIQAg"] = "not json" },
+		"users 403":           func(f *fake) { f.status["/v1/accounts/"+account+"/users"] = http.StatusForbidden },
+		"repeated page token": func(f *fake) { f.pages["CAIQAg"] = `{"results":[],"next_page_token":"CAIQAg"}` },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFake(t)
+			mut(f)
+			s, err := opaccount.Inspect(context.Background(), client(t, f.serve(t)), fixed)
+			if err == nil {
+				t.Fatalf("expected error, got state %+v", s)
+			}
+		})
+	}
+}
+
+func TestInspect_NilAPI(t *testing.T) {
+	if _, err := opaccount.Inspect(context.Background(), nil, nil); err == nil {
+		t.Fatal("expected error for nil API")
+	}
+}
+
+func TestClient_RefusesRedirectToAnotherHost(t *testing.T) {
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(`{"account_uuid":"X","features":["auditevents"]}`))
 	}))
-	t.Cleanup(srv.Close)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
-	if _, err := opaccount.Inspect(context.Background(), c, nil); err == nil {
-		t.Fatal("expected error on HTTP 500; got nil")
+	t.Cleanup(other.Close)
+	events := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(events.Close)
+
+	c := opaccount.NewClient(nil, events.URL, events.URL, creds(t))
+	_, err := c.Introspect(context.Background())
+	if !errors.Is(err, opauth.ErrUnsafeRedirect) {
+		t.Fatalf("err = %v; want ErrUnsafeRedirect", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the other host received %d requests", hits.Load())
 	}
 }
 
-func TestInspect_RejectsEmptyOrgID(t *testing.T) {
-	srv := newFake1Password(t, `{"id": "", "two_factor_required": true}`)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
-	if _, err := opaccount.Inspect(context.Background(), c, nil); err == nil {
-		t.Fatal("expected error on empty org id; got nil")
+func TestNewClient_Defaults(t *testing.T) {
+	c := opaccount.NewClient(nil, "", "", opauth.Credentials{})
+	if c.EventsBaseURL != opaccount.DefaultEventsBaseURL || c.UsersBaseURL != opaccount.DefaultUsersBaseURL {
+		t.Errorf("base URLs = %q, %q", c.EventsBaseURL, c.UsersBaseURL)
+	}
+	if c.HTTP.CheckRedirect == nil {
+		t.Error("default client has no redirect guard")
 	}
 }
 
-// Defensive: clamp negative ActiveMembers (schema requires minimum 0).
-func TestInspect_RejectsNegativeMemberCount(t *testing.T) {
-	srv := newFake1Password(t, `{
-		"id": "acme-corp",
-		"two_factor_required": true,
-		"minimum_password_length": 14,
-		"active_member_count": -1
-	}`)
-	creds, _ := opauth.Resolve(opauth.ResolveOpts{Token: "test-token"})
-	c := opaccount.NewClient(srv.Client(), srv.URL, creds)
-	if _, err := opaccount.Inspect(context.Background(), c, nil); err == nil {
-		t.Fatal("expected error on negative member count; got nil")
+func TestAPIError(t *testing.T) {
+	if got := (&opaccount.APIError{Status: 500}).Error(); got != "1password: HTTP 500" {
+		t.Errorf("got %q", got)
 	}
-}
-
-// Sanity: ensure the test fixture JSON parses cleanly under encoding/json
-// so the integration test against the same response shape stays honest.
-func TestRawResponse_RoundtripJSON(t *testing.T) {
-	const body = `{"id":"acme","two_factor_required":true,"minimum_password_length":14,"active_member_count":47,"domain_restrictions_enabled":true}`
-	var got opaccount.RawAccount
-	if err := json.Unmarshal([]byte(body), &got); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if got.ID != "acme" || got.MinimumPasswordLength != 14 || got.ActiveMembers != 47 {
-		t.Fatalf("decoded shape wrong: %+v", got)
+	if got := (&opaccount.APIError{Status: 403, Body: "nope"}).Error(); got != "1password: HTTP 403: nope" {
+		t.Errorf("got %q", got)
 	}
 }

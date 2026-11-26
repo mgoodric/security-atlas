@@ -3,8 +3,13 @@ package notify
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // SSRF guard for the generic-webhook channel (slice 543 / threat-model S /
@@ -26,7 +31,10 @@ import (
 //     time — the resolved set must be entirely public).
 //
 // The guard runs at config-validation time (channel construction) so a bad
-// target fails fast and visibly, not silently at send time.
+// target fails fast and visibly, not silently at send time. A config-time
+// check alone is not enough: DNS can change between validation and the
+// dial. NewHTTPClient re-applies the same deny list to every dialled
+// address and refuses redirects (#2304).
 
 // SSRFPolicy parameterizes the guard. The zero value is the strict
 // production policy (https-only, deny all internal).
@@ -98,31 +106,38 @@ func (p SSRFPolicy) resolve(host string) ([]net.IP, error) {
 
 // denyReason returns a non-empty reason string when ip is in a denied
 // (internal / non-routable) range, honoring the policy's test allowances.
+// The deny list itself is netguard's, shared with the OIDC client (#2534).
 func (p SSRFPolicy) denyReason(ip net.IP) string {
-	switch {
-	case ip.IsLoopback():
-		if p.AllowLoopback {
-			return ""
-		}
-		return "loopback"
-	case ip.IsUnspecified():
-		return "unspecified"
-	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
-		// Covers 169.254.0.0/16 incl. the 169.254.169.254 cloud metadata IP
-		// and fe80::/10.
-		return "link-local"
-	case ip.IsPrivate():
-		// RFC1918 (10/8, 172.16/12, 192.168/16) + ULA fc00::/7.
-		return "private"
-	case ip.IsMulticast():
-		return "multicast"
-	case ip.IsInterfaceLocalMulticast():
-		return "interface-local-multicast"
-	}
-	// Carrier-grade NAT 100.64.0.0/10 is not flagged by the stdlib helpers;
-	// deny it explicitly (it is not a legitimate public webhook target).
-	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
-		return "cgnat"
-	}
-	return ""
+	return p.guard().DenyReason(ip)
+}
+
+// guard is the netguard policy this notify policy maps to. Notify targets
+// never get the private-network opt-in.
+func (p SSRFPolicy) guard() netguard.Policy {
+	return netguard.Policy{AllowLoopback: p.AllowLoopback}
+}
+
+// WithResolver returns a copy of the policy whose config-time check
+// resolves hosts with f instead of net.LookupIP. It is a test seam: it
+// changes ValidateWebhookURL only, never the dial-time check, which always
+// judges the address actually being connected to.
+func (p SSRFPolicy) WithResolver(f func(host string) ([]net.IP, error)) SSRFPolicy {
+	p.resolveHost = f
+	return p
+}
+
+// DialControl is a net.Dialer.Control hook that applies the policy to the
+// resolved address being dialled (#2304). ValidateWebhookURL checks the
+// host once, at config time; every later dial resolves the name again, so
+// a hostname whose DNS an attacker controls could rebind to an internal
+// address after validation. See netguard.Policy.DialControl.
+func (p SSRFPolicy) DialControl(network, address string, c syscall.RawConn) error {
+	return p.guard().DialControl(network, address, c)
+}
+
+// NewHTTPClient returns an *http.Client for an operator-configured
+// outbound target, hardened against SSRF (#2304): dial-time IP checks, no
+// proxy, no redirects, timeout backstop. See netguard.Policy.NewHTTPClient.
+func (p SSRFPolicy) NewHTTPClient(timeout time.Duration) *http.Client {
+	return p.guard().NewHTTPClient(timeout)
 }

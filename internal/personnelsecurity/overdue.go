@@ -35,6 +35,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
+	"github.com/mgoodric/security-atlas/internal/notify"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -59,6 +61,7 @@ type OverdueNotifier struct {
 	migratorPool *pgxpool.Pool
 	store        *Store
 	logger       *slog.Logger
+	modules      notify.Reacher
 }
 
 // NewOverdueNotifier constructs an OverdueNotifier. migratorPool MUST be the
@@ -70,6 +73,21 @@ func NewOverdueNotifier(migratorPool *pgxpool.Pool, store *Store, logger *slog.L
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}
 	return &OverdueNotifier{migratorPool: migratorPool, store: store, logger: logger}
+}
+
+// personnelModule is the registry key (featureflag.Modules) of Personnel
+// security, which owns overdue-offboarding notifications.
+const personnelModule = "personnel_security"
+
+// WithModules makes the sweep follow module switches and module access
+// (#2175): a user is notified only while Personnel security is switched
+// on and they can work in it. A skipped user has no notification row, the
+// dedup marker, so they are notified once the module is switched back on
+// or their access is widened. A failed access read skips that user and is
+// logged. nil notifies as before.
+func (n *OverdueNotifier) WithModules(r notify.Reacher) *OverdueNotifier {
+	n.modules = r
+	return n
 }
 
 // Run executes the tick loop until ctx is cancelled. The first sweep fires
@@ -161,6 +179,22 @@ func (n *OverdueNotifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, n
 			continue
 		}
 		recipient := uuid.UUID(u.ID.Bytes).String()
+		if n.modules != nil {
+			ok, err := n.modules.Reaches(ctx, tenantID, recipient, personnelModule)
+			if errors.Is(err, featureflag.ErrStoreUnavailable) {
+				// #2548: the switch is unknown, so skip the tenant this
+				// sweep (the caller logs it); the next sweep retries.
+				return notified, fmt.Errorf("personnel security switch: %w", err)
+			}
+			if err != nil {
+				n.logger.Error("personnel overdue: module access read failed; not notifying",
+					"tenant", tenantID, "recipient", recipient, "err", err.Error())
+				continue
+			}
+			if !ok {
+				continue
+			}
+		}
 		if _, err := n.store.SurfaceOverdueOffboarding(tctx, now, recipient); err != nil {
 			return notified, fmt.Errorf("surface overdue offboarding for %s: %w", recipient, err)
 		}

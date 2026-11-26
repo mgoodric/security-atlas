@@ -57,9 +57,9 @@
 # Assertions (both modes):
 #   1. `docker compose up` brings every service to running/healthy.
 #   2. atlas /health returns 200.
-#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 50
-#      SOC 2 control-bundle uploads all succeeded).
-#   4. `controls` ends up with the 50 seeded control rows.
+#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 65
+#      stock control-bundle uploads all succeeded).
+#   4. `controls` ends up with the 65 seeded control rows.
 #   5. `decision_audit_log` ends up with at least one row — every
 #      authenticated control-bundle upload in phase 6 passes through the
 #      OPA authz middleware, which writes one decision row per request.
@@ -86,7 +86,11 @@
 #      would return 403 even though sign-in itself succeeded.
 #   8. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
-#      AC-7).
+#      AC-7). The first boot printed the opt-in crosswalk commands and the
+#      re-run does not (security-atlas#1888).
+#   8c. (bundled mode, security-atlas#1928) An artifact uploaded through
+#      POST /v1/artifacts:upload reads back byte-identical from the
+#      bundled MinIO via its presigned URL, served as an attachment.
 #
 # AC-9 is covered by the `external` mode's pre-created non-superuser
 # atlas_migrate: if the cluster-admin one-time grant (BYPASSRLS +
@@ -174,6 +178,7 @@ ATLAS_DEFAULT_USER_PASSWORD=test-default-user-password
 POSTGRES_DB=security_atlas
 ATLAS_BOOTSTRAP_TENANT=00000000-0000-4000-8000-000000000001
 ARTIFACTS_BUCKET=atlas-artifacts
+ARTIFACTS_S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000
 AWS_REGION=us-east-1
 ATLAS_SECURE_COOKIES=false
 NEXT_PUBLIC_API_BASE_URL=
@@ -377,9 +382,12 @@ log "polling evidence_kind_schemas existence (sentinel of forward migrations com
 # before the matching ledger row's INSERT.
 SCHEMA_READY=""
 for i in $(seq 1 120); do
-    if "${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -t -A \
-        -c "SELECT to_regclass('public.evidence_kind_schemas') IS NOT NULL" 2>/dev/null \
-        | tr -d '[:space:]' | grep -qx 't'; then
+    # security-atlas#1940: capture output before testing it. Under pipefail,
+    # piping into a quiet grep fails when grep exits on its first match and
+    # the writer takes SIGPIPE. Same pattern for every check below.
+    SCHEMA_PROBE="$("${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -t -A \
+        -c "SELECT to_regclass('public.evidence_kind_schemas') IS NOT NULL" 2>/dev/null || true)"
+    if [ "${SCHEMA_PROBE//[[:space:]]/}" = "t" ]; then
         SCHEMA_READY=1
         break
     fi
@@ -400,6 +408,41 @@ for i in $(seq 1 120); do
 done
 [ -n "${SCHEMA_READY}" ] || fail "evidence_kind_schemas relation not created within ~4 min (stage-1 migrations stalled)"
 log "evidence_kind_schemas exists — stage-1 migrations complete"
+
+# security-atlas#1888: the first boot prints the opt-in crosswalk import
+# commands in a form that runs from the repo root. Read them now: stage 2's
+# `up -d --build` recreates the bootstrap container, which drops this log,
+# and the recreated container is no longer a first install. Phase 4 (wait
+# for atlas /health) follows the crosswalk phase, and atlas is not up in
+# stage 1, so the bootstrap is parked there once the line appears.
+# security-atlas#1896: proxy mode's command carries the overlay as well.
+OPTIN_ARGS="-f deploy/docker/docker-compose.yml"
+if [ "${MODE}" = "proxy" ]; then
+    OPTIN_ARGS="${OPTIN_ARGS} -f deploy/docker/docker-compose.proxy.yml"
+fi
+OPTIN_CMD="docker compose ${OPTIN_ARGS} run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+# security-atlas#1940: poll for the opt-in line itself rather than reading
+# the log once after phase 4. Seeing the phase-4 line does not guarantee a
+# single `compose logs` snapshot already holds the earlier opt-in line
+# (seen on #1921: the read landed ~110ms before the line did).
+PHASE4_SEEN=""
+OPTIN_SEEN=""
+for i in $(seq 1 60); do
+    BOOTSTRAP_LOG="$("${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 || true)"
+    if grep -qF -- "waiting for atlas /health" <<<"${BOOTSTRAP_LOG}"; then
+        PHASE4_SEEN=1
+    fi
+    if grep -qF -- "${OPTIN_CMD}" <<<"${BOOTSTRAP_LOG}"; then
+        OPTIN_SEEN=1
+    fi
+    if [ -n "${PHASE4_SEEN}" ] && [ -n "${OPTIN_SEEN}" ]; then
+        break
+    fi
+    sleep 2
+done
+[ -n "${PHASE4_SEEN}" ] || fail "atlas-bootstrap did not reach phase 4 within ~2 min of stage-1 migrations"
+[ -n "${OPTIN_SEEN}" ] || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
+log "first boot printed the repo-root opt-in crosswalk commands"
 
 # ---------------------------------------------------------------------
 # Stage 2: bring up the rest (atlas + web). atlas's boot-time schema
@@ -474,10 +517,10 @@ db_count() {
     docker exec -i "${PG_CID}" psql -U postgres -d security_atlas -t -A -c "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
-# Assertion 4: 50 control rows.
+# Assertion 4: 65 control rows.
 CONTROLS="$(db_count 'SELECT count(*) FROM controls')"
-[ "${CONTROLS}" = "50" ] || fail "controls row count = ${CONTROLS}, want 50"
-log "controls table has 50 rows"
+[ "${CONTROLS}" = "65" ] || fail "controls row count = ${CONTROLS}, want 65"
+log "controls table has 65 rows"
 
 # Assertion 5: decision_audit_log has at least one row — proves phase 6's
 # authenticated control-bundle upload path ran AND slice 065 bug #1's fix
@@ -564,6 +607,113 @@ print(f"  atlas:roles[{TENANT}] contains 'admin'")
 PY
 log "JWT carries super_admin=true + admin role in bootstrap tenant"
 rm -f "${LOGIN_RESP}"
+
+# ---------------------------------------------------------------------
+# Assertion 8 (security-atlas#1739): the stock controls the bootstrap
+# uploaded with its OAuth client land in the bootstrap tenant, and the
+# default user sees them. Before the fix the client's tokens were
+# tenant-free, so every stock row landed in the all-zeros tenant and the
+# signed-in user's GET /v1/controls returned count 0.
+# ---------------------------------------------------------------------
+BOOTSTRAP_TENANT_ID="00000000-0000-4000-8000-000000000001"
+NIL_TENANT_ID="00000000-0000-0000-0000-000000000000"
+IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTSTRAP_TENANT_ID}'")"
+[ "${IN_TENANT}" = "65" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 65"
+IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
+[ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
+UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND bound_tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
+[ "${UNBOUND}" = "0" ] || fail "${UNBOUND} bootstrap OAuth client(s) not bound to the bootstrap tenant"
+
+CONTROLS_RESP="$(mktemp)"
+CONTROLS_CODE="$(curl -sS -o "${CONTROLS_RESP}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/controls?limit=100")"
+[ "${CONTROLS_CODE}" = "200" ] \
+    || fail "GET /v1/controls: HTTP ${CONTROLS_CODE} (want 200); body: $(head -c 400 "${CONTROLS_RESP}")"
+API_COUNT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("count", -1))' "${CONTROLS_RESP}")"
+rm -f "${CONTROLS_RESP}"
+[ "${API_COUNT}" = "65" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 65"
+log "default user sees the 65 stock controls in the bootstrap tenant; none in the all-zeros tenant"
+
+# ---------------------------------------------------------------------
+# Assertion 8b (security-atlas#1721): the bootstrap imports the bundled
+# SOC 2 crosswalk, so the stock SOC 2 controls map to SOC 2 requirements
+# through their SCF anchors. Before the fix a fresh install had zero
+# framework requirements and /v1/frameworks listed only SCF.
+#
+# security-atlas#1888: an exact count, not a > 0 floor. Every requirement
+# in the bundled YAML has an edge, and the stock controls' anchors cover
+# every one, so the mapped count must equal the YAML's requirement count.
+# A lost edge or a dropped requirement fails here.
+# ---------------------------------------------------------------------
+SOC2_WANT="$(grep -c '^  - code:' "${REPO_ROOT}/data/crosswalks/soc2-tsc-2017.yaml")"
+SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
+    FROM framework_requirements fr
+    JOIN fw_to_scf_edges e ON e.framework_requirement_id = fr.id
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'soc2'")"
+[ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
+    || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
+#
+# Every SOC 2 requirement with edges is reached by a stock control: the
+# requirements no bootstrap-tenant control reaches must be none. The
+# Privacy criteria P1.1-P8.1 (#1753) are reached by the Privacy kit
+# (#2426), so a lost edge or a dropped bundle fails here.
+SOC2_UNMAPPED="$(db_count "SELECT coalesce(string_agg(fr.code, ',' ORDER BY fr.code COLLATE \"C\"), '')
+    FROM framework_requirements fr
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'soc2'
+      AND EXISTS (SELECT 1 FROM fw_to_scf_edges e WHERE e.framework_requirement_id = fr.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM fw_to_scf_edges e
+        JOIN controls c ON c.scf_anchor_id = e.scf_anchor_id
+        WHERE e.framework_requirement_id = fr.id
+          AND c.tenant_id = '${BOOTSTRAP_TENANT_ID}')")"
+[ -z "${SOC2_UNMAPPED}" ] \
+    || fail "SOC 2 requirements no stock control reaches = '${SOC2_UNMAPPED}', want none"
+log "stock SOC 2 controls reach every SOC 2 requirement with edges"
+
+# ---------------------------------------------------------------------
+# Assertion 8c (security-atlas#1928) — BUNDLED MODE: the artifact store is
+# wired from ARTIFACTS_* and round-trips through the bundled MinIO. Upload
+# an HTML file through POST /v1/artifacts:upload, fetch its presigned URL
+# from GET /v1/artifacts/{id}, download it from MinIO and require the
+# exact bytes back, served as an attachment (never rendered inline).
+# ARTIFACTS_S3_PUBLIC_ENDPOINT in .env.test points presigned URLs at the
+# host-published MinIO port so this runner can follow them.
+# ---------------------------------------------------------------------
+if [ "${MODE}" = "bundled" ]; then
+    log "artifact store: upload + read back through MinIO"
+    ART_FILE="$(mktemp)"
+    ART_RESP="$(mktemp)"
+    ART_DL="$(mktemp)"
+    ART_HDRS="$(mktemp)"
+    printf '<html><script>window.atlasProbe=%s</script></html>' "$(date +%s%N)" > "${ART_FILE}"
+    ART_CODE="$(curl -sS -o "${ART_RESP}" -w "%{http_code}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -F "file=@${ART_FILE};type=text/html;filename=probe.html" \
+        "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/artifacts:upload")"
+    [ "${ART_CODE}" = "201" ] \
+        || fail "POST /v1/artifacts:upload: HTTP ${ART_CODE} (want 201); body: $(head -c 400 "${ART_RESP}")"
+    ART_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifact"]["id"])' "${ART_RESP}")"
+    ART_CODE="$(curl -sS -o "${ART_RESP}" -w "%{http_code}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/artifacts/${ART_ID}")"
+    [ "${ART_CODE}" = "200" ] \
+        || fail "GET /v1/artifacts/${ART_ID}: HTTP ${ART_CODE} (want 200); body: $(head -c 400 "${ART_RESP}")"
+    ART_URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["url"])' "${ART_RESP}")"
+    ART_CODE="$(curl -sS -D "${ART_HDRS}" -o "${ART_DL}" -w "%{http_code}" "${ART_URL}")"
+    [ "${ART_CODE}" = "200" ] || fail "presigned download: HTTP ${ART_CODE} (want 200)"
+    cmp -s "${ART_FILE}" "${ART_DL}" || fail "artifact read back from MinIO differs from the upload"
+    grep -qi '^content-disposition: *attachment' "${ART_HDRS}" \
+        || fail "presigned download is not served as an attachment; headers: $(tr -d '\r' < "${ART_HDRS}")"
+    grep -qi '^content-type: *application/octet-stream' "${ART_HDRS}" \
+        || fail "presigned download is not served as application/octet-stream; headers: $(tr -d '\r' < "${ART_HDRS}")"
+    rm -f "${ART_FILE}" "${ART_RESP}" "${ART_DL}" "${ART_HDRS}"
+    log "artifact ${ART_ID} uploaded and read back byte-identical from MinIO, as an octet-stream attachment"
+fi
 
 # ---------------------------------------------------------------------
 # Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
@@ -719,11 +869,17 @@ CONTROLS_BEFORE="${CONTROLS}"
 SCOPES_BEFORE="$(db_count 'SELECT count(*) FROM scope_cells')"
 USERS_BEFORE="$(db_count 'SELECT count(*) FROM users')"
 
+# security-atlas#1888: the first boot printed the opt-in crosswalk commands
+# (checked in stage 1 above); a re-run is not a first install and prints none.
 set +e
-"${COMPOSE[@]}" run --rm atlas-bootstrap
+RERUN_OUT="$("${COMPOSE[@]}" run --rm atlas-bootstrap 2>&1)"
 RERUN_RC=$?
 set -e
+printf '%s\n' "${RERUN_OUT}"
 [ "${RERUN_RC}" = "0" ] || fail "atlas-bootstrap re-run exited ${RERUN_RC}, want 0"
+case "${RERUN_OUT}" in
+    *"catalog import-crosswalk /repo/data/crosswalks/"*) fail "atlas-bootstrap re-run printed the opt-in crosswalk commands again" ;;
+esac
 
 CONTROLS_AFTER="$(db_count 'SELECT count(*) FROM controls')"
 SCOPES_AFTER="$(db_count 'SELECT count(*) FROM scope_cells')"
@@ -848,7 +1004,7 @@ SQL
     set -e
     printf '%s\n' "${MIGRATE2_OUT}"
     [ "${MIGRATE2_RC}" = "0" ] || fail "AC-7: second atlas-migrate run exited ${MIGRATE2_RC}, want 0"
-    printf '%s' "${MIGRATE2_OUT}" | grep -q "schema current" \
+    grep -qF -- "schema current" <<<"${MIGRATE2_OUT}" \
         || fail "AC-7: second migrate run did not log the 'schema current' idempotent no-op line"
     CONTROLS_FINAL="$(db_count 'SELECT count(*) FROM controls')"
     USERS_FINAL="$(db_count 'SELECT count(*) FROM users')"

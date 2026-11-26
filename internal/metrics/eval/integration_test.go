@@ -44,6 +44,7 @@ package eval_test
 import (
 	"context"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -237,11 +238,11 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO exceptions (
 			id, tenant_id, control_id, scope_cell_predicate,
-			justification, requested_by, expires_at, status
+			justification, requested_by, expires_at, activated_at, status
 		)
 		VALUES ($1, $2, $3, '{}'::jsonb,
 		        'slice 294 test exception', 'requester',
-		        now() + INTERVAL '15 days', 'active')
+		        now() + INTERVAL '15 days', now(), 'active')
 	`, exID, tenant, ctrlID); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
@@ -255,10 +256,10 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 	riskID := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, treatment,
+			id, tenant_id, title, category_id, treatment,
 			residual_score
 		)
-		VALUES ($1, $2, 'slice 294 test risk', 'operational', 'mitigate',
+		VALUES ($1, $2, 'slice 294 test risk', risk_category_id($2, 'operational'), 'mitigate',
 		        '{"likelihood": 3, "impact": 4}'::jsonb)
 	`, riskID, tenant); err != nil {
 		t.Fatalf("seed risk: %v", err)
@@ -496,6 +497,52 @@ func TestOpenRiskFinancialExposure_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
+// TestOpenRiskFinancialExposure_TreatmentStates pins #1746: untreated and
+// proposed-accept risks count as open exposure; an approved acceptance does
+// not. The evaluator reads every tenant, so the test asserts on deltas.
+func TestOpenRiskFinancialExposure_TreatmentStates(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctx := context.Background()
+
+	e, ok := eval.NewRegistry(admin).Get("open_risk_financial_exposure")
+	if !ok {
+		t.Fatal("open_risk_financial_exposure not registered")
+	}
+	before, err := e.Compute(ctx)
+	if err != nil {
+		t.Fatalf("Compute(before): %v", err)
+	}
+
+	for _, ins := range []string{
+		`INSERT INTO risks (id, tenant_id, title, category_id, residual_score)
+		 VALUES ($1, $2, 'untreated risk', risk_category_id($2, 'operational'), '{"likelihood": 2, "impact": 3}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status, residual_score)
+		 VALUES ($1, $2, 'proposed accept', risk_category_id($2, 'operational'), 'accept', 'proposed', '{"likelihood": 1, "impact": 5}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status,
+		                    accepted_until, accepter, residual_score)
+		 VALUES ($1, $2, 'approved accept', risk_category_id($2, 'operational'), 'accept', 'approved',
+		         CURRENT_DATE + 30, 'ciso', '{"likelihood": 4, "impact": 4}'::jsonb)`,
+	} {
+		if _, err := admin.Exec(ctx, ins, uuid.New(), tenant); err != nil {
+			t.Fatalf("seed risk: %v", err)
+		}
+	}
+
+	after, err := e.Compute(ctx)
+	if err != nil {
+		t.Fatalf("Compute(after): %v", err)
+	}
+	if got := after.Value - before.Value; got != 11 {
+		t.Errorf("magnitude delta = %v; want 11 (untreated 6 + proposed 5, approved excluded)", got)
+	}
+	bc, _ := strconv.Atoi(before.Dimensions["open_risks_count"])
+	ac, _ := strconv.Atoi(after.Dimensions["open_risks_count"])
+	if ac-bc != 2 {
+		t.Errorf("open_risks_count delta = %d; want 2", ac-bc)
+	}
+}
+
 // ===== policyAttestationRateEvaluator =====
 //
 // Covers BOTH branches: expected==0 (no acks in the 365-day window →
@@ -615,15 +662,15 @@ func TestCriticalFindingsSLA_EmptyAndPopulated(t *testing.T) {
 	}
 
 	// Pre-seed: if no findings in the universe, hits the empty-sample
-	// branch which returns Value=1.0 + dims['sample']='empty'. If sibling
-	// tests left findings, hits the count > 0 branch which returns 0.0.
-	// Both are valid code paths.
+	// branch (Value=0 + the empty marker, #2064; it used to be 1.0). If
+	// sibling tests left findings, hits the count > 0 branch which returns
+	// 0.0. Both are valid code paths.
 	res, err := e.Compute(context.Background())
 	if err != nil {
 		t.Fatalf("Compute(pre-seed): %v", err)
 	}
-	if res.Value != 0.0 && res.Value != 1.0 {
-		t.Errorf("Compute(pre-seed) Value = %v; want 0.0 or 1.0 (v1 degraded shape)", res.Value)
+	if res.Value != 0.0 {
+		t.Errorf("Compute(pre-seed) Value = %v; want 0.0 (v1 degraded shape)", res.Value)
 	}
 	if res.Dimensions["v1_degraded"] != "no_severity_band_column" {
 		t.Errorf("Compute(pre-seed) dims['v1_degraded'] = %q; want no_severity_band_column", res.Dimensions["v1_degraded"])

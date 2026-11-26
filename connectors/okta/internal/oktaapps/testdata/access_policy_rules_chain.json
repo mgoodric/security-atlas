@@ -1,0 +1,52 @@
+[
+  {
+    "id": "rul7yut96gmsOzKAA1d6",
+    "status": "ACTIVE",
+    "name": "Allow two authentication method chains",
+    "priority": 0,
+    "system": false,
+    "conditions": null,
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "type": "AUTH_METHOD_CHAIN",
+          "chains": [
+            {
+              "authenticationMethods": [
+                { "key": "okta_password", "method": "password" }
+              ],
+              "next": [
+                {
+                  "authenticationMethods": [
+                    { "key": "phone_number", "method": "sms" }
+                  ]
+                }
+              ]
+            },
+            {
+              "authenticationMethods": [
+                {
+                  "key": "okta_verify",
+                  "method": "signed_nonce",
+                  "userVerification": "REQUIRED"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "type": "ACCESS_POLICY"
+  },
+  {
+    "id": "ruleId",
+    "status": "ACTIVE",
+    "name": "Catch-all rule",
+    "priority": 99,
+    "system": true,
+    "conditions": null,
+    "actions": { "appSignOn": { "access": "DENY" } },
+    "type": "ACCESS_POLICY"
+  }
+]

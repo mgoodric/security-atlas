@@ -2,7 +2,7 @@
 //
 // An `Ack` is an affirmative, per-user attestation that a published
 // policy version has been read and accepted (canvas §2.6 + §7.1;
-// CONTEXT.md "Policy acknowledgment (slice 023)").
+// GLOSSARY.md "Policy acknowledgment (slice 023)").
 //
 // This package owns the domain Store; the HTTP surface lives in
 // internal/api/policyacks/ and the evidence emission flows through
@@ -50,10 +50,12 @@ var (
 	// 409 (anti-criterion P0-3 — ack of superseded does not satisfy
 	// current).
 	ErrAckPolicyNotPublished = errors.New("policy_ack: target policy version is not published")
-	// ErrAckNotRequired is returned when the calling user's roles do not
-	// intersect the policy's acknowledgment_required_roles AND the user
-	// is not an admin. Handler maps to 403 (AC-3).
-	ErrAckNotRequired = errors.New("policy_ack: caller's roles do not intersect required roles")
+	// ErrAckNotRequired is returned when the calling user is not on the
+	// version's roster: no active users row holding a live user_roles row
+	// the audience names (any live role for AudienceEveryone). The super
+	// admin flag and an api_keys label do not put a user on it (#2728).
+	// Handler maps to 403 (AC-3).
+	ErrAckNotRequired = errors.New("policy_ack: caller is not in the policy's acknowledgment audience")
 	// ErrAckMissingUser is returned when cred.UserID is empty. Handler
 	// would already have 401'd via the auth middleware; this is a
 	// defensive shoulder-tap.
@@ -61,16 +63,28 @@ var (
 	// ErrAckMissingPolicyID is returned when the input policy id is the
 	// nil UUID.
 	ErrAckMissingPolicyID = errors.New("policy_ack: policy id is required")
+	// ErrAckVersionMismatch is returned by Record when the caller pins the
+	// version it was shown (RecordInput.PolicyVersionID) and that is not
+	// the version it would acknowledge. Handler maps to 409, so no one
+	// acknowledges a version they never saw (#2668).
+	ErrAckVersionMismatch = errors.New("policy_ack: policy version is not the one the caller was shown")
 )
+
+// AudienceEveryone is the acknowledgment_required_roles value that aims a
+// policy at every member of the tenant (#2524). A caller matches it when it
+// is a member, meaning it holds a live user_roles row (#2728).
+const AudienceEveryone = "everyone"
 
 // AckCaller is the slice-034 credential subset the ack store needs.
 // Decoupled from the full credstore.Credential so unit tests can build
 // a minimal caller and the API package boundary stays clean (this
 // package has no dependency on internal/api/credstore).
+//
+// It carries the user id only. Who must acknowledge is read from the
+// live user_roles rows behind that id, the roster the rate counts, not
+// from the credential's roles or admin flag (#2728).
 type AckCaller struct {
-	UserID     string
-	OwnerRoles []string
-	IsAdmin    bool
+	UserID string
 }
 
 // Pending describes one policy that requires acknowledgment from the
@@ -101,6 +115,11 @@ type Ack struct {
 	AckToken         string
 	EvidenceRecordID *uuid.UUID
 	Deduplicated     bool
+	// PolicyTitle and PolicyVersion are the acknowledged policy row's
+	// title and version string, snapshotted into the evidence payload so
+	// the stock ack checks can tell which policy a record is for (#2832).
+	PolicyTitle   string
+	PolicyVersion string
 }
 
 // RateResult is the result of AckStore.Rate. Denominator zero produces
@@ -135,10 +154,14 @@ func (s *AckStore) WithClock(fn func() time.Time) *AckStore {
 	return s
 }
 
+// Now is the store's clock, the instant its pending lists are cut at. A
+// caller judging a pending row's Due reads it, so the two agree.
+func (s *AckStore) Now() time.Time { return s.now() }
+
 // PendingForUser returns the policies that require an acknowledgment
-// from caller, sorted by title ASC. A policy is "pending" when the
-// caller's roles intersect acknowledgment_required_roles (or the caller
-// is admin) AND there is no fresh (<= AcknowledgmentFreshness) ack of
+// from the calling user, sorted by title ASC. A policy is "pending" when the
+// caller is on its roster (an active user holding a live user_roles row the
+// audience names, #2728) AND there is no fresh (<= AcknowledgmentFreshness) ack of
 // the current published version.
 //
 // Single-query implementation via ListPendingAcksForUser (LEFT JOIN
@@ -147,24 +170,37 @@ func (s *AckStore) WithClock(fn func() time.Time) *AckStore {
 // nil) from "stale ack" (LastAcknowledgedAt set but older than the
 // freshness window) -- the UI labels these differently.
 func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pending, error) {
+	acks, err := s.ForUser(ctx, caller)
+	return acks.Pending, err
+}
+
+// UserAcks splits the published policies whose audience includes a caller
+// by whether the caller still owes an acknowledgment (#2668).
+type UserAcks struct {
+	// Pending is PendingForUser's list.
+	Pending []Pending
+	// Current holds the policies the caller has acknowledged, for the
+	// current version, within AcknowledgmentFreshness. LastAcknowledgedAt
+	// is that acknowledgment.
+	Current []Pending
+}
+
+// ForUser is PendingForUser plus the policies the caller has a fresh
+// acknowledgment of, so a page can show "You acknowledged version N" after
+// a reload (#2668). Same query, same audience rule.
+func (s *AckStore) ForUser(ctx context.Context, caller AckCaller) (UserAcks, error) {
 	if caller.UserID == "" {
-		return nil, ErrAckMissingUser
+		return UserAcks{}, ErrAckMissingUser
 	}
 	userID, err := uuid.Parse(caller.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("policy_ack: parse user id: %w", err)
+		return UserAcks{}, fmt.Errorf("policy_ack: parse user id: %w", err)
 	}
-	var out []Pending
+	var out UserAcks
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		roles := caller.OwnerRoles
-		if roles == nil {
-			roles = []string{}
-		}
 		rows, qerr := q.ListPendingAcksForUser(ctx, dbx.ListPendingAcksForUserParams{
-			TenantID:   pgUUID(tenantID),
-			UserID:     pgUUID(userID),
-			IsAdmin:    caller.IsAdmin,
-			OwnerRoles: roles,
+			TenantID: pgUUID(tenantID),
+			UserID:   pgUUID(userID),
 		})
 		if qerr != nil {
 			return fmt.Errorf("policy_ack: list pending: %w", qerr)
@@ -179,10 +215,7 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 				lastAt = &t
 				isFresh = !t.Before(cutoff)
 			}
-			if isFresh {
-				continue
-			}
-			out = append(out, Pending{
+			item := Pending{
 				PolicyID:           policyID,
 				PolicyVersionID:    policyID,
 				Title:              p.Title,
@@ -190,7 +223,12 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 				EffectiveDate:      datePtr(p.EffectiveDate),
 				RequiredRoles:      append([]string(nil), p.AcknowledgmentRequiredRoles...),
 				LastAcknowledgedAt: lastAt,
-			})
+			}
+			if isFresh {
+				out.Current = append(out.Current, item)
+				continue
+			}
+			out.Pending = append(out.Pending, item)
 		}
 		return nil
 	})
@@ -202,6 +240,10 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 type RecordInput struct {
 	PolicyID uuid.UUID
 	Caller   AckCaller
+	// PolicyVersionID, when non-nil, pins the version the caller was
+	// shown. Record refuses with ErrAckVersionMismatch when it is not the
+	// version it would record (#2668).
+	PolicyVersionID *uuid.UUID
 	// EvidenceRecordID, when non-nil, is written to the row's
 	// evidence_record_id column. The handler calls Record FIRST to
 	// reserve the ack row, then calls ingest.Service.Process to emit
@@ -215,8 +257,11 @@ type RecordInput struct {
 	ObservedAt time.Time
 }
 
-// Record inserts a new ack row after validating the caller is eligible
-// and the policy is currently published. Idempotency: a re-call within
+// Record inserts a new ack row after validating the caller is on the
+// version's roster and the policy is currently published. The policy row
+// is read FOR SHARE, so a concurrent publish waits for this transaction
+// rather than superseding the version between the check and the insert
+// (#2728). Idempotency: a re-call within
 // the same UTC day with the same (user_id, policy_version_id) returns
 // the existing row with Deduplicated=true.
 //
@@ -240,6 +285,7 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 	}
 	token := DeriveAckToken(in.Caller.UserID, in.PolicyID.String(), observed)
 	var out Ack
+	var title, version string
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		policyRow, perr := q.GetPolicyForAcknowledge(ctx, dbx.GetPolicyForAcknowledgeParams{
 			TenantID: pgUUID(tenantID),
@@ -251,12 +297,32 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 			}
 			return fmt.Errorf("policy_ack: load policy: %w", perr)
 		}
+		// The roster check runs before the version and published checks, so
+		// a caller off the roster gets 403 without learning whether this
+		// version is current or published (#2762).
+		required := policyRow.AcknowledgmentRequiredRoles
+		if required == nil {
+			required = []string{}
+		}
+		onRoster, rerr := q.IsUserOnAckRoster(ctx, dbx.IsUserOnAckRosterParams{
+			TenantID:      pgUUID(tenantID),
+			UserID:        pgUUID(userID),
+			RequiredRoles: required,
+		})
+		if rerr != nil {
+			return fmt.Errorf("policy_ack: roster check: %w", rerr)
+		}
+		if !onRoster {
+			return ErrAckNotRequired
+		}
+		// A policy row is one version, so policy_version_id is the row id.
+		if in.PolicyVersionID != nil && *in.PolicyVersionID != uuid.UUID(policyRow.ID.Bytes) {
+			return ErrAckVersionMismatch
+		}
 		if policyRow.Status != StatePublished {
 			return ErrAckPolicyNotPublished
 		}
-		if !rolesIntersect(in.Caller, policyRow.AcknowledgmentRequiredRoles) {
-			return ErrAckNotRequired
-		}
+		title, version = policyRow.Title, policyRow.Version
 		// Idempotency probe: existing row with same token deduplicates.
 		existing, gerr := q.GetAcknowledgmentByToken(ctx, dbx.GetAcknowledgmentByTokenParams{
 			TenantID: pgUUID(tenantID),
@@ -299,6 +365,9 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 		out = ackFromRow(row, false)
 		return nil
 	})
+	if err == nil {
+		out.PolicyTitle, out.PolicyVersion = title, version
+	}
 	return out, err
 }
 
@@ -321,7 +390,8 @@ func (s *AckStore) SetEvidenceRecordID(ctx context.Context, ackID uuid.UUID, evi
 
 // Rate computes the policy attestation rate for the policy at policyID,
 // resolved to its current published version. denominator = distinct
-// users with the required role in `api_keys`; numerator = those who
+// active users holding a live user_roles row the audience names (any live
+// role for AudienceEveryone, #2586); numerator = those who
 // have a fresh ack (>= now - AcknowledgmentFreshness) of that version.
 //
 // Returns ErrNotFound if the row doesn't exist; ErrAckPolicyNotPublished
@@ -347,12 +417,8 @@ func (s *AckStore) Rate(ctx context.Context, policyID uuid.UUID) (RateResult, er
 		if required == nil {
 			required = []string{}
 		}
-		// TODO(slice-035): the rate denominator currently uses the
-		// slice-034 stand-in (api_keys.owner_roles + is_admin). When
-		// slice 035 lands OPA-driven RBAC with first-class user-role
-		// bindings, replace this with a query against the
-		// user_role_bindings table. CONTEXT.md "Policy acknowledgment
-		// (slice 023)" documents the stand-in.
+		// #2586: the roster is the live user_roles set, the same rows the
+		// authz engine resolves into a caller's TenantRoles.
 		denom, derr := q.CountRequiredRoleUsersForVersion(ctx, dbx.CountRequiredRoleUsersForVersionParams{
 			TenantID:      pgUUID(tenantID),
 			RequiredRoles: required,
@@ -433,25 +499,6 @@ func (s *AckStore) inTx(ctx context.Context, fn func(context.Context, *dbx.Queri
 		return fmt.Errorf("policy_ack: commit: %w", err)
 	}
 	return nil
-}
-
-func rolesIntersect(caller AckCaller, required []string) bool {
-	if caller.IsAdmin {
-		return true
-	}
-	if len(required) == 0 || len(caller.OwnerRoles) == 0 {
-		return false
-	}
-	set := make(map[string]struct{}, len(required))
-	for _, r := range required {
-		set[r] = struct{}{}
-	}
-	for _, r := range caller.OwnerRoles {
-		if _, ok := set[r]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func ackFromRow(r dbx.PolicyAcknowledgment, deduped bool) Ack {

@@ -4,9 +4,9 @@ Bulk import of training completions (and optional phishing-simulation
 results) against **existing** assignments, for compliance teams whose LMS
 hands them a CSV export (OPENENGINE-659, follow-up to OPENENGINE-626).
 This is the practical bridge until an LMS connector exists: matched rows
-complete their assignment with `completion_source = 'csv'` and carry the
-same `security_awareness.training_completion.v1` evidence record the
-manual completion path builds.
+complete their assignment with `completion_source = 'csv'` and write the
+same `security_awareness.training_completion.v1` evidence record to the
+ledger that the manual completion path writes (#2941).
 
 Entry point: `securityawareness.(*Store).ImportCompletionsCSV`
 (`internal/securityawareness/csvimport.go`). The importer does not create
@@ -50,17 +50,28 @@ silently dropped.
 - **Idempotent re-import.** A row whose assignment is already completed
   at the same instant reports `already_complete` and rewrites nothing
   (phishing results still upsert, deduplicated on
-  `(assignment, simulation_id)`).
+  `(assignment, simulation_id)`). If that completion has no ledger
+  record yet (it was recorded before #2941), the re-import writes one.
+- **No future completions.** A row whose `completed_at` is more than one
+  hour after the import is a per-row `error`; the other rows still import
+  (#2941 D5).
 - **No overwrites.** A row whose assignment is completed at a different
   instant — for example, a manual completion recorded in the UI — is a
   per-row `error` (`refusing to overwrite`). Reconciling divergent
   records is a human decision, not an import side effect.
-- **Evidence parity with manual completion.** Every newly imported row
-  carries a `BuildCompletionEvidence` record in its `RowResult`, exactly
-  what the manual `Complete` path produces, with
-  `completion_source: csv` in the payload. The evidence idempotency key
-  is derived from assignment id + completion date, so re-pushing after a
-  re-import deduplicates at the ledger.
+- **Evidence parity with manual completion.** Every imported row's
+  completion is written to the evidence ledger through
+  `ingest.Service.ProcessInTx`, in the import transaction, exactly as the
+  manual `Complete` path writes it, with `completion_source: csv` in the
+  payload. The record's id is stored on the assignment
+  (`evidence_record_id`) and returned in the `RowResult`. Its
+  `observed_at` is the import instant; the completion's own instant is
+  the payload's `completed_at`, which cc1_4 reads. So a completion older
+  than ingest's 24-hour skew window is accepted
+  (`docs/audit-log/2941-training-completion-ledger-decisions.md` D1). The
+  evidence idempotency key is the assignment id plus the exact completion
+  instant. An ingest refusal is an infrastructure error and rolls the
+  whole batch back.
 - **Tenant isolation.** All resolution queries run under the calling
   tenant's RLS context; a row can never resolve to — or complete —
   another tenant's assignment.
@@ -78,8 +89,8 @@ alice@example.com,,,SAT-2026,2026 annual,2026-07-10T09:00:00Z,sim-2026-07,2026-0
 `ImportReport` carries `Imported` / `AlreadyComplete` / `Failed` counts
 plus one `RowResult` per data row: 1-based row number, status
 (`imported`, `already_complete`, `error`), resolved assignment id, the
-error message for failed rows, and the evidence record for imported
-rows.
+error message for failed rows, and the ledger record id
+(`EvidenceRecordID`) for imported and already-complete rows.
 
 ## Related
 

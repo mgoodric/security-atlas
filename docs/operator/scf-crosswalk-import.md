@@ -44,6 +44,57 @@ contains `Focal Document Element`, `Relationship`, `Reference Document Element`,
 and `Strength of Relationship` columns. When this shape is supplied, the
 importer uses the workbook's explicit relationship and strength values.
 
+## What Each Source Carries
+
+A crosswalk edge has two parts: which SCF anchor a requirement maps to, and the
+NIST IR 8477 STRM detail of that mapping (relationship type and strength). The
+sources differ in how much of that detail they publish, so the same pair can
+arrive with different detail depending on the file you import.
+
+| Source                                     | Anchor IDs | Relationship type  | Strength  | `source_attribution` on import |
+| ------------------------------------------ | ---------- | ------------------ | --------- | ------------------------------ |
+| Full SCF workbook (`SCF <version>` sheet)  | Yes        | No, defaulted      | No, `0.5` | `community_draft`              |
+| SCF OLIR STRM workbook                     | Yes        | Yes, from the file | Yes       | `community_draft`              |
+| Project YAML crosswalk (`data/crosswalks`) | Yes        | Yes, per mapping   | Yes       | As declared in the file        |
+
+What this means in practice:
+
+- **Full workbook edges are placeholders for the STRM detail.** The workbook
+  lists only requirement IDs per SCF control, so every edge from it lands as
+  `intersects_with` with strength `0.5`. These values are not SCF's
+  assessment; they are the importer's conservative default. The edge's
+  rationale names the sheet, row and column it came from and says it is
+  pending STRM review.
+- **The OLIR STRM workbook is the source of real relationship detail.** SCF
+  publishes its STRM relationship types and strengths in separate STRM files,
+  not in the main workbook. At the time of writing those are free as PDFs or
+  as a paid Excel bundle; only the Excel (`.xlsx`) shape is importable. When
+  you have one, import it (see [Import](#import)) and its explicit
+  `Relationship` and `Strength of Relationship` values replace the
+  workbook's defaults for the same (requirement, anchor) pairs, because both
+  imports are `community_draft` and a same-source import updates the edge.
+  Any edge whose content that import changes has its trust tier re-seeded
+  (#1849), so an edge already promoted to reviewed or verified drops back to
+  draft and needs review again. Each one is printed:
+
+  ```text
+  edge tier re-seeded CC6.1->IAC-01: content changed; mapping_tier verified -> draft
+  ```
+
+- **What "official" means.** No XLSX import is written as `scf_official`,
+  including the OLIR STRM workbook: the importer cannot verify that a local
+  file is an unmodified SCF publication. `scf_official` is only set by a YAML
+  crosswalk that declares it, and none of the bundled
+  `data/crosswalks/*.yaml` files does today. Every XLSX import, and every YAML
+  mapping that isn't `scf_official`, starts at the draft trust tier, and
+  promoting it is a human step. A YAML mapping declared `scf_official` is
+  seeded at verified (ADR 0018 §2).
+
+If you need STRM-accurate relationships for audit work, import the OLIR STRM
+workbook for that framework before promoting its edges, or review and edit the
+workbook-derived edges before promoting them. Do not read a workbook edge's `intersects_with` /
+`0.5` as SCF's judgement of that mapping.
+
 ## Import
 
 For the full SCF workbook, pass the local `.xlsx` file and the framework column
@@ -60,15 +111,413 @@ If the workbook has exactly one framework mapping column, the column is selected
 automatically. Real SCF full workbooks contain many framework columns, so
 `--framework-column` is normally required.
 
+The framework slug, name, issuer and version default to the column's row in the
+`Focal Documents` sheet. `--framework-slug` is required when that metadata is
+missing: the workbook has no `Focal Documents` sheet, the sheet has no
+`SCF Column Header` column, or it has no row for the selected column (the first
+one, when several are combined). Without it the slug would fall back to the
+column header and could duplicate a framework already imported under its FDI
+slug, so the import fails and names the cause.
+
+### Combining columns (ISO 27001)
+
+Some frameworks span more than one workbook column. Repeat
+`--framework-column` to import them as one framework. A column given as
+`HEADER=PREFIX` has `PREFIX` prepended to every requirement code read from it
+(a code that already starts with the prefix is left alone). Framework metadata
+that is not passed explicitly is taken from the first column.
+
+ISO/IEC 27001:2022 is the case this exists for. SCF puts only the
+management-system clauses (4-10) under `ISO 27001 2022`; the Annex A controls
+are mapped under `ISO 27002 2022` as bare `5.1`-`8.34`. Importing either column
+alone gives an ISO 27001 with no Annex A controls or one with no clauses. The
+preset below imports both and writes the Annex A codes as `A.5.1`-`A.8.34`,
+the same codes and slug as the shipped `data/crosswalks/iso27001-2022.yaml`:
+
+```sh
+atlas-cli catalog import-crosswalk ./secure-controls-framework-scf-2026-3.xlsx \
+  --framework-column "ISO 27001 2022" \
+  --framework-column "ISO 27002 2022=A." \
+  --framework-slug iso27001 \
+  --framework-name "ISO/IEC 27001:2022" \
+  --framework-version 2022
+```
+
+The Annex A codes take their titles and bodies from the bundled
+`iso27001-2022.yaml` (see [Requirement titles](#requirement-titles)). That
+file has no management-system clauses, so the clauses 4-10 have no title
+source: pass `--titles` with a file that names them, or `--allow-code-titles`
+to import them titled with their codes.
+
+The preset targets the same framework slug and version (`iso27001` / `2022`)
+as `iso27001-2022.yaml`. On a database that already holds the YAML import it
+adds the workbook's edges and leaves the stored requirements alone (see
+[Frozen versions](#frozen-versions)). To compare the two side by side, give
+the workbook import its own version, for example
+`--framework-version 2022-scf-2026.3`.
+
 For an SCF OLIR STRM workbook, no framework column is needed:
 
 ```sh
 atlas-cli catalog import-crosswalk ./scf-olir-strm-nist-800-53-r5-1-1.xlsx \
   --framework-slug nist-800-53 \
   --framework-name "NIST SP 800-53 R5.1.1" \
-  --framework-issuer NIST
+  --framework-issuer NIST \
+  --scf-release 2026.2
 ```
+
+## SCF release
+
+The SCF reuses control codes between releases, sometimes for a different
+control. Each crosswalk therefore names the SCF release its `scf_anchor` codes
+belong to, and the importer binds every code within that release only (#1771):
+
+| Source                 | Where the release comes from                                         |
+| ---------------------- | -------------------------------------------------------------------- |
+| YAML crosswalk         | the top-level `scf_release` key (`--scf-release` fills it if absent) |
+| Full SCF workbook      | the `SCF <release>` sheet name: `SCF 2026.3` declares `2026.3`       |
+| SCF OLIR STRM workbook | `--scf-release`, because the OLIR shape has no `SCF <release>` sheet |
+
+Load the release first with `atlas-cli catalog import-scf`. A declared release
+(`scf_release` or `--scf-release`) that is not loaded fails the import
+(`unknown SCF release`), and so does a code the release does not have
+(`SCF code not in release`). Either way nothing is written. A `--scf-release`
+that contradicts the file is refused.
+
+A release read from a workbook's sheet name binds just as strictly (#1774): when
+it is not loaded, the import fails, names the sheet, and writes nothing. To
+import a workbook into a different loaded release than its sheet names, rename
+the sheet to `SCF <release>`, or convert the workbook to crosswalk YAML that
+declares that `scf_release`. A sheet name can only spell an `SCF <yyyy>.<n>`
+release, so the bundled sample (`test-2026.3`) is reachable only through YAML.
+`--scf-release` cannot override the sheet.
+
+A crosswalk that declares no release is refused (#1774), and nothing is
+written. Its codes are never bound in the current release instead. The fix is
+one line at the top level of the YAML:
+
+```yaml
+scf_release: "test-2026.3" # the SCF release the scf_anchor codes are from
+```
+
+For an OLIR STRM workbook, which has no `SCF <release>` sheet, pass
+`--scf-release <release>`.
+
+**After a new SCF release import (#2315).** A crosswalk that declares a release
+keeps its edges on that release's anchors. Requirement coverage reads the
+current release by default (#2203), so without help those edges would drop out
+of default coverage as soon as `catalog import-scf` makes a newer release
+current. The import carries them forward instead:
+
+- An edge whose anchor has the **same code and the same title** in the new
+  release is copied onto that anchor in the same step. Default coverage for it
+  does not change. This is the rule that re-binds controls (#1971).
+- Every other edge (title changed, code gone, split, code reused) stays on the
+  old release with an open remap proposal for a super-admin (below). It is
+  flagged, never moved silently and never dropped. Until it is decided, default
+  coverage does not count it; `?scf_release=<old>` still does.
+- The original edge is never changed, so a read pinned to the old release is
+  the same as before.
+
+The import prints `crosswalk_edges carried_forward=<n>`. Re-running it carries
+nothing twice. Re-importing a crosswalk that still declares the old release
+leaves the carried edges alone, so you do not need to re-import each crosswalk
+after an SCF upgrade.
+
+### Edges left on an older release (#1777)
+
+`atlas-cli catalog import-scf` queues every live edge still on an anchor of an
+older SCF release for review, and prints the counts as
+`edge_remap_proposals unchanged=… renamed=… split=… reused_id=… no_successor=…`.
+The classes are the same as for controls. Queueing changes no existing edge.
+In the same transaction, each proposal whose anchor kept its code and title
+is approved by the import itself (`decided_by` `system:scf-import`; see "SCF
+release" above). That leaves the rest open.
+
+Edges are global, so only a super-admin reviews them, through
+`/v1/admin/crosswalk-edge-remap-proposals`:
+
+- **List:** `GET /v1/admin/crosswalk-edge-remap-proposals?class=&status=`.
+- **Approve:** `POST …/{id}/approve` with `{"scf_id"?, "reason"?}`. A split or
+  no-successor proposal needs `scf_id`. Approval creates a copy of the edge on
+  that anchor in the new release, keeping its relationship, strength,
+  rationale, source attribution and tier. The tier is copied as it is: a
+  `verified` edge stays `verified` on the new anchor, so review the anchor
+  choice before approving.
+- **Reject:** `POST …/{id}/reject`. The proposal can be revisited later.
+- **Keep legacy:** `POST …/{id}/keep-legacy`. This is final.
+- **Bulk-approve:** `POST …/approve-unchanged` approves every open `unchanged`
+  proposal.
+
+Approval leaves the legacy edge untouched. Default coverage reads the current
+release, so it counts the new edge. `?scf_release=<old>` still reads the old
+one. A tenant admin who isn't a super-admin gets 403 on every route.
+
+### Overlay edges left on an older release (#1804)
+
+The same import also queues every tenant's **active** overlay edge
+(`/v1/mapping-overlays`) still on an anchor of an older release, and prints
+`overlay_remap_proposals unchanged=… renamed=… split=… reused_id=… no_successor=…`
+with the counts across every tenant. Retired overlay edges are not queued, and
+queueing changes no edge.
+
+Overlay edges belong to a tenant, so each tenant's own writers (admin,
+grc_engineer) review them under `/v1/mapping-overlays/remap-proposals`. No
+super-admin is involved, and a tenant never sees or decides another tenant's
+proposals:
+
+- **List:** `GET /v1/mapping-overlays/remap-proposals?class=&status=`.
+- **Approve:** `POST …/{id}/approve` with `{"scf_id"?, "reason"?}`. A split or
+  no-successor proposal needs `scf_id`. Approval creates an overlay edge on that
+  anchor in the new release, keeping the requirement, relationship, strength,
+  rationale and source, and retires the old overlay edge with reason
+  `remapped`. Both show in the overlay audit trail. An approval onto a pair the
+  tenant already holds, or that a live catalog edge already joins, is refused
+  with 409.
+- **Reject:** `POST …/{id}/reject`. The proposal can be revisited later.
+- **Keep legacy:** `POST …/{id}/keep-legacy`. This is final.
+
+A person must decide: a machine credential gets 403.
+
+**Carried at import (#2554).** As for catalog edges, an overlay edge whose
+anchor has the **same code and the same title** in the new release is carried
+by the import itself: a copy lands on that anchor in the same tenant and its
+proposal is approved. The carry runs once per tenant, as `atlas_app` under that
+tenant, so it reads and writes only that tenant's rows. The new edge, its
+audit row and the decision all record `system:scf-import`, shown as "System".
+Unlike a writer's approval, the carry **keeps the legacy overlay edge
+active**, so `?scf_release=<old>` reads the same as before. Every other
+overlay edge stays an open proposal for the tenant's writers. The import
+prints `overlay_edges carried_forward=<n> closed=<n>`.
+
+**Closed proposals.** If the requirement already maps to the same code in the
+new release (the tenant already holds that overlay pair, or a live catalog
+edge joins it), approval could never succeed. The import then closes the
+proposal as `kept_legacy` with the reason, instead of leaving it open. The
+same applies to catalog edge proposals (`crosswalk_edges … closed=<n>`).
+
+### Deleting catalog rows that overlay edges use (#2240)
+
+The database refuses to delete an SCF anchor, a framework requirement, or a
+framework version holding requirements, while any tenant has an **active**
+overlay edge on it (SQLSTATE 23001, `active overlay edge(s) reference …`).
+Retire those overlay edges first. A retired overlay edge does not hold the
+row: the delete removes it and writes a `cascade_removed` row to that
+tenant's overlay audit trail, with the edge's codes and the catalog row it
+went with. `TRUNCATE` skips both checks; only test fixtures use it.
 
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.
+
+## Requirement titles
+
+SCF workbooks list requirement IDs only, with no title or body. A framework
+version is frozen the moment its import commits (see
+[Frozen versions](#frozen-versions)), so a requirement's title has to be right
+on first insert. Each workbook requirement takes its title from the first of
+these sources that has its code:
+
+1. **`--titles <yaml>`.** A file in the crosswalk YAML `requirements` format
+   (`code`, `title`, optional `body`). Any `mappings` in it are ignored, and so
+   is its `framework_slug`, so any bundled crosswalk can be passed as-is:
+
+   ```yaml
+   requirements:
+     - code: "EX-1"
+       title: "Example requirement title"
+       body: "A one-line description in your own words."
+   ```
+
+2. **The bundled crosswalk for the same framework slug.** `data/crosswalks/*.yaml`
+   is built into `atlas-cli`, matched by `framework_slug`: `soc2`,
+   `iso27001`, `nist_csf`, `pcidss` and `hipaa_security_rule`. Its title and
+   body are used whatever its version. The match is on the slug the import
+   writes, so pass `--framework-slug soc2` to get the bundled SOC 2 titles
+   rather than the slug derived from the workbook's Focal Documents row.
+   Because these files ship inside the binary, they never quote a
+   copyrighted standard; `data/crosswalks/README.md` has the authoring rules.
+3. **The code itself**, but only with `--allow-code-titles`.
+
+A SOC 2 point of focus (`CC1.1-POF3`) takes its parent criterion's title and
+no body; it never has a title of its own.
+
+If any requirement is left with only its code as its title, the import fails
+before writing anything and lists the codes:
+
+```text
+crosswalk: 2 requirement(s) of nist-800-53 would be titled with their own code, and a framework version cannot be retitled once imported: AC-01, AC-02; pass --titles <yaml> with their titles, or --allow-code-titles to import them as codes
+```
+
+With `--allow-code-titles` it proceeds, and the summary reports the count:
+
+```text
+requirements titled with their own code=2
+```
+
+A version imported with code titles keeps them. To retitle it, import a new
+version.
+
+## Frozen versions
+
+A framework version is written as `current` by its first import, and a
+`current`, `legacy` or `withdrawn` version's requirements can't be updated
+(the `enforce_framework_requirement_immutability` trigger). There is no draft
+stage. A later import into the same slug and version therefore:
+
+- leaves every existing requirement's title and body untouched, even when the
+  incoming file differs;
+- still adds new requirements and new edges, and updates edges as described
+  under [Provenance Precedence](#provenance-precedence);
+- prints a warning to stderr for each requirement whose incoming title,
+  body or points of focus differed, naming the fields that did, and by
+  default does not fail for that reason:
+
+  ```text
+  warning: requirement kept CC6.1: incoming title differs, but framework version 2017 is frozen; ship a new version to change it
+  warning: requirement kept CC1.1: incoming points of focus differ, but framework version 2017 is frozen; ship a new version to change it
+  ```
+
+  The stdout summary counts them as `differed=<n>`. Pass `--strict` to make
+  the command exit non-zero when `differed` is above zero, so a scripted
+  import notices. The import has still committed; `--strict` changes only the
+  exit status.
+
+To change a requirement's text, import it as a new version
+(`--framework-version`).
+
+## SOC 2 Points of Focus
+
+SCF's SOC 2 column lists the Trust Services Criteria (`CC1.1`) and, mixed in
+with them, their points of focus (`CC1.1-POF1`). An auditor tests against the
+criteria; the points of focus are guidance on what a criterion covers. Imported
+one-for-one, SOC 2 would carry several hundred "requirements" and coverage
+would count every point of focus in both the numerator and the denominator.
+
+XLSX imports therefore roll each point of focus up into its criterion. Any
+code of the form `<criterion>-POF<n>` is treated this way:
+
+- **It never becomes a requirement.** It is not in `requirement_count`, in
+  coverage or posture, or in requirement lists.
+- **Its mapping becomes an edge from the criterion.** If the criterion already
+  has its own edge to the same SCF anchor, that edge wins. If only points of
+  focus map the anchor, the strongest of their edges is used (the first one on
+  a tie). The criterion never gets two edges to one anchor. A rolled-up edge's
+  rationale starts with `Rolled up from SOC 2 point of focus <code>.`
+- **The criterion records it as metadata.** Each requirement's
+  `points_of_focus` holds the code of each point of focus and the SCF anchors
+  it mapped to. `GET /v1/requirements/{id}/coverage` and
+  `GET /v1/requirements/{id}/anchors` return it on the requirement; the
+  field is omitted when there are none.
+- **A missing criterion is created.** If the column names a point of focus
+  but never its criterion, the criterion is created (titled by the
+  [Requirement titles](#requirement-titles) rules) and the import summary
+  says so.
+
+The import summary reports the roll-up, for example:
+
+```text
+points of focus rolled up=3 into criteria=2
+criterion CC2.1 created from its points of focus (the column has no bare CC2.1)
+```
+
+The metadata is written when a requirement is first inserted, because a
+frozen version's requirements can't be updated afterwards. SOC 2 versions
+imported before this roll-up existed are not rewritten; import the workbook
+into a new version to get the rolled-up shape.
+
+An import into such a version warns on stderr. The importer never deletes a
+requirement, so the old `-POF<n>` rows stay in `requirement_count` and the
+coverage denominator. Their edges were written by the same workbook source,
+and the import no longer lists them, so it retires those edges and the rows
+are left uncovered:
+
+```text
+warning: framework version 2017 keeps 2 point-of-focus requirement row(s) from before points of focus rolled up onto their criterion (CC1.1-POF1, CC1.1-POF2); they still count toward requirement_count and coverage, and this import retired 2 edge(s) on them; import into a new --framework-version to drop them
+```
+
+`--strict` makes this warning a non-zero exit as well.
+
+YAML crosswalks are not rolled up. A YAML requirement may list its points of
+focus explicitly, but none of the bundled files does. Each point of focus must
+be one of that requirement's own (`CC1.1-POF<n>` under `CC1.1`), listed once,
+with at least one SCF anchor, and every anchor must exist in the SCF release
+the crosswalk binds in; the loader or the import rejects the file otherwise.
+The database holds `points_of_focus` to a JSON array.
+
+```yaml
+requirements:
+  - code: CC1.1
+    title: COSO Principle 1
+    points_of_focus:
+      - code: CC1.1-POF1
+        scf_anchors: [GOV-02]
+```
+
+## Provenance Precedence
+
+An import never lowers an existing edge's provenance. Precedence is
+`scf_official` > `community_draft` > `org_internal`. A row whose source ranks
+below the existing edge for the same (requirement, anchor) pair is skipped,
+and the edge keeps its attribution, rationale, relationship, strength and
+tier. Because XLSX imports land as `community_draft`, they skip every pair that
+already has an `scf_official` edge. Each skip is printed:
+
+```text
+edge skipped CC6.1->IAC-01: existing source_attribution=scf_official outranks incoming community_draft
+```
+
+A same-source or stronger-source row updates the edge. If that changes the
+edge's content (relationship, strength, attribution or rationale), its trust
+tier is re-seeded to the incoming source's seed tier: verified for
+`scf_official`, draft for everything else. The reviewer's earlier judgement
+applied to content that no longer exists. Each re-seed is printed and recorded
+as a tier transition. An unchanged row leaves the tier alone.
+
+A `rejected` edge is never re-seeded: rejection is a human call and only a
+reviewer reopens it. If a stronger source lands on a `rejected` edge, the edge
+stays out of coverage, and the import prints one line per edge so a reviewer
+can act on it:
+
+```text
+edge upgraded onto rejected tier CC6.1->IAC-01: source_attribution community_draft -> scf_official; mapping_tier stays rejected
+```
+
+## Retiring edges
+
+An import retires the edges of its framework version that it no longer
+lists. That stops a mapping that moved from leaving the old edge counting as
+coverage. The mapping might have moved to another anchor (an SCF renumbering),
+or to a new SCF release's anchor row: edges are matched by requirement row and
+anchor row, not by code.
+
+A retired edge is not deleted. It keeps its row and its tier history, and
+the import adds a tier-transition row noting the retirement. It drops out of
+coverage, traversal, the catalog export and the tier workflow. If a later
+import lists the same pair again, the edge is restored, with another
+transition row.
+
+An import retires only edges it wrote. Each edge records its source in
+`crosswalk_source`:
+
+| Import                     | Source                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| YAML crosswalk             | `yaml:<file name>`                                                             |
+| SCF workbook, wide columns | `scf-workbook:<columns>`, e.g. `scf-workbook:ISO 27001 2022+ISO 27002 2022=A.` |
+| SCF OLIR STRM workbook     | `scf-olir:<sheet>`                                                             |
+
+So the ISO preset above and `iso27001-2022.yaml` can share `iso27001` / `2022`:
+re-importing either one leaves the other's edges alone. An edge written
+before sources were recorded has none. A YAML import treats such an edge as
+its own; a workbook import never retires it. An unlisted edge with a
+`source_attribution` the import does not write is also kept.
+
+Each retired edge, restored edge and kept unlisted edge is printed, with a
+count of retired edges per source:
+
+```text
+edge retired 164.308(a)(5)(ii)(D)->IAC-10: no longer in the crosswalk (source=(none) source_attribution=community_draft mapping_tier=draft)
+edges retired by source[(none)]=1
+edge restored CC6.1->IAC-01: listed again (mapping_tier=verified)
+edge kept A.5.15->IAC-37: not in the crosswalk, but written by another source (source=scf-workbook:ISO 27001 2022+ISO 27002 2022=A. source_attribution=community_draft)
+```

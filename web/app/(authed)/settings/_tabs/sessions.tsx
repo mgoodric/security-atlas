@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
+import {
+  ConfirmInline,
+  useFocusAfterRemoval,
+  useTriggerRefs,
+} from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { listMySessions, MeSession, revokeMySession } from "@/lib/api/me";
@@ -29,6 +34,10 @@ import { sessionLine } from "../session-line";
 
 export function SessionsSection() {
   const qc = useQueryClient();
+  // #2280: Revoke signs another device out at once and can't be undone
+  // from there, so it asks first.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const revokeTriggers = useTriggerRefs();
   const sessionsQuery = useQuery({
     queryKey: ["settings-me-sessions"],
     queryFn: listMySessions,
@@ -36,13 +45,27 @@ export function SessionsSection() {
   const revokeMut = useMutation({
     mutationFn: revokeMySession,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
+      setConfirming(null);
+      // Returned, so the mutation stays pending until the list is
+      // refetched and focus moves only once the row has gone (#2682).
+      return qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
     },
   });
+  const headingRef = useRef<HTMLDivElement>(null);
+  const removal = useFocusAfterRemoval(
+    (sessionsQuery.data ?? []).map((s) => s.id),
+    {
+      get: revokeTriggers.get,
+      fallback: () => headingRef.current,
+      settled: !revokeMut.isPending,
+    },
+  );
   return (
     <Card id="sessions" data-testid="settings-section-sessions">
       <CardHeader>
-        <CardTitle>Active sessions</CardTitle>
+        <CardTitle ref={headingRef} tabIndex={-1}>
+          Active sessions
+        </CardTitle>
         <CardDescription>Browsers currently signed in as you.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -100,11 +123,26 @@ export function SessionsSection() {
                   <div className="flex items-center gap-2">
                     {s.is_current ? (
                       <Badge variant="outline">current</Badge>
+                    ) : confirming === s.id ? (
+                      <ConfirmInline
+                        prompt="Revoke this session? That device is signed out immediately."
+                        confirmLabel="Revoke session"
+                        ariaLabel={`Confirm: revoke session …${s.last4}`}
+                        busy={revokeMut.isPending}
+                        onCancel={() => setConfirming(null)}
+                        returnFocus={() => revokeTriggers.get(s.id)}
+                        onConfirm={() => {
+                          removal.arm(s.id);
+                          revokeMut.mutate(s.id);
+                        }}
+                        data-testid="settings-session-revoke-confirm"
+                      />
                     ) : (
                       <Button
                         size="sm"
-                        variant="destructive"
-                        onClick={() => revokeMut.mutate(s.id)}
+                        variant="outline"
+                        ref={revokeTriggers.ref(s.id)}
+                        onClick={() => setConfirming(s.id)}
                         disabled={revokeMut.isPending}
                         data-testid="settings-session-revoke"
                       >

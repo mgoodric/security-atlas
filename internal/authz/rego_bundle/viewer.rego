@@ -24,9 +24,21 @@ viewer_readable_resources := {
     "framework-scopes",
     "vendors",
     "risks",
+    # #2556: the decision log (GET /v1/decisions and below), read beside
+    # the register. Read only: the is_read predicate above keeps decision
+    # create / update / supersede / link writes denied to viewer.
+    "decisions",
     "themes",
     "org_units",
     "scopes",
+    # #3030 (decided on #3021): mapping overlays, the organisation's
+    # crosswalk edges onto the same controls a viewer already reads. Every
+    # GET on the resource: the list, the CSV export (which names overlay
+    # authors, #2286: internal staff, read by internal users), the
+    # audited-under report and its export, and the remap-proposal queue.
+    # Read only: is_read keeps create, retire, import and the remap
+    # decisions denied to viewer.
+    "mapping-overlays",
     # Slice 148: compliance calendar is cross-business by design
     # (slice 094 AC-9: "accessible to all signed-in users, no admin
     # gate"). The handler is read-only over four existing source
@@ -41,7 +53,7 @@ viewer_readable_resources := {
     # the most restrictive signed-in role and the program dashboard
     # is the entry surface every signed-in user lands on (slice 040
     # + 066 contract). Without these admits, OPA returns
-    # allow=false on GET /v1/activity and GET /v1/upcoming, the
+    # allow=false on GET /v1/activity and the upcoming rollup, the
     # React Query enters the isError branch, and the dashboard
     # Activity / Upcoming panels render "Failed to load." RLS keeps
     # the reads tenant-scoped (activity = admin_audit_log_v view,
@@ -57,7 +69,8 @@ viewer_readable_resources := {
     # continues to cover this path so a future maintainer who
     # narrows catalog_resources is surfaced at the unit-test layer.
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
 }
 
 # Slice 148: viewer can mint their own ICS subscription URL via
@@ -75,4 +88,15 @@ allow if {
     input.action == "write"
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
+}
+
+# #2381: the dashboard's Evidence freshness panel. GET
+# /v1/evidence/freshness returns per-freshness-class counts only (no
+# evidence rows, ids or titles; internal/api/freshnessdrift). Exact path:
+# /v1/evidence and /v1/evidence/{id} stay denied to viewer.
+allow if {
+    has_role("viewer")
+    is_read
+    input.resource.type == "evidence"
+    input.request.path == "/v1/evidence/freshness"
 }

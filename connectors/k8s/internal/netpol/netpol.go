@@ -21,12 +21,13 @@ import (
 type CoverageResult string
 
 const (
-	// ResultPass — the namespace has a default-deny posture for at least one
-	// direction (an empty-podSelector policy that selects every pod with no
-	// allow rule in that direction).
+	// ResultPass — the namespace has a default-deny posture for both ingress
+	// and egress (empty-podSelector policies that select every pod with no
+	// allow rule in each direction).
 	ResultPass CoverageResult = "pass"
-	// ResultFail — the namespace has no default-deny in either direction
-	// (unprotected or partially-protected by per-pod allow policies only).
+	// ResultFail — the namespace lacks default-deny in at least one direction
+	// (unprotected, partially-protected by per-pod allow policies only, or
+	// default-deny in one direction with the other open).
 	ResultFail CoverageResult = "fail"
 	// ResultInconclusive — the per-namespace read errored.
 	ResultInconclusive CoverageResult = "inconclusive"
@@ -167,8 +168,10 @@ func Assess(ctx context.Context, api API, now func() time.Time) ([]Coverage, err
 // direction when it has at least one policy that (a) selects every pod
 // (empty podSelector) and (b) governs that direction with zero allow rules for
 // it. That is the Kubernetes canonical default-deny shape. PASS when default-deny
-// holds for at least one direction; FAIL when neither direction is default-deny;
-// INCONCLUSIVE when the read errored.
+// holds for both ingress and egress (#2745); FAIL when either direction is open;
+// INCONCLUSIVE when the read errored. A one-direction namespace FAILS rather than
+// reading INCONCLUSIVE: the stock control's roll-up lets any pass outrank
+// inconclusive, so an inconclusive verdict would hide the open direction.
 func assessNamespace(ns RawNamespace, observedAt time.Time) Coverage {
 	c := Coverage{
 		Namespace:   ns.Name,
@@ -236,9 +239,9 @@ func verdict(c Coverage) (CoverageResult, string) {
 	case c.DefaultDenyIngress && c.DefaultDenyEgress:
 		return ResultPass, ""
 	case c.DefaultDenyIngress:
-		return ResultPass, "namespace enforces default-deny ingress (egress is open)"
+		return ResultFail, "namespace enforces default-deny ingress only (egress is open)"
 	case c.DefaultDenyEgress:
-		return ResultPass, "namespace enforces default-deny egress (ingress is open)"
+		return ResultFail, "namespace enforces default-deny egress only (ingress is open)"
 	case c.PolicyCount == 0:
 		return ResultFail, "namespace has no NetworkPolicy (allow-all default)"
 	default:

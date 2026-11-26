@@ -115,7 +115,7 @@ message Metadata {
 // description — never AI-generated) and its latest evaluation result.
 message ControlImplementation {
   string control_id = 1;
-  // SCF anchor code, e.g. "IAC-06".
+  // SCF anchor code, e.g. "IAC-37".
   string scf_id = 2;
   string title = 3;
   // Human-authored implementation narrative (control bundle description).
@@ -127,6 +127,9 @@ message ControlImplementation {
   string evaluated_at = 6;
   // Policy ids linked to this control.
   repeated string linked_policy_ids = 7;
+  // True when the in-place demo seed added this control to the
+  // organisation (#2043). The SSP marks it with an atlas "demo-seed" prop.
+  bool demo = 8;
 }
 
 // ScopeCell is one multidimensional scope tuple included in the SSP
@@ -199,6 +202,26 @@ message SspInput {
   // statements. SEPARATE from control_implementations by design (slice 619):
   // a vendor claim never contributes to platform control-satisfaction.
   repeated VendorAttestedImplementation vendor_attested_implementations = 9;
+  // Framework requirements excluded in the framework-scope revision active
+  // at the period's frozen_at (#1792, Statement of Applicability). Rendered
+  // as `not-applicable` implemented-requirements with the justification as
+  // remarks. SEPARATE from control_implementations: an exclusion is a scope
+  // decision, not a control implementation.
+  repeated ExcludedRequirement excluded_requirements = 10;
+}
+
+// ExcludedRequirement is one framework requirement the operator excluded in
+// an approved, activated framework-scope revision (#1792).
+message ExcludedRequirement {
+  // Framework namespace: framework slug and version, e.g. "iso27001-2022".
+  string framework = 1;
+  // The requirement's code within the framework, e.g. "A.8.25".
+  string requirement_code = 2;
+  string requirement_title = 3;
+  // The human-authored exclusion justification (never AI-generated).
+  string justification = 4;
+  // The framework-scope revision that recorded the exclusion.
+  string framework_scope_id = 5;
 }
 
 message SerializeSSPRequest {
@@ -222,6 +245,9 @@ message SamplePopulation {
   repeated string sampled_evidence_ids = 4;
   // RFC-3339 horizon the population was frozen at.
   string frozen_at = 5;
+  // The subset of sampled_evidence_ids the in-place demo seed added
+  // (#2043). The AR marks those observations with an atlas "demo-seed" prop.
+  repeated string demo_evidence_ids = 6;
 }
 
 // WalkthroughAttachment is one screen-capture / transcript attached to a
@@ -271,6 +297,43 @@ message AuditNote {
   string created_at = 6;
 }
 
+// AcceptedException is the exception that waived a control in a scope cell
+// (#2269). The AR carries it as a back-matter resource the excepted cell's
+// observation links to.
+message AcceptedException {
+  string id = 1;
+  // RFC-3339 instant the exception stops applying.
+  string expires_at = 2;
+  // The person who approved the exception (exceptions.approved_by).
+  string approved_by = 3;
+  // RFC-3339 approval instant; empty when not recorded.
+  string approved_at = 4;
+  string justification = 5;
+  // The exception's status at export time: active | expired | revoked.
+  string status = 6;
+}
+
+// ExceptedCell is the latest evaluation of a (control, scope cell) as of
+// the frozen horizon whose result is `excepted` (#2112). The AR emits it as
+// a risk-accepted observation, never a finding (#2269).
+message ExceptedCell {
+  string evaluation_id = 1;
+  string control_id = 2;
+  // Empty for the whole-tenant row (the control resolved to no cells).
+  string scope_cell_id = 3;
+  // RFC-3339 instant of the evaluation.
+  string evaluated_at = 4;
+  // The exceptions in force for this cell at the instant the row judged:
+  // evaluated_as_of when set, else evaluated_at. Empty only when the
+  // exception can no longer be resolved; the observation says so.
+  repeated AcceptedException exceptions = 5;
+  // RFC-3339 instant a replay judged the cell as of (#3056, #3071). Empty
+  // for a live evaluation, which judged at evaluated_at. When set, the
+  // observation was written at evaluated_at but describes this earlier
+  // instant, and its exceptions are the ones in force then.
+  string evaluated_as_of = 6;
+}
+
 message AssessmentInput {
   Metadata metadata = 1;
   string tenant_id = 2;
@@ -279,6 +342,7 @@ message AssessmentInput {
   repeated SamplePopulation populations = 5;
   repeated Walkthrough walkthroughs = 6;
   repeated AuditNote audit_notes = 7;
+  repeated ExceptedCell excepted_cells = 8;
 }
 
 message SerializeAssessmentRequest {
@@ -307,6 +371,10 @@ message PoamItem {
   // RFC-3339.
   string due_date = 7;
   string milestone = 8;
+  // RFC-3339 instant a replay judged the failing cell as of (#3087). Empty
+  // for a live evaluation and for an audit-note item. When set, the finding
+  // describes this earlier instant, and due_date counts from it.
+  string evaluated_as_of = 9;
 }
 
 message PoamInput {

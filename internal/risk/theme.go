@@ -4,9 +4,8 @@
 // frontend's theme picker.
 //
 // The default vocabulary is seeded into `org_themes` (tenant_id IS NULL) by
-// migration 20260511000015 (10 canvas §6.5 themes). Tenant-private themes
-// are created via a separate (future) endpoint — slice 053 does not ship a
-// "create theme" endpoint; it consumes the vocabulary.
+// migration 20260511000015 (10 canvas §6.5 themes). Organisation themes are
+// created, renamed and deleted in theme_admin.go (#1811).
 
 package risk
 
@@ -14,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,6 +41,10 @@ type Theme struct {
 	Name        string
 	Description string
 	Source      ThemeSource
+	// RiskCount and RuleCount are the theme's usage in the tenant (#1818):
+	// the risks that carry it and the aggregation rules that target it.
+	RiskCount int64
+	RuleCount int64
 }
 
 // ListVisibleThemes returns the union of default themes (tenant_id IS NULL)
@@ -51,7 +55,7 @@ type Theme struct {
 func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 	var out []Theme
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		rows, err := q.ListAllVisibleThemes(ctx, pgUUID(tenantID))
+		rows, err := q.ListVisibleThemesWithUsage(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list visible themes: %w", err)
 		}
@@ -65,6 +69,8 @@ func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 				Name:        r.ThemeName,
 				Description: r.Description,
 				Source:      src,
+				RiskCount:   r.RiskCount,
+				RuleCount:   r.RuleCount,
 			})
 		}
 		// Sort alphabetically per AC-3. The SQL `ORDER BY (tenant_id IS NULL)
@@ -86,12 +92,54 @@ func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 // The HTTP handler exposes both add (POST) and remove (DELETE) semantics by
 // reading the current themes, merging in the operation, and calling
 // AssignThemes with the resulting set.
-func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []string) (Risk, error) {
+func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []string, actor string) (Risk, error) {
+	if actor == "" {
+		return Risk{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	// Normalise: trim + lowercase + dedupe + sorted-for-stability.
 	normalised := normaliseThemes(themes)
 	var out Risk
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		if err := validateThemesAgainstVocab(ctx, q, tenantID, normalised); err != nil {
+			return err
+		}
+		// The themes the risk carried before this write: a rule targeting a
+		// theme being removed must re-evaluate too, or its meta-risk keeps
+		// the stale child link and score (#1861).
+		//
+		// Lock order (#1867): take the rules' advisory locks for the old
+		// and new themes before the row lock, as Delete does. The unlocked
+		// read only picks which rules to lock; the locked read is the one
+		// that counts, because a concurrent theme write may have committed
+		// in between, and without the row lock it could commit after this
+		// read and leave a removed theme unevaluated. If that write added a
+		// theme the rule locks did not cover, the transaction is retried
+		// once (#1880).
+		unlocked, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(riskID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get risk themes: %w", err)
+		}
+		preLocked := unionThemes(unlocked.Themes, normalised)
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, preLocked); err != nil {
+			return err
+		}
+		before, err := q.LockRiskByID(ctx, dbx.LockRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(riskID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock risk themes: %w", err)
+		}
+		if err := s.checkRuleLocks(lastAttempt, preLocked, before.Themes); err != nil {
 			return err
 		}
 		row, err := q.UpdateRiskThemes(ctx, dbx.UpdateRiskThemesParams{
@@ -106,6 +154,15 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 			return fmt.Errorf("update risk themes: %w", err)
 		}
 		out = riskFromRow(row)
+		// A changed set writes one themes_changed row (#2835); the same set
+		// writes none, as AC-2's no-op promises.
+		if !slices.Equal(normaliseThemes(before.Themes), normaliseThemes(out.Themes)) {
+			if err := insertRiskAudit(ctx, q, tenantID, riskID, actor, ActionThemesChanged,
+				map[string]any{"themes": themesValue(before.Themes)},
+				map[string]any{"themes": themesValue(out.Themes)}); err != nil {
+				return err
+			}
+		}
 		// LinkedControlIDs requires a separate query (slice 019) — read it
 		// so the wire response keeps the same shape.
 		links, err := q.ListRiskControlLinks(ctx, dbx.ListRiskControlLinksParams{
@@ -119,7 +176,7 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		for i, l := range links {
 			out.LinkedControlIDs[i] = uuid.UUID(l.ControlID.Bytes)
 		}
-		return nil
+		return s.runAfterRiskWrite(ctx, q, tenantID, unionThemes(before.Themes, out.Themes))
 	})
 	return out, err
 }
@@ -151,6 +208,12 @@ func validateThemesAgainstVocab(ctx context.Context, q *dbx.Queries, tenantID uu
 	if len(themes) == 0 {
 		return nil
 	}
+	// #1811: hold the vocabulary against a concurrent rename or delete
+	// until this write commits, so it cannot store a name that no longer
+	// exists.
+	if err := q.LockThemeVocabularyShared(ctx, pgUUID(tenantID)); err != nil {
+		return fmt.Errorf("lock theme vocabulary: %w", err)
+	}
 	rows, err := q.ListAllVisibleThemes(ctx, pgUUID(tenantID))
 	if err != nil {
 		return fmt.Errorf("list visible themes for validation: %w", err)
@@ -169,6 +232,20 @@ func validateThemesAgainstVocab(ctx context.Context, q *dbx.Queries, tenantID uu
 		return fmt.Errorf("%w: %s", ErrUnknownTheme, strings.Join(bad, ", "))
 	}
 	return nil
+}
+
+// unionThemes returns every theme in a or b, once each.
+func unionThemes(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, t := range append(append([]string(nil), a...), b...) {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }
 
 // normaliseThemes trims whitespace, lowercases (theme names are slug-style

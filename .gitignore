@@ -99,10 +99,15 @@ docs-site/site/
 ### Slice 140 — generated at docs build time by docs-site/hooks/openapi_pipeline.py
 ### from the canonical docs/openapi.yaml (the source of truth, committed).
 docs-site/docs/openapi.yaml
+### #2144 — generated at docs build time from web/help/terms.json.
+docs-site/docs/terms.md
+### #2143 — generated at docs build time from web/help/modules/*.md.
+docs-site/docs/help/
 
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/
 web/test-results/
+web/axe-report/
 
 ### Slice 178 — UI honesty audit harness raw reports.
 ### The harness writes per-run JSON / markdown / screenshots under
@@ -116,3 +121,6 @@ web/e2e-audit/reports/
 
 ### Slice 057 — README capture pipeline bundled artifact
 web/scripts/.capture-readme-screenshots.bundled.js
+
+### Local scratch Postgres (scripts/scratch-pg.sh)
+.scratch-pg/

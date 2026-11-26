@@ -51,6 +51,17 @@ JOIN frameworks f ON f.id = fv.framework_id
 WHERE f.slug = $1 AND fv.tenant_id IS NULL
 ORDER BY fv.effective_from DESC NULLS LAST, fv.version DESC;
 
+-- name: ListFrameworkVersionsForTenant :many
+-- #2414: every catalog version plus the caller's own tenant-private
+-- versions, for `GET /v1/frameworks?include=versions`, newest first within
+-- each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+-- predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+-- (board_briefs.sql).
+SELECT fv.*
+FROM framework_versions fv
+WHERE fv.tenant_id IS NULL OR fv.tenant_id = sqlc.arg('tenant_id')
+ORDER BY fv.framework_id, fv.effective_from DESC NULLS LAST, fv.version DESC;
+
 -- name: GetSCFAnchorByVersionAndSCFID :one
 -- Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
 -- The importer calls this first to classify the upsert as Created /
@@ -62,9 +73,19 @@ WHERE framework_version_id = $1 AND scf_id = $2;
 -- name: InsertSCFAnchor :one
 -- Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 -- ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics, legacy_scf_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: BackfillSCFAnchorLegacySCFID :execrows
+-- #1769: fill legacy_scf_id on an anchor imported without one. Only a
+-- NULL is filled, so a stored value is never rewritten; the importer
+-- refuses a re-import whose legacy_scf_id differs from a stored one.
+-- legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+UPDATE scf_anchors
+SET legacy_scf_id = $2,
+    updated_at    = now()
+WHERE id = $1 AND legacy_scf_id IS NULL;
 
 -- name: UpdateSCFAnchor :one
 -- Update an existing anchor in place. Touches updated_at; the caller
@@ -104,7 +125,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM scf_anchors WHERE id = $1;
 
 -- name: GetSCFAnchorBySCFID :one
--- Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+-- Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 -- framework version.
 SELECT a.*
 FROM scf_anchors a
@@ -146,10 +167,11 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      tenant-instantiated control that satisfies one anchor:
 --        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 --        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
---   3. `anchor_frameworks` aggregates the global crosswalk: for each
---      anchor, the DISTINCT set of framework slugs reached via
---      fw_to_scf_edges → framework_requirements → framework_versions
---      → frameworks. Excludes the SCF spine itself (the column is
+--   3. `anchor_frameworks` aggregates the effective crosswalk (catalog
+--      edges plus the caller tenant's active overlay edges, #1798): for
+--      each anchor, the DISTINCT set of framework slugs reached via
+--      effective_fw_to_scf_edges → framework_requirements →
+--      framework_versions → frameworks. Excludes the SCF spine itself (the column is
 --      "what frameworks DOES this anchor satisfy?", not "is it an SCF
 --      anchor?" — the answer to that is always yes). Excludes
 --      `no_relationship` edges (those are explicit non-mappings, not
@@ -164,9 +186,12 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      column SURFACES this invariant on the controls list.
 --   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 --      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
---      filters those rows; the global `scf_anchors` rows + the
---      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
---      visible to every tenant by design.
+--      filters those rows, and each `controls` read also carries an
+--      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
+--      #1832, belt-and-suspenders as in ListActiveControlsWithState);
+--      the global `scf_anchors` rows + catalog `fw_to_scf_edges` are
+--      visible to every tenant by design; the overlay arm of
+--      effective_fw_to_scf_edges shows only the caller tenant's own.
 --   #2 Engine is sole writer of control_evaluations: this is a pure read
 --      over the engine's output table, never a parallel computation.
 --
@@ -183,20 +208,28 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -216,7 +249,8 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
       -- When the param is the NULL UUID sentinel, this predicate is a no-op
@@ -226,22 +260,45 @@ worst_per_anchor AS (
 ),
 anchor_frameworks AS (
     -- Slice 226: per-anchor framework set. One GROUP BY over the
-    -- catalog-global crosswalk; no per-row fan-out.
+    -- effective crosswalk (catalog edges + this tenant's overlay edges,
+    -- #1798); no per-row fan-out.
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
-    FROM fw_to_scf_edges e
+    FROM effective_fw_to_scf_edges e
     JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
+),
+anchor_controls AS (
+    -- Issue #1741: the tenant's active controls per anchor, so each
+    -- row links to a control id (not the anchor id the control detail
+    -- page cannot resolve) and the `has_control` filter runs here, in
+    -- SQL, ahead of LIMIT/OFFSET. `controls` is tenant-scoped under
+    -- FORCE RLS; the GUC limits this CTE to the caller's tenant, and the
+    -- explicit `c.tenant_id` predicate (issue #1832) holds it there even
+    -- where RLS is bypassed. The
+    -- representative control is the lowest bundle_id, deterministic
+    -- when more than one bundle anchors to the same SCF control.
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        (array_agg(c.id ORDER BY c.bundle_id))[1]::uuid AS control_id,
+        count(*)::bigint AS control_count
+    FROM controls c
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -265,13 +322,21 @@ SELECT
     -- nil → empty array). The LEFT JOIN ensures every anchor row
     -- carries the column; anchors with no satisfaction edges return
     -- NULL → empty slice → wire `[]`.
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    ac.control_id                     AS control_id,
+    COALESCE(ac.control_count, 0)::bigint AS control_count
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
 LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
+LEFT JOIN anchor_controls ac ON ac.anchor_id = a.id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+  -- Issue #1741: optional server-side "has control" filter. NULL is
+  -- no filter; true keeps anchors the tenant has a control on; false
+  -- keeps the rest.
+  AND (sqlc.narg('has_control')::boolean IS NULL
+       OR (ac.anchor_id IS NOT NULL) = sqlc.narg('has_control')::boolean)
 ORDER BY a.scf_id
 LIMIT $1 OFFSET $2;
 
@@ -301,20 +366,28 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
+      AND ce.evaluated_as_of IS NULL  -- #3071: replays are not live state
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -334,7 +407,8 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter; see comment on the
       -- latest-with-state variant above.
@@ -349,11 +423,12 @@ anchor_frameworks AS (
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
-    FROM fw_to_scf_edges e
+    FROM effective_fw_to_scf_edges e
     JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
@@ -361,6 +436,7 @@ anchor_frameworks AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -425,8 +501,8 @@ ORDER BY a.scf_id
 LIMIT $1;
 
 -- name: ListAllFwToScfEdgesForExport :many
--- Slice 174: anchor catalog export edges projection. Returns EVERY
--- fw_to_scf_edges row whose target anchor is in the current SCF
+-- Slice 174: anchor catalog export edges projection. Returns EVERY live
+-- (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 -- framework_version, joined to framework_requirements +
 -- framework_versions + frameworks so consumers get the natural-key
 -- (`framework_slug:version:code`) without a second query.
@@ -439,6 +515,11 @@ LIMIT $1;
 -- map to that requirement" as a recorded fact, not a silent
 -- omission. The slice 008 traversal views filter no_relationship
 -- out for coverage UI; the export does NOT.
+--
+-- Issue #1826: mapping_tier is projected so a reviewer-rejected edge
+-- appears in the export marked `rejected` rather than looking like a
+-- live mapping. Rejected edges are NOT filtered out — the export is
+-- the full catalog record, tier included.
 --
 -- Sorted by anchor_scf_id then framework_slug + framework_version
 -- + requirement_code so the rows group by anchor (matches the
@@ -455,7 +536,8 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
-    e.rationale
+    e.rationale,
+    e.mapping_tier
 FROM fw_to_scf_edges e
 JOIN scf_anchors a                ON a.id = e.scf_anchor_id
 JOIN framework_versions afv       ON afv.id = a.framework_version_id
@@ -466,4 +548,25 @@ JOIN frameworks f                 ON f.id = fv.framework_id
 WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
+  -- A retired edge (#1971) is no longer part of the catalog.
+  AND e.retired_at IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code;
+
+-- name: CountSCFAnchorsLatest :one
+-- Issue #1741: totals for the paged `/v1/anchors?include=state` read on
+-- the current SCF version: the whole catalog, and the anchors the
+-- caller's tenant has at least one active control on. `controls` is
+-- tenant-scoped under FORCE RLS; the explicit `c.tenant_id` predicate
+-- (issue #1832) keeps with_control_total per tenant even where RLS is
+-- bypassed.
+SELECT
+    count(*)::bigint AS catalog_total,
+    count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM controls c
+        WHERE c.tenant_id = sqlc.arg(tenant_id)
+          AND c.scf_anchor_id = a.id AND c.superseded_by IS NULL
+    ))::bigint AS with_control_total
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL;

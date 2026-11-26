@@ -10,23 +10,29 @@
 // TRIPLE-GATE (defense in depth — order matters):
 //
 //  1. Env-var gate: handlers read `ATLAS_ENABLE_DEMO_SEED`. Unset
-//     -> 503 {error: "demo seed not enabled on this deployment"}.
-//     This is the load-bearing edge-deployment-only gate. The
-//     env var is set on the `atlas-edge` docker-compose profile
-//     only; production deployments never set it. 503 (NOT 404)
-//     is intentional: the path exists, the feature is disabled.
-//     Non-admin callers never see 503 because the admin gate
-//     short-circuits first (admin OPA -> 403 from authzmw).
+//     -> 409 {error: "demo seed not enabled on this deployment",
+//     code: "feature_not_enabled"}. This is the load-bearing
+//     edge-deployment-only gate. The env var is set on the
+//     `atlas-edge` docker-compose profile only; production
+//     deployments never set it. 409 (NOT 404) is intentional: the
+//     path exists, the feature is disabled. A 4xx, not a 503: it is a
+//     refusal about configuration, not a server failure, and the web
+//     client shows a 4xx's wording but replaces every 5xx body (#2730).
+//     Non-admin callers never see 409 because the admin gate
+//     short-circuits first (admin OPA -> 403 from authzmw; the
+//     handler's super_admin check also runs before the env gate).
 //
 //  2. Admin role gate: slice-035 OPA at authzmw.Middleware. Resolves
 //     the request to resource.type='admin', resource.id='demo'.
 //     The admin.rego rule admits any action for a caller carrying
 //     RoleAdmin (DB-side user_roles grant). Every other canonical
-//     role denies. Super_admin alone does NOT admit (anti-criterion
-//     P0-278-7: admin is the only gate). The handler additionally
-//     does a defense-in-depth admin check via
-//     authctx.CredentialFromContext so a misconfigured authz mount
-//     fails closed.
+//     role denies. Super_admin alone does NOT admit at this gate.
+//     The handler then checks, for Seed and Teardown, the verified
+//     JWT's `atlas:super_admin` claim (#1851): both create or delete
+//     a whole tenant through the BYPASSRLS auth pool, an install-wide
+//     effect, so a tenant admin (including a per-tenant admin API
+//     key) gets 403. Seed and Teardown therefore need the admin role
+//     AND super_admin. Status keeps a defense-in-depth admin check.
 //
 //  3. Meta-audit row: every Seed/Teardown invocation writes ONE
 //     `me_audit_log` row with action='demo_seed' (or 'demo_teardown')
@@ -34,6 +40,12 @@
 //     'demo_seed_apply' / 'demo_seed_teardown' rows separately —
 //     two-row forensic separation distinguishes WHO CLICKED THE
 //     BUTTON from WHAT THE SEEDER DID.
+//
+// MULTI-TENANT GATE (#2043): Seed goes through demoseed.Seeder.Seed, which
+// creates the `demo` tenant beside an existing tenant only when
+// ATLAS_ALLOW_MULTI_TENANT=true (#1763). Without the opt-in the click is
+// audited and then refused with 403, so the button never makes an install
+// multi-tenant. Re-seeding an existing demo tenant needs no opt-in.
 //
 // RATE LIMIT: per-IP token bucket, 1 invocation per 60 seconds for
 // Seed + Teardown (shared bucket per IP). Excess returns 429 with
@@ -57,7 +69,8 @@
 //   - P0-278-5: no modification of slice 205's demoseed package.
 //   - P0-278-6: no bypass of slice 205's safeguards (10-row guard,
 //     forensic-mark teardown).
-//   - P0-278-7: no new authz role — admin role only.
+//   - P0-278-7: no new authz role — admin role, plus the existing
+//     super_admin claim on Seed/Teardown (#1851).
 //   - P0-278-8: no logging of seeded row contents — only counts.
 //
 // CONSTITUTIONAL INVARIANTS:

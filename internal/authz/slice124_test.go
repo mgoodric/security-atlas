@@ -1,20 +1,44 @@
 package authz_test
 
-// Slice 124 — OPA matrix tests for the `audit-log-unified` resource type.
+// Slice 124 — OPA matrix tests for GET /v1/admin/audit-log/unified.
 //
-// The slice ships read-only access to a tenant-scoped UNION ALL across nine
-// per-domain audit-log tables; admins and auditors get read access, every
-// other role is default-deny. These tests pin that contract at the rego layer
-// so a future edit to admin.rego / auditor.rego / control_owner.rego /
-// grc_engineer.rego / viewer.rego that accidentally widens or narrows the
-// access surface trips a unit-test failure.
+// The slice ships read-only access to a tenant-scoped UNION ALL across the
+// per-domain audit-log tables. The route lives under /v1/admin/, so
+// BuildInput resolves it to resource type "admin" (id "audit-log"): admin
+// and grc_engineer read it, every other role is default-deny. Auditors read
+// the same rows, payload-gated per kind, through /v1/activity/unified
+// (slice 270, #2375). Until #2378 these tests decided a hand-built
+// "audit-log-unified" resource the real path never produces, and pinned an
+// auditor admit that never applied.
+//
+// The inputs are built from the real request path, the way authzmw builds
+// them, so the matrix is pinned at the path a caller hits.
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
+
+// unifiedAuditLogInput builds the OPA input authzmw builds for method+path.
+func unifiedAuditLogInput(t *testing.T, method, path string, roles []authz.Role) authz.Input {
+	t.Helper()
+	r := httptest.NewRequest(method, path, nil)
+	r = r.WithContext(authctx.WithCredential(r.Context(), credstore.Credential{
+		ID: "jwt:124", TenantID: "00000000-0000-0000-0000-000000000124", UserID: "user:124",
+	}))
+	in := authz.BuildInput(r, nil)
+	if in.Resource.Type != "admin" || in.Resource.ID != "audit-log" {
+		t.Fatalf("%s resolves to %s/%s, want admin/audit-log", path, in.Resource.Type, in.Resource.ID)
+	}
+	in.User.Roles = roles
+	return in
+}
 
 func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 	t.Parallel()
@@ -23,26 +47,34 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 	cases := []struct {
 		name      string
 		roles     []authz.Role
+		adminCred bool
 		wantAllow bool
 		reason    string
 	}{
 		{
 			name:      "admin-allow-read",
 			roles:     []authz.Role{authz.RoleAdmin},
+			adminCred: true,
 			wantAllow: true,
-			reason:    "admin.rego wildcard allows every action on every resource within tenant",
+			reason:    "an admin credential (cred.IsAdmin) reaches every non-super-admin-only /v1/admin segment (#2503)",
 		},
 		{
-			name:      "auditor-allow-read",
-			roles:     []authz.Role{authz.RoleAuditor},
+			name:      "tenant-admin-by-role-allow-read",
+			roles:     []authz.Role{authz.RoleAdmin},
 			wantAllow: true,
-			reason:    "auditor.rego auditor_readable_resources['audit-log-unified'] match",
+			reason:    "#2503 D5 (Matt, 2026-11-18): an org admin reads its own tenant's admin audit log",
+		},
+		{
+			name:      "auditor-deny-read",
+			roles:     []authz.Role{authz.RoleAuditor},
+			wantAllow: false,
+			reason:    "auditor.rego does not admit resource 'admin'; auditors use /v1/activity/unified",
 		},
 		{
 			name:      "viewer-deny-read",
 			roles:     []authz.Role{authz.RoleViewer},
 			wantAllow: false,
-			reason:    "viewer.rego does not enumerate audit-log-unified — default-deny",
+			reason:    "viewer.rego does not admit resource 'admin' — default-deny",
 		},
 		{
 			name:      "control_owner-deny-read",
@@ -68,16 +100,9 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d, err := e.Decide(context.Background(), authz.Input{
-				User: authz.UserInput{
-					ID:    "user-" + tc.name,
-					Roles: tc.roles,
-				},
-				TenantID: "00000000-0000-0000-0000-000000000124",
-				Action:   "read",
-				Resource: authz.ResourceInput{Type: "audit-log-unified"},
-				Request:  authz.RequestInput{Method: "GET", Path: "/v1/admin/audit-log/unified"},
-			})
+			in := unifiedAuditLogInput(t, http.MethodGet, "/v1/admin/audit-log/unified", tc.roles)
+			in.User.Attrs["is_admin_credential"] = tc.adminCred
+			d, err := e.Decide(context.Background(), in)
 			if err != nil {
 				t.Fatalf("Decide: %v", err)
 			}
@@ -90,26 +115,16 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 
 func TestSlice124_AuditorWriteDenied(t *testing.T) {
 	t.Parallel()
-	// Read-only contract: no role gets a write surface on the unified
-	// aggregator — the aggregator package has no exported writer
-	// (slice-124 anti-criterion P0-A8). This test pins that even an
-	// auditor (the most-permissive non-admin read role here) cannot
-	// hit a write action.
+	// Read-only contract: the aggregator package has no exported writer
+	// (slice-124 anti-criterion P0-A8), and an auditor has no write
+	// surface on the route.
 	e := engine(t)
-	d, err := e.Decide(context.Background(), authz.Input{
-		User: authz.UserInput{
-			ID:    "user-write-attempt",
-			Roles: []authz.Role{authz.RoleAuditor},
-		},
-		TenantID: "00000000-0000-0000-0000-000000000124",
-		Action:   "write",
-		Resource: authz.ResourceInput{Type: "audit-log-unified"},
-		Request:  authz.RequestInput{Method: "POST", Path: "/v1/admin/audit-log/unified"},
-	})
+	d, err := e.Decide(context.Background(),
+		unifiedAuditLogInput(t, http.MethodPost, "/v1/admin/audit-log/unified", []authz.Role{authz.RoleAuditor}))
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	if d.Allow {
-		t.Errorf("auditor.write on audit-log-unified should be denied; got allow")
+		t.Errorf("auditor write on /v1/admin/audit-log/unified should be denied; got allow")
 	}
 }

@@ -31,11 +31,19 @@ func TestIsCanonical_RejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestAllKinds_NineExactly(t *testing.T) {
+func TestAllKinds_SeventeenExactly(t *testing.T) {
 	t.Parallel()
-	// Slice 124 wires exactly nine per-domain audit-log tables. A change
+	// Slice 124 wired nine per-domain audit-log tables; issue #1786 added
+	// framework_scope_workflow_log as the tenth, #1810
+	// taxonomy_audit_log as the eleventh, #1797
+	// fw_to_scf_overlay_edge_audit_log as the twelfth and #1782
+	// control_import_audit_log as the thirteenth and #1954
+	// risk_audit_log as the fourteenth, and #2136
+	// framework_posture_target_audit_log as the fifteenth, and #2172
+	// member_module_access_audit_log as the sixteenth, and #2450
+	// vendor_audit_log as the seventeenth. A change
 	// to this count must come with a slice (extension or retirement).
-	if got, want := len(unifiedlog.AllKinds), 9; got != want {
+	if got, want := len(unifiedlog.AllKinds), 17; got != want {
 		t.Errorf("AllKinds len = %d; want %d", got, want)
 	}
 }

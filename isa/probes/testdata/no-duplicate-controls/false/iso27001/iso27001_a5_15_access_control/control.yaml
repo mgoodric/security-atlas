@@ -1,0 +1,8 @@
+# Fixture for isa/probes/no-duplicate-controls.sh. Not a real control.
+bundle_schema_version: "1"
+bundle_id: iso27001_a5_15_access_control
+title: "Access control policy"
+scf_anchor_id: IAC-01
+control_family: IAC
+implementation_type: manual_attested
+lifecycle_state: active

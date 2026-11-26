@@ -1,23 +1,28 @@
 // Package adminsso is the HTTP surface for /v1/admin/sso (slice 062).
 //
-// Two routes:
+// Four routes:
 //
-//	GET   /v1/admin/sso              -- returns the tenant's primary IdP config
-//	                                    (sans client_secret); 404 when unset
-//	PATCH /v1/admin/sso              -- upserts the primary IdP config
+//	GET    /v1/admin/sso             -- returns the tenant's primary IdP config
+//	                                    (sans client_secret) and what deleting
+//	                                    it would remove; 404 when unset
+//	PATCH  /v1/admin/sso             -- upserts the primary IdP config
+//	DELETE /v1/admin/sso             -- deletes it, its mappings and the
+//	                                    group-derived roles only it derived
+//	                                    (#2760, delete.go)
 //	POST  /v1/admin/sso/preflight    -- server-side fetch of the IdP
 //	                                    .well-known/openid-configuration
 //	                                    (no state change)
 //
-// All three require an admin credential (cred.IsAdmin) -- the slice 035
+// All four require an admin credential (cred.IsAdmin) -- the slice 035
 // OPA RBAC middleware also gates the path, this handler does
 // defense-in-depth.
 //
 // Anti-criteria honored (P0):
 //
-//   - client_secret is NEVER returned in any GET response. The DB column
-//     client_secret_enc is encrypted-at-rest (slice 034 contract); we
-//     never read it back to the wire.
+//   - client_secret is NEVER returned in any GET response. PATCH seals it
+//     with idpconfig.SecretCrypter (AES-256-GCM bound to tenant + name,
+//     #2034) before it reaches client_secret_enc; we never read it back to
+//     the wire.
 //   - PATCH treats an empty client_secret field as "leave existing" -- the
 //     UI cannot accidentally clear the secret by submitting an empty form.
 //   - Preflight is SSRF-hardened: scheme must be https, host must not
@@ -57,7 +62,11 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -71,6 +80,13 @@ const configName = "primary"
 type Handler struct {
 	pool          *pgxpool.Pool
 	preflightOpts PreflightOptions
+	// crypter seals the client secret before it is stored (#2034). nil
+	// means the deployment set no ATLAS_OIDC_SECRET_KEY: PATCH then refuses
+	// a new secret rather than store one the sign-in path cannot read.
+	crypter *idpconfig.SecretCrypter
+	// insertAudit writes the PATCH audit row (#2609). Tests replace it to
+	// prove a failed audit write rolls the change back.
+	insertAudit func(context.Context, *dbx.Queries, dbx.InsertMeAuditLogParams) error
 }
 
 // PreflightOptions configures the SSRF defenses for the OIDC discovery
@@ -80,10 +96,15 @@ type PreflightOptions struct {
 	Timeout time.Duration
 	// MaxBodyBytes caps the response body size. Default: 64 KiB.
 	MaxBodyBytes int64
-	// AllowPrivateIPs, when true, permits the fetch to target loopback
-	// and RFC1918 addresses. Defaults to false in production; tests set
-	// true so a local fake IdP can be reached via 127.0.0.1.
-	AllowPrivateIPs bool
+	// IssuerPolicy is the deployment's issuer policy,
+	// oidc.IssuerPolicyFromEnv (#2534): the strict zero value by default,
+	// loopback and private (RFC1918 / ULA / CGNAT) addresses with
+	// oidc.AllowPrivateIssuersEnv; link-local stays denied either way.
+	// PATCH validates the issuer with it through idpconfig.ValidateIssuerURL,
+	// the check the sign-in Resolver makes with the same policy, so a config
+	// that saves is one that signs in (#2609). Tests set the opt-in so a
+	// local fake IdP can be reached via 127.0.0.1.
+	IssuerPolicy netguard.Policy
 	// HTTPClient overrides the default transport so tests can supply a
 	// roundtripper that records calls.
 	HTTPClient *http.Client
@@ -111,7 +132,16 @@ func (h *Handler) WithPreflightOptions(opts PreflightOptions) *Handler {
 	if opts.MaxBodyBytes == 0 {
 		opts.MaxBodyBytes = h.preflightOpts.MaxBodyBytes
 	}
-	return &Handler{pool: h.pool, preflightOpts: opts}
+	c := *h
+	c.preflightOpts = opts
+	return &c
+}
+
+// WithSecretCrypter returns a copy of h that seals client secrets with c.
+func (h *Handler) WithSecretCrypter(c *idpconfig.SecretCrypter) *Handler {
+	cp := *h
+	cp.crypter = c
+	return &cp
 }
 
 // --- response shapes ---
@@ -119,14 +149,22 @@ func (h *Handler) WithPreflightOptions(opts PreflightOptions) *Handler {
 // GetResponse is the JSON body of GET /v1/admin/sso.
 // client_secret is intentionally omitted.
 type GetResponse struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	IssuerURL           string    `json:"issuer_url"`
-	ClientID            string    `json:"client_id"`
-	RedirectURL         string    `json:"redirect_url"`
-	AllowedEmailDomains []string  `json:"allowed_email_domains"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	IssuerURL           string   `json:"issuer_url"`
+	ClientID            string   `json:"client_id"`
+	RedirectURL         string   `json:"redirect_url"`
+	AllowedEmailDomains []string `json:"allowed_email_domains"`
+	// TrustUnverifiedEmailForLink lets a sign-in whose ID token omits
+	// email_verified link to a SCIM-provisioned user by email (#1944 D3).
+	TrustUnverifiedEmailForLink bool      `json:"trust_unverified_email_for_link"`
+	CreatedAt                   time.Time `json:"created_at"`
+	UpdatedAt                   time.Time `json:"updated_at"`
+	// MappingCount and DerivedRoleCount are what DELETE would remove: the
+	// group-role mappings scoped to this config, and the group-derived
+	// roles only it derives (#2760). GET only; PATCH leaves them zero.
+	MappingCount     int64 `json:"mapping_count"`
+	DerivedRoleCount int64 `json:"derived_role_count"`
 }
 
 // PatchRequest is the JSON body of PATCH /v1/admin/sso. client_secret is
@@ -137,6 +175,9 @@ type PatchRequest struct {
 	ClientSecret        string   `json:"client_secret,omitempty"`
 	RedirectURL         string   `json:"redirect_url"`
 	AllowedEmailDomains []string `json:"allowed_email_domains"`
+	// TrustUnverifiedEmailForLink: like every field here, an omitted value
+	// is written as its zero value, false, which is the strict default.
+	TrustUnverifiedEmailForLink bool `json:"trust_unverified_email_for_link"`
 }
 
 // PreflightRequest is the JSON body of POST /v1/admin/sso/preflight.
@@ -168,12 +209,17 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var row dbx.GetAdminSSORow
+	var preview grouprole.ConfigDeletePreview
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, qErr := q.GetAdminSSO(ctx, dbx.GetAdminSSOParams{
 			TenantID: uuidToPgtype(tenantID),
 			Name:     configName,
 		})
+		if qErr != nil {
+			return qErr
+		}
 		row = got
+		preview, qErr = grouprole.PreviewConfigDelete(ctx, q, tenantID, uuidFromPgtype(got.ID))
 		return qErr
 	})
 	if err != nil {
@@ -194,6 +240,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		AllowedEmailDomains: row.AllowedEmailDomains,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
+
+		TrustUnverifiedEmailForLink: row.TrustUnverifiedEmailForLink,
+		MappingCount:                preview.MappingCount,
+		DerivedRoleCount:            preview.DerivedRoleCount,
 	}
 	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
@@ -224,39 +274,29 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "client_id is required")
 		return
 	}
-
-	// First INSERT requires a non-empty client_secret -- the upsert ON
-	// CONFLICT branch tolerates empty (leave-existing). We check by
-	// reading whether a row already exists; if not, secret is required.
-	var exists bool
-	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
-		_, gErr := q.GetAdminSSO(ctx, dbx.GetAdminSSOParams{
-			TenantID: uuidToPgtype(tenantID),
-			Name:     configName,
-		})
-		if gErr == nil {
-			exists = true
-			return nil
-		}
-		if errors.Is(gErr, pgx.ErrNoRows) {
-			return nil
-		}
-		return gErr
-	})
-	if err != nil {
-		httperr.WriteInternal(w, r, "check existing", err)
-		return
-	}
-	if !exists && req.ClientSecret == "" {
-		httpresp.WriteError(w, http.StatusBadRequest, "client_secret is required on first config")
+	// The sign-in path refuses the same issuers (#2034), so a config that
+	// saves here is one the resolver will use.
+	if err := idpconfig.ValidateIssuerURL(req.IssuerURL, h.guard()); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Encrypt-at-rest in v1 is a stub: we store the raw bytes. KMS-wrap
-	// is a v1.x follow-up (per slice 034's contract). The handler treats
-	// the field as already-encrypted for forward compatibility -- callers
-	// pass a base-string today, KMS-ciphertext tomorrow.
-	secretBytes := []byte(req.ClientSecret)
+	// #2034: the secret is sealed before it is stored; an empty value is
+	// the upsert's leave-existing sentinel and is passed through as such.
+	secretBytes := []byte{}
+	if req.ClientSecret != "" {
+		if h.crypter == nil {
+			httpresp.WriteFeatureNotEnabled(w,
+				"client secret encryption is not configured on this deployment (set "+idpconfig.SecretKeyEnv+")")
+			return
+		}
+		sealed, sErr := h.crypter.Seal(tenantID, configName, req.ClientSecret)
+		if sErr != nil {
+			httpresp.WriteError(w, http.StatusInternalServerError, "seal client secret failed")
+			return
+		}
+		secretBytes = sealed
+	}
 	// Normalize nil slice -> empty slice so the column's NOT NULL
 	// constraint is satisfied. allowed_email_domains is text[] with NOT
 	// NULL DEFAULT '{}' at the schema layer; the upsert path passes the
@@ -266,8 +306,40 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		domains = []string{}
 	}
 
+	// #2609: the change and its audit row commit together or not at all.
+	// The lock serialises SSO writes in the tenant, so the before value is
+	// the state this write replaces, also while the tenant has no row yet.
+	userID, principal := actor(r)
 	var row dbx.UpsertAdminSSORow
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
+		if lErr := q.LockAdminSSO(ctx, uuidToPgtype(tenantID)); lErr != nil {
+			return fmt.Errorf("lock sso: %w", lErr)
+		}
+		before := ssoAuditState{AllowedEmailDomains: []string{}}
+		cur, gErr := q.GetAdminSSOForUpdate(ctx, dbx.GetAdminSSOForUpdateParams{
+			TenantID: uuidToPgtype(tenantID),
+			Name:     configName,
+		})
+		switch {
+		case gErr == nil:
+			before = ssoAuditState{
+				Configured:                  true,
+				IssuerURL:                   cur.IssuerUrl,
+				ClientID:                    cur.ClientID,
+				RedirectURL:                 cur.RedirectUrl,
+				AllowedEmailDomains:         cur.AllowedEmailDomains,
+				TrustUnverifiedEmailForLink: cur.TrustUnverifiedEmailForLink,
+			}
+		case errors.Is(gErr, pgx.ErrNoRows):
+			// First INSERT requires a non-empty client_secret -- the
+			// upsert ON CONFLICT branch tolerates empty (leave-existing).
+			if req.ClientSecret == "" {
+				return errSecretRequired
+			}
+		default:
+			return gErr
+		}
+
 		got, qErr := q.UpsertAdminSSO(ctx, dbx.UpsertAdminSSOParams{
 			ID:                  uuidToPgtype(uuid.New()),
 			TenantID:            uuidToPgtype(tenantID),
@@ -277,10 +349,27 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 			ClientSecretEnc:     secretBytes,
 			RedirectUrl:         req.RedirectURL,
 			AllowedEmailDomains: domains,
+
+			TrustUnverifiedEmailForLink: req.TrustUnverifiedEmailForLink,
 		})
+		if qErr != nil {
+			return qErr
+		}
 		row = got
-		return qErr
+		after := ssoAuditState{
+			Configured:                  true,
+			IssuerURL:                   got.IssuerUrl,
+			ClientID:                    got.ClientID,
+			RedirectURL:                 got.RedirectUrl,
+			AllowedEmailDomains:         got.AllowedEmailDomains,
+			TrustUnverifiedEmailForLink: got.TrustUnverifiedEmailForLink,
+		}
+		return h.auditSSOChange(ctx, q, tenantID, userID, principal, before, after, req.ClientSecret != "")
 	})
+	if errors.Is(err, errSecretRequired) {
+		httpresp.WriteError(w, http.StatusBadRequest, "client_secret is required on first config")
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "upsert sso", err)
 		return
@@ -295,6 +384,8 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		AllowedEmailDomains: row.AllowedEmailDomains,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
+
+		TrustUnverifiedEmailForLink: row.TrustUnverifiedEmailForLink,
 	}
 	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
@@ -322,8 +413,9 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid issuer_url: "+err.Error())
 		return
 	}
-	if !h.preflightOpts.AllowPrivateIPs && parsed.Scheme != "https" {
-		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url must be https")
+	// The same issuer check as PATCH and the sign-in Resolver (#2609).
+	if err := idpconfig.ValidateIssuerURL(parsed.String(), h.guard()); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if parsed.Host == "" {
@@ -332,7 +424,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// SSRF guard: resolve host and reject loopback / RFC1918.
-	if !h.preflightOpts.AllowPrivateIPs {
+	if !h.privateIssuersAllowed() {
 		if err := h.guardSSRF(r.Context(), parsed.Host); err != nil {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -351,7 +443,10 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 	client := h.preflightOpts.HTTPClient
 	if client == nil {
-		client = h.newSafeHTTPClient()
+		// Re-checks every dialled IP (closing the DNS-rebinding window
+		// after guardSSRF), ignores proxies and refuses redirects:
+		// discovery documents have no legitimate reason to redirect.
+		client = h.guard().NewHTTPClient(h.preflightOpts.Timeout)
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -431,85 +526,27 @@ func (h *Handler) guardSSRF(ctx context.Context, host string) error {
 		return fmt.Errorf("dns lookup failed for %s: %w", hostname, err)
 	}
 	for _, ip := range ips {
-		if isUnsafeIP(ip) {
-			return fmt.Errorf("issuer_url host resolves to non-routable address %s", ip)
+		if reason := h.guard().DenyReason(ip); reason != "" {
+			return fmt.Errorf("issuer_url host resolves to non-routable address %s (%s)", ip, reason)
 		}
 	}
 	return nil
 }
 
-// newSafeHTTPClient returns an HTTP client whose Transport re-validates
-// the destination IP at connect-time (closing the TOCTOU window between
-// guardSSRF's pre-check and the actual dial — DNS rebinding) and which
-// refuses to follow HTTP redirects (a redirect to an internal address
-// would otherwise bypass guardSSRF entirely). The handler-level
-// guardSSRF remains as a first line of defense; this Transport is the
-// second.
-//
-// CodeQL `go/request-forgery` flags `client.Do` on a URL that came from
-// user input even when the URL passed a prior check, because Go's
-// default Transport re-resolves the host at dial time using whatever
-// the resolver returns at that moment. This implementation moves the
-// safety check inside DialContext so it fires on every concrete IP
-// returned by the resolver, then dials the validated IP directly.
-func (h *Handler) newSafeHTTPClient() *http.Client {
-	lookup := h.preflightOpts.LookupHost
-	if lookup == nil {
-		lookup = func(ctx context.Context, host string) ([]net.IP, error) {
-			return net.DefaultResolver.LookupIP(ctx, "ip", host)
-		}
-	}
-	dialer := &net.Dialer{Timeout: h.preflightOpts.Timeout}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("split host port: %w", err)
-			}
-			if h.preflightOpts.AllowPrivateIPs {
-				return dialer.DialContext(ctx, network, addr)
-			}
-			ips, err := lookup(ctx, host)
-			if err != nil {
-				return nil, fmt.Errorf("dial-time dns lookup failed: %w", err)
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("dial-time dns lookup returned no addresses")
-			}
-			for _, ip := range ips {
-				if isUnsafeIP(ip) {
-					return nil, fmt.Errorf("connection to %s blocked: resolves to non-routable address %s", host, ip)
-				}
-			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-		},
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   h.preflightOpts.Timeout,
-		// Refuse to follow redirects — a redirect to an internal host
-		// would otherwise bypass the DialContext check by hopping out
-		// of our Transport on the second request. Discovery documents
-		// have no legitimate reason to redirect.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+// guard is the deployment's issuer policy (internal/netguard, #2534), the
+// one PATCH, the preflight and the sign-in path all apply.
+// oidc.AllowPrivateIssuersEnv is the opt-in for a self-hosted IdP on a
+// private network; it permits loopback and private ranges but never
+// link-local, so cloud metadata stays denied.
+func (h *Handler) guard() netguard.Policy {
+	return h.preflightOpts.IssuerPolicy
 }
 
-// isUnsafeIP reports whether ip is in loopback, link-local, RFC1918,
-// RFC4193, multicast, or unspecified space. Public IPs return false.
-func isUnsafeIP(ip net.IP) bool {
-	if ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() ||
-		ip.IsMulticast() ||
-		ip.IsPrivate() ||
-		ip.IsUnspecified() {
-		return true
-	}
-	return false
+// privateIssuersAllowed reports the private-issuer opt-in. With it, the
+// preflight's DNS pre-check is skipped (a dev IdP is reached by raw IP) and
+// the dial-time guard still applies the policy.
+func (h *Handler) privateIssuersAllowed() bool {
+	return h.preflightOpts.IssuerPolicy.AllowLoopback || h.preflightOpts.IssuerPolicy.AllowPrivate
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -518,7 +555,10 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles manages its own tenant's
+	// SSO config. Every read and write is keyed on the credential's
+	// tenant under RLS.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}

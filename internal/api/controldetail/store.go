@@ -26,6 +26,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -75,17 +77,21 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 // controlID, bounded by the [since, until] observed_at window and the keyset
 // cursor. It returns up to limit rows. Resolution reuses slice 012's
 // control->evidence path: (control_id = $ OR control_ref = $) with the
-// control ref being the UUID's string form.
+// control ref being the UUID's string form. p.idOnly drops the control_ref
+// leg (#2470), and a routed kind never takes it (#2931).
 func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error) {
 	var rows []dbx.ListEvidenceForControlPagedRow
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var qerr error
 		rows, qerr = q.ListEvidenceForControlPaged(ctx, dbx.ListEvidenceForControlPagedParams{
+			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
 			ObservedAt:   pgTimestamptz(p.since),
 			ObservedAt_2: pgTimestamptz(p.until),
+			IDOnly:       p.idOnly,
 			CursorTs:     pgTimestamptz(p.cursor.ts),
 			CursorID:     pgUUID(p.cursor.id),
 			RowLimit:     p.pageRows + 1, // +1 probe row to detect a next page
@@ -93,6 +99,41 @@ func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p e
 		return qerr
 	})
 	return rows, err
+}
+
+// CountEvidenceForControl counts the records EvidenceForControl pages
+// through for controlID: the same resolution (p.idOnly included) and
+// [since, until] window, ignoring the cursor and page size. It is the
+// per-control list's `total` (#2470), so a period-scoped caller learns
+// nothing beyond the rows it may read.
+func (s *Store) CountEvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) (int64, error) {
+	var total int64
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var qerr error
+		total, qerr = q.CountEvidenceForControlWindow(ctx, dbx.CountEvidenceForControlWindowParams{
+			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			ObservedAt:   pgTimestamptz(p.since),
+			ObservedAt_2: pgTimestamptz(p.until),
+			IDOnly:       p.idOnly,
+		})
+		return qerr
+	})
+	return total, err
+}
+
+// DemoEvidence returns which of ids the in-place demo seed added (#2043).
+func (s *Store) DemoEvidence(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error) {
+	var set demoprov.Set
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		var err error
+		set, err = demoprov.Lookup(ctx, q, demoprov.TableEvidence, ids)
+		return err
+	})
+	return set, err
 }
 
 // EvidencePaged reads one page of the tenant-wide evidence ledger, bounded
@@ -125,7 +166,8 @@ func (s *Store) EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.Li
 }
 
 // CountEvidenceForTenant reads the tenant-wide ledger row count, ignoring
-// any filter predicates. Slice 236 — the `/evidence` page surfaces this as
+// any filter predicates. It is the tenant-wide list's `total`; the
+// per-control list uses CountEvidenceForControl (#2470). Slice 236 — the `/evidence` page surfaces this as
 // the M in `Showing N of M records` so the operator can distinguish
 // "filters are narrowing the view" from "the ledger is empty tenant-wide".
 //

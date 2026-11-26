@@ -17,12 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-	"time"
-
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -34,19 +29,12 @@ import (
 // Deprecated: use pdfrender.Default().RenderTimeout().
 const PDFTimeout = pdfrender.DefaultRenderTimeout
 
-// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
-// wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
-// Slice 340 diagnosed this watchdog firing on Harden-Runner audit-
-// mode-stretched Chrome startup; this slice fans the fix out to
-// the four sibling PDF renderers. See slice 341.
-const chromedpWSURLReadTimeout = 60 * time.Second
-
 // ErrChromeUnavailable signals the headless browser isn't available
 // in this environment. The HTTP handler maps this to 503 so operators
 // can run the platform without Chrome (PDF export disabled) until they
 // install it — the questionnaire workflow itself still works. Mirrors
-// internal/board/pdf.go.
-var ErrChromeUnavailable = errors.New("questionnaire/pdf: chrome browser unavailable")
+// internal/board/pdf.go: both are the shared pdfrender sentinel.
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // PDFInput is the structured snapshot the renderer turns into bytes.
 // Callers (the HTTP handler) hydrate this from the DB via the standard
@@ -69,6 +57,31 @@ type PDFItem struct {
 	NeedsMapping bool
 }
 
+// PDFItems projects a questionnaire's questions, with their answers, into
+// the rows the PDF export renders. It is the export's entire content
+// selection: the ExportPDF handler passes its result to RenderPDF
+// unchanged, so whatever answer reaches a PDFItem reaches the customer.
+// isa/probes/human-approver-guard.sh (ISC-4) calls it directly for that
+// reason.
+func PDFItems(questions []Question) []PDFItem {
+	items := make([]PDFItem, 0, len(questions))
+	for _, q := range questions {
+		pi := PDFItem{
+			Code:         q.Code,
+			Text:         q.Text,
+			Domain:       q.Domain,
+			ScfAnchorID:  q.ScfAnchorID,
+			NeedsMapping: q.NeedsMapping,
+		}
+		if q.Answer != nil {
+			pi.AnswerValue = q.Answer.AnswerValue
+			pi.Narrative = q.Answer.Narrative
+		}
+		items = append(items, pi)
+	}
+	return items
+}
+
 // RenderPDF returns a PDF byte stream for the questionnaire. Bytes
 // begin with the literal `%PDF-` magic header. Blocking; caller
 // supplies the timeout via ctx.
@@ -78,65 +91,12 @@ func RenderPDF(ctx context.Context, in PDFInput) ([]byte, error) {
 	}
 	htmlDoc := buildHTML(in)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderQuestionnaireBytes(ctx, htmlDoc)
-	})
-}
-
-// renderQuestionnaireBytes performs the chromedp render under the deadline the
-// limiter has already applied to ctx.
-func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	// data: URL only — we never navigate to an untrusted URL. The HTML
-	// we render is entirely server-side templated against escaped DB
-	// data, so XSS / SSRF risk is bounded by the renderer interface.
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Run(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("questionnaire/pdf: %w", err)
 		}
-		return nil, fmt.Errorf("questionnaire/pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("questionnaire/pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 func buildHTML(in PDFInput) string {
@@ -196,28 +156,4 @@ h1 { font-size: 20pt; border-bottom: 2px solid #333; padding-bottom: 8px; margin
 
 	w.WriteString(`</body></html>`)
 	return w.String()
-}
-
-// encodeForDataURL — same minimal set as internal/board/pdf.
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
-}
-
-// isChromeUnavailable — same heuristic as internal/board/pdf.
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
 }

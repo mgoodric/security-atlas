@@ -31,6 +31,7 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   CHECKLIST_KINDS,
   CHECKLIST_STATUSES,
@@ -40,12 +41,13 @@ import {
 } from "@/lib/api/personnel-security";
 
 import {
-  dateLabel,
   kindLabel,
   sortChecklists,
   statusBadgeClass,
   statusBadgeLabel,
 } from "./status";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 const ALL = "__all__";
 
@@ -167,7 +169,7 @@ function PersonnelSecurityPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="personnel-row-due"
         >
-          {dateLabel(row.due_at)}
+          <Timestamp value={row.due_at} style="date" />
         </span>
       ),
     },
@@ -212,13 +214,19 @@ function PersonnelSecurityPageInner() {
     />
   );
 
-  const subtitle =
-    "Onboarding / offboarding security checklists · overdue offboarding surfaces first";
+  // #2154: the subtitle names the module's key term.
+  const subtitle = (
+    <>
+      Onboarding / offboarding security{" "}
+      <Term id="personnel-checklist">checklists</Term> · overdue offboarding
+      surfaces first
+    </>
+  );
 
   if (listQ.isLoading) {
     return (
       <ListPage
-        title="Personnel Security"
+        title={pageTitle("/personnel-security")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -233,7 +241,7 @@ function PersonnelSecurityPageInner() {
   if (listQ.isError) {
     return (
       <ListPage
-        title="Personnel Security"
+        title={pageTitle("/personnel-security")}
         subtitle={subtitle}
         actions={actions}
       >
@@ -247,7 +255,7 @@ function PersonnelSecurityPageInner() {
 
   return (
     <ListPage
-      title="Personnel Security"
+      title={pageTitle("/personnel-security")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

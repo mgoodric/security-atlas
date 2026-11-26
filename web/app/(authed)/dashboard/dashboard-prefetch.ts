@@ -42,13 +42,18 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import {
-  getActivity,
   getControlDrift,
   getEvidenceFreshness,
   getFrameworkPosture,
-  getMitigateRisks,
-  getUpcoming,
+  getRecentActivity,
+  getTopRisks,
+  getComingUp,
 } from "@/lib/api/dashboard";
+import {
+  DASHBOARD_NEEDS_ATTENTION_LIMIT,
+  getNeedsAttention,
+  needsAttentionQuery,
+} from "@/lib/api/needs-attention";
 
 // DASHBOARD_QUERY_KEYS mirrors the queryKeys the page's six `useQuery`
 // hooks register under (page.tsx lines ~54-77). The HydrationBoundary
@@ -59,10 +64,14 @@ import {
 // should not import server-helper consts); the cross-module drift guard
 // is the equality assertion in dashboard-prefetch.test.ts.
 export const DASHBOARD_QUERY_KEYS = {
+  // #2135: the first load asks for the server's default view (`for`
+  // omitted: For you, or Everyone for a user who owns nothing and may see
+  // it). A view the user picks is a different key, fetched on demand.
+  needsAttention: ["dashboard", "needs-attention", "default"],
   drift: ["dashboard", "drift"],
   freshness: ["dashboard", "freshness"],
   risks: ["dashboard", "risks"],
-  upcoming: ["dashboard", "upcoming"],
+  comingUp: ["dashboard", "coming-up"],
   frameworkPosture: ["dashboard", "framework-posture"],
   activity: ["dashboard", "activity"],
 } as const;
@@ -104,24 +113,32 @@ type PanelPrefetch = {
 
 // DASHBOARD_PANEL_PREFETCHES enumerates the six panels. The order is not
 // load-bearing (Promise.all fans out in parallel); it tracks the page's
-// visual order for readability. `getMitigateRisks` returns the unwrapped
+// visual order for readability. `getTopRisks` returns the unwrapped
 // `DashboardRisk[]` -- the same shape `fetchDashboardRisks` resolves to
 // (it `.then(b => b.risks)`), so the dehydrated value matches the page's
 // `risksQ.data` exactly (AC-6).
 export const DASHBOARD_PANEL_PREFETCHES: readonly PanelPrefetch[] = [
   {
+    queryKey: DASHBOARD_QUERY_KEYS.needsAttention,
+    load: (bearer) =>
+      getNeedsAttention(
+        bearer,
+        needsAttentionQuery({ limit: DASHBOARD_NEEDS_ATTENTION_LIMIT }),
+      ),
+  },
+  {
     queryKey: DASHBOARD_QUERY_KEYS.frameworkPosture,
     load: getFrameworkPosture,
   },
-  { queryKey: DASHBOARD_QUERY_KEYS.risks, load: getMitigateRisks },
+  { queryKey: DASHBOARD_QUERY_KEYS.risks, load: getTopRisks },
   { queryKey: DASHBOARD_QUERY_KEYS.freshness, load: getEvidenceFreshness },
   // getControlDrift's second arg (`since`) defaults to "7d" -- the same
   // default the client `fetchDashboardDrift` -> BFF -> getControlDrift
   // path uses -- so the bare fn reference (called with one arg) is
   // wire-equivalent to the client path (P0-4).
   { queryKey: DASHBOARD_QUERY_KEYS.drift, load: getControlDrift },
-  { queryKey: DASHBOARD_QUERY_KEYS.upcoming, load: getUpcoming },
-  { queryKey: DASHBOARD_QUERY_KEYS.activity, load: getActivity },
+  { queryKey: DASHBOARD_QUERY_KEYS.comingUp, load: getComingUp },
+  { queryKey: DASHBOARD_QUERY_KEYS.activity, load: getRecentActivity },
 ];
 
 // prefetchDashboard fans out all six panels in parallel and seeds the

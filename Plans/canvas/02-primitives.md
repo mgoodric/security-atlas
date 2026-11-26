@@ -32,7 +32,7 @@ erDiagram
 | `scf_id`                              | string          | Canonical SCF code (e.g. `IAC-01`). Optional but strongly recommended.    |
 | `title`                               | string          |                                                                           |
 | `description`                         | text            |                                                                           |
-| `control_family`                      | enum            | SCF taxonomy: AAA, AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                 |
+| `control_family`                      | enum            | SCF taxonomy: AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                      |
 | `implementation_type`                 | enum            | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic` |
 | `owner_role`                          | string          | Who owns it (RACI).                                                       |
 | `lifecycle_state`                     | enum            | `draft` → `proposed` → `active` → `deprecated` → `retired`                |
@@ -47,17 +47,19 @@ Controls are **first-class** whether automated or manual. A `manual_attested` co
 
 A risk is a _statement of plausible loss_, not a control failure. Controls _treat_ risks; risks are not derived from controls. We support multiple methodologies behind a common surface.
 
-| Field                        | Type      | Notes                                                                                                           |
-| ---------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `id`, `title`, `description` |           |                                                                                                                 |
-| `category`                   | enum      | `confidentiality` \| `integrity` \| `availability` \| `privacy` \| `regulatory` \| `operational` \| `financial` |
-| `methodology`                | enum      | `nist_800_30` \| `fair` \| `cis_ram` \| `iso_27005` \| `qualitative_5x5`                                        |
-| `inherent_score`             | jsonb     | Methodology-specific (FAIR has LEF/LM; NIST has likelihood/impact 1–5).                                         |
-| `treatment`                  | enum      | `accept` \| `mitigate` \| `transfer` \| `avoid`                                                                 |
-| `treatment_owner`            | string    |                                                                                                                 |
-| `linked_control_ids[]`       | array     | Many-to-many.                                                                                                   |
-| `residual_score`             | jsonb     | Computed; see [§6 Risk Register Linkage](./06-risk.md).                                                         |
-| `review_due_at`              | timestamp |                                                                                                                 |
+| Field                        | Type      | Notes                                                                                                     |
+| ---------------------------- | --------- | --------------------------------------------------------------------------------------------------------- |
+| `id`, `title`, `description` |           |                                                                                                           |
+| `category_id`                | uuid      | One of the organisation's own risk categories, not a fixed enum (#1745). Seven seeded; see `GLOSSARY.md`. |
+| `methodology`                | enum      | `nist_800_30` \| `fair` \| `cis_ram` \| `iso_27005` \| `qualitative_5x5`                                  |
+| `inherent_score`             | jsonb     | Methodology-specific (FAIR has LEF/LM; NIST has likelihood/impact 1–5).                                   |
+| `treatment`                  | enum      | `accept` \| `mitigate` \| `transfer` \| `avoid`                                                           |
+| `treatment_owner`            | string    |                                                                                                           |
+| `linked_control_ids[]`       | array     | Many-to-many.                                                                                             |
+| `residual_score`             | jsonb     | Computed; see [§6 Risk Register Linkage](./06-risk.md).                                                   |
+| `review_due_at`              | timestamp |                                                                                                           |
+
+**Categories are organisation-owned.** Each organisation keeps its own set of risk categories: it can add, rename, archive and set a default, and a risk references one of them. The seven seeded categories (`confidentiality`, `integrity`, `availability`, `privacy`, `regulatory`, `operational`, `financial`) carry the slugs of the fixed enum they replaced, so older clients that send those values keep working.
 
 **Default methodology: NIST 800-30 qualitative**, because it is the lowest common denominator most auditors and regulators expect. FAIR is supported for orgs that have invested in it. Methodology is a per-risk field, not global, so they coexist.
 
@@ -91,6 +93,8 @@ An evidence record is _a single observation about reality at a point in time_. P
 | `monthly`   | 90 d    | Access review, vendor security questionnaire    |
 | `quarterly` | 120 d   | DR test, tabletop exercise                      |
 | `annual`    | 400 d   | Penetration test, policy reaffirmation          |
+
+Each max age is the class's cadence plus a grace period (quarterly is 90 d + 30 d, annual is 365 d + 35 d, about 13 months), so evidence produced a few weeks late in the next cycle is still fresh. Control descriptions state the max age, not the bare cadence (`docs/spec/control-bundle.md` §2.2.1; #2816).
 
 Records past `valid_until` are **stale**, not deleted. Stale evidence drives a `drift` signal; the historical record is preserved for point-in-time audit replay.
 

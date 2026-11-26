@@ -38,6 +38,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(
@@ -45,6 +46,8 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
@@ -68,11 +71,12 @@ export async function GET(
   });
 
   // Error path: the platform returned a JSON error body (404 unknown /
-  // cross-tenant period, 409 not-frozen, 5xx). Pass the upstream status +
-  // body through unchanged so the operator sees the upstream message.
+  // cross-tenant period, 409 not-frozen, 5xx). Pass the upstream status
+  // through; a 4xx body passes unchanged so the operator sees the upstream
+  // message, a 5xx body is masked (upstreamBody, #2757).
   if (!upstream.ok) {
     const text = await upstream.text();
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: {
         "Content-Type":

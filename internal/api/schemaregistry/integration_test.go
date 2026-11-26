@@ -15,12 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -60,16 +59,15 @@ func setupHTTP(t *testing.T, tenant string, admin bool) (*httptest.Server, strin
 		SchemaRegistry: svc,
 	})
 	srv.AttachDB(appPool)
-	// Slice 197: JWT bearer via slice 190 path. AdminFor matches the
-	// legacy IssueBootstrapAdminCredential (SuperAdmin=true → jwtmw
-	// synthesizes IsAdmin=true on the credential); ViewerFor matches
-	// IssueBootstrapCredential (no elevation).
-	var bearer string
+	liveroletest.Attach(t, srv, appPool)
+	// #3016: a seeded person with a live grant, on the real engine. The
+	// non-admin is a grc_engineer, the operator role, which the engine
+	// still refuses a schema write ("schemas" is a catalog read only).
+	role := "grc_engineer"
 	if admin {
-		bearer = srv.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenant)))
-	} else {
-		bearer = srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
+		role = "admin"
 	}
+	bearer := liveroletest.Bearer(t, srv, tenant, role)
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests returned nil")
@@ -141,8 +139,11 @@ func TestImport_TenPlatformSchemas(t *testing.T) {
 		"manual.attestation.v1",
 		"aws.s3.bucket_encryption_state.v1",
 		"github.repo_protection.v1",
+		"github.repo_protection.v2",
 		"okta.mfa_policy.v1",
+		"okta.mfa_policy.v2",
 		"1password.org_policy.v1",
+		"1password.org_policy.v2",
 		"osquery.host_posture.v1",
 		"jira.ticket_evidence.v1",
 		"manual.upload.v1",
@@ -257,10 +258,13 @@ func TestRegister_AdminOnly(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("anon POST = %d; want 401", resp.StatusCode)
 	}
-	// Non-admin → 403.
+	// Non-admin → 403, from the engine: the handler's IsTenantAdmin gate
+	// says "admin credential required" instead. The engine admits only a
+	// live admin to write "schemas", which passes that gate, so the gate
+	// is not reached by a refused caller.
 	resp, raw := reqJSON(t, ts, http.MethodPost, "/v1/schemas", nonAdminBearer, body)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin POST = %d; want 403; body=%s", resp.StatusCode, raw)
+	if resp.StatusCode != http.StatusForbidden || !bytes.Contains(raw, []byte(`"error":"forbidden"`)) {
+		t.Fatalf("non-admin POST = %d; want 403 forbidden; body=%s", resp.StatusCode, raw)
 	}
 }
 
@@ -390,7 +394,8 @@ func TestRegister_TenantIsolated(t *testing.T) {
 	}
 	srvB := api.New(api.Config{RotationGrace: time.Hour, SchemaRegistry: svcB})
 	srvB.AttachDB(app)
-	bearerB := srvB.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenantB)))
+	liveroletest.Attach(t, srvB, app)
+	bearerB := liveroletest.Bearer(t, srvB, tenantB, "admin")
 	handlerB := srvB.HTTPHandlerForTests()
 	tsB := httptest.NewServer(handlerB)
 	t.Cleanup(tsB.Close)

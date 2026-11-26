@@ -11,9 +11,27 @@ The target is the same primary persona as the platform itself — the solo secur
 - A Docker host with Docker Engine 24+ and `docker compose` plugin
 - Outbound HTTPS to `ghcr.io` (for image pulls) and to any cloud provider whose APIs you connect (AWS, GitHub, etc.)
 - A DNS name pointing at the host if you intend to expose the UI publicly
-- An S3-compatible artifact store. Options:
-  - **MinIO** — runs on the same host (simplest)
-  - **Backblaze B2 / Wasabi / AWS S3** — managed; cheap if your evidence volume is modest
+
+### Required and optional services
+
+Only Postgres is required. The `atlas` server starts and serves without
+every other backing service; each one it lacks switches a feature off
+rather than stopping the boot. The full bundle below runs Postgres, NATS
+and MinIO for you. A pilot on the slim server-only bundle can start with
+Postgres alone.
+
+| Service                                      | Needed?                | Turned on by                                   | Without it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------- | ---------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Postgres 16+                                 | **Required**           | `DATABASE_URL` (+ `DATABASE_URL_APP`)          | Not a supported deployment. Every tenant-scoped store, the evidence ledger and authentication live here.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| NATS JetStream                               | Optional (recommended) | `NATS_URL`                                     | Evidence push writes straight to the ledger in-process, with no durable buffer to absorb bursts or replay from. The on-ingest reactions are off: control re-evaluation, freshness/drift refresh, residual-risk recompute, and HRIS joiner/leaver checklists. The hourly evaluation recompute and the daily freshness/drift tick still run, so dashboards lag by up to an hour. If `NATS_URL` is set but unreachable, `atlas` exits at boot.                                                                                                |
+| S3-compatible artifact store (MinIO, B2, S3) | Optional               | `ARTIFACTS_BUCKET` (+ `ARTIFACTS_S3_ENDPOINT`) | File uploads are unavailable: `POST /v1/artifacts:upload` and `GET /v1/artifacts/{id}` are not mounted, attestation files cannot be attached (the attestation itself still records), and walkthrough attachments answer `503 artifact store not configured`. Inline evidence payloads over 1 MiB are rejected either way. If `ARTIFACTS_BUCKET` is set but the bucket is unreachable, `atlas` exits at boot. Set `ARTIFACTS_S3_PUBLIC_ENDPOINT` to the MinIO address browsers reach, or download links point at the internal `minio:9000`. |
+| S3-compatible backup bucket                  | Optional               | `ATLAS_BACKUP_TARGET=s3`                       | Backups go to the local volume (the default). See [Backups](#backups).                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| OSCAL bridge (`oscal-bridge`)                | Optional               | `OSCAL_BRIDGE_ADDR`                            | OSCAL export is disabled.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| OTLP collector                               | Optional               | `OTEL_EXPORTER_OTLP_ENDPOINT`                  | Traces and metrics are not exported (no-op SDK). See [Monitoring](#monitoring).                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+For an artifact store, **MinIO** on the same host is the simplest option;
+**Backblaze B2 / Wasabi / AWS S3** are managed and cheap if your evidence
+volume is modest.
 
 ---
 
@@ -22,10 +40,10 @@ The target is the same primary persona as the platform itself — the solo secur
 The `deploy/docker/docker-compose.yml` bundle brings up the **whole
 platform** on one host — Postgres, NATS JetStream, MinIO, the `atlas`
 server, and the Next.js frontend — and seeds it on first boot
-(migrations, default tenant/scope/user, the SCF catalog, and the 50 SOC 2
+(migrations, default tenant/scope/user, the SCF catalog, and the 65 stock
 control bundles). It is the bundle behind the "installable + first
 evidence in 4 hours" acceptance criterion; the end-to-end walkthrough
-lives in [`docs/getting-started/first-evidence.md`](getting-started/first-evidence.md).
+lives in the [Getting started guide](../docs-site/docs/getting-started.md).
 
 ```sh
 # 1. Clone the repo (the bundle bind-mounts migrations/ + controls/ from it).
@@ -71,6 +89,35 @@ Services in the bundle (`docker compose ps` / `just self-host-ps`):
 `self-host-logs`, `self-host-ps`, `self-host-build`, `self-host-config`
 (validates the compose file without starting anything).
 
+### When a subsystem fails, `atlas` exits
+
+The `atlas` process runs several subsystems side by side. If one that serves
+requests or keeps control state current fails, the process stops and exits 1
+with every collected error on stderr, so a supervisor restarts it. Those
+subsystems are the gRPC and HTTP servers, the NATS evidence consumer, the
+event subscribers (evaluation, freshness/drift, risk residual, personnel
+security) and the evaluation, freshness/drift, metrics and staleness
+schedulers. A port that will not bind is the usual cause. Before #2781 the
+process kept running without the failed subsystem, and `/health` still
+answered.
+
+The notification and housekeeping loops do not stop the process: the
+exception expirer, the decision and personnel overdue notifiers, the
+security-awareness roster sync, the control-import sweeper, the exception
+Idempotency-Key sweeper and the digest scheduler. Each logs a failed sweep and tries again on its next tick.
+
+Run `atlas` under something that restarts it. The compose bundles set
+`restart: unless-stopped` on the `atlas` service. A bare-binary deploy needs
+the equivalent, such as systemd `Restart=on-failure`. Decisions:
+[`docs/audit-log/2781-fatal-subsystems-decisions.md`](audit-log/2781-fatal-subsystems-decisions.md).
+
+On SIGTERM, or when a subsystem fails, the gRPC and HTTP servers each get
+5 seconds to drain in-flight requests and streams. Past that, gRPC closes
+the connections that are still open and HTTP returns with its handlers
+still running, so a stuck stream cannot keep the process from exiting
+(#2805). A supervisor's stop timeout should allow at least that long;
+Docker's default of 10 seconds does.
+
 ### Manual smoke test
 
 CI validates that `docker-compose.yml` parses (`just self-host-config`);
@@ -88,6 +135,26 @@ curl -fsS http://localhost:3000 -o /dev/null -w '%{http_code}\n'   # expect 200
 just self-host-wipe                                # tear down + delete volumes
 ```
 
+### Signing in from a script
+
+`POST /auth/local/login` takes a JSON body of `email`, `password` and, on a
+multi-tenant install only, `tenant_id`. It answers with the session cookie and, when the in-app
+authorization server is configured, an `atlas_jwt` in `token`:
+
+```sh
+curl -fsS -X POST http://localhost:8080/auth/local/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"..."}'
+```
+
+- **One tenant (the self-host default):** `tenant_id` may be omitted; the
+  login uses the install's only tenant.
+- **Several tenants:** `tenant_id` is required. Without it the endpoint
+  answers `400 {"error":"tenant_id is required"}`. The tenant ids are on
+  `GET /v1/admin/tenants`.
+- The all-zeros tenant id is never accepted. Wrong passwords and unknown
+  emails both answer `401 invalid credentials`.
+
 ### Bootstrap credential — rotate it
 
 `ATLAS_BOOTSTRAP_TOKEN` is a pre-shared admin token the one-shot
@@ -96,7 +163,180 @@ convenience credential for first boot. Once you have signed in and
 issued a real operator API key, **revoke or rotate the bootstrap
 token** — it should not remain a long-lived admin credential.
 
+### Bring your own SCF release
+
+By default the bootstrap seeds two things you may not want in a real
+deployment:
+
+- **`migrations/fixtures/scf-sample.json`** — a small SCF sample, enough
+  for the bundled SOC 2 crosswalk and the stock controls, not the full
+  ~1,400-anchor catalog.
+- **`controls/soc2/`** — the 65 stock control bundles.
+
+Two variables in `deploy/docker/.env` override them. Both are paths
+**inside the bootstrap container**, where your clone is mounted
+read-only at `/repo`, so a file at `<clone>/local/scf.json` is
+`/repo/local/scf.json`.
+
+| Variable       | Default                                     | Set it to                                                                    |
+| -------------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| `SCF_CATALOG`  | `/repo/migrations/fixtures/scf-sample.json` | your SCF release, converted to the importer's JSON shape (below)             |
+| `CONTROLS_DIR` | `/repo/controls/soc2`                       | your own control bundles, or an empty or non-existent directory to seed none |
+
+The importer reads JSON, not SCF's Excel workbook. Convert the release
+into this shape (the contract is `internal/api/scfimport/catalog.go`;
+`scf_id`, `family` and `title` are required per control):
+
+```json
+{
+  "schema_version": "1.0",
+  "release_version": "2025.4",
+  "release_date": "2025-12-01",
+  "controls": [
+    {
+      "scf_id": "IAC-37",
+      "family": "IAC",
+      "title": "Multi-Factor Authentication (MFA)",
+      "description": "Mechanisms exist to ...",
+      "legacy_scf_id": "IAC-06"
+    }
+  ]
+}
+```
+
+`legacy_scf_id` is optional: the control's code in the previous SCF
+release, as the workbook's `Legacy SCF #` column gives it. Leave it out
+when the control is new or you don't have it. Anchors store it, and the
+anchor API returns it (`GET /v1/anchors`, `GET /v1/anchors/{id}`). An
+imported release is frozen, with one exception: re-importing the same
+`release_version` with `legacy_scf_id` filled in sets it on anchors stored
+without one. A re-import that gives a different value from the stored one
+is refused.
+
+Then, **before the first `just self-host-up`**:
+
+```bash
+# 1. Put the converted catalog somewhere in the clone (don't commit it;
+#    check the SCF license terms before redistributing it).
+mkdir -p local && cp ~/Downloads/scf-2025.4.json local/scf.json
+
+# 2. Point the bootstrap at it, and seed no stock controls.
+cat >> deploy/docker/.env <<'EOF'
+SCF_CATALOG=/repo/local/scf.json
+CONTROLS_DIR=/repo/local/no-controls
+EOF
+
+# 3. Bring the stack up as usual, and check the import line in the logs.
+just self-host-up
+docker compose -f deploy/docker/docker-compose.yml logs atlas-bootstrap \
+  | grep -E 'release_version=|uploaded [0-9]+ control bundles'
+#   release_version=2025.4 framework_version_id=... new_version=true status=current
+#   release_version=test-2026.3 framework_version_id=... new_version=true status=legacy
+#   uploaded 0 control bundles
+#   release_version=2025.4 framework_version_id=... new_version=false status=current
+```
+
+What the bootstrap does with your release (#3061):
+
+1. It imports your catalog. Your release is the current SCF release.
+2. It also loads the bundled sample, `test-2026.3`, with
+   `atlas-cli catalog import-scf --keep-current`. That flag loads a new
+   release as **legacy** and leaves the current one alone, so your release
+   stays current. The stock controls, the bundled crosswalks and the stock
+   policies all declare `scf_release: test-2026.3`, and a declared release
+   resolves whether it is current or legacy.
+3. It imports the SOC 2 crosswalk and uploads the stock controls. Both
+   bind in `test-2026.3`.
+4. It imports your catalog again. That import is a no-op, but it runs the
+   re-bind and the crosswalk-edge carry that follow every SCF import.
+   Each stock control and each SOC 2 edge whose SCF code has the same
+   title in your release moves onto your release's anchor. Every sample
+   title is the SCF 2026.3 title, so on a 2026.3 release everything moves.
+   On another release, only an exact code and title match moves. A stock
+   control whose code is missing or whose title differs, even by wording
+   alone, stays on its `test-2026.3` anchor and is listed at
+   `GET /v1/controls/needs-reanchoring`. (A later import of a newer SCF
+   release does move a stock control whose title alone changed; moves off
+   the sample do not.) Such an edge waits in the crosswalk-edge remap
+   queue for a super-admin.
+
+Every later boot repeats these steps, and each one is a no-op.
+
+Things to know:
+
+- **The sample stays loaded.** `GET /v1/frameworks?include=versions` lists
+  `test-2026.3` as a legacy SCF release beside yours. Default coverage reads
+  the current release, so the sample's anchors don't count toward it.
+- **`--keep-current` is one-way.** A release loaded with it stays legacy:
+  re-importing it is a no-op that never promotes it, and only SQL can.
+  Use the flag only for a release that must stay legacy, as the bootstrap
+  does for the sample. Load your own release without it.
+- **Re-import your catalog after adding a crosswalk by hand.** The other
+  bundled crosswalks (the `import-crosswalk` commands the bootstrap
+  prints) also bind in `test-2026.3`. After importing one, import your
+  catalog again so its edges move onto your release, with the path the
+  container sees:
+  `docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-scf /repo/local/scf.json`.
+  The next boot does the same.
+- **Stock policies link through your release, by code and title.**
+  `atlas-cli policy seed-stock` resolves the policies' declared release
+  (`test-2026.3`). After step 4 the stock controls are on your release,
+  so a code with no control in `test-2026.3` links the control bound to
+  your release's anchor with the same code and the same title, and the
+  seed prints a `warning:` line naming your release. A code whose title
+  differs in your release stays unlinked, with a `warning:` line naming
+  it. Link those by hand once you have reviewed them.
+- **Set these before first boot.** Control upload and SCF import both
+  upsert; neither deletes. Changing `CONTROLS_DIR` after the stock
+  controls are uploaded does not remove them.
+- **A newer release later is a re-run.** Update `SCF_CATALOG` and run
+  `docker compose -f deploy/docker/docker-compose.yml run --rm atlas-bootstrap`.
+  A new `release_version` becomes the current SCF version; the previous
+  one is kept as `legacy` for audit replay.
+- These variables apply to `deploy/docker/docker-compose.yml`. The
+  edge compose file runs a published image with its own copy of the
+  repo and no bind mount, so it does not take them.
+
 ---
+
+## One organisation by default
+
+A fresh install is a **single-tenant install**: one tenant, the bootstrap
+tenant (`ATLAS_BOOTSTRAP_TENANT`), which the UI calls your organisation. No
+sign-in form, CLI command, OAuth client or doc step asks you for a tenant ID;
+each resolves to that tenant on its own. Row-level security still isolates
+the tenant at the database layer
+([ADR 0023](adr/0023-single-tenant-experience-by-default.md)).
+
+**OAuth clients are bound to a tenant.** A `client_credentials` client's
+tokens act in the tenant it is bound to, and its writes land there.
+`bootstrap.sh` issues its upload client bound to your organisation, and
+`atlas-cli oauth issue-client <name>` does the same by default. A token from
+an unbound client can read but every write is refused with
+`403 tenant_unbound`. Upgrading binds existing clients for you on a
+single-tenant install. On a multi-tenant install, bind each one:
+
+```sh
+DATABASE_URL=postgres://atlas_migrate:...@localhost:5432/atlas \
+  atlas-cli oauth bind-client <client_id> --tenant <tenant id>
+```
+
+**Multi-tenant is an opt-in, and one-way.** A second tenant can be created
+only by a super-admin, and only while `ATLAS_ALLOW_MULTI_TENANT=true` is set
+on the `atlas` service (in `deploy/docker/.env` for the compose bundle). Once
+a second tenant exists the tenant chrome appears, sign-in and the CLI ask
+which tenant you mean, and there is no supported path back to one tenant
+(tenants are not merged). Existing
+multi-tenant installs keep working without the setting; it gates only the
+creation of tenants. See
+[Tenant membership](../docs-site/docs/tenant-membership.md#opting-in-to-multi-tenant).
+
+**Demo data respects the same line.** On a fresh single-tenant install,
+`atlas-cli demo seed` loads into your organisation and `demo teardown`
+removes exactly what it added. Once the organisation holds its own
+evidence, risks, framework versions, controls or policies, the seed refuses, rather than mix demo and real data; a separate demo tenant
+needs the multi-tenant opt-in. See
+[demo seed](getting-started/demo-seed.md).
 
 ## Quick start — the Watchtower auto-update example (server-only)
 
@@ -424,18 +664,18 @@ or volume encryption) exactly as the runbook describes.
 
 Configuration (all optional; sensible defaults for the single-VM bundle):
 
-| Env var                        | Default                  | Meaning                                                          |
-| ------------------------------ | ------------------------ | ---------------------------------------------------------------- |
-| `ATLAS_BACKUP_TARGET`          | `local`                  | `local` (volume) or `s3`                                         |
-| `ATLAS_BACKUP_DIR`             | `/var/lib/atlas/backups` | local-target directory (mount a volume here)                     |
-| `ATLAS_BACKUP_S3_BUCKET`       | —                        | bucket for the `s3` target                                       |
-| `ATLAS_BACKUP_S3_PREFIX`       | —                        | key prefix within the bucket                                     |
-| `ATLAS_BACKUP_S3_ENDPOINT`     | —                        | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds |
-| `ATLAS_BACKUP_INTERVAL`        | `24h`                    | backup cadence                                                   |
-| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                    | restore-verification cadence                                     |
-| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                      | dailies to retain                                                |
-| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                      | weeklies to retain                                               |
-| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                        | user id that receives failure notifications                      |
+| Env var                        | Default                   | Meaning                                                                                               |
+| ------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ATLAS_BACKUP_TARGET`          | `local`                   | `local` (volume) or `s3`                                                                              |
+| `ATLAS_BACKUP_DIR`             | `$ATLAS_DATA_DIR/backups` | local-target directory (mount a volume here); `/var/lib/atlas/backups` when `ATLAS_DATA_DIR` is unset |
+| `ATLAS_BACKUP_S3_BUCKET`       | —                         | bucket for the `s3` target                                                                            |
+| `ATLAS_BACKUP_S3_PREFIX`       | —                         | key prefix within the bucket                                                                          |
+| `ATLAS_BACKUP_S3_ENDPOINT`     | —                         | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds                                      |
+| `ATLAS_BACKUP_INTERVAL`        | `24h`                     | backup cadence                                                                                        |
+| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                     | restore-verification cadence                                                                          |
+| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                       | dailies to retain                                                                                     |
+| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                       | weeklies to retain                                                                                    |
+| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                         | user id that receives failure notifications                                                           |
 
 > **Scope note.** The automated dump is a logical (data + minimal-schema)
 > dump tuned for continuity + restore-verification. For exact catalog fidelity

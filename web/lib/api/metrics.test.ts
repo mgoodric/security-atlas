@@ -22,7 +22,15 @@ import { describe, expect, test } from "vitest";
 
 import {
   type CascadeNode,
+  canSetMetricTarget,
+  DEFAULT_NO_DATA_REASON,
+  measuredObservations,
+  metricTargetError,
+  metricTargetInputFromStored,
+  metricTargetScale,
+  metricTargetStoredFromInput,
   neutralBadgeLabel,
+  noDataReason,
   reassembleCascade,
   thresholdBadgeColor,
 } from "./metrics";
@@ -267,5 +275,236 @@ describe("thresholdBadgeColor — target_is_better", () => {
     expect(thresholdBadgeColor(102, fallback)).toBe("green"); // within 5%
     expect(thresholdBadgeColor(108, fallback)).toBe("yellow"); // within 15%
     expect(thresholdBadgeColor(120, fallback)).toBe("red"); // beyond 15%
+  });
+});
+
+describe("noDataReason — the evaluators' empty marker (#2064)", () => {
+  test("an empty-marked observation yields its reason", () => {
+    expect(
+      noDataReason({
+        dimensions: {
+          sample: "empty",
+          no_data_reason: "No critical findings recorded in the last 90 days",
+        },
+      }),
+    ).toBe("No critical findings recorded in the last 90 days");
+  });
+
+  test("an empty marker without a reason falls back to the default copy", () => {
+    expect(noDataReason({ dimensions: { sample: "empty" } })).toBe(
+      DEFAULT_NO_DATA_REASON,
+    );
+    expect(
+      noDataReason({ dimensions: { sample: "empty", no_data_reason: " " } }),
+    ).toBe(DEFAULT_NO_DATA_REASON);
+  });
+
+  test("a measured observation is not no-data", () => {
+    expect(noDataReason({ dimensions: { sample: "all_controls" } })).toBeNull();
+    expect(noDataReason({ dimensions: {} })).toBeNull();
+    expect(noDataReason(undefined)).toBeNull();
+  });
+
+  test("measuredObservations drops empty-marked points", () => {
+    const real = { id: "a", dimensions: { total_controls: "4" } };
+    const empty = { id: "b", dimensions: { sample: "empty" } };
+    expect(measuredObservations([empty, real, empty])).toEqual([real]);
+  });
+});
+
+// #2341 — the metric-target dialog's guard and client-side check.
+// The guard reads /v1/me's is_approver (authz.IsTenantApprover over the
+// live roles: admin or grc_engineer, #2572), never the JWT's owner_roles
+// claim, which goes stale after a revoke.
+describe("canSetMetricTarget", () => {
+  test.each([
+    [{ is_approver: true }, true],
+    [{ is_approver: false }, false],
+    // An admin: /v1/me reports is_approver true for every tenant admin.
+    [{ is_tenant_admin: true, is_approver: true }, true],
+    // A stale claim still listing admin or grc_engineer is not enough.
+    [{ is_approver: false, owner_roles: ["admin"] }, false],
+    [{ is_approver: false, owner_roles: ["grc_engineer"] }, false],
+    [{}, false],
+    [undefined, false],
+  ])("%j -> %s", (me, want) => {
+    expect(canSetMetricTarget(me)).toBe(want);
+  });
+});
+
+describe("metricTargetError", () => {
+  const check = (
+    direction: string,
+    target_value: number,
+    warning_threshold: number,
+    critical_threshold: number,
+  ) =>
+    metricTargetError({
+      direction,
+      target_value,
+      warning_threshold,
+      critical_threshold,
+    });
+
+  test("ordered thresholds pass for each direction", () => {
+    expect(check("higher_is_better", 95, 85, 70)).toBeNull();
+    expect(check("higher_is_better", 90, 90, 90)).toBeNull();
+    expect(check("lower_is_better", 7, 14, 30)).toBeNull();
+    expect(check("target_is_better", 50, 45, 30)).toBeNull();
+  });
+
+  test("misordered thresholds are refused", () => {
+    expect(check("higher_is_better", 80, 90, 70)).toContain(
+      "critical ≤ warning ≤ target",
+    );
+    expect(check("lower_is_better", 30, 14, 7)).toContain(
+      "target ≤ warning ≤ critical",
+    );
+    expect(check("target_is_better", 50, 30, 45)).toContain("critical band");
+  });
+
+  test("a value that is not a number, or no direction, is refused", () => {
+    expect(check("higher_is_better", Number.NaN, 1, 0)).toBe(
+      "Target must be a number.",
+    );
+    expect(check("higher_is_better", 2, 1, Number.NaN)).toBe(
+      "Critical must be a number.",
+    );
+    expect(check("", 2, 1, 0)).toBe("Choose a direction.");
+  });
+
+  test("a percent metric's values must be 0..100; other units have no range", () => {
+    const input = {
+      direction: "higher_is_better",
+      target_value: 120,
+      warning_threshold: 80,
+      critical_threshold: 60,
+    };
+    expect(metricTargetError(input, "percent")).toBe(
+      "Target must be between 0 and 100.",
+    );
+    expect(
+      metricTargetError(
+        { ...input, target_value: 90, critical_threshold: -1 },
+        "percent",
+      ),
+    ).toBe("Critical must be between 0 and 100.");
+    expect(metricTargetError({ ...input, target_value: 90 }, "percent")).toBe(
+      null,
+    );
+    expect(metricTargetError(input, "count")).toBeNull();
+  });
+});
+
+// #2341 — a percent target is typed as a percentage and stored as the
+// fraction the metric's observations use.
+describe("metric target percent conversion", () => {
+  test("stored fraction -> shown percentage", () => {
+    expect(metricTargetInputFromStored("0.9", "percent")).toBe("90");
+    expect(metricTargetInputFromStored("0.7", "percent")).toBe("70");
+    expect(metricTargetInputFromStored("0.955", "percent")).toBe("95.5");
+    expect(metricTargetInputFromStored("1", "percent")).toBe("100");
+    expect(metricTargetInputFromStored("0", "percent")).toBe("0");
+    // Already percentage points, as formatValue reads it.
+    expect(metricTargetInputFromStored("85", "percent")).toBe("85");
+    expect(metricTargetInputFromStored(undefined, "percent")).toBe("");
+  });
+
+  test("typed percentage -> stored fraction", () => {
+    expect(metricTargetStoredFromInput(90, "percent")).toBe(0.9);
+    expect(metricTargetStoredFromInput(70.1, "percent")).toBe(0.701);
+    expect(metricTargetStoredFromInput(100, "percent")).toBe(1);
+    expect(metricTargetStoredFromInput(0, "percent")).toBe(0);
+  });
+
+  test("the two directions round-trip", () => {
+    for (const pct of [0, 12.5, 33.33, 70, 99.99, 100]) {
+      const stored = metricTargetStoredFromInput(pct, "percent");
+      expect(metricTargetInputFromStored(String(stored), "percent")).toBe(
+        String(pct),
+      );
+    }
+  });
+
+  test("other units pass through unchanged", () => {
+    expect(metricTargetInputFromStored("14", "days")).toBe("14");
+    expect(metricTargetInputFromStored("0.5", "count")).toBe("0.5");
+    expect(metricTargetStoredFromInput(14, "days")).toBe(14);
+    expect(metricTargetStoredFromInput(14, "days", 30)).toBe(14);
+  });
+});
+
+// #2572 — a percent target is stored on its observations' scale, picked
+// from the latest observation, and a ratio is entered as a percentage like
+// the percentage it is displayed as.
+describe("metric target scale", () => {
+  test.each([
+    ["percent", undefined, "fraction"],
+    ["percent", 0.92, "fraction"],
+    ["percent", 1, "fraction"],
+    ["percent", 85, "points"],
+    ["ratio", undefined, "fraction"],
+    ["ratio", 0.4, "fraction"],
+    ["ratio", 40, "points"],
+    ["count", 85, "raw"],
+    ["days", undefined, "raw"],
+  ] as const)("%s latest=%s -> %s", (unit, latest, want) => {
+    expect(metricTargetScale(unit, latest)).toBe(want);
+  });
+
+  test.each([
+    // A stored target above 1 is points, whatever the latest value.
+    ["percent", 0, 90, "points"],
+    ["percent", 0.5, 90, "points"],
+    ["percent", undefined, 90, "points"],
+    ["percent", 0, 0.9, "fraction"],
+    ["ratio", 0, 40, "points"],
+    ["count", 0, 90, "raw"],
+  ] as const)("%s latest=%s stored=%s -> %s", (unit, latest, stored, want) => {
+    expect(metricTargetScale(unit, latest, stored)).toBe(want);
+  });
+
+  test("points: latest 0, stored 90, re-saving keeps 90", () => {
+    // The dialog shows the stored target, the operator saves it unchanged.
+    const shown = metricTargetInputFromStored("90", "percent", 0, 90);
+    expect(shown).toBe("90");
+    expect(metricTargetStoredFromInput(Number(shown), "percent", 0, 90)).toBe(
+      90,
+    );
+  });
+
+  test("points: typed percentage is stored and shown as typed", () => {
+    expect(metricTargetStoredFromInput(90, "percent", 85)).toBe(90);
+    expect(metricTargetInputFromStored("90", "percent", 85)).toBe("90");
+    // A target of 0.5 points is 0.5%, not 50%.
+    expect(metricTargetInputFromStored("0.5", "percent", 85)).toBe("0.5");
+  });
+
+  test("points: the stored target grades a points observation", () => {
+    const target = {
+      target_value: String(metricTargetStoredFromInput(90, "percent", 85)),
+      warning_threshold: String(metricTargetStoredFromInput(80, "percent", 85)),
+      critical_threshold: String(
+        metricTargetStoredFromInput(70, "percent", 85),
+      ),
+      direction: "higher_is_better",
+    };
+    expect(thresholdBadgeColor(85, target)).toBe("yellow");
+  });
+
+  test("ratio: a percentage is stored as a fraction and shown back", () => {
+    expect(metricTargetStoredFromInput(40, "ratio")).toBe(0.4);
+    expect(metricTargetInputFromStored("0.4", "ratio")).toBe("40");
+    expect(
+      metricTargetError(
+        {
+          target_value: 140,
+          warning_threshold: 30,
+          critical_threshold: 20,
+          direction: "higher_is_better",
+        },
+        "ratio",
+      ),
+    ).toBe("Target must be between 0 and 100.");
   });
 });

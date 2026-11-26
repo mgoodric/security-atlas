@@ -202,6 +202,292 @@ Slice 192 (2026-05-21) closes the auth-substrate-v2 spine. With slice 192 merged
 
 The binary vCISO success criterion from slice 141 is fulfilled.
 
+## Amendment (2026-11-13, #1851): super_admin on install-wide admin routes
+
+A per-tenant admin API key sets `cred.IsAdmin` but never carries
+`atlas:super_admin`. Two `/v1/admin` routes had install-wide effects behind
+`cred.IsAdmin` alone, so any tenant's admin could reach them. They now use the
+verified-JWT `atlas:super_admin` check that #1757 put on the global catalog
+write routes (re-read per request since #1853):
+
+- **`POST /v1/admin/demo/seed` and `POST /v1/admin/demo/teardown`** create or
+  delete a whole tenant through the BYPASSRLS pool. They require
+  `atlas:super_admin`, in addition to the OPA admin-role check. No fallback.
+- **`POST /v1/admin/install/reset-bootstrap`** clears the install-wide
+  `first_signin_at` and `bootstrap_token_consumed_at` markers and rewrites the
+  install's `bootstrap-token` file. It admits `atlas:super_admin`, **or** an
+  admin credential while the install has exactly one tenant.
+
+**Why the reset keeps an admin-key fallback.** The reset is the recovery path
+for an install whose sign-in is broken, run from `atlas-cli credentials issue
+--reset-bootstrap`. Then there may be no way to get a JWT, and the operator
+holds only an admin API key. On a single-tenant install that key's tenant is
+the whole install, so admitting it is no cross-tenant effect. Once a second
+tenant exists, a tenant admin key is refused (403) and the operator signs in
+as a super_admin and passes that JWT as `--token`. The tenant count is read
+on each request through the BYPASSRLS pool (`platform.Status.TenantCount`).
+
+**The CLI presents the operator's credential.** `--reset-bootstrap` now sends
+the caller's `--token` as the bearer for the reset POST. It used to send the
+key it had just minted, which is a non-admin key and could never pass the
+gate.
+
+**The token is validated.** The request's `token` must authenticate as a
+live (unrevoked, unexpired) credential in the server's credential store, the
+store the CLI's `AdminCredentialsService.Issue` call mints into. A
+caller-chosen string is refused with 400 before anything is written, because
+the login page points operators at that file. Authenticating the token is
+stricter than checking its shape: a well-formed string that was never issued
+is refused too.
+
+(Superseded by the #1885 amendment below: the endpoint no longer takes a
+token.)
+
+## Amendment (2026-11-13, #1885): recovery mints an admin bootstrap credential
+
+**What the #1851 token check proved.** It accepted any live, unrevoked
+credential in the store: every rehydrated `api_keys` row, of any tenant and
+any privilege. It proved the token was live. It did not prove the token was
+an admin credential, or bound to the caller's tenant.
+
+**The re-issued token was not an admin credential.** `--reset-bootstrap`
+minted the token through `AdminCredentialsService.Issue` → `admin.Service.Issue`
+→ `credstore.Store.Issue`, which mints non-admin keys only. The cold-start
+bootstrap credential is an admin credential (`IssueBootstrapFixedAdminCredential`),
+and the login page stores the pasted token as the session bearer, so signing
+in with a recovered token gave a non-admin session. The recovery path did not
+recover admin access.
+
+**Decision: recovery mints an admin credential, server-side, behind the
+gate.** `POST /v1/admin/install/reset-bootstrap` no longer accepts a token.
+After `authorizeResetBootstrap` admits the caller (super_admin, or an admin
+credential on a single-tenant install) and the foot-gun gate passes, the
+handler mints an admin credential (`credstore.Store.IssueAdmin`, no expiry,
+like the cold-start credential) for the caller's tenant, writes its bearer
+to the bootstrap-token file, and returns it once in the response.
+
+- **Reachable only through the gate.** No other runtime path mints an admin
+  credential for the file. The admin gRPC `Issue` RPC still mints non-admin
+  keys only; it is not widened. A non-gated caller (non-admin key, missing
+  credential, tenant admin key on a multi-tenant install) is refused before
+  anything is minted, and a reset refused by the foot-gun gate (409) mints
+  nothing, because the mint runs after the status reset.
+- **Tenant-bound.** The credential is for the caller's own tenant. The CLI
+  sends `--tenant` as `tenant_id`; a value other than the caller's tenant is
+  refused with 400 rather than ignored. The credential is a tenant admin
+  credential, not super_admin: it carries `IsAdmin`, never
+  `atlas:super_admin`. On a single-tenant install that is the whole install,
+  and it passes this same gate again for a later recovery.
+- **Caller tokens are ignored.** A `token` field sent by an older CLI is
+  dropped; the file never holds a caller-chosen string. This retires the
+  #1851 token check rather than tightening it.
+- **No orphaned admin key.** If the file write fails after the mint, the
+  credential is revoked, since its bearer is not returned on that path.
+
+**Rejected: keep the non-admin re-issue and document it.** Recovery exists
+for an operator who has lost admin access. A recovered non-admin session
+cannot reach admin pages or re-run this gate, so the operator would still
+need an admin key from elsewhere, which is the situation recovery is for.
+
+(The "no expiry" above is superseded by the #1892 amendment below.)
+
+## Amendment (2026-11-13, #1892): the recovery key is bounded, marked and traceable
+
+The #1885 key had the right privilege but no end. It never expired, it
+outlived the next reset (the file was overwritten, the key was not
+revoked), and nothing recorded who minted it.
+
+**Decision.**
+
+- **Bounded TTL.** The recovery key expires 24h after issue by default.
+  The operator can set `ttl_seconds` (CLI `--ttl`) up to 7d. Zero or
+  absent means the default. A negative value, a value above 7d, and a
+  non-expiring key are refused with 400. 24h is longer than the 8h session
+  cookie the bearer-paste sign-in sets, so the session it opens is not cut
+  short, and short enough that a forgotten key dies the next day. 7d covers
+  a recovery that waits over a weekend.
+- **TTL is enforced in memory.** `credstore.Store.Authenticate` and `List`
+  now reject a key past `IssuedAt + TTL`. Until now the in-memory store
+  applied TTL only by not reloading expired rows at boot, while the
+  DB-backed `apikeystore` already enforced `expires_at`. `ttl=0` still
+  means no expiry, which the env `ATLAS_BOOTSTRAP_TOKEN` key, the
+  `ATLAS_BOOTSTRAP_TENANT` key and the chaos and CI keys (`--ttl 0`) rely on.
+- **Marked, durably.** The key is minted with `api_keys.purpose =
+'bootstrap-recovery'` (migration `20260814000000_api_keys_purpose`). It is
+  reloaded at boot, and a rotated successor inherits it. Revocation finds
+  recovery keys by this marker and the credential id, never by the bearer.
+  The env `ATLAS_BOOTSTRAP_TOKEN` key is memory-only and unmarked, and no
+  other issue path sets the marker, so neither revocation below can reach
+  any key but a recovery key.
+- **Each reset revokes the recovery keys earlier resets minted.** This runs
+  after the new bearer is in the file, so the file only ever names a live
+  key.
+- **First sign-in by a different credential revokes it.** When
+  `mark-first-signin` flips the marker, it revokes every recovery key except
+  the caller's own. When the caller _is_ the recovery key (the bearer-paste
+  sign-in uses the pasted key as the session), it is kept live until it
+  expires, because revoking it would sign the operator straight back out.
+  The response says which happened (`revoked_credential_ids`,
+  `recovery_key_kept`). The documented step is to sign in another way and
+  revoke it: `atlas-cli credentials revoke --id <credential_id>`.
+  `mark-first-signin` requires an admin credential (#1906), so a
+  low-privilege key cannot call it first and revoke the recovery key out
+  from under the operator. The recovery key is itself an admin key.
+- **Rotation keeps the bound and the marker.** `Rotate` gives a recovery
+  key's successor the same TTL, counted from the successor's own issue
+  time, so it gets a fresh window. The successor keeps the
+  `bootstrap-recovery` marker, so the next reset or first sign-in still
+  revokes it.
+- **Revocation is install-wide.** Both revocations above match every live
+  recovery key on the install, across tenants, not only the caller's
+  tenant. The reset clears install-wide markers and rewrites the
+  install's one bootstrap-token file, so its recovery keys are an
+  install-wide set.
+- **Traceable.** The mint is logged at Info with `credential_id`,
+  `tenant_id`, `expires_at`, the caller's credential id and subject, and the
+  ids it revoked. The bearer is never logged, in whole or in part. A caller
+  that is a user (a JWT `user:<uuid>` subject, or a key issued by a user) is
+  recorded in a new column, `api_keys.minted_by`, and on the credential as
+  `MintedBy`. Both are attribution only, and nothing authorizes on them. An
+  API-key caller with no user records no minter; the log line names its
+  credential id. There is no separate admin audit-event sink. The OPA
+  decision audit already records the request.
+- **The recovery key never acts as its minter.** The ticket asked for
+  `api_keys.issued_by`, but the platform reads `issued_by` as the user the
+  key belongs to. `credentialFromRow` maps it to the key's `UserID`, which
+  `/v1/me` and approval records (`approver_user_id`) resolve. The
+  policy-acknowledgment denominators count distinct `issued_by` over admin
+  keys. Writing the minter there would make the recovery key act as, and
+  count as a key of, the operator who minted it. So a recovery key keeps
+  `issued_by` NULL and its `UserID` equal to its own credential id, before
+  and after a restart.
+- **The all-zeros tenant is refused.** A super_admin JWT with no current
+  tenant carries `00000000-…`, which passed the empty-tenant check. It is now
+  refused with 400 before the reset, as the empty tenant is.
+- **The CLI no longer drops flags.** `--reset-bootstrap` refuses `--scope`
+  and `--kinds`, which do not apply to an admin key, and sends `--ttl` as
+  `ttl_seconds`.
+
+**Rejected: track reset-minted ids in memory.** A restart between the reset
+and the sign-in would lose the id, and the next reset would silently stop
+revoking. The marker costs one nullable column.
+
+## Amendment (2026-11-13, #1947): admin-minted keys outlive their minter; revocation holds on every replica
+
+Two gaps were found in the #1915 review. First, a key an admin mints through
+`POST /v1/admin/credentials` or gRPC `AdminCredentialsService.Issue` had no
+link to that admin. `issued_by` is NULL on these keys, so they kept working
+after the admin was disabled, and nothing recorded that this was intended.
+Second, `RevokeUserInMemory` reaches only the replica that ran the
+deactivation. Other replicas relied on the per-request user gate. A SCIM
+reprovision reopens that gate, so a key revoked in `api_keys` authenticated
+again on those replicas until restart.
+
+**Decision.**
+
+- **Admin-minted keys are machine keys and outlive the admin who minted
+  them.** These keys belong to connectors and CI jobs. If disabling an
+  admin revoked every key they minted, offboarding them would silently stop
+  evidence ingestion, which is an audit-continuity failure. The keys keep
+  `issued_by` NULL and `UserID` equal to their own credential id, as the
+  recovery key does. Disabling, deprovisioning or deleting the minting
+  admin leaves them working.
+- **The minter is recorded, for attribution only.** Both issue paths now
+  write the calling user to `api_keys.minted_by`, the #1892 column, and to
+  `Credential.MintedBy` (`credstore.MinterUserID` reads the caller). A
+  rotated successor inherits it. Nothing authorizes on it. An API-key caller
+  with no user records no minter.
+- **Operators revoke these keys deliberately.** When an admin leaves, list
+  the keys they minted (`api_keys.minted_by`) and revoke the ones that
+  should not outlive them: `atlas-cli credentials revoke --id
+<credential_id>` or `POST /v1/admin/credentials/{id}/revoke`. A follow-up
+  ticket adds an admin-UI warning on the user-disable screen that lists that
+  user's still-live minted keys. (#1953 shipped it: the Admin → Users
+  revoke dialog reads `GET /v1/admin/credentials?minted_by=<user>` and
+  never revokes on its own.)
+- **A durable revocation holds on every replica.** For a user-owned key
+  with an `api_keys` row, the per-request user gate now also reads that row.
+  It refuses the key when `revoked_at` is set or the row is missing, before
+  checking the owner's status. Reprovisioning the user therefore cannot
+  bring a revoked key back on any replica. The cost is one primary-key read
+  per authentication of a user-owned key. Machine keys skip the gate as
+  before. (#1964 closes that gap for machine keys; see the next
+  amendment.)
+
+## Amendment (2026-11-13, #1964): revocation holds on every replica for every persisted key
+
+The #1947 amendment left machine keys out of the per-request gate. A
+machine key (admin-minted, which can carry `is_admin`, or a push key) is
+rehydrated from `api_keys` into every replica's credstore at boot. Revoking
+it updated `api_keys` and the memory of the replica that ran the revoke,
+and every other replica kept authenticating it until it restarted. Under
+the #1947 decision that operators revoke these keys deliberately,
+deliberate revocation is the only control, so it has to hold everywhere.
+
+**Decision.**
+
+- **Every persisted key reads its own `api_keys` row on each
+  authentication.** The credstore gate now covers a key with no user when
+  the store holds a row for it. The key is refused when `revoked_at` is set
+  or the row is missing, and a lookup error fails closed. User-owned keys
+  keep the #1947 check.
+- **Staleness bound: none beyond the next request.** The read is uncached,
+  so once the revoke commits, the next authentication of that key on any
+  replica is refused. The cost is one primary-key read per authentication
+  of a persisted machine key, the same read user-owned keys already pay.
+- **Memory-only keys are unchanged.** The env bootstrap key and other
+  `IssueFixedAdmin` credentials have no row and are never gated. They are
+  re-minted from the environment each boot, so an operator removes one by
+  changing the environment and restarting every replica.
+
+**Operator guidance.** `atlas-cli credentials revoke --id <credential_id>`
+or `POST /v1/admin/credentials/{id}/revoke` on any one replica stops the
+key on all replicas from the next request. No restart is needed.
+
+**Rejected: a short TTL cache in front of the read.** It would trade a
+seconds-long window in which a revoked admin key still works for one
+indexed read per request. The user-owned path already pays that read
+uncached, and nothing measured shows it matters.
+
+**Rejected: a revocation generation or LISTEN/NOTIFY.** Either adds a
+channel whose failure mode is a key that stays live with no error.
+Reading the row needs no new infrastructure and fails closed.
+
+**Rejected: revoke minted keys when the minter is disabled.** The model is
+simpler, but it turns staff offboarding into an ingestion outage, and the
+operator gets no chance to rotate the keys first.
+
+**Rejected: cross-replica revocation sync.** The gate already reads the
+database on every user-owned key authentication, so checking `revoked_at`
+in that read closes the gap without a new channel.
+
+## Amendment (2026-11-14, #2121): the admin-key reset runs over gRPC
+
+The #1851 admin-key fallback on `POST /v1/admin/install/reset-bootstrap` was
+unreachable. Slice 326 made JWTs the only credential `/v1` accepts, so an
+admin API key, `ATLAS_BOOTSTRAP_TOKEN` included, gets 401 before the handler
+runs. The documented recovery command failed for every operator without a
+JWT, which is the operator it exists for.
+
+The fallback now lives on gRPC: `AdminCredentialsService.ResetBootstrap`,
+where API keys authenticate. It runs the same code as the HTTP handler and
+admits only an admin key on an install with exactly one tenant; gRPC has no
+JWTs, so there is no super_admin path there. The HTTP endpoint is unchanged
+and serves super_admin JWTs. `atlas-cli credentials issue --reset-bootstrap`
+picks the transport from the shape of `--token`: a JWT goes to HTTP, anything
+else to gRPC. Each reset is logged with its transport.
+
+Rejected alternatives:
+
+- **Accept the bootstrap token on that one HTTP route.** It reopens a non-JWT
+  credential on `/v1`, which slice 326 closed, and needs a second
+  authentication path ahead of `requireCredential` for one route.
+- **An on-box `DATABASE_URL` reset command.** The credential store is held
+  in the server's memory and rehydrated from `api_keys` only at boot, and
+  the bootstrap-token file lives in the server's data directory. A
+  separate process writing to the database could not mint a key the running
+  server accepts, or write the file, without a restart.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

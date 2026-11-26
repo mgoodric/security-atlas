@@ -50,9 +50,32 @@ func (q *Queries) ActionPlanControlExistsInTenant(ctx context.Context, arg Actio
 	return exists, err
 }
 
+const actionPlanControlsFailing = `-- name: ActionPlanControlsFailing :one
+
+SELECT (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
+FROM action_plans ap
+WHERE ap.tenant_id = $1 AND ap.id = $2
+`
+
+type ActionPlanControlsFailingParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// ===== #2109: verified from evidence =====
+// A completed plan whose linked controls do not all pass their latest
+// evaluation: the plan page's "Completed · linked controls still failing".
+func (q *Queries) ActionPlanControlsFailing(ctx context.Context, arg ActionPlanControlsFailingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, actionPlanControlsFailing, arg.TenantID, arg.ID)
+	var controls_failing bool
+	err := row.Scan(&controls_failing)
+	return controls_failing, err
+}
+
 const actionPlanOwnerExistsInTenant = `-- name: ActionPlanOwnerExistsInTenant :one
 SELECT EXISTS (
-    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2
+    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2 AND status = 'active'
 )
 `
 
@@ -61,8 +84,9 @@ type ActionPlanOwnerExistsInTenantParams struct {
 	ID       pgtype.UUID `json:"id"`
 }
 
-// AC-10 tampering guard: owner_id must resolve to a user in the caller's
-// tenant. RLS hides cross-tenant users.
+// AC-10 tampering guard: owner_id must resolve to an active user in the
+// caller's tenant (#2108: a disabled user cannot be handed a plan). RLS
+// hides cross-tenant users.
 func (q *Queries) ActionPlanOwnerExistsInTenant(ctx context.Context, arg ActionPlanOwnerExistsInTenantParams) (bool, error) {
 	row := q.db.QueryRow(ctx, actionPlanOwnerExistsInTenant, arg.TenantID, arg.ID)
 	var exists bool
@@ -239,6 +263,42 @@ func (q *Queries) GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDPa
 	return i, err
 }
 
+const getActionPlanByIDForUpdate = `-- name: GetActionPlanByIDForUpdate :one
+SELECT id, tenant_id, title, description, triggering_event, owner_id, due_date, status, audit_period_id, tombstoned_at, created_at, updated_at
+FROM action_plans
+WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL
+FOR UPDATE
+`
+
+type GetActionPlanByIDForUpdateParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// GetActionPlanByID under a row lock, for a write that guards on the plan
+// (#2434). A control link or owner change in flight finishes first, so
+// the guard and the UPDATE see the same plan. The link tables' FK takes
+// KEY SHARE on this row, which FOR UPDATE conflicts with.
+func (q *Queries) GetActionPlanByIDForUpdate(ctx context.Context, arg GetActionPlanByIDForUpdateParams) (ActionPlan, error) {
+	row := q.db.QueryRow(ctx, getActionPlanByIDForUpdate, arg.TenantID, arg.ID)
+	var i ActionPlan
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.TriggeringEvent,
+		&i.OwnerID,
+		&i.DueDate,
+		&i.Status,
+		&i.AuditPeriodID,
+		&i.TombstonedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const linkActionPlanControl = `-- name: LinkActionPlanControl :exec
 
 INSERT INTO action_plan_controls (action_plan_id, control_id, tenant_id, linked_by)
@@ -290,7 +350,7 @@ func (q *Queries) LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRisk
 }
 
 const listActionPlanAuditLog = `-- name: ListActionPlanAuditLog :many
-SELECT id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at
+SELECT id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at, system_actor
 FROM action_plan_audit_log
 WHERE tenant_id = $1 AND action_plan_id = $2
 ORDER BY created_at ASC, id ASC
@@ -319,6 +379,7 @@ func (q *Queries) ListActionPlanAuditLog(ctx context.Context, arg ListActionPlan
 			&i.BeforeState,
 			&i.AfterState,
 			&i.CreatedAt,
+			&i.SystemActor,
 		); err != nil {
 			return nil, err
 		}
@@ -369,7 +430,9 @@ func (q *Queries) ListActionPlanControls(ctx context.Context, arg ListActionPlan
 }
 
 const listActionPlanIDsForControl = `-- name: ListActionPlanIDsForControl :many
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_controls apc
 JOIN action_plans ap ON ap.id = apc.action_plan_id AND ap.tenant_id = apc.tenant_id
 WHERE apc.tenant_id = $1 AND apc.control_id = $2 AND ap.tombstoned_at IS NULL
@@ -382,10 +445,11 @@ type ListActionPlanIDsForControlParams struct {
 }
 
 type ListActionPlanIDsForControlRow struct {
-	ID      pgtype.UUID `json:"id"`
-	Title   string      `json:"title"`
-	Status  string      `json:"status"`
-	DueDate pgtype.Date `json:"due_date"`
+	ID              pgtype.UUID `json:"id"`
+	Title           string      `json:"title"`
+	Status          string      `json:"status"`
+	DueDate         pgtype.Date `json:"due_date"`
+	ControlsFailing bool        `json:"controls_failing"`
 }
 
 // Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
@@ -403,6 +467,7 @@ func (q *Queries) ListActionPlanIDsForControl(ctx context.Context, arg ListActio
 			&i.Title,
 			&i.Status,
 			&i.DueDate,
+			&i.ControlsFailing,
 		); err != nil {
 			return nil, err
 		}
@@ -415,7 +480,9 @@ func (q *Queries) ListActionPlanIDsForControl(ctx context.Context, arg ListActio
 }
 
 const listActionPlanIDsForRisk = `-- name: ListActionPlanIDsForRisk :many
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_risks apr
 JOIN action_plans ap ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
 WHERE apr.tenant_id = $1 AND apr.risk_id = $2 AND ap.tombstoned_at IS NULL
@@ -428,10 +495,11 @@ type ListActionPlanIDsForRiskParams struct {
 }
 
 type ListActionPlanIDsForRiskRow struct {
-	ID      pgtype.UUID `json:"id"`
-	Title   string      `json:"title"`
-	Status  string      `json:"status"`
-	DueDate pgtype.Date `json:"due_date"`
+	ID              pgtype.UUID `json:"id"`
+	Title           string      `json:"title"`
+	Status          string      `json:"status"`
+	DueDate         pgtype.Date `json:"due_date"`
+	ControlsFailing bool        `json:"controls_failing"`
 }
 
 // Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
@@ -450,6 +518,7 @@ func (q *Queries) ListActionPlanIDsForRisk(ctx context.Context, arg ListActionPl
 			&i.Title,
 			&i.Status,
 			&i.DueDate,
+			&i.ControlsFailing,
 		); err != nil {
 			return nil, err
 		}
@@ -505,17 +574,19 @@ FROM action_plans
 WHERE tenant_id = $1
   AND tombstoned_at IS NULL
   AND ($2::text IS NULL OR status = $2::text)
+  AND ($3::text IS NULL OR strpos(lower(title), lower($3::text)) > 0)
   AND (
-        $3::timestamptz IS NULL
-        OR (created_at, id) < ($3::timestamptz, $4::uuid)
+        $4::timestamptz IS NULL
+        OR (created_at, id) < ($4::timestamptz, $5::uuid)
       )
 ORDER BY created_at DESC, id DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListActionPlansParams struct {
 	TenantID        pgtype.UUID        `json:"tenant_id"`
 	Status          *string            `json:"status"`
+	Q               *string            `json:"q"`
 	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
 	CursorID        pgtype.UUID        `json:"cursor_id"`
 	RowLimit        int32              `json:"row_limit"`
@@ -524,11 +595,13 @@ type ListActionPlansParams struct {
 // Cursor pagination on created_at DESC, id DESC. The cursor is the
 // (created_at, id) of the last row of the previous page; when the cursor
 // timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
-// rows are excluded.
+// rows are excluded. #2618: `q` narrows to titles containing it, ignoring
+// case; strpos rather than ILIKE, so `%` and `_` in it match literally.
 func (q *Queries) ListActionPlans(ctx context.Context, arg ListActionPlansParams) ([]ActionPlan, error) {
 	rows, err := q.db.Query(ctx, listActionPlans,
 		arg.TenantID,
 		arg.Status,
+		arg.Q,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,
@@ -612,6 +685,20 @@ func (q *Queries) ListActionPlansSnapshot(ctx context.Context, arg ListActionPla
 		return nil, err
 	}
 	return items, nil
+}
+
+const reconcileActionPlanVerification = `-- name: ReconcileActionPlanVerification :one
+SELECT action_plans_reconcile_verification($1::uuid)::int AS moved
+`
+
+// After a control's evaluation, inside the evaluation's transaction: the
+// system moves completed <-> verified for the plans linked to it. The
+// function reads the tenant from app.current_tenant and refuses without it.
+func (q *Queries) ReconcileActionPlanVerification(ctx context.Context, controlID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, reconcileActionPlanVerification, controlID)
+	var moved int32
+	err := row.Scan(&moved)
+	return moved, err
 }
 
 const tombstoneActionPlan = `-- name: TombstoneActionPlan :one
@@ -752,7 +839,7 @@ INSERT INTO action_plan_audit_log (
     id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at
+RETURNING id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at, system_actor
 `
 
 type WriteActionPlanAuditLogParams struct {
@@ -788,6 +875,7 @@ func (q *Queries) WriteActionPlanAuditLog(ctx context.Context, arg WriteActionPl
 		&i.BeforeState,
 		&i.AfterState,
 		&i.CreatedAt,
+		&i.SystemActor,
 	)
 	return i, err
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/actionplan"
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -64,8 +65,8 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO risks (id, tenant_id, title, category, treatment)
-		VALUES ($1, $2, 'Test risk', 'operational', 'avoid')
+		INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+		VALUES ($1, $2, 'Test risk', risk_category_id($2, 'operational'), 'avoid')
 	`, id, tenant); err != nil {
 		t.Fatalf("seed risk: %v", err)
 	}
@@ -88,7 +89,7 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 
 func validCreate(owner uuid.UUID) actionplan.CreateInput {
 	return actionplan.CreateInput{
-		Title:           "Close the IAC-06 freshness gap",
+		Title:           "Close the IAC-37 freshness gap",
 		Description:     "Customer X Q2 2026 TPRM finding #4 remediation.",
 		TriggeringEvent: "Customer X Q2 2026 TPRM finding #4",
 		OwnerID:         owner,
@@ -324,10 +325,17 @@ func TestStateMachine_Transitions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			// #2108: a plan reaches verified through Verify, by someone other
+			// than its owner.
+			verifier := seedUser(t, admin, tenant)
 			var lastErr error
 			for i, status := range tc.path {
 				s := status
-				_, lastErr = store.Update(ctx, plan.ID, actionplan.UpdateInput{Status: &s, Actor: owner})
+				if s == actionplan.StatusVerified {
+					_, lastErr = store.Verify(ctx, plan.ID, approval.Approver{UserID: verifier.String()})
+				} else {
+					_, lastErr = store.Update(ctx, plan.ID, actionplan.UpdateInput{Status: &s, Actor: owner})
+				}
 				// All but the final step in a wantError path must succeed.
 				if tc.wantError && i < len(tc.path)-1 && lastErr != nil {
 					t.Fatalf("prefix step %d (%s) failed unexpectedly: %v", i, status, lastErr)

@@ -94,6 +94,10 @@ type controlFixture struct {
 	ImplementationType string // 'automated' | 'semi_automated' | 'manual_attested' | 'manual_periodic'
 	OwnerRole          string
 	Lifecycle          string // always 'active' for demo
+	// EvidenceKind is the kind this control's evidence rows carry
+	// (controlEvidenceKinds, #2903). It is not a column: it decides
+	// which kind buildFixturesFor writes for the control's rows.
+	EvidenceKind string
 }
 
 // riskFixture is one row of `risks`.
@@ -127,6 +131,7 @@ type evidenceFixture struct {
 	ObservedAt   time.Time
 	Result       string // pass | fail | na | inconclusive
 	EvidenceKind string // e.g. "osquery.host_posture"
+	SchemaVer    string // registered schema semver the payload matches
 	FreshnessCl  string // realtime | daily | weekly | monthly | quarterly | annual
 	Payload      map[string]any
 	Provenance   map[string]any
@@ -178,6 +183,14 @@ type auditPeriodFixture struct {
 	FrozenAt           *time.Time
 	FrozenBy           string
 	CreatedBy          string
+	// ControlID is the control the period's population draws for;
+	// RowCount is how many fixture evidence rows that draw selects.
+	ControlID uuid.UUID
+	RowCount  int
+	// WindowEvidenceIDs are the records seeded inside this period's
+	// window for ControlID: members of its population, and what its
+	// sample links to (#3047).
+	WindowEvidenceIDs []uuid.UUID
 	// The slice of evidence rows pinned into this period's sample
 	// population (used by writeAuditPeriodsAndSamples to draw samples).
 	SampleEvidenceIDs []uuid.UUID
@@ -199,6 +212,7 @@ type exceptionFixture struct {
 	ActivatedAt       *time.Time
 	EffectiveFrom     *time.Time
 	ExpiresAt         time.Time
+	ExpiredAt         *time.Time
 	Status            string // requested | approved | denied | active | expired
 }
 
@@ -287,7 +301,7 @@ type questionnaireQuestionFixture struct {
 	Text        string
 	Domain      string
 	AnswerType  string
-	SCFAnchorID *string // free-form scf_id like "IAC-06"; nil = needs mapping
+	SCFAnchorID *string // free-form scf_id like "IAC-37"; nil = needs mapping
 	SortOrder   int
 	// Answer, when non-empty, seeds a questionnaire_answers row so the
 	// question reads as answered (not a blank intake form).
@@ -314,6 +328,7 @@ type questionnaireFixture struct {
 // reads the available framework_versions from the catalog.
 type fixtureSet struct {
 	tenant       tenantRow
+	inPlace      bool // #1765: tenant existed before this seed (ApplyInPlace)
 	scope        scopeRow
 	user         userRow
 	controls     []controlFixture
@@ -364,18 +379,28 @@ type fixtureSet struct {
 // values live near each other so a reader can see the dataset shape
 // at a glance.
 func (s *Seeder) buildFixtures(slug string) *fixtureSet {
-	now := s.clock().UTC()
-	fs := &fixtureSet{
-		tenant: tenantRow{
+	return s.buildFixturesFor(
+		tenantRow{
 			ID:                uuid.New(),
 			Name:              capitalize(slug) + " " + fictionalCompanyName,
 			Slug:              slug,
 			IsBootstrapTenant: false,
 		},
-		scope: scopeRow{
+		scopeRow{
 			DimensionID: uuid.New(),
 			CellID:      uuid.New(),
 		},
+	)
+}
+
+// buildFixturesFor builds the fixture set for a given tenant + scope. The
+// in-place seed (#1765) passes the existing tenant and its existing scope
+// cell; buildFixtures passes a fresh tenant.
+func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet {
+	now := s.clock().UTC()
+	fs := &fixtureSet{
+		tenant: tenant,
+		scope:  scope,
 		user: userRow{
 			ID:    uuid.New(),
 			Email: "admin@" + personEmailDomain,
@@ -477,6 +502,7 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 			ImplementationType: cImplTypes[i%len(cImplTypes)],
 			OwnerRole:          ownerRoles[i%len(ownerRoles)],
 			Lifecycle:          "active",
+			EvidenceKind:       controlEvidenceKind(cTitles[i]),
 		})
 	}
 
@@ -679,26 +705,22 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 		{0.10, 91, 365},
 	}
 	cellID := fs.scope.CellID
-	for i := 0; i < nEvidence; i++ {
-		// Pick a band by index.
-		band := bands[0]
-		acc := 0.0
-		for _, b := range bands {
-			acc += b.Fraction
-			if float64(i)/float64(nEvidence) < acc {
-				band = b
-				break
-			}
-		}
-		// Days back within the band.
-		bandLen := band.MaxDays - band.MinDays
-		days := band.MinDays + (i % (bandLen + 1))
-		obs := now.AddDate(0, 0, -days)
-		controlID := fs.controls[i%len(fs.controls)].ID
-		kind := evidenceKindsPool[i%len(evidenceKindsPool)]
+	kindSeq := map[string]int{}
+	// addEvidence appends one ledger row for control observed at obs; i
+	// varies the result, freshness and connector run.
+	addEvidence := func(i int, control controlFixture, obs time.Time) {
+		// #2903: a row carries its control's kind, so a control holds the
+		// kind its subject produces (S3 rows on the encryption-at-rest
+		// control, MFA policy rows on the MFA control).
+		controlID := control.ID
+		kind := control.EvidenceKind
 		result := evidenceResults[i%len(evidenceResults)]
 		freshness := evidenceFreshness[i%len(evidenceFreshness)]
-		payload := buildEvidencePayload(kind, i)
+		// seq numbers the rows of one kind, so a kind's payloads vary row
+		// to row however many controls share the kind.
+		seq := kindSeq[kind]
+		kindSeq[kind]++
+		payload := buildEvidencePayload(kind, seq, result)
 		provenance := map[string]any{
 			"connector":     kindToConnector(kind),
 			"connector_run": fmt.Sprintf("demo-run-%d", i),
@@ -716,11 +738,58 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 			ObservedAt:   obs,
 			Result:       result,
 			EvidenceKind: kind,
+			SchemaVer:    evidenceSchemaVersions[kind],
 			FreshnessCl:  freshness,
 			Payload:      payload,
 			Provenance:   provenance,
 			HashHex:      hexString(hashBytes),
 		})
+	}
+	for i := 0; i < nEvidence; i++ {
+		// Pick a band by index.
+		band := bands[0]
+		acc := 0.0
+		for _, b := range bands {
+			acc += b.Fraction
+			if float64(i)/float64(nEvidence) < acc {
+				band = b
+				break
+			}
+		}
+		// Days back within the band.
+		bandLen := band.MaxDays - band.MinDays
+		days := band.MinDays + (i % (bandLen + 1))
+		addEvidence(i, fs.controls[i%len(fs.controls)], now.AddDate(0, 0, -days))
+	}
+
+	// #3040: a period's population draws its control's records observed
+	// in the period window (and, once frozen, at or before frozen_at). The
+	// banded spread above leaves some windows empty for their control, so
+	// seed samplesPerPeriod records evenly inside each window, then set
+	// the population's row_count to the number of fixture rows it draws.
+	for i := range fs.auditPeriods {
+		ap := &fs.auditPeriods[i]
+		control := fs.controls[i%len(fs.controls)]
+		ap.ControlID = control.ID
+		span := ap.PeriodEnd.Sub(ap.PeriodStart)
+		for j := 0; j < samplesPerPeriod; j++ {
+			obs := ap.PeriodStart.Add(span * time.Duration(j+1) / time.Duration(samplesPerPeriod+1))
+			// #3047: above scale ~1.17 the later windows open at or after
+			// now. The ledger holds nothing observed in the future.
+			if obs.After(now) {
+				continue
+			}
+			addEvidence(nEvidence+i*samplesPerPeriod+j, control, obs)
+			ap.WindowEvidenceIDs = append(ap.WindowEvidenceIDs, fs.evidence[len(fs.evidence)-1].ID)
+		}
+	}
+	for i := range fs.auditPeriods {
+		ap := &fs.auditPeriods[i]
+		for _, e := range fs.evidence {
+			if e.ControlID == ap.ControlID && populationHolds(ap, e.ObservedAt) {
+				ap.RowCount++
+			}
+		}
 	}
 
 	// Walkthroughs — N walkthroughs across N controls, all finalized.
@@ -780,10 +849,18 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 				ex.EffectiveFrom = &ts2
 			}
 		case "expired":
+			// An expired row was active first: it carries activated_at and
+			// the expired_at the sweep stamps (#3056).
 			a := "approver@" + personEmailDomain
 			ts := req.AddDate(0, 0, 7)
 			ex.ApprovedBy = &a
 			ex.ApprovedAt = &ts
+			a2 := fs.user.Email
+			ts2 := ts.AddDate(0, 0, 1)
+			ex.ActivatedBy = &a2
+			ex.ActivatedAt = &ts2
+			ex.EffectiveFrom = &ts2
+			ex.ExpiredAt = &exp
 		case "denied":
 			// approved_by must differ from requested_by (slice 021 SoD).
 			// denied path leaves approved fields NULL, denied_by set.
@@ -1061,7 +1138,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "IAM-01", Domain: "Identity & Access Management",
 			Text:        "Do you enforce multi-factor authentication for all administrative access?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("IAC-06"), SortOrder: 1,
+			SCFAnchorID: anchor("IAC-37"), SortOrder: 1,
 			AnswerValue: "Yes",
 			Narrative:   "MFA (WebAuthn + Okta Verify) is enforced for all human access to production via the production MFA policy.",
 			AuthoredBy:  authoredBy,
@@ -1070,7 +1147,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "DSI-02", Domain: "Data Security",
 			Text:        "Is customer data encrypted at rest?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("CRY-05"), SortOrder: 2,
+			SCFAnchorID: anchor("CRY-07"), SortOrder: 2,
 			AnswerValue: "Yes",
 			Narrative:   "All data stores use AES-256 at rest (KMS-managed keys); S3 buckets enforce SSE-KMS.",
 			AuthoredBy:  authoredBy,
@@ -1079,7 +1156,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "BCR-03", Domain: "Business Continuity",
 			Text:        "Do you test disaster recovery at least annually?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("BCD-11"), SortOrder: 3,
+			SCFAnchorID: anchor("BCD-24"), SortOrder: 3,
 			AnswerValue: "Yes",
 			Narrative:   "A full DR restore drill is run quarterly; the annual tabletop exercise validates the runbook end to end.",
 			AuthoredBy:  authoredBy,
@@ -1088,7 +1165,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "AIS-04", Domain: "Application Security",
 			Text:        "Is static analysis (SAST) run on every commit?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("TDA-09"), SortOrder: 4,
+			SCFAnchorID: anchor("TDA-17.1"), SortOrder: 4,
 			AnswerValue: "Yes",
 			Narrative:   "Semgrep runs on every commit; merges are blocked on new critical findings.",
 			AuthoredBy:  authoredBy,
@@ -1097,7 +1174,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "TPM-05", Domain: "Supply Chain",
 			Text:        "Do you perform due-diligence reviews on critical vendors?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("TPM-03"), SortOrder: 5,
+			SCFAnchorID: anchor("TPM-10"), SortOrder: 5,
 			AnswerValue: "Yes",
 			Narrative:   "Critical vendors are reviewed on a quarterly cadence; DPAs are tracked per vendor.",
 			AuthoredBy:  authoredBy,
@@ -1206,21 +1283,96 @@ var ownerRoles = []string{
 // seeds (out of the 15 registered in internal/api/schemaregistry).
 // Selection criteria: span the major connector surfaces (host posture,
 // SaaS posture, access reviews, SAST, change reviews, manual).
+// Each is spelled as the registry and the connectors spell it, with
+// the .v<major> suffix, so demo rows match what real ingest stores (#2863).
 //
 // Documented in docs/audit-log/205-demo-seed-data-decisions.md D3.
 var evidenceKindsPool = []string{
-	"osquery.host_posture",
-	"github.repo_protection",
-	"github.audit_event",
-	"github.scim_user",
-	"okta.app_assignment",
-	"okta.mfa_policy",
-	"okta.user_lifecycle",
-	"aws.s3.bucket_encryption_state",
-	"access_review.completion",
-	"sast.scan_result",
-	"manual.attestation",
-	"manual.upload",
+	"osquery.host_posture.v1",
+	"github.repo_protection.v2",
+	"github.audit_event.v1",
+	"github.scim_user.v1",
+	"okta.app_assignment.v1",
+	"okta.mfa_policy.v2",
+	"okta.user_lifecycle.v1",
+	"aws.s3.bucket_encryption_state.v1",
+	"access_review.completion.v1",
+	"sast.scan_result.v1",
+	"manual.attestation.v1",
+	"manual.upload.v1",
+}
+
+// controlEvidenceKinds names the evidence kind each demo control's rows
+// carry, keyed by control title (#2903). Each kind goes to the controls
+// whose subject that source reports on: S3 bucket encryption to the
+// encryption-at-rest and cloud-configuration controls, the Okta MFA policy
+// to the MFA control, host posture to the endpoint controls. Process
+// controls with no connector source take a manual attestation or upload.
+// Before #2903 a row's kind was evidenceKindsPool[i%len(pool)], whatever
+// its control, so the MFA control held S3 rows. Every title in
+// buildFixturesFor's cTitles has an entry
+// (TestControlEvidenceKinds_CoverEveryTitle).
+var controlEvidenceKinds = map[string]string{
+	"Multi-factor authentication required for all human access": "okta.mfa_policy.v2",
+	"Quarterly access review across production systems":         "access_review.completion.v1",
+	"Endpoint encryption baseline enforced via MDM":             "osquery.host_posture.v1",
+	"Continuous vulnerability scanning of cloud workloads":      "sast.scan_result.v1",
+	"Encryption-at-rest on every data store":                    "aws.s3.bucket_encryption_state.v1",
+	"Annual third-party penetration test":                       "manual.upload.v1",
+	"Documented incident response runbook":                      "manual.attestation.v1",
+	"30-day log retention for production services":              "manual.attestation.v1",
+	"Backup verification with quarterly restore drill":          "manual.upload.v1",
+	"Change-management approval gate on production deploys":     "github.repo_protection.v2",
+	"SAST scanning enabled on every commit":                     "sast.scan_result.v1",
+	"Container image baseline scan":                             "sast.scan_result.v1",
+	"Secrets management via centralized vault":                  "manual.attestation.v1",
+	"Privileged access management for break-glass accounts":     "okta.app_assignment.v1",
+	"Network segmentation between prod and non-prod":            "manual.attestation.v1",
+	"Web application firewall in front of customer-facing apps": "manual.attestation.v1",
+	"DDoS protection on edge endpoints":                         "manual.attestation.v1",
+	"Anti-malware coverage on every endpoint":                   "osquery.host_posture.v1",
+	"Cloud configuration drift detection":                       "aws.s3.bucket_encryption_state.v1",
+	"Identity-provider single source of truth":                  "okta.app_assignment.v1",
+	"OS patching cadence — critical within 14 days":             "osquery.host_posture.v1",
+	"Mobile device management on company-issued devices":        "osquery.host_posture.v1",
+	"Physical access controls at data centers":                  "manual.attestation.v1",
+	"Visitor log retention for 90 days":                         "manual.upload.v1",
+	"Disaster recovery plan tested annually":                    "manual.attestation.v1",
+	"Business continuity tabletop exercise":                     "manual.attestation.v1",
+	"Vendor due-diligence questionnaire on onboarding":          "manual.upload.v1",
+	"Annual security awareness training for all staff":          "manual.attestation.v1",
+	"Phishing simulation cadence — monthly":                     "manual.attestation.v1",
+	"Background checks on all new hires":                        "manual.attestation.v1",
+	"Termination access removal SLA — 24 hours":                 "okta.user_lifecycle.v1",
+	"Service account inventory with quarterly review":           "github.scim_user.v1",
+	"Hardware inventory tracked in CMDB":                        "osquery.host_posture.v1",
+	"Software inventory via endpoint agent":                     "osquery.host_posture.v1",
+	"Data classification labels enforced in document storage":   "manual.attestation.v1",
+	"PII tokenization for analytical workloads":                 "manual.attestation.v1",
+	"Encryption key rotation cadence — annual":                  "aws.s3.bucket_encryption_state.v1",
+	"TLS 1.2+ enforced on all external endpoints":               "manual.attestation.v1",
+	"Code review required before merge":                         "github.repo_protection.v2",
+	"Branch protection on default branches":                     "github.repo_protection.v2",
+	"Two-person rule for production secret access":              "github.audit_event.v1",
+	"GDPR data-subject request handling SLA":                    "manual.attestation.v1",
+	"HIPAA-aligned PHI handling for healthcare data":            "manual.attestation.v1",
+	"PCI scope minimization documented":                         "manual.upload.v1",
+	"Cloud account boundary controls":                           "aws.s3.bucket_encryption_state.v1",
+	"Cross-region failover validated quarterly":                 "manual.attestation.v1",
+	"Time synchronization across infrastructure":                "osquery.host_posture.v1",
+	"Centralized audit log aggregation":                         "github.audit_event.v1",
+	"User behavior analytics on privileged accounts":            "github.audit_event.v1",
+	"Threat intelligence feed integration":                      "manual.attestation.v1",
+}
+
+// controlEvidenceKind is the kind a demo control's rows carry. A title
+// without an entry gets a manual attestation, the kind any control can
+// hold; the coverage test keeps that fallback unused.
+func controlEvidenceKind(title string) string {
+	if kind, ok := controlEvidenceKinds[title]; ok {
+		return kind
+	}
+	return "manual.attestation.v1"
 }
 
 var evidenceResults = []string{"pass", "pass", "pass", "pass", "pass", "pass", "pass", "fail", "inconclusive", "na"}
@@ -1236,101 +1388,161 @@ func kindToConnector(kind string) string {
 	return parts[0]
 }
 
-// buildEvidencePayload synthesizes a plausible payload for the given
-// evidence_kind. Shapes match the JSON Schemas under
-// internal/api/schemaregistry/schemas/ (loose match — schema-validator
-// is not invoked, but the keys present in the payload are the
-// load-bearing ones a reader of the schema would expect).
-func buildEvidencePayload(kind string, idx int) map[string]any {
+// evidenceSchemaVersions pins the registered schema version each demo
+// evidence_kind is written at. writeEvidence stamps it on the row's
+// schema_version, and TestDemoEvidencePayloads_MatchRegisteredSchemas runs
+// every payload buildEvidencePayload makes through the ingest validator at
+// that version, so the demo rows cannot drift from the schemas under
+// internal/api/schemaregistry/schemas/ (#2863). The rows are written raw,
+// not through ingest (see writeEvidence), so that test is the only check.
+var evidenceSchemaVersions = map[string]string{
+	"osquery.host_posture.v1":           "1.0.0",
+	"github.repo_protection.v2":         "2.0.0",
+	"github.audit_event.v1":             "1.0.0",
+	"github.scim_user.v1":               "1.0.0",
+	"okta.app_assignment.v1":            "1.0.0",
+	"okta.mfa_policy.v2":                "2.0.0",
+	"okta.user_lifecycle.v1":            "1.0.0",
+	"aws.s3.bucket_encryption_state.v1": "1.1.0",
+	"access_review.completion.v1":       "1.0.0",
+	"sast.scan_result.v1":               "1.0.0",
+	"manual.attestation.v1":             "1.2.0",
+	"manual.upload.v1":                  "1.0.0",
+}
+
+// buildEvidencePayload synthesizes a payload for the given evidence_kind
+// that the registered schema at evidenceSchemaVersions[kind] accepts.
+// result is the row's verdict; kinds whose payload states the verdict
+// (S3 encryption, manual attestation) are built to agree with it.
+func buildEvidencePayload(kind string, idx int, result string) map[string]any {
+	asset := fictionalAssets[idx%len(fictionalAssets)]
 	switch kind {
-	case "osquery.host_posture":
+	case "osquery.host_posture.v1":
 		return map[string]any{
-			"hostname":         fictionalAssets[idx%len(fictionalAssets)],
-			"os_version":       "Ubuntu 22.04 LTS",
-			"disk_encryption":  true,
-			"firewall_enabled": true,
-			"agent_version":    "osquery-5.10.2",
+			"host_uuid":               fmt.Sprintf("00000000-0000-4000-8000-%012d", idx),
+			"hostname":                asset,
+			"platform":                "ubuntu",
+			"os_version":              "Ubuntu 22.04 LTS",
+			"disk_encryption_enabled": true,
+			"screen_lock_enabled":     true,
+			"firewall_enabled":        true,
+			"mdm_enrolled":            true,
 		}
-	case "github.repo_protection":
+	case "github.repo_protection.v2":
 		return map[string]any{
-			"repo":               "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"default_branch":     "main",
-			"require_pr_reviews": true,
-			"required_approvers": 2,
-			"enforce_admins":     true,
+			"repo_id":                    100000 + idx,
+			"protection_source":          "classic",
+			"repo_full_name":             "demo-org/" + asset,
+			"default_branch":             "main",
+			"required_reviews":           2,
+			"require_code_owner_reviews": true,
+			"enforce_admins":             true,
 		}
-	case "github.audit_event":
+	case "github.audit_event.v1":
 		return map[string]any{
-			"actor":   fictionalPeople[idx%len(fictionalPeople)].First,
-			"action":  "team.add_member",
-			"repo":    "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"created": fmt.Sprintf("2026-0%d-15T12:00:00Z", 1+(idx%9)),
+			"event_type": "team",
+			"action":     "team.add_member",
+			"actor":      strings.ToLower(fictionalPeople[idx%len(fictionalPeople)].First),
+			"created_at": fmt.Sprintf("2026-0%d-15T12:00:00Z", 1+(idx%9)),
+			"org":        "demo-org",
+			"repo":       "demo-org/" + asset,
 		}
-	case "github.scim_user":
+	case "github.scim_user.v1":
 		return map[string]any{
-			"user_id":          fmt.Sprintf("scim-%d", idx),
-			"email":            fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"active":           idx%5 != 0,
-			"provisioned_from": "okta",
+			"scim_user_id":  fmt.Sprintf("scim-%d", idx),
+			"user_name":     fmt.Sprintf("user%d", idx),
+			"active":        idx%5 != 0,
+			"org":           "demo-org",
+			"primary_email": fmt.Sprintf("user%d@%s", idx, personEmailDomain),
 		}
-	case "okta.app_assignment":
+	case "okta.app_assignment.v1":
 		return map[string]any{
-			"app":         "GitHub Enterprise",
-			"user":        fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"assigned_at": fmt.Sprintf("2026-0%d-01T00:00:00Z", 1+(idx%9)),
-			"groups":      []string{"engineering", "security"},
+			"app_id":               fmt.Sprintf("0oa-demo-%d", idx%4),
+			"app_name":             "GitHub Enterprise",
+			"sign_on_mode":         "SAML_2_0",
+			"status":               "ACTIVE",
+			"assigned_group_ids":   []string{"00g-engineering", "00g-security"},
+			"assigned_group_count": 2,
 		}
-	case "okta.mfa_policy":
+	case "okta.mfa_policy.v2":
 		return map[string]any{
-			"policy_name":   "Production MFA Policy",
-			"factor_types":  []string{"webauthn", "okta_verify"},
-			"enforced":      true,
-			"users_covered": 142,
+			"policy_id":           "00p-demo-mfa",
+			"policy_name":         "Production MFA Policy",
+			"status":              "ACTIVE",
+			"priority":            1,
+			"mfa_required":        true,
+			"factors_allowed":     []string{"okta_verify", "webauthn"},
+			"applies_to_groups":   []string{"00g-everyone"},
+			"applies_to_everyone": true,
 		}
-	case "okta.user_lifecycle":
+	case "okta.user_lifecycle.v1":
 		return map[string]any{
-			"user":   fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"event":  "USER.LIFECYCLE.DEACTIVATE",
-			"actor":  "auto-deprovision",
-			"reason": "termination",
+			"user_id":        fmt.Sprintf("00u-demo-%d", idx),
+			"login":          fmt.Sprintf("user%d@%s", idx, personEmailDomain),
+			"status":         "DEPROVISIONED",
+			"primary_email":  fmt.Sprintf("user%d@%s", idx, personEmailDomain),
+			"deactivated_at": fmt.Sprintf("2026-0%d-20T09:00:00Z", 1+(idx%9)),
 		}
-	case "aws.s3.bucket_encryption_state":
-		return map[string]any{
-			"bucket":            fictionalAssets[idx%len(fictionalAssets)] + "-bucket",
-			"region":            "us-east-1",
-			"sse_algorithm":     "aws:kms",
-			"kms_key_id":        "alias/atlas-demo",
-			"bucket_versioning": true,
+	case "aws.s3.bucket_encryption_state.v1":
+		p := map[string]any{
+			"bucket_name": asset + "-bucket",
+			"account_id":  "111122223333",
+			"region":      "us-east-1",
 		}
-	case "access_review.completion":
-		return map[string]any{
-			"reviewer":       fictionalPeople[idx%len(fictionalPeople)].First + " " + fictionalPeople[idx%len(fictionalPeople)].Last,
-			"system":         fictionalAssets[idx%len(fictionalAssets)],
-			"users_reviewed": 47,
-			"removals":       3,
-			"completed_at":   fmt.Sprintf("2026-0%d-15T17:00:00Z", 1+(idx%9)),
+		switch result {
+		case "fail":
+			p["encryption_enabled"] = false
+		case "inconclusive":
+			p["encryption_enabled"] = false
+			p["reason"] = "get bucket encryption: AccessDenied"
+		default:
+			p["encryption_enabled"] = true
+			// buildFixturesFor passes a row's place among the S3 rows as
+			// idx, so successive rows alternate between the algorithms.
+			if idx%2 == 0 {
+				p["sse_algorithm"] = "aws:kms"
+				p["kms_key_id"] = "alias/atlas-demo"
+				p["bucket_key_enabled"] = true
+			} else {
+				p["sse_algorithm"] = "AES256"
+			}
 		}
-	case "sast.scan_result":
+		return p
+	case "access_review.completion.v1":
 		return map[string]any{
-			"repo":           "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"scanner":        "semgrep",
-			"critical":       0,
-			"high":           idx % 3,
-			"medium":         idx % 7,
-			"scan_completed": fmt.Sprintf("2026-0%d-12T08:00:00Z", 1+(idx%9)),
+			"review_id":          fmt.Sprintf("ar-%s-%d", asset, idx),
+			"completed_by":       fictionalUserEmail(idx),
+			"reviewer_role":      ownerRoles[idx%len(ownerRoles)],
+			"users_reviewed":     47,
+			"users_terminated":   3,
+			"users_role_changed": 1,
 		}
-	case "manual.attestation":
+	case "sast.scan_result.v1":
 		return map[string]any{
-			"attester":    fictionalUserEmail(idx),
-			"control_ref": fictionalAssets[idx%len(fictionalAssets)],
-			"statement":   "I attest the documented procedure was followed during the period.",
+			"tool":                  "semgrep",
+			"tool_version":          "1.85.0",
+			"ruleset":               "p/default",
+			"findings_count":        idx%3 + idx%7,
+			"scanned_files":         1200 + idx,
+			"scan_duration_seconds": 42.5,
 		}
-	case "manual.upload":
+	case "manual.attestation.v1":
+		p := map[string]any{
+			"attestor":  fictionalUserEmail(idx),
+			"statement": "I attest the documented procedure for " + asset + " was followed during the period.",
+		}
+		if result == "fail" {
+			p["result"] = "fail"
+			p["fail_reason"] = "Procedure step skipped for one change during the period."
+		}
+		return p
+	case "manual.upload.v1":
 		return map[string]any{
-			"uploader":    fictionalUserEmail(idx),
-			"filename":    fmt.Sprintf("evidence-%d.pdf", idx),
-			"size_bytes":  102400 + idx*1024,
-			"description": "Quarterly compliance report upload.",
+			"uploaded_by":  fictionalUserEmail(idx),
+			"filename":     fmt.Sprintf("evidence-%d.pdf", idx),
+			"content_type": "application/pdf",
+			"size_bytes":   102400 + idx*1024,
+			"description":  "Quarterly compliance report upload.",
 		}
 	default:
 		return map[string]any{"note": "demo placeholder"}
@@ -1362,4 +1574,16 @@ func capitalize(s string) string {
 		c -= 32
 	}
 	return string(c) + s[1:]
+}
+
+// populationHolds reports whether a record observed at obs is in the
+// period's population draw (ListPopulationEvidenceIDs): inside the window
+// and, for a frozen period, at or before frozen_at. The seed stamps
+// ingested_at = min(now, observed_at), so the draw's ingested_at bound
+// selects nothing the observed_at bound keeps out.
+func populationHolds(ap *auditPeriodFixture, obs time.Time) bool {
+	if obs.Before(ap.PeriodStart) || obs.After(ap.PeriodEnd) {
+		return false
+	}
+	return ap.FrozenAt == nil || !obs.After(*ap.FrozenAt)
 }

@@ -1,6 +1,8 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import noDevNotesInUi from "./eslint-rules/no-dev-notes-in-ui.mjs";
+import noRawUpstreamError from "./eslint-rules/no-raw-upstream-error.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -23,7 +25,40 @@ const eslintConfig = defineConfig([
     // deleted by hand. Found 2026-08-29 while recovering stranded work.
     "playwright-report/**",
     "test-results/**",
+    // #2394: written by openapi-typescript from docs/openapi.yaml.
+    "lib/api/generated/**",
   ]),
+  // #2040 — peer-chain.cjs is a `node --require` preload, which must be
+  // CommonJS.
+  {
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  // #2082 — no slice numbers, canvas sections or API paths in UI text.
+  // Tests are excluded; there is no allow-list.
+  {
+    files: ["**/*.tsx", "**/*.jsx"],
+    ignores: ["**/*.test.tsx", "**/*.spec.tsx"],
+    plugins: { atlas: { rules: { "no-dev-notes-in-ui": noDevNotesInUi } } },
+    rules: { "atlas/no-dev-notes-in-ui": "error" },
+  },
+  // #2737 (was the #2645 regex sentinel) — a response body's `error` is
+  // read only through upstreamErrorMessage / upstreamErrorText, so a 5xx
+  // body never reaches the user. The helpers' own file is the one exemption.
+  {
+    files: [
+      "app/**/*.{ts,tsx}",
+      "components/**/*.{ts,tsx}",
+      "lib/**/*.{ts,tsx}",
+    ],
+    ignores: ["**/*.test.ts", "**/*.test.tsx", "lib/api/_shared.ts"],
+    plugins: {
+      "atlas-upstream": {
+        rules: { "no-raw-upstream-error": noRawUpstreamError },
+      },
+    },
+    rules: { "atlas-upstream/no-raw-upstream-error": "error" },
+  },
   // Slice 370 (AC-5) — soft cap on the per-domain api client modules to
   // prevent the god-file from re-accreting. The former `web/lib/api.ts`
   // was 2901 LOC / 219 exports (slice 328 H-2); after the per-domain

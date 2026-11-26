@@ -91,11 +91,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, likelihoo
 	score, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	_, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology, inherent_score,
+			id, tenant_id, title, category_id, methodology, inherent_score,
 			treatment, treatment_owner, residual_score, accepter,
 			instrument_reference, level, org_unit_id, themes, created_at
 		) VALUES (
-			$1, $2, $3, 'operational', 'nist_800_30', $4,
+			$1, $2, $3, risk_category_id($2, 'operational'), 'nist_800_30', $4,
 			'avoid', '', '{}', '', '', 'team', $5, $6, $7
 		)`, id, tenant, title, score, orgUnit, themes, createdAt)
 	if err != nil {
@@ -250,6 +250,15 @@ func TestEngine_WindowIdempotency_ISC18(t *testing.T) {
 	}
 	if n := metaRiskCount(t, admin, tenant); n != 1 {
 		t.Fatalf("after eval #1: %d meta-risks, want 1", n)
+	}
+	// #1746: a rule-generated meta-risk carries no treatment decision.
+	var metaTreatment string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT treatment::text FROM risks WHERE id = $1`, *firstMeta).Scan(&metaTreatment); err != nil {
+		t.Fatalf("read meta-risk treatment: %v", err)
+	}
+	if metaTreatment != "untreated" {
+		t.Fatalf("meta-risk treatment = %q; want untreated", metaTreatment)
 	}
 
 	// Add a fourth risk in the SAME window, re-evaluate. Must UPDATE the

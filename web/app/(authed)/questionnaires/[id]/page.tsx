@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { use, useEffect, useMemo, useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { AnswerEditor } from "@/components/questionnaire/answer-editor";
 import { QuestionList } from "@/components/questionnaire/question-list";
 import { ReviewQueue } from "@/components/questionnaire/review-queue";
@@ -34,19 +35,15 @@ import {
   type AnswerRunDetail,
   pendingDrafts,
 } from "@/lib/questionnaire/review-queue";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
+import { currentTenantEpoch } from "@/lib/tenant-cache";
 
 async function fetchDetail(id: string): Promise<QuestionnaireDetail> {
   const res = await fetch(`/api/questionnaires/${id}`, {
     cache: "no-store",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as QuestionnaireDetail;
@@ -57,13 +54,7 @@ async function exportPDF(id: string, name: string): Promise<void> {
     method: "POST",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   const blob = await res.blob();
@@ -85,13 +76,7 @@ async function fetchRunDetail(
     cache: "no-store",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as AnswerRunDetail;
@@ -132,23 +117,21 @@ export default function QuestionnaireDetailPage(props: {
   async function draftAll(): Promise<void> {
     setDrafting(true);
     setDraftError(null);
+    const epoch = currentTenantEpoch(queryClient);
     try {
       const res = await fetch(`/api/questionnaires/${id}/answer-runs`, {
         method: "POST",
       });
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // body not JSON
-        }
+        const msg = await upstreamErrorMessage(res);
         setDraftError(msg);
         return;
       }
       const detail = (await res.json()) as AnswerRunDetail;
       await queryClient.invalidateQueries({ queryKey: ["questionnaire", id] });
+      // The tenant switched during the run: detail is the old tenant's,
+      // so neither cache it nor navigate to it (#2768).
+      if (currentTenantEpoch(queryClient) !== epoch) return;
       queryClient.setQueryData(
         ["questionnaire-run", id, detail.run.id],
         detail,
@@ -195,19 +178,28 @@ export default function QuestionnaireDetailPage(props: {
 
   if (detailQ.isLoading) {
     return (
-      <div className="space-y-4" data-testid="questionnaire-detail-loading">
-        <Skeleton className="h-8 w-1/2" />
+      <PageShell
+        title={
+          <Skeleton className="inline-block h-8 w-96 max-w-full align-middle" />
+        }
+        bodyClassName="space-y-4"
+        data-testid="questionnaire-detail-loading"
+      >
         <Skeleton className="h-96 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (detailQ.error) {
     return (
-      <Alert variant="destructive" data-testid="questionnaire-detail-error">
-        <AlertTitle>Could not load questionnaire</AlertTitle>
-        <AlertDescription>{(detailQ.error as Error).message}</AlertDescription>
-      </Alert>
+      <PageShell title="Questionnaire">
+        <Alert variant="destructive" data-testid="questionnaire-detail-error">
+          <AlertTitle>Could not load questionnaire</AlertTitle>
+          <AlertDescription>
+            {(detailQ.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -217,30 +209,28 @@ export default function QuestionnaireDetailPage(props: {
   const draftCount = pendingDrafts(questions).length;
 
   return (
-    <div
-      className="flex flex-col h-full overflow-hidden"
-      data-testid="questionnaire-detail"
-    >
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-4 pb-4 border-b border-border">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <Link href="/questionnaires" className="hover:underline">
-              Questionnaires
-            </Link>
-            <span>·</span>
-            <span className="font-mono">{questionnaire.status}</span>
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight">
-            {questionnaire.name}
-          </h1>
+    // The split-pane authoring view fills the main column's height: the
+    // shell is a flex column and its body flexes to the remaining space so
+    // the question list and editor panes scroll inside themselves.
+    <PageShell
+      title={questionnaire.name}
+      subtitle={
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Link href="/questionnaires" className="hover:underline">
+            Questionnaires
+          </Link>
+          <span>·</span>
+          <span className="font-mono">{questionnaire.status}</span>
           {questionnaire.source_filename ? (
-            <div className="text-xs text-muted-foreground font-mono mt-0.5">
-              {questionnaire.source_filename}
-            </div>
+            <>
+              <span>·</span>
+              <span className="font-mono">{questionnaire.source_filename}</span>
+            </>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+      }
+      actions={
+        <>
           {/* Slice 757: start a batch drafting run (disabled while one is in
               flight). The run persists UNAPPROVED drafts only — review +
               per-answer approval happen in the queue. */}
@@ -298,9 +288,12 @@ export default function QuestionnaireDetailPage(props: {
           >
             Export PDF
           </Button>
-        </div>
-      </div>
-
+        </>
+      }
+      className="flex h-full flex-col overflow-hidden"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      data-testid="questionnaire-detail"
+    >
       {draftError ? (
         <Alert
           variant="destructive"
@@ -394,6 +387,6 @@ export default function QuestionnaireDetailPage(props: {
           </section>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

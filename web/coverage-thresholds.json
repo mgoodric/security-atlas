@@ -61,12 +61,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/(authed)/controls/new-control-future.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/(authed)/controls/saved-views.ts": {
       "statements": 98,
       "branches": 95,
@@ -319,12 +313,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/api/audit-log/unified/route.ts": {
-      "statements": 88,
-      "branches": 64,
-      "functions": 98,
-      "lines": 88
-    },
     "app/api/audits/[id]/oscal-export/route.ts": {
       "statements": 98,
       "branches": 73,
@@ -421,12 +409,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/api/dashboard/upcoming/route.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/api/evidence/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -434,12 +416,6 @@
       "lines": 98
     },
     "app/api/exceptions/route.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
-    "app/api/features/enabled/route.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -456,6 +432,12 @@
       "branches": 82,
       "functions": 98,
       "lines": 95
+    },
+    "app/api/me/acknowledgments/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
     },
     "app/api/me/email-channel/route.ts": {
       "statements": 93,
@@ -664,6 +646,12 @@
     "components/dashboard/portfolio-summary-view.ts": {
       "statements": 98,
       "branches": 93,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/dashboard/treatment-badge.ts": {
+      "statements": 98,
+      "branches": 98,
       "functions": 98,
       "lines": 98
     },
@@ -890,6 +878,18 @@
       "lines": 98
     },
     "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/help/term-checks.ts": {
+      "statements": 96,
+      "branches": 89,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/help/terms.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,

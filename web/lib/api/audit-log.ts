@@ -29,6 +29,14 @@ export const AUDIT_LOG_KINDS = [
   "feature_flag",
   "me",
   "walkthrough",
+  "framework_scope",
+  "taxonomy",
+  "mapping_overlay",
+  "control_import",
+  "risk",
+  "posture_target",
+  "module_access",
+  "vendor",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];
@@ -72,6 +80,9 @@ export type UnifiedListParams = {
   // every row and ignores the parameter). Emitted as `include_reads=true`
   // only when true — omitted otherwise so the default URL stays clean.
   includeReads?: boolean;
+  // limit (#2135) caps the page; the dashboard's Recent activity asks for
+  // 10. Omitted, the platform returns its full page.
+  limit?: number;
 };
 
 /**
@@ -95,35 +106,10 @@ export function buildUnifiedQuery(params: UnifiedListParams): string {
   if (params.includeReads) {
     u.set("include_reads", "true");
   }
-  return `?${u.toString()}`;
-}
-
-/**
- * Browser-side fetch helper for the BFF. Returns the parsed JSON envelope
- * (or throws on non-2xx with the upstream error message attached).
- */
-export async function fetchUnifiedAuditLog(
-  params: UnifiedListParams,
-  signal?: AbortSignal,
-): Promise<UnifiedListResponse> {
-  const res = await fetch(
-    `/api/audit-log/unified${buildUnifiedQuery(params)}`,
-    {
-      cache: "no-store",
-      signal,
-    },
-  );
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = (await res.json()) as { error?: string };
-      detail = body.error ?? "";
-    } catch {
-      // body is empty / non-JSON — fall through with status-only detail
-    }
-    throw new AuditLogFetchError(res.status, detail);
+  if (params.limit != null) {
+    u.set("limit", String(params.limit));
   }
-  return (await res.json()) as UnifiedListResponse;
+  return `?${u.toString()}`;
 }
 
 export class AuditLogFetchError extends Error {

@@ -28,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 const testHashKey = "atlas-slice-034-test-hash-key!!1"
@@ -230,6 +231,64 @@ func TestRotateGivesSuccessor(t *testing.T) {
 	}
 }
 
+// #2384: a label given at mint is trimmed, stored, listed back and kept by
+// the rotate successor; a key minted without one lists none.
+func TestIssue_LabelListsAndSurvivesRotate(t *testing.T) {
+	tenantID := uuid.New()
+	_, _, handler := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+
+	issue := func(label string) admincreds.IssueResponse {
+		t.Helper()
+		body, _ := json.Marshal(admincreds.IssueRequest{Label: label})
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body)))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Issue(%q): want 201, got %d: %s", label, w.Code, w.Body.String())
+		}
+		var resp admincreds.IssueResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	labelled := issue("  CI deploy  ")
+	if labelled.Label != "CI deploy" {
+		t.Fatalf("issue label = %q, want trimmed %q", labelled.Label, "CI deploy")
+	}
+	plain := issue("")
+
+	rotW := httptest.NewRecorder()
+	handler.ServeHTTP(rotW, httptest.NewRequest(http.MethodPost, "/v1/admin/credentials/"+labelled.ID+"/rotate", nil))
+	if rotW.Code != http.StatusOK {
+		t.Fatalf("Rotate: want 200, got %d: %s", rotW.Code, rotW.Body.String())
+	}
+	var rot admincreds.RotateResponse
+	if err := json.Unmarshal(rotW.Body.Bytes(), &rot); err != nil {
+		t.Fatalf("decode rotate: %v", err)
+	}
+
+	listW := httptest.NewRecorder()
+	handler.ServeHTTP(listW, httptest.NewRequest(http.MethodGet, "/v1/admin/credentials", nil))
+	var list admincreds.ListResponse
+	if err := json.Unmarshal(listW.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	labels := map[string]string{}
+	for _, it := range list.Items {
+		labels[it.ID] = it.Label
+	}
+	want := map[string]string{labelled.ID: "CI deploy", rot.ID: "CI deploy", plain.ID: ""}
+	for id, w := range want {
+		got, ok := labels[id]
+		if !ok {
+			t.Errorf("%s missing from list %v", id, labels)
+		} else if got != w {
+			t.Errorf("%s label = %q, want %q", id, got, w)
+		}
+	}
+}
+
 // === Slice 051: tenant must derive from credential, not request ===
 
 // TestIssue_RejectsCrossTenantInRequestBody asserts the Issue handler refuses
@@ -321,4 +380,208 @@ func cleanupTenant(tenantID uuid.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _ = adminPool.Exec(ctx, "DELETE FROM api_keys WHERE tenant_id = $1", tenantID)
+}
+
+// #1953: ?minted_by lists the live keys a user minted, with minted_by and
+// expires_at, and leaves out revoked keys and keys minted by anyone else.
+// Listing revokes nothing.
+func TestList_MintedByFiltersLiveKeys(t *testing.T) {
+	tenantID := uuid.New()
+	_, store, handler := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	minter, other := uuid.New(), uuid.New()
+	issue := func(in apikeystore.IssueInput) credstore.Credential {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), in, apikeystore.Actor{})
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		return c
+	}
+	live := issue(apikeystore.IssueInput{MintedBy: &minter, TTL: time.Hour})
+	revoked := issue(apikeystore.IssueInput{MintedBy: &minter})
+	_ = issue(apikeystore.IssueInput{MintedBy: &other})
+	_ = issue(apikeystore.IssueInput{})
+	revUUID, _ := uuid.Parse(strings.TrimPrefix(revoked.ID, "key_"))
+	if err := store.Revoke(ctx, tenantID.String(), revUUID, apikeystore.Actor{}); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	list := func() admincreds.ListResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?minted_by="+minter.String(), nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("List: want 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp admincreds.ListResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	resp := list()
+	if len(resp.Items) != 1 || resp.Items[0].ID != live.ID {
+		t.Fatalf("minted_by list = %+v; want only %s", resp.Items, live.ID)
+	}
+	if got := resp.Items[0]; got.MintedBy != minter.String() || got.ExpiresAt == nil {
+		t.Fatalf("item minted_by=%q expires_at=%v; want %s and a deadline", got.MintedBy, got.ExpiresAt, minter)
+	}
+	// Listing is read-only: the key is still listed on a second read.
+	if again := list(); len(again.Items) != 1 {
+		t.Fatalf("second list = %d items; want 1", len(again.Items))
+	}
+}
+
+// #1953 review: a rotated-out predecessor is live inside its grace window
+// and gone from ?minted_by once retires_at passes, as apikeystore's
+// keyLive treats it. Both successors inherit minted_by (#1947 D7).
+func TestList_MintedByDropsKeysPastRotationGrace(t *testing.T) {
+	tenantID := uuid.New()
+	_, longStore, handler := newHandler(t, tenantID) // 7-day grace
+	defer cleanupTenant(tenantID)
+	hasher, err := bearer.NewHasher([]byte(testHashKey))
+	if err != nil {
+		t.Fatalf("bearer.NewHasher: %v", err)
+	}
+	shortStore := apikeystore.NewStore(appPool, adminPool, hasher, 50*time.Millisecond)
+	shortStore.SetPrefix(bearer.PrefixTest)
+
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	minter := uuid.New()
+	rotate := func(store *apikeystore.Store) (pred, succ string) {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), apikeystore.IssueInput{MintedBy: &minter}, apikeystore.Actor{})
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		id, _ := uuid.Parse(strings.TrimPrefix(c.ID, "key_"))
+		s, _, _, err := store.Rotate(ctx, tenantID.String(), id, apikeystore.Actor{})
+		if err != nil {
+			t.Fatalf("Rotate: %v", err)
+		}
+		return c.ID, s.ID
+	}
+	inGrace, inGraceSucc := rotate(longStore)
+	pastGrace, pastGraceSucc := rotate(shortStore)
+	time.Sleep(200 * time.Millisecond) // let the 50ms grace run out
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?minted_by="+minter.String(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("List: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp admincreds.ListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]bool{}
+	for _, it := range resp.Items {
+		got[it.ID] = true
+	}
+	for _, id := range []string{inGrace, inGraceSucc, pastGraceSucc} {
+		if !got[id] {
+			t.Errorf("%s missing from minted_by list %v", id, got)
+		}
+	}
+	if got[pastGrace] {
+		t.Errorf("%s is past its rotation grace but was listed as live", pastGrace)
+	}
+	if len(resp.Items) != 3 {
+		t.Errorf("minted_by list = %d items; want 3", len(resp.Items))
+	}
+}
+
+// #2656: an unbound key labelled admin, with a TTL, a scope and kinds, is a
+// tenant admin by its label. It mints and rotates only keys no wider than
+// itself, against the real store. Revoke is not bound: it grants nothing.
+func TestKeyCallerMintBound2656(t *testing.T) {
+	tenantID := uuid.New()
+	_, store, _ := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	const prod = `{"op":"eq","dim":"environment","value":"prod"}`
+	kinds := []string{"sast.scan_result"}
+	issue := func(in apikeystore.IssueInput) credstore.Credential {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), in, apikeystore.Actor{})
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		return c
+	}
+	caller := issue(apikeystore.IssueInput{
+		OwnerRoles: []string{"admin"}, TTL: time.Hour, ScopePredicate: prod, AllowedKinds: kinds,
+	})
+	if caller.UserID != caller.ID {
+		t.Fatalf("caller key is bound (UserID %q); want an unbound key", caller.UserID)
+	}
+
+	h := admincreds.New(store)
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req.WithContext(authctx.WithCredential(req.Context(), caller)))
+		})
+	})
+	r.Use(tenancymw.Middleware)
+	r.Post("/v1/admin/credentials", h.Issue)
+	r.Post("/v1/admin/credentials/{id}/rotate", h.Rotate)
+	r.Post("/v1/admin/credentials/{id}/revoke", h.Revoke)
+	do := func(path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var buf []byte
+		if body != nil {
+			buf, _ = json.Marshal(body)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(buf)))
+		return w
+	}
+
+	for name, req := range map[string]admincreds.IssueRequest{
+		"never expires":     {TTLSeconds: 0, ScopePredicate: prod, AllowedKinds: kinds},
+		"outlives caller":   {TTLSeconds: 7200, ScopePredicate: prod, AllowedKinds: kinds},
+		"unrestricted":      {TTLSeconds: 60, AllowedKinds: kinds},
+		"every kind":        {TTLSeconds: 60, ScopePredicate: prod},
+		"another kind":      {TTLSeconds: 60, ScopePredicate: prod, AllowedKinds: []string{"access_review.completion"}},
+		"other environment": {TTLSeconds: 60, ScopePredicate: `{"op":"eq","dim":"environment","value":"staging"}`, AllowedKinds: kinds},
+	} {
+		if w := do("/v1/admin/credentials", req); w.Code != http.StatusForbidden {
+			t.Errorf("issue %s: want 403, got %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+	narrower := admincreds.IssueRequest{
+		TTLSeconds:     60,
+		ScopePredicate: `{"op":"and","args":[` + prod + `,{"op":"eq","dim":"cloud_account","value":"aws:1"}]}`,
+		AllowedKinds:   kinds,
+	}
+	if w := do("/v1/admin/credentials", narrower); w.Code != http.StatusCreated {
+		t.Fatalf("issue a narrower key: want 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	wide := issue(apikeystore.IssueInput{})
+	if w := do("/v1/admin/credentials/"+wide.ID+"/rotate", nil); w.Code != http.StatusForbidden {
+		t.Errorf("rotate an unbounded key: want 403, got %d: %s", w.Code, w.Body.String())
+	}
+	within := issue(apikeystore.IssueInput{TTL: time.Minute, ScopePredicate: prod, AllowedKinds: kinds})
+	if w := do("/v1/admin/credentials/"+within.ID+"/rotate", nil); w.Code != http.StatusOK {
+		t.Errorf("rotate a key within the caller: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := do("/v1/admin/credentials/"+wide.ID+"/revoke", nil); w.Code != http.StatusNoContent {
+		t.Errorf("revoke an unbounded key: want 204, got %d: %s", w.Code, w.Body.String())
+	}
 }

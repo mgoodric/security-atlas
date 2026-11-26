@@ -35,6 +35,10 @@
 //  2. Adding the new kind enum to [Kind] and to [AllKinds].
 //  3. Updating the integration test in `internal/api/adminauditlog/`
 //     to seed + assert the new table's rows.
+//  4. Mapping the kind to the OPA resource type of its source route in
+//     `kindSourceResource` (`internal/api/adminauditlog/payloadgate.go`).
+//     An unmapped kind's payload is withheld from every non-admin reader
+//     (#2375), and a unit test there fails until the kind is mapped.
 //
 // No code change is required in this Go file beyond the [Kind] addition.
 package unifiedlog
@@ -65,6 +69,27 @@ const (
 	KindFeatureFlag     Kind = "feature_flag"
 	KindMe              Kind = "me"
 	KindWalkthrough     Kind = "walkthrough"
+	// KindFrameworkScope is framework_scope_workflow_log (issue #1786).
+	KindFrameworkScope Kind = "framework_scope"
+	// KindTaxonomy is taxonomy_audit_log (#1810): risk-category changes.
+	KindTaxonomy Kind = "taxonomy"
+	// KindMappingOverlay is fw_to_scf_overlay_edge_audit_log (#1797):
+	// overlay edge create, retire and version carry-over (#1803).
+	KindMappingOverlay Kind = "mapping_overlay"
+	// KindControlImport is control_import_audit_log (#1782): control
+	// import approvals, rejections and duplicates.
+	KindControlImport Kind = "control_import"
+	// KindRisk is risk_audit_log (#1954): a risk's placement, category
+	// and record-field changes.
+	KindRisk Kind = "risk"
+	// KindPostureTarget is framework_posture_target_audit_log (#2136): a
+	// framework version's posture target set.
+	KindPostureTarget Kind = "posture_target"
+	// KindModuleAccess is member_module_access_audit_log (#2172): a
+	// member's module access set.
+	KindModuleAccess Kind = "module_access"
+	// KindVendor is vendor_audit_log (#2450): a vendor's owner changes.
+	KindVendor Kind = "vendor"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -93,9 +118,17 @@ var AllKinds = []Kind{
 	KindFeatureFlag,
 	KindMe,
 	KindWalkthrough,
+	KindFrameworkScope,
+	KindTaxonomy,
+	KindMappingOverlay,
+	KindControlImport,
+	KindRisk,
+	KindPostureTarget,
+	KindModuleAccess,
+	KindVendor,
 }
 
-// IsCanonical reports whether k is one of the nine canonical kinds.
+// IsCanonical reports whether k is one of the canonical kinds in [AllKinds].
 func IsCanonical(k Kind) bool {
 	for _, candidate := range AllKinds {
 		if candidate == k {

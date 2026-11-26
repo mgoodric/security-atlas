@@ -7,13 +7,16 @@
 --   - at least one control that has drifted out of passing in the last
 --     7 days (recent-drift panel)
 --   - evidence records across >=2 freshness classes (freshness panel)
---   - at least one exception expiring within 30 days (upcoming panel)
+--   - an exception expiring in 10 days, a risk review due in 7 and an
+--     action plan due in 5 (the "Coming up" panel reads the compliance
+--     calendar's next 14 days, #2130)
 --
 -- Most inserts are ON CONFLICT DO NOTHING for idempotency across re-runs.
 -- The exceptions row is `ON CONFLICT (id) DO UPDATE` per slice 193: the
--- `status` column is read by `/v1/upcoming` (`status='active'` filter); a
+-- `status` column is read by the calendar (`status='active'` filter); a
 -- prior run's stale value must be overwritten to guarantee the seed
--- state on every re-run.
+-- state on every re-run. The risk review date and the action plan are
+-- reset on every run for the same reason.
 
 \set ON_ERROR_STOP on
 
@@ -24,8 +27,13 @@ SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0';
 -- ============================================================
 -- A risk with treatment=mitigate (linked to the seeded control)
 -- ============================================================
+-- The risk carries its category reference, looked up by slug in this
+-- tenant's own categories (#1816); the risk_category enum is gone (#1819).
+-- seed_risk_categories is idempotent.
+SELECT seed_risk_categories('00000000-0000-0000-0000-00000000d3a0');
+
 INSERT INTO risks (
-    id, tenant_id, title, description, category, treatment,
+    id, tenant_id, title, description, category_id, treatment,
     treatment_owner, inherent_score, residual_score
 )
 VALUES (
@@ -33,7 +41,8 @@ VALUES (
     '00000000-0000-0000-0000-00000000d3a0',
     'Unencrypted production data at rest',
     'Risk that production S3 buckets in customer-data accounts ship without server-side encryption.',
-    'confidentiality',
+    (SELECT id FROM org_risk_categories
+     WHERE tenant_id = '00000000-0000-0000-0000-00000000d3a0' AND slug = 'confidentiality'),
     'mitigate',
     'security-engineering',
     '{"likelihood": 3, "impact": 4}'::jsonb,
@@ -135,20 +144,21 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- Exception expiring within 30 days (upcoming panel)
+-- Exception expiring in 10 days ("Coming up" panel)
 -- ============================================================
--- Slice 193 — status MUST be 'active' (not 'approved'). The
--- /v1/upcoming rollup (`ListUpcomingItems` in
--- internal/db/queries/dashboard.sql) filters `e.status = 'active'`;
+-- Slice 193 — status MUST be 'active' (not 'approved'). The calendar's
+-- exception branch (`ListCalendarEvents` in
+-- internal/db/queries/calendar.sql) filters `e.status = 'active'`;
 -- so do the slice-040 `/v1/exceptions/expiring` query and every
--- integration test seed. The pre-slice-193 fixture seeded 'approved'
+-- integration test seed. #2130: 10 days, not 14, so the expiry sits
+-- inside the panel's [today, today + 14d) window whatever the hour. The pre-slice-193 fixture seeded 'approved'
 -- — that never showed because slice 082's assertions were commented
 -- out. Slice 111 un-skipped, AC-5 broke; slice 193 fixes it.
 -- ON CONFLICT (id) DO UPDATE follows the slice-168 settings.sql
 -- precedent: DO NOTHING would leave a stale row from a prior local
 -- run untouched, defeating the re-seed. Update both status and
 -- expires_at so re-runs always start from a known-good "active +
--- expires in 14d" state. activated_by/activated_at are set so the
+-- expires in 10d" state. activated_by/activated_at are set so the
 -- exception's lifecycle narrative is consistent (requested →
 -- approved → active) and the `exceptions_sod` CHECK constraint
 -- (activator MUST differ from requester) is satisfied — we reuse
@@ -172,7 +182,7 @@ VALUES (
     now() - INTERVAL '59 days',
     'demo-approver@example.invalid',
     now() - INTERVAL '58 days',
-    now() + INTERVAL '14 days',
+    now() + INTERVAL '10 days',
     'active'
 )
 ON CONFLICT (id) DO UPDATE
@@ -180,5 +190,54 @@ SET status = EXCLUDED.status,
     expires_at = EXCLUDED.expires_at,
     activated_by = EXCLUDED.activated_by,
     activated_at = EXCLUDED.activated_at;
+
+-- ============================================================
+-- #2130: a risk review and an action plan due inside 14 days
+-- ============================================================
+-- The mitigate risk above gets its review date moved into the window on
+-- every run (the risk insert is DO NOTHING, and #2059's trigger set the
+-- original date a year out).
+UPDATE risks
+SET review_due_at = now() + INTERVAL '7 days'
+WHERE id = '77777777-7777-7777-7777-777777770001';
+
+-- An open action plan due in 5 days, owned by the shared e2e user
+-- (the same id settings.sql / controls-list.sql seed; DO NOTHING keeps
+-- whichever fixture created it first).
+INSERT INTO users (
+    id, tenant_id, email, display_name, status, idp_issuer, idp_subject
+)
+VALUES (
+    '44444444-4444-4444-4444-444444440001',
+    '00000000-0000-0000-0000-00000000d3a0',
+    'dashboard-e2e-user@example.invalid',
+    'Dashboard E2E Operator',
+    'active',
+    '',
+    ''
+)
+ON CONFLICT DO NOTHING;
+
+-- #2501: the live roles the e2e token claims (settings.sql seeds the
+-- same rows). A user with no live role lacks every optional module, so
+-- without them the plan's owner is flagged and owner pickers leave the
+-- user out.
+INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+VALUES ('00000000-0000-0000-0000-00000000d3a0', '44444444-4444-4444-4444-444444440001', 'admin', 'e2e:2501'),
+       ('00000000-0000-0000-0000-00000000d3a0', '44444444-4444-4444-4444-444444440001', 'grc_engineer', 'e2e:2501')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO action_plans (id, tenant_id, title, owner_id, due_date, status)
+VALUES (
+    'acacacac-acac-acac-acac-acacacac0001',
+    '00000000-0000-0000-0000-00000000d3a0',
+    'Enable SSE on staging buckets',
+    '44444444-4444-4444-4444-444444440001',
+    (now() + INTERVAL '5 days')::date,
+    'in_progress'
+)
+ON CONFLICT (id) DO UPDATE
+SET due_date = EXCLUDED.due_date,
+    tombstoned_at = NULL;
 
 COMMIT;

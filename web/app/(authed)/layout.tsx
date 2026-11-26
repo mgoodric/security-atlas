@@ -1,11 +1,16 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { MobileSidebar } from "@/components/shell/mobile-sidebar";
-import { Sidebar, getAuthedNav } from "@/components/shell/sidebar";
-import { TopBar } from "@/components/shell/topbar";
-import { VersionFooter } from "@/components/version-footer";
+import { ModulesProvider } from "@/components/modules-context";
+import { AppShell } from "@/components/shell/app-shell";
+import { NoTenantRole } from "@/components/shell/no-tenant-role";
+import { ToastProvider } from "@/components/ui/toast";
+import {
+  fetchTenantRoleState,
+  fetchTenantsSummary,
+} from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { fetchEffectiveModules } from "@/lib/feature-nav.server";
 
 export default async function AuthedLayout({
   children,
@@ -13,48 +18,43 @@ export default async function AuthedLayout({
   children: React.ReactNode;
 }) {
   const jar = await cookies();
-  if (!jar.get(ATLAS_JWT_COOKIE)?.value) {
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
+  if (!bearer) {
     redirect("/login");
   }
 
-  // Slice 277 — resolve the nav list ONCE per request server-side. The
-  // desktop `<Sidebar>` renders its own copy from the same source via
-  // `getAuthedNav()` (called inside the component); we pass a serialized
-  // {href,label} array to the client `<MobileSidebar>` so the drawer
-  // doesn't re-run the admin-role probe. Both surfaces honor the slice
-  // 186 admin-role gate identically (no behavior drift between desktop
-  // and mobile).
-  const nav = await getAuthedNav();
-  const mobileNav = nav.map(({ href, label }) => ({ href, label }));
+  // #2494 — a signed-in user with no role in this tenant gets one page
+  // that says so, not a dashboard of 403s. The layout persists across
+  // client navigation, so this runs once per load; a role granted since
+  // shows on the next reload (live roles, #2442). A failed read is
+  // "unknown" and renders the app as before, where the page shows its own
+  // error state: it is never taken as role-less, nor as having a role.
+  if ((await fetchTenantRoleState(bearer)) === "no_role") {
+    const tenants = await fetchTenantsSummary(bearer);
+    return (
+      <NoTenantRole
+        tenantName={tenants.currentName}
+        tenantCount={tenants.count}
+      />
+    );
+  }
 
+  // #2080 — the chrome (skip link, top bar, sidebar with the version tag
+  // in its footer, main column) lives in `<AppShell>`, shared with
+  // `/admin`, `/audit`, `/audit-log` and the 404 page.
+  //
+  // #2089: the toast provider lives in this persistent layout, so a toast
+  // raised before router.push shows on the landing page.
+  //
+  // #2174: the caller's effective modules reach client pages through
+  // `<ModulesProvider>`, so a record hides its link sections into a
+  // module the caller cannot see.
+  const modules = await fetchEffectiveModules();
   return (
-    <div className="flex h-screen flex-col">
-      {/* Slice 359 (a11y A11Y-1): visually-hidden skip-link that
-        becomes visible on focus. WCAG SC 2.4.1 Bypass Blocks (Level
-        A). Lets keyboard-only users skip the TopBar + Sidebar (~25
-        affordances) on every authed page navigation. Must remain
-        the first focusable element inside the authed layout. */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        Skip to main content
-      </a>
-      <TopBar mobileSidebar={<MobileSidebar nav={mobileNav} />} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="flex-1 overflow-y-auto p-6"
-        >
-          {children}
-        </main>
-      </div>
-      {/* Slice 072: build-version footer. Fixed-position; does not
-        consume layout space. `print:hidden` keeps it off the
-        board-pack print stylesheet (anti-criterion P0-A2). */}
-      <VersionFooter />
-    </div>
+    <AppShell>
+      <ModulesProvider modules={modules}>
+        <ToastProvider>{children}</ToastProvider>
+      </ModulesProvider>
+    </AppShell>
   );
 }

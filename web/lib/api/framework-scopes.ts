@@ -2,7 +2,7 @@
 // `web/lib/api.ts` god-file.
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 export type FrameworkScopeState =
   | "draft"
@@ -23,6 +23,13 @@ export type FrameworkScope = {
   predicate_hash_at_approval?: string;
   approval_evidence_file_url?: string;
   approval_evidence_file_hash?: string;
+  /** #2101 — who submitted the scope for review (a user id). */
+  submitted_by?: string;
+  /**
+   * #2101 — true when the submitter approved the scope under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   effective_from?: string;
   superseded_by?: string;
   superseded_at?: string;
@@ -30,16 +37,29 @@ export type FrameworkScope = {
   updated_at: string;
 };
 
-export type FrameworkScopeCreate = {
-  framework_version_id: string;
-  name: string;
-  predicate: unknown;
-};
+// With from_scope_id the new draft is a revision of that scope (#1965): the
+// other fields default to the source's, and its decisions are copied.
+export type FrameworkScopeCreate =
+  | { framework_version_id: string; name: string; predicate: unknown }
+  | {
+      from_scope_id: string;
+      framework_version_id?: string;
+      name?: string;
+      predicate?: unknown;
+    };
 
 export type FrameworkScopePatchResponse = {
   framework_scope: FrameworkScope;
   approval_invalidated: boolean;
 };
+
+// #2115: the platform's `{"error": "..."}` message, so a refusal (the
+// approval rule's "the submitter cannot approve their own scope", a frozen
+// revision) reaches the page as the platform words it, else the status line.
+// A 5xx always gets the status line (#2433).
+async function upstreamError(res: Response): Promise<APIError> {
+  return new APIError(res.status, await upstreamErrorMessage(res));
+}
 
 export async function listFrameworkScopes(
   bearer: string,
@@ -72,8 +92,7 @@ export async function createFrameworkScope(
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   const decoded = (await res.json()) as { framework_scope: FrameworkScope };
   return decoded.framework_scope;
 }
@@ -94,8 +113,7 @@ export async function patchFrameworkScopePredicate(
       body: JSON.stringify({ predicate }),
     },
   );
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   return (await res.json()) as FrameworkScopePatchResponse;
 }
 
@@ -118,8 +136,7 @@ export async function transitionFrameworkScope(
       body: body ? JSON.stringify(body) : undefined,
     },
   );
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   const decoded = (await res.json()) as { framework_scope: FrameworkScope };
   return decoded.framework_scope;
 }

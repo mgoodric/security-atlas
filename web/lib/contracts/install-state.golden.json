@@ -4,13 +4,20 @@
   "variants": {
     "fresh_install_with_tenant": {
       "first_install": true,
-      "tenant_id": "11111111-1111-4111-8111-111111111111"
+      "tenant_id": "11111111-1111-4111-8111-111111111111",
+      "single_tenant": false
     },
     "fresh_install_without_tenant": {
-      "first_install": true
+      "first_install": true,
+      "single_tenant": false
     },
     "post_first_install": {
-      "first_install": false
+      "first_install": false,
+      "single_tenant": false
+    },
+    "post_first_install_single_tenant": {
+      "first_install": false,
+      "single_tenant": true
     }
   }
 }

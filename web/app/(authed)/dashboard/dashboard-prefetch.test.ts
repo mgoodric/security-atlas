@@ -32,16 +32,27 @@ import {
 vi.mock("@/lib/api/dashboard", () => ({
   getControlDrift: vi.fn(),
   getEvidenceFreshness: vi.fn(),
-  getMitigateRisks: vi.fn(),
-  getUpcoming: vi.fn(),
+  getTopRisks: vi.fn(),
+  getComingUp: vi.fn(),
   getFrameworkPosture: vi.fn(),
-  getActivity: vi.fn(),
+  getRecentActivity: vi.fn(),
+}));
+
+vi.mock("@/lib/api/needs-attention", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/needs-attention")>()),
+  getNeedsAttention: vi.fn(),
 }));
 
 // Import the mocked module AFTER vi.mock so `api.*` are the vi.fn()s.
 import * as api from "@/lib/api/dashboard";
+import * as na from "@/lib/api/needs-attention";
 
-const mocked = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
+const mocked: Record<string, ReturnType<typeof vi.fn>> = {
+  ...(api as unknown as Record<string, ReturnType<typeof vi.fn>>),
+  getNeedsAttention: na.getNeedsAttention as unknown as ReturnType<
+    typeof vi.fn
+  >,
+};
 
 beforeEach(() => {
   // Default every fn to resolve a benign empty object so a test that
@@ -49,10 +60,11 @@ beforeEach(() => {
   for (const key of [
     "getControlDrift",
     "getEvidenceFreshness",
-    "getMitigateRisks",
-    "getUpcoming",
+    "getTopRisks",
+    "getComingUp",
     "getFrameworkPosture",
-    "getActivity",
+    "getRecentActivity",
+    "getNeedsAttention",
   ]) {
     mocked[key].mockReset();
     mocked[key].mockResolvedValue({});
@@ -77,8 +89,8 @@ describe("DASHBOARD_QUERY_KEYS (key parity with page.tsx useQuery)", () => {
   it("risks key matches the page useQuery key", () => {
     expect(DASHBOARD_QUERY_KEYS.risks).toEqual(["dashboard", "risks"]);
   });
-  it("upcoming key matches the page useQuery key", () => {
-    expect(DASHBOARD_QUERY_KEYS.upcoming).toEqual(["dashboard", "upcoming"]);
+  it("coming-up key matches the page useQuery key", () => {
+    expect(DASHBOARD_QUERY_KEYS.comingUp).toEqual(["dashboard", "coming-up"]);
   });
   it("framework-posture key matches the page useQuery key", () => {
     expect(DASHBOARD_QUERY_KEYS.frameworkPosture).toEqual([
@@ -89,13 +101,20 @@ describe("DASHBOARD_QUERY_KEYS (key parity with page.tsx useQuery)", () => {
   it("activity key matches the page useQuery key", () => {
     expect(DASHBOARD_QUERY_KEYS.activity).toEqual(["dashboard", "activity"]);
   });
+  it("needs-attention key matches the page's default-view key (#2135)", () => {
+    expect(DASHBOARD_QUERY_KEYS.needsAttention).toEqual([
+      "dashboard",
+      "needs-attention",
+      "default",
+    ]);
+  });
 });
 
 describe("DASHBOARD_PANEL_PREFETCHES (fan-out enumeration)", () => {
-  it("enumerates all six panels exactly once", () => {
-    expect(DASHBOARD_PANEL_PREFETCHES).toHaveLength(6);
+  it("enumerates all seven panels exactly once", () => {
+    expect(DASHBOARD_PANEL_PREFETCHES).toHaveLength(7);
     const keys = DASHBOARD_PANEL_PREFETCHES.map((p) => p.queryKey.join("/"));
-    expect(new Set(keys).size).toBe(6);
+    expect(new Set(keys).size).toBe(7);
   });
 });
 
@@ -112,26 +131,31 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
       total_stale: 0,
     };
     const drift = { snapshots: [] };
-    const upcoming = { items: [], count: 0, next_cursor: "" };
-    const activity = { activity: [], count: 0, next_cursor: "" };
+    const comingUp = { events: [], count: 0, truncated: false };
+    const activity = { entries: [], next_cursor: "" };
+    const needsAttention = { for: "me", items: [], total: 0 };
 
     mocked.getFrameworkPosture.mockResolvedValue(posture);
-    mocked.getMitigateRisks.mockResolvedValue(risks);
+    mocked.getTopRisks.mockResolvedValue(risks);
     mocked.getEvidenceFreshness.mockResolvedValue(freshness);
     mocked.getControlDrift.mockResolvedValue(drift);
-    mocked.getUpcoming.mockResolvedValue(upcoming);
-    mocked.getActivity.mockResolvedValue(activity);
+    mocked.getComingUp.mockResolvedValue(comingUp);
+    mocked.getRecentActivity.mockResolvedValue(activity);
+    mocked.getNeedsAttention.mockResolvedValue(needsAttention);
 
     const qc = new QueryClient();
     await prefetchDashboard(qc, "bearer-token");
 
+    expect(
+      qc.getQueryData(["dashboard", "needs-attention", "default"]),
+    ).toEqual(needsAttention);
     expect(qc.getQueryData(["dashboard", "framework-posture"])).toEqual(
       posture,
     );
     expect(qc.getQueryData(["dashboard", "risks"])).toEqual(risks);
     expect(qc.getQueryData(["dashboard", "freshness"])).toEqual(freshness);
     expect(qc.getQueryData(["dashboard", "drift"])).toEqual(drift);
-    expect(qc.getQueryData(["dashboard", "upcoming"])).toEqual(upcoming);
+    expect(qc.getQueryData(["dashboard", "coming-up"])).toEqual(comingUp);
     expect(qc.getQueryData(["dashboard", "activity"])).toEqual(activity);
   });
 
@@ -139,24 +163,29 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     const qc = new QueryClient();
     await prefetchDashboard(qc, "the-bearer");
     expect(mocked.getFrameworkPosture).toHaveBeenCalledWith("the-bearer");
-    expect(mocked.getMitigateRisks).toHaveBeenCalledWith("the-bearer");
+    expect(mocked.getTopRisks).toHaveBeenCalledWith("the-bearer");
     expect(mocked.getEvidenceFreshness).toHaveBeenCalledWith("the-bearer");
     // getControlDrift is called with one arg (the bearer); its `since`
     // param defaults to "7d" inside the fn, matching the client path.
     expect(mocked.getControlDrift).toHaveBeenCalledWith("the-bearer");
-    expect(mocked.getUpcoming).toHaveBeenCalledWith("the-bearer");
-    expect(mocked.getActivity).toHaveBeenCalledWith("the-bearer");
+    expect(mocked.getComingUp).toHaveBeenCalledWith("the-bearer");
+    expect(mocked.getRecentActivity).toHaveBeenCalledWith("the-bearer");
+    // The default view: no `for`, the dashboard's 10.
+    expect(mocked.getNeedsAttention).toHaveBeenCalledWith(
+      "the-bearer",
+      "?limit=10",
+    );
   });
 
   it("fails soft on a single upstream error without rejecting (D3)", async () => {
     // The drift upstream throws; the other five still seed, and the
     // failing panel is left UNseeded (no error-state in the cache).
     mocked.getFrameworkPosture.mockResolvedValue({ ok: 1 });
-    mocked.getMitigateRisks.mockResolvedValue([]);
+    mocked.getTopRisks.mockResolvedValue([]);
     mocked.getEvidenceFreshness.mockResolvedValue({ ok: 1 });
     mocked.getControlDrift.mockRejectedValue(new Error("upstream 500"));
-    mocked.getUpcoming.mockResolvedValue({ ok: 1 });
-    mocked.getActivity.mockResolvedValue({ ok: 1 });
+    mocked.getComingUp.mockResolvedValue({ ok: 1 });
+    mocked.getRecentActivity.mockResolvedValue({ ok: 1 });
 
     const qc = new QueryClient();
     // Must NOT reject:
@@ -166,7 +195,7 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     expect(qc.getQueryData(["dashboard", "framework-posture"])).toEqual({
       ok: 1,
     });
-    expect(qc.getQueryData(["dashboard", "upcoming"])).toEqual({ ok: 1 });
+    expect(qc.getQueryData(["dashboard", "coming-up"])).toEqual({ ok: 1 });
 
     // The failed panel is UNseeded (undefined) -- NOT an error state.
     // This is the load-bearing fail-soft property: the client useQuery

@@ -1,12 +1,26 @@
-// Package scfimport ingests the Secure Controls Framework JSON catalog
-// into Postgres. The catalog JSON shape is documented in the Catalog type
-// below — operators convert SCF's Excel/JSON release into this shape.
+// Package scfimport ingests the Secure Controls Framework catalog into
+// Postgres. It reads either the JSON shape documented in the Catalog type
+// below (Load) or SCF's published Excel workbook directly (LoadWorkbook).
 //
-// The importer is idempotent: re-running with the same release_version
-// upserts in place (no duplicates); a new release_version creates a new
-// framework_versions row, demotes the previous "current" → "legacy", and
-// inserts a fresh set of anchors against the new version. Old versions
-// stay queryable for audit replay.
+// An imported release is frozen. Re-running with a release_version that is
+// already loaded compares the incoming catalog with the stored anchors:
+// identical content is a no-op, and any difference is a
+// *ReleaseConflictError naming the differing anchors, with nothing written
+// (migration 20260916000000 backs this with a trigger on scf_anchors). A new
+// release_version creates a new framework_versions row, demotes the previous
+// "current" → "legacy", and inserts a fresh set of anchors against the new
+// version. Old versions stay queryable for audit replay.
+//
+// legacy_scf_id is the one exception to the freeze: it is not anchor
+// content, so a re-import of an imported release fills it on anchors stored
+// without one (#1769). A stored legacy_scf_id is never rewritten; a
+// re-import that gives a different one is a *ReleaseConflictError.
+//
+// Options.KeepCurrent loads a new release as "legacy" when another release
+// is current, and demotes nothing (#3061). The docker bootstrap uses it to
+// load the bundled sample beside an operator's own SCF release, so the
+// stock content's scf_release pin resolves while the operator's release
+// stays current.
 package scfimport
 
 import (
@@ -14,7 +28,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +61,11 @@ type Control struct {
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
 	Subtopics   []Subtopic `json:"subtopics,omitempty"`
+	// LegacySCFID is the anchor's code in the previous SCF release (the
+	// workbook's "Legacy SCF #" column). Optional: surrounding whitespace is
+	// trimmed, and an empty or blank value means the catalog does not say,
+	// so the anchor stores NULL.
+	LegacySCFID string `json:"legacy_scf_id,omitempty"`
 }
 
 // Subtopic mirrors the SCF sub-control structure. Persisted as JSONB.
@@ -58,9 +80,13 @@ type Report struct {
 	FrameworkID        string
 	FrameworkVersionID string
 	IsNewVersion       bool
-	Created            int
-	Updated            int
-	Unchanged          int
+	// Status is the version's status after the import: "current", or
+	// "legacy" for a release that KeepCurrent loaded beside a current one
+	// or that a later release had already demoted.
+	Status    string
+	Created   int
+	Updated   int
+	Unchanged int
 }
 
 // Load reads a JSON catalog file from disk.
@@ -103,9 +129,23 @@ func validate(cat *Catalog) error {
 	return nil
 }
 
+// Options changes how Import treats a new release.
+type Options struct {
+	// KeepCurrent loads a new release as "legacy" when another SCF release
+	// is current, instead of demoting that release (#3061). With no current
+	// release, the new one becomes current as usual. A release already
+	// loaded keeps its status either way.
+	KeepCurrent bool
+}
+
 // Import runs the catalog against the database in a single transaction.
 // Returns a Report on success; rolls back on any error.
 func Import(ctx context.Context, db DBTX, cat *Catalog) (Report, error) {
+	return ImportWithOptions(ctx, db, cat, Options{})
+}
+
+// ImportWithOptions is Import with Options.
+func ImportWithOptions(ctx context.Context, db DBTX, cat *Catalog, opts Options) (Report, error) {
 	conn, ok := db.(pgxBeginner)
 	if !ok {
 		return Report{}, errors.New("scfimport: db must support BeginTx (pgx.Conn / pgxpool.Pool)")
@@ -116,7 +156,7 @@ func Import(ctx context.Context, db DBTX, cat *Catalog) (Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	report, err := importIntoTx(ctx, tx, cat)
+	report, err := importIntoTx(ctx, tx, cat, opts)
 	if err != nil {
 		return Report{}, err
 	}
@@ -134,8 +174,120 @@ type pgxBeginner interface {
 	BeginTx(ctx context.Context, txOpts pgx.TxOptions) (pgx.Tx, error)
 }
 
-func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) {
+// ReleaseConflictError reports a re-import of an already-imported release
+// label whose content differs from the stored anchors. Imported anchors are
+// frozen; a changed catalog ships under a new release label.
+type ReleaseConflictError struct {
+	ReleaseVersion string
+	// Changed lists scf_ids present in both whose family, title,
+	// description or subtopics differ, or whose stored legacy_scf_id
+	// differs from a non-empty incoming one.
+	Changed []string
+	// Added lists scf_ids in the incoming catalog but not the stored release.
+	Added []string
+	// Missing lists scf_ids in the stored release but not the incoming catalog.
+	Missing []string
+}
+
+func (e *ReleaseConflictError) Error() string {
+	var parts []string
+	if len(e.Changed) > 0 {
+		parts = append(parts, "changed: "+strings.Join(e.Changed, ", "))
+	}
+	if len(e.Added) > 0 {
+		parts = append(parts, "added: "+strings.Join(e.Added, ", "))
+	}
+	if len(e.Missing) > 0 {
+		parts = append(parts, "missing: "+strings.Join(e.Missing, ", "))
+	}
+	return fmt.Sprintf(
+		"scfimport: SCF release %q is already imported and its anchors are frozen; the incoming catalog differs (%s); nothing was written — import the changed catalog under a new release label",
+		e.ReleaseVersion, strings.Join(parts, "; "))
+}
+
+// diffRelease compares the stored anchors of a release with the incoming
+// catalog. It returns nil when they are identical.
+func diffRelease(release string, stored []dbx.ScfAnchor, incoming []Control) *ReleaseConflictError {
+	byID := make(map[string]dbx.ScfAnchor, len(stored))
+	for _, a := range stored {
+		byID[a.ScfID] = a
+	}
+	conflict := &ReleaseConflictError{ReleaseVersion: release}
+	seen := make(map[string]bool, len(incoming))
+	for _, ctl := range incoming {
+		seen[ctl.SCFID] = true
+		row, ok := byID[ctl.SCFID]
+		switch {
+		case !ok:
+			conflict.Added = append(conflict.Added, ctl.SCFID)
+		case !anchorContentEqual(row, ctl), legacyConflicts(row, ctl):
+			conflict.Changed = append(conflict.Changed, ctl.SCFID)
+		}
+	}
+	for _, a := range stored {
+		if !seen[a.ScfID] {
+			conflict.Missing = append(conflict.Missing, a.ScfID)
+		}
+	}
+	if len(conflict.Changed)+len(conflict.Added)+len(conflict.Missing) == 0 {
+		return nil
+	}
+	return conflict
+}
+
+func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog, opts Options) (Report, error) {
 	q := dbx.New(tx)
+
+	// 0. A release label that is already imported is frozen: compare before
+	//    any write. Identical content is a no-op; a difference is refused.
+	//    A version row with no anchors yet (a load that never inserted any)
+	//    falls through to the normal load path.
+	versions, err := q.ListFrameworkVersionsBySlug(ctx, "scf")
+	if err != nil {
+		return Report{}, fmt.Errorf("scfimport: list versions: %w", err)
+	}
+	isNew := true
+	// Scanned in full first: the loop below can break before it has seen
+	// every version (an anchor-less row for this release).
+	otherCurrent := false
+	for _, v := range versions {
+		if v.Version != cat.ReleaseVersion && v.Status == dbx.FrameworkVersionStatusCurrent {
+			otherCurrent = true
+		}
+	}
+	for _, v := range versions {
+		if v.Version != cat.ReleaseVersion {
+			continue
+		}
+		isNew = false
+		stored, err := q.ListSCFAnchorsForVersion(ctx, dbx.ListSCFAnchorsForVersionParams{
+			FrameworkVersionID: v.ID,
+			Limit:              math.MaxInt32,
+			Offset:             0,
+		})
+		if err != nil {
+			return Report{}, fmt.Errorf("scfimport: list stored anchors for %s: %w", cat.ReleaseVersion, err)
+		}
+		if len(stored) == 0 {
+			break
+		}
+		if conflict := diffRelease(cat.ReleaseVersion, stored, cat.Controls); conflict != nil {
+			return Report{}, conflict
+		}
+		updated, err := backfillLegacySCFIDs(ctx, q, stored, cat.Controls)
+		if err != nil {
+			return Report{}, err
+		}
+		return Report{
+			ReleaseVersion:     cat.ReleaseVersion,
+			FrameworkID:        uuidString(v.FrameworkID),
+			FrameworkVersionID: uuidString(v.ID),
+			IsNewVersion:       false,
+			Status:             string(v.Status),
+			Updated:            updated,
+			Unchanged:          len(stored) - updated,
+		}, nil
+	}
 
 	// 1. Upsert the SCF framework row.
 	frameworkID := uuidFromString("scf")
@@ -150,28 +302,21 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		return Report{}, fmt.Errorf("scfimport: upsert framework: %w", err)
 	}
 
-	// 2. Decide if this is a new release_version.
-	versions, err := q.ListFrameworkVersionsBySlug(ctx, "scf")
-	if err != nil {
-		return Report{}, fmt.Errorf("scfimport: list versions: %w", err)
+	// 2. If new, demote previous "current" → "legacy" so the at-most-one-
+	//    current invariant holds. KeepCurrent instead loads this release as
+	//    legacy beside the current one (#3061).
+	asLegacy := opts.KeepCurrent && otherCurrent
+	status := dbx.FrameworkVersionStatusCurrent
+	if asLegacy {
+		status = dbx.FrameworkVersionStatusLegacy
 	}
-	isNew := true
-	for _, v := range versions {
-		if v.Version == cat.ReleaseVersion {
-			isNew = false
-			break
-		}
-	}
-
-	// 3. If new, demote previous "current" → "legacy" so the at-most-one-
-	//    current invariant holds.
-	if isNew {
+	if isNew && !asLegacy {
 		if err := q.DemoteCurrentFrameworkVersions(ctx, framework.ID); err != nil {
 			return Report{}, fmt.Errorf("scfimport: demote current: %w", err)
 		}
 	}
 
-	// 4. Upsert the framework_version pinned to the imported release.
+	// 3. Upsert the framework_version pinned to the imported release.
 	effectiveFrom := parseDate(cat.ReleaseDate)
 	version, err := q.UpsertFrameworkVersion(ctx, dbx.UpsertFrameworkVersionParams{
 		ID:            uuidFromString("scf-" + cat.ReleaseVersion),
@@ -179,88 +324,124 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 		Version:       cat.ReleaseVersion,
 		EffectiveFrom: effectiveFrom,
 		EffectiveTo:   pgtype.Date{},
-		Status:        dbx.FrameworkVersionStatusCurrent,
+		Status:        status,
 	})
 	if err != nil {
 		return Report{}, fmt.Errorf("scfimport: upsert framework_version: %w", err)
 	}
 
-	// 5. Point frameworks.latest_version_id at this row.
-	if err := q.SetLatestVersion(ctx, dbx.SetLatestVersionParams{
-		ID:              framework.ID,
-		LatestVersionID: pgtype.UUID{Bytes: version.ID.Bytes, Valid: true},
-	}); err != nil {
-		return Report{}, fmt.Errorf("scfimport: set latest version: %w", err)
+	// 4. Point frameworks.latest_version_id at this row, unless it was
+	//    loaded as legacy beside the current one.
+	if !asLegacy {
+		if err := q.SetLatestVersion(ctx, dbx.SetLatestVersionParams{
+			ID:              framework.ID,
+			LatestVersionID: pgtype.UUID{Bytes: version.ID.Bytes, Valid: true},
+		}); err != nil {
+			return Report{}, fmt.Errorf("scfimport: set latest version: %w", err)
+		}
 	}
 
-	// 6. Look up + insert-or-update each anchor; tally counts. Two queries
-	//    per anchor (one read, one write) — keeps the Created/Updated/
-	//    Unchanged distinction honest. ON CONFLICT-based xmax detection
-	//    cannot distinguish "updated to the same content" from "actually
-	//    updated" because RETURNING runs after the SET.
+	// 5. Insert each anchor. Only a new release (or an empty version row)
+	//    reaches here, so every anchor is new; a row that already exists
+	//    means a concurrent load, and the unique (framework_version_id,
+	//    scf_id) key rejects it.
 	report := Report{
 		ReleaseVersion:     cat.ReleaseVersion,
 		FrameworkID:        uuidString(framework.ID),
 		FrameworkVersionID: uuidString(version.ID),
 		IsNewVersion:       isNew,
+		Status:             string(status),
 	}
 	for _, ctl := range cat.Controls {
 		subtopics, err := json.Marshal(ctl.Subtopics)
 		if err != nil {
 			return Report{}, fmt.Errorf("scfimport: marshal subtopics for %s: %w", ctl.SCFID, err)
 		}
-
-		existing, lookupErr := q.GetSCFAnchorByVersionAndSCFID(ctx, dbx.GetSCFAnchorByVersionAndSCFIDParams{
+		if _, err := q.InsertSCFAnchor(ctx, dbx.InsertSCFAnchorParams{
+			ID:                 uuidFromString("anchor-" + cat.ReleaseVersion + "-" + ctl.SCFID),
 			FrameworkVersionID: version.ID,
 			ScfID:              ctl.SCFID,
-		})
-		switch {
-		case lookupErr == nil:
-			if anchorContentEqual(existing, ctl, subtopics) {
-				report.Unchanged++
-				continue
-			}
-			if _, err := q.UpdateSCFAnchor(ctx, dbx.UpdateSCFAnchorParams{
-				ID:          existing.ID,
-				Family:      ctl.Family,
-				Title:       ctl.Title,
-				Description: ctl.Description,
-				Subtopics:   subtopics,
-			}); err != nil {
-				return Report{}, fmt.Errorf("scfimport: update anchor %s: %w", ctl.SCFID, err)
-			}
-			report.Updated++
-		case errors.Is(lookupErr, pgx.ErrNoRows):
-			if _, err := q.InsertSCFAnchor(ctx, dbx.InsertSCFAnchorParams{
-				ID:                 uuidFromString("anchor-" + cat.ReleaseVersion + "-" + ctl.SCFID),
-				FrameworkVersionID: version.ID,
-				ScfID:              ctl.SCFID,
-				Family:             ctl.Family,
-				Title:              ctl.Title,
-				Description:        ctl.Description,
-				Subtopics:          subtopics,
-			}); err != nil {
-				return Report{}, fmt.Errorf("scfimport: insert anchor %s: %w", ctl.SCFID, err)
-			}
-			report.Created++
-		default:
-			return Report{}, fmt.Errorf("scfimport: lookup anchor %s: %w", ctl.SCFID, lookupErr)
+			Family:             ctl.Family,
+			Title:              ctl.Title,
+			Description:        ctl.Description,
+			Subtopics:          subtopics,
+			LegacyScfID:        optionalText(legacySCFID(ctl)),
+		}); err != nil {
+			return Report{}, fmt.Errorf("scfimport: insert anchor %s: %w", ctl.SCFID, err)
 		}
+		report.Created++
 	}
 	return report, nil
 }
 
 // anchorContentEqual returns true when the persisted row's content matches
-// the incoming control + subtopics — used to skip no-op writes and tally
-// Unchanged correctly.
-func anchorContentEqual(row dbx.ScfAnchor, ctl Control, subtopics []byte) bool {
+// the incoming control. Subtopics compare by value, not by bytes: Postgres
+// re-serializes JSONB, so the stored text does not match json.Marshal output
+// byte-for-byte once a subtopic is present. A null and an empty list are the
+// same (no subtopics).
+func anchorContentEqual(row dbx.ScfAnchor, ctl Control) bool {
 	if row.Family != ctl.Family || row.Title != ctl.Title || row.Description != ctl.Description {
 		return false
 	}
-	if string(row.Subtopics) != string(subtopics) {
-		return false
+	var stored []Subtopic
+	if len(row.Subtopics) > 0 {
+		if err := json.Unmarshal(row.Subtopics, &stored); err != nil {
+			return false
+		}
 	}
-	return true
+	if len(stored) == 0 && len(ctl.Subtopics) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(stored, ctl.Subtopics)
+}
+
+// legacyConflicts reports whether the incoming control names a
+// legacy_scf_id that differs from one already stored. An incoming empty
+// value, or a stored NULL, is never a conflict.
+func legacyConflicts(row dbx.ScfAnchor, ctl Control) bool {
+	id := legacySCFID(ctl)
+	return id != "" && row.LegacyScfID != nil && *row.LegacyScfID != id
+}
+
+// legacySCFID is the control's legacy_scf_id with surrounding whitespace
+// removed; a blank value counts as absent.
+func legacySCFID(ctl Control) string {
+	return strings.TrimSpace(ctl.LegacySCFID)
+}
+
+// backfillLegacySCFIDs fills legacy_scf_id on stored anchors that have none
+// when the incoming catalog gives one. It runs only after diffRelease found
+// the release otherwise identical, and returns how many anchors it filled.
+func backfillLegacySCFIDs(ctx context.Context, q *dbx.Queries, stored []dbx.ScfAnchor, incoming []Control) (int, error) {
+	legacy := make(map[string]string, len(incoming))
+	for _, ctl := range incoming {
+		if id := legacySCFID(ctl); id != "" {
+			legacy[ctl.SCFID] = id
+		}
+	}
+	filled := 0
+	for _, a := range stored {
+		id, ok := legacy[a.ScfID]
+		if !ok || a.LegacyScfID != nil {
+			continue
+		}
+		n, err := q.BackfillSCFAnchorLegacySCFID(ctx, dbx.BackfillSCFAnchorLegacySCFIDParams{
+			ID:          a.ID,
+			LegacyScfID: &id,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("scfimport: backfill legacy_scf_id for %s: %w", a.ScfID, err)
+		}
+		filled += int(n)
+	}
+	return filled, nil
+}
+
+func optionalText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func uuidFromString(seed string) pgtype.UUID {

@@ -33,6 +33,8 @@ type nopResetter struct{}
 
 func (nopResetter) ResetBootstrap(context.Context, bool) error { return nil }
 
+func (nopResetter) TenantCount(context.Context) (int, error) { return 1, nil }
+
 // nopValidator satisfies ingest.SchemaValidator so ingest.New does not
 // panic. It is never invoked — the route walk only registers routes.
 type nopValidator struct{}
@@ -141,10 +143,10 @@ func walkRoutes(t testing.TB, srv *Server) []string {
 // walkRoutesWithMW returns the sorted "METHOD path <mwcount>" set. The
 // middleware count is the depth of the per-route inline middleware chain
 // chi records — the GLOBAL root.Use() chain plus any group-level Use().
-// The base depth (currently 8) is every shared middleware; routes inside a
-// featureflag.Gate group (oscal.export, board.reporting) or the SCIM auth
-// subrouter carry depth+1. This is the AC-6 gating fingerprint: a route
-// that silently moves OFF its feature-gate / SCIM auth group would change
+// The base depth is every shared middleware (the module gate among them,
+// #2171); routes inside the SCIM auth
+// subrouter carry more. This is the AC-6 gating fingerprint: a route
+// that silently moves OFF its SCIM auth group would change
 // its count here.
 func walkRoutesWithMW(t testing.TB, srv *Server) []string {
 	t.Helper()
@@ -228,8 +230,8 @@ func TestRouteTable_MatchesGolden(t *testing.T) {
 
 // TestRouteMiddleware_GatingUnchanged is the slice-436 AC-6 EoP guard: the
 // per-route middleware DEPTH must equal the golden. The depth encodes which
-// routes sit inside a featureflag.Gate group (oscal.export / board.reporting)
-// or the SCIM auth subrouter — the only group-level middleware in the tree.
+// routes sit inside the SCIM auth subrouter, the only group-level
+// middleware in the tree (module switches are the shared ModuleGate, #2171).
 // Every other route carries exactly the shared global chain. If the split
 // moved a feature-gated or SCIM-gated route OUT from under its group (the
 // classic "admin route onto the unauthenticated mux" regression, expressed

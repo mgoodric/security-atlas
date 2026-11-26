@@ -16,23 +16,31 @@ UPDATE policies
 SET status = 'approved',
     approved_at = now(),
     approved_by = $3,
+    self_approved = $4,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'under_review'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type ApprovePolicyParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ID         pgtype.UUID `json:"id"`
-	ApprovedBy *string     `json:"approved_by"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ID           pgtype.UUID `json:"id"`
+	ApprovedBy   *string     `json:"approved_by"`
+	SelfApproved bool        `json:"self_approved"`
 }
 
 // Transition: under_review -> approved. Requires IsApprover at handler
-// (AC-4). The DB only guards the prior-state.
+// (AC-4). The DB only guards the prior-state. self_approved is set by the
+// store after the approval rule allowed a self-approval (#2101).
 func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error) {
-	row := q.db.QueryRow(ctx, approvePolicy, arg.TenantID, arg.ID, arg.ApprovedBy)
+	row := q.db.QueryRow(ctx, approvePolicy,
+		arg.TenantID,
+		arg.ID,
+		arg.ApprovedBy,
+		arg.SelfApproved,
+	)
 	var i Policy
 	err := row.Scan(
 		&i.ID,
@@ -59,8 +67,219 @@ func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (P
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
+}
+
+const clearSyncedPoliciesUnreadable = `-- name: ClearSyncedPoliciesUnreadable :exec
+UPDATE policies
+SET sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND NOT (sync_page_id = ANY($4::text[]))
+  AND sync_unreadable_since IS NOT NULL
+`
+
+type ClearSyncedPoliciesUnreadableParams struct {
+	TenantID          pgtype.UUID `json:"tenant_id"`
+	SyncSite          *string     `json:"sync_site"`
+	SyncSpace         *string     `json:"sync_space"`
+	UnreadablePageIds []string    `json:"unreadable_page_ids"`
+}
+
+// #3000 — every published synced row of this source whose page the run
+// did not carry unreadable (it was readable, or absent) loses any
+// unreadable state an earlier run recorded. Rows not marked are left
+// alone, so updated_at moves only on a change.
+func (q *Queries) ClearSyncedPoliciesUnreadable(ctx context.Context, arg ClearSyncedPoliciesUnreadableParams) error {
+	_, err := q.db.Exec(ctx, clearSyncedPoliciesUnreadable,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.UnreadablePageIds,
+	)
+	return err
+}
+
+const clearSyncedPolicyDrift = `-- name: ClearSyncedPolicyDrift :one
+UPDATE policies
+SET sync_drift_detected_at = NULL,
+    sync_drift_body_sha256 = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type ClearSyncedPolicyDriftParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2851 — the page's body matches the synced version again: the drift
+// recorded on the row is cleared.
+func (q *Queries) ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPolicyDriftParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, clearSyncedPolicyDrift, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const clearSyncedPolicyMissing = `-- name: ClearSyncedPolicyMissing :exec
+UPDATE policies
+SET sync_missing_since = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_page_id = ANY($4::text[])
+  AND sync_missing_since IS NOT NULL
+`
+
+type ClearSyncedPolicyMissingParams struct {
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	SyncSite       *string     `json:"sync_site"`
+	SyncSpace      *string     `json:"sync_space"`
+	PresentPageIds []string    `json:"present_page_ids"`
+}
+
+// #2853 — the pages of this run are present: any missing state recorded
+// on their published synced rows by an earlier run is cleared. Rows not
+// marked missing are left alone, so updated_at moves only on a change.
+func (q *Queries) ClearSyncedPolicyMissing(ctx context.Context, arg ClearSyncedPolicyMissingParams) error {
+	_, err := q.db.Exec(ctx, clearSyncedPolicyMissing,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.PresentPageIds,
+	)
+	return err
+}
+
+const countPublishedSyncedPoliciesInSource = `-- name: CountPublishedSyncedPoliciesInSource :one
+SELECT count(*)
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+`
+
+type CountPublishedSyncedPoliciesInSourceParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	SyncSite  *string     `json:"sync_site"`
+	SyncSpace *string     `json:"sync_space"`
+}
+
+// #2902 — the published synced rows of one source at the start of a run:
+// an empty push for a source that has some is refused without
+// allow_empty, and a run that leaves more than half of them missing
+// carries a warning. Read under LockPolicySyncSource.
+func (q *Queries) CountPublishedSyncedPoliciesInSource(ctx context.Context, arg CountPublishedSyncedPoliciesInSourceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPublishedSyncedPoliciesInSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantControls = `-- name: CountTenantControls :one
+SELECT count(*)::bigint AS n
+FROM controls
+WHERE tenant_id = $1
+  AND id = ANY($2::uuid[])
+  AND lifecycle_state <> 'retired'
+`
+
+type CountTenantControlsParams struct {
+	TenantID pgtype.UUID   `json:"tenant_id"`
+	Ids      []pgtype.UUID `json:"ids"`
+}
+
+// #2446 — how many of the given control ids exist in the tenant. A policy's
+// linked_control_ids must all resolve here on create and draft edit.
+// A retired control is not counted (#2459): it no longer governs anything,
+// so it cannot keep a policy from being an orphan. Controls are never
+// soft-deleted; every other lifecycle state counts.
+func (q *Queries) CountTenantControls(ctx context.Context, arg CountTenantControlsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantControls, arg.TenantID, arg.Ids)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
 }
 
 const createPolicy = `-- name: CreatePolicy :one
@@ -70,16 +289,16 @@ INSERT INTO policies (
     title, version, body_md,
     owner_role, approver_role,
     linked_control_ids, acknowledgment_required_roles,
-    status, source_attribution, created_by
+    status, source_attribution, created_by, draft_editors
 )
 VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8,
     $9, $10,
-    'draft', $11, $12
+    'draft', $11, $12, COALESCE($13::text[], '{}')
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type CreatePolicyParams struct {
@@ -95,6 +314,7 @@ type CreatePolicyParams struct {
 	AcknowledgmentRequiredRoles []string      `json:"acknowledgment_required_roles"`
 	SourceAttribution           string        `json:"source_attribution"`
 	CreatedBy                   string        `json:"created_by"`
+	DraftEditors                []string      `json:"draft_editors"`
 }
 
 // Slice 022 — policy library queries.
@@ -109,8 +329,9 @@ type CreatePolicyParams struct {
 // as the prior-state guard; zero affected rows means the transition was
 // attempted from the wrong state (the application probes after to
 // disambiguate ErrNotFound vs ErrWrongState, matching slice 021's pattern).
-// Publish is a two-step operation (supersede prior + insert new); the
-// application wraps both queries in a single tx so the chain is atomic.
+// Publishing a later version is a two-step operation (supersede prior +
+// publish the successor row in place); the application wraps both queries
+// in a single tx so the chain is atomic.
 func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, createPolicy,
 		arg.ID,
@@ -125,6 +346,7 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		arg.AcknowledgmentRequiredRoles,
 		arg.SourceAttribution,
 		arg.CreatedBy,
+		arg.DraftEditors,
 	)
 	var i Policy
 	err := row.Scan(
@@ -152,12 +374,133 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
 
+const deleteDraftPolicy = `-- name: DeleteDraftPolicy :one
+DELETE FROM policies
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 'draft'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type DeleteDraftPolicyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1987 — discard a draft. Only a row still in 'draft' matches, so a policy
+// that has been submitted, approved, published or superseded is never
+// deleted here. Deleting a next-version draft frees its predecessor's
+// successor slot (policies_predecessor_unique_when_set). The caller writes
+// the policy_audit_log row in the same transaction.
+func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, deleteDraftPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const getAuthoredPolicyByTitle = `-- name: GetAuthoredPolicyByTitle :one
+SELECT id, status
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution NOT IN ('imported', 'synced')
+  AND status <> 'superseded'
+  AND title = $2
+ORDER BY created_at DESC, id
+LIMIT 1
+`
+
+type GetAuthoredPolicyByTitleParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+}
+
+type GetAuthoredPolicyByTitleRow struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// #2854 — a policy authored in security-atlas (not imported, not synced)
+// with the page's title, which a sync never takes over. Only read to say
+// so in the run report.
+func (q *Queries) GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredPolicyByTitleParams) (GetAuthoredPolicyByTitleRow, error) {
+	row := q.db.QueryRow(ctx, getAuthoredPolicyByTitle, arg.TenantID, arg.Title)
+	var i GetAuthoredPolicyByTitleRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const getPolicyByID = `-- name: GetPolicyByID :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -195,68 +538,56 @@ func (q *Queries) GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (P
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
 
-const insertPublishedPolicy = `-- name: InsertPublishedPolicy :one
-INSERT INTO policies (
-    id, tenant_id, predecessor_id,
-    title, version, body_md,
-    owner_role, approver_role,
-    linked_control_ids, acknowledgment_required_roles,
-    status, effective_date, source_attribution,
-    created_by, published_at, published_by
-)
-VALUES (
-    $1, $2, $3,
-    $4, $5, $6,
-    $7, $8,
-    $9, $10,
-    'published', $11, $12,
-    $13, now(), $14
-)
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+const getSyncedPolicyByPage = `-- name: GetSyncedPolicyByPage :one
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_page_id = $4
 `
 
-type InsertPublishedPolicyParams struct {
-	ID                          pgtype.UUID   `json:"id"`
-	TenantID                    pgtype.UUID   `json:"tenant_id"`
-	PredecessorID               pgtype.UUID   `json:"predecessor_id"`
-	Title                       string        `json:"title"`
-	Version                     string        `json:"version"`
-	BodyMd                      string        `json:"body_md"`
-	OwnerRole                   string        `json:"owner_role"`
-	ApproverRole                string        `json:"approver_role"`
-	LinkedControlIds            []pgtype.UUID `json:"linked_control_ids"`
-	AcknowledgmentRequiredRoles []string      `json:"acknowledgment_required_roles"`
-	EffectiveDate               pgtype.Date   `json:"effective_date"`
-	SourceAttribution           string        `json:"source_attribution"`
-	CreatedBy                   string        `json:"created_by"`
-	PublishedBy                 *string       `json:"published_by"`
+type GetSyncedPolicyByPageParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	SyncSite   *string     `json:"sync_site"`
+	SyncSpace  *string     `json:"sync_space"`
+	SyncPageID *string     `json:"sync_page_id"`
 }
 
-// Part 2 of the two-step Publish for SECOND-and-later versions: clones
-// the approved row's content into a NEW row with status='published',
-// predecessor_id pointing at the just-superseded prior. Called inside
-// the same tx as SupersedePolicyAtPublish so the version chain stays
-// atomic. The caller supplies the new row's id and version string.
-func (q *Queries) InsertPublishedPolicy(ctx context.Context, arg InsertPublishedPolicyParams) (Policy, error) {
-	row := q.db.QueryRow(ctx, insertPublishedPolicy,
-		arg.ID,
+// #2850 — the published synced row for one page of one sync source, if
+// any. idx_policies_synced_page makes it unique.
+func (q *Queries) GetSyncedPolicyByPage(ctx context.Context, arg GetSyncedPolicyByPageParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, getSyncedPolicyByPage,
 		arg.TenantID,
-		arg.PredecessorID,
-		arg.Title,
-		arg.Version,
-		arg.BodyMd,
-		arg.OwnerRole,
-		arg.ApproverRole,
-		arg.LinkedControlIds,
-		arg.AcknowledgmentRequiredRoles,
-		arg.EffectiveDate,
-		arg.SourceAttribution,
-		arg.CreatedBy,
-		arg.PublishedBy,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
 	)
 	var i Policy
 	err := row.Scan(
@@ -284,12 +615,514 @@ func (q *Queries) InsertPublishedPolicy(ctx context.Context, arg InsertPublished
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
 
+const importPublishedPolicy = `-- name: ImportPublishedPolicy :one
+INSERT INTO policies (
+    id, tenant_id, predecessor_id,
+    title, version, body_md,
+    owner_role, approver_role,
+    linked_control_ids, acknowledgment_required_roles,
+    status, effective_date, next_review_at, source_attribution,
+    created_by, published_at, published_by,
+    historical_approver_name, historical_approved_at, source_url,
+    imported_by, imported_at
+)
+VALUES (
+    $1, $2, NULL,
+    $3, $4, $5,
+    $6, $7,
+    $8, $9,
+    'published', $10, $11, 'imported',
+    $12, now(), $12,
+    $13, $14, $15,
+    $12, now()
+)
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type ImportPublishedPolicyParams struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Title                       string             `json:"title"`
+	Version                     string             `json:"version"`
+	BodyMd                      string             `json:"body_md"`
+	OwnerRole                   string             `json:"owner_role"`
+	ApproverRole                string             `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID      `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string           `json:"acknowledgment_required_roles"`
+	EffectiveDate               pgtype.Date        `json:"effective_date"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	ImportedBy                  string             `json:"imported_by"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+}
+
+// #1747 — insert an imported policy directly as 'published', carrying its
+// historical lifecycle. The in-tool submit/approve/publish transitions do
+// not apply; the handler gates the import on an admin credential instead.
+// approved_by stays NULL: the historical approver is a free-text name in
+// historical_approver_name, not a credential.
+func (q *Queries) ImportPublishedPolicy(ctx context.Context, arg ImportPublishedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, importPublishedPolicy,
+		arg.ID,
+		arg.TenantID,
+		arg.Title,
+		arg.Version,
+		arg.BodyMd,
+		arg.OwnerRole,
+		arg.ApproverRole,
+		arg.LinkedControlIds,
+		arg.AcknowledgmentRequiredRoles,
+		arg.EffectiveDate,
+		arg.NextReviewAt,
+		arg.ImportedBy,
+		arg.HistoricalApproverName,
+		arg.HistoricalApprovedAt,
+		arg.SourceUrl,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const insertPolicyAuditLog = `-- name: InsertPolicyAuditLog :one
+INSERT INTO policy_audit_log (
+    tenant_id, policy_id, action, actor, source_file,
+    historical_approver_name, historical_approved_at, source_url,
+    previous_next_review_at, new_next_review_at,
+    policy_title, policy_version,
+    previous_state, new_state,
+    body_sha256, editors,
+    previous_linked_control_ids, new_linked_control_ids,
+    previous_source_attribution, sync_drift_body_sha256
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10,
+    $11, $12,
+    $13, $14,
+    $15, $16,
+    $17, $18,
+    $19, $20
+)
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution, sync_drift_body_sha256
+`
+
+type InsertPolicyAuditLogParams struct {
+	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	PolicyID                  pgtype.UUID        `json:"policy_id"`
+	Action                    string             `json:"action"`
+	Actor                     string             `json:"actor"`
+	SourceFile                string             `json:"source_file"`
+	HistoricalApproverName    *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt      pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                 *string            `json:"source_url"`
+	PreviousNextReviewAt      pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt           pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle               *string            `json:"policy_title"`
+	PolicyVersion             *string            `json:"policy_version"`
+	PreviousState             *string            `json:"previous_state"`
+	NewState                  *string            `json:"new_state"`
+	BodySha256                *string            `json:"body_sha256"`
+	Editors                   []string           `json:"editors"`
+	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
+	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
+	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
+	SyncDriftBodySha256       *string            `json:"sync_drift_body_sha256"`
+}
+
+// #1747 — append one row to the policy audit log.
+func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAuditLogParams) (PolicyAuditLog, error) {
+	row := q.db.QueryRow(ctx, insertPolicyAuditLog,
+		arg.TenantID,
+		arg.PolicyID,
+		arg.Action,
+		arg.Actor,
+		arg.SourceFile,
+		arg.HistoricalApproverName,
+		arg.HistoricalApprovedAt,
+		arg.SourceUrl,
+		arg.PreviousNextReviewAt,
+		arg.NewNextReviewAt,
+		arg.PolicyTitle,
+		arg.PolicyVersion,
+		arg.PreviousState,
+		arg.NewState,
+		arg.BodySha256,
+		arg.Editors,
+		arg.PreviousLinkedControlIds,
+		arg.NewLinkedControlIds,
+		arg.PreviousSourceAttribution,
+		arg.SyncDriftBodySha256,
+	)
+	var i PolicyAuditLog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PolicyID,
+		&i.Action,
+		&i.Actor,
+		&i.SourceFile,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.SubjectModule,
+		&i.CreatedAt,
+		&i.PreviousNextReviewAt,
+		&i.NewNextReviewAt,
+		&i.PolicyTitle,
+		&i.PolicyVersion,
+		&i.PreviousState,
+		&i.NewState,
+		&i.BodySha256,
+		&i.Editors,
+		&i.PreviousAudience,
+		&i.NewAudience,
+		&i.PreviousLinkedControlIds,
+		&i.NewLinkedControlIds,
+		&i.PreviousSourceAttribution,
+		&i.SyncDriftBodySha256,
+	)
+	return i, err
+}
+
+const insertSyncedPolicy = `-- name: InsertSyncedPolicy :one
+INSERT INTO policies (
+    id, tenant_id, predecessor_id,
+    title, version, body_md,
+    owner_role, approver_role,
+    linked_control_ids, acknowledgment_required_roles,
+    status, effective_date, next_review_at, source_attribution,
+    created_by, published_at, published_by,
+    historical_approver_name, historical_approved_at, source_url,
+    sync_site, sync_space, sync_page_id, synced_body_sha256,
+    synced_by, synced_at
+)
+VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    $7, $8,
+    $9, $10,
+    'published', $11, $12, 'synced',
+    $13, now(), $13,
+    $14, $15, $16,
+    $17, $18, $19, $20,
+    $13, now()
+)
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type InsertSyncedPolicyParams struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	PredecessorID               pgtype.UUID        `json:"predecessor_id"`
+	Title                       string             `json:"title"`
+	Version                     string             `json:"version"`
+	BodyMd                      string             `json:"body_md"`
+	OwnerRole                   string             `json:"owner_role"`
+	ApproverRole                string             `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID      `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string           `json:"acknowledgment_required_roles"`
+	EffectiveDate               pgtype.Date        `json:"effective_date"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	SyncedBy                    string             `json:"synced_by"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+}
+
+// #2850 — insert a page's synced version directly as 'published'. A
+// page's first sync has no predecessor; a later version (#2851) names the
+// synced row it supersedes, which SupersedeSyncedPolicy has just marked
+// 'superseded' in the same transaction, and carries that row's control
+// links forward (links are kept in security-atlas, not synced). As with
+// ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
+// not apply: the source's approval, kept in historical_approver_name and
+// historical_approved_at, is the approval. approved_by stays NULL.
+// created_by, published_by and synced_by are the policy-sync key's id.
+func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, insertSyncedPolicy,
+		arg.ID,
+		arg.TenantID,
+		arg.PredecessorID,
+		arg.Title,
+		arg.Version,
+		arg.BodyMd,
+		arg.OwnerRole,
+		arg.ApproverRole,
+		arg.LinkedControlIds,
+		arg.AcknowledgmentRequiredRoles,
+		arg.EffectiveDate,
+		arg.NextReviewAt,
+		arg.SyncedBy,
+		arg.HistoricalApproverName,
+		arg.HistoricalApprovedAt,
+		arg.SourceUrl,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
+		arg.SyncedBodySha256,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const listImportedPoliciesForTakeover = `-- name: ListImportedPoliciesForTakeover :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'imported'
+  AND status = 'published'
+  AND title = $2
+ORDER BY published_at DESC NULLS LAST, id
+FOR UPDATE
+`
+
+type ListImportedPoliciesForTakeoverParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+}
+
+// #2854 — on a page's first sync, every published imported policy in the
+// tenant with the page's title. The page takes over the policy only when
+// there is exactly one; the import does not chain versions, so a title
+// can carry several, and then the sync refuses to choose. FOR UPDATE locks
+// the rows until the run commits. A concurrent run for another source
+// that reads the same title waits on the lock; under READ COMMITTED its
+// read then re-checks the committed row, which is no longer a published
+// imported one, and leaves it out. There is no LIMIT, so the waiting run
+// sees every remaining candidate, not an empty result.
+func (q *Queries) ListImportedPoliciesForTakeover(ctx context.Context, arg ListImportedPoliciesForTakeoverParams) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listImportedPoliciesForTakeover, arg.TenantID, arg.Title)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMissingSyncedPolicies = `-- name: ListMissingSyncedPolicies :many
+SELECT id, title, owner_role, sync_missing_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_missing_since, id
+`
+
+type ListMissingSyncedPoliciesRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	Title            string             `json:"title"`
+	OwnerRole        string             `json:"owner_role"`
+	SyncMissingSince pgtype.Timestamptz `json:"sync_missing_since"`
+}
+
+// #2853 — the published synced policies whose page a sync run found
+// absent, for GET /v1/needs-attention.
+func (q *Queries) ListMissingSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListMissingSyncedPoliciesRow, error) {
+	rows, err := q.db.Query(ctx, listMissingSyncedPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMissingSyncedPoliciesRow
+	for rows.Next() {
+		var i ListMissingSyncedPoliciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.OwnerRole,
+			&i.SyncMissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -331,6 +1164,101 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 			&i.PublishedBy,
 			&i.SupersededAt,
 			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPoliciesUnderReview = `-- name: ListPoliciesUnderReview :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+FROM policies
+WHERE tenant_id = $1
+  AND status = 'under_review'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the policies waiting for approval, for GET /v1/approvals and its
+// sidebar badge. Served by the (tenant_id, status, created_at DESC) index.
+func (q *Queries) ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listPoliciesUnderReview, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -346,14 +1274,17 @@ const listPoliciesWithAckRate = `-- name: ListPoliciesWithAckRate :many
 WITH ack_cells AS (
     SELECT
         p.id AS policy_id,
-        (SELECT COUNT(DISTINCT k.issued_by)::bigint
-         FROM api_keys k
-         WHERE k.tenant_id = p.tenant_id
-           AND k.revoked_at IS NULL
-           AND k.issued_by IS NOT NULL
+        (SELECT COUNT(DISTINCT u.id)::bigint
+         FROM user_roles ur
+         JOIN users u
+           ON u.tenant_id = ur.tenant_id
+          AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+         WHERE ur.tenant_id = p.tenant_id
+           AND u.status = 'active'
            AND (
-               k.is_admin = true
-               OR k.owner_roles && p.acknowledgment_required_roles
+               ur.role = ANY(p.acknowledgment_required_roles)
+               -- #2524: an "everyone" audience counts every live member.
+               OR 'everyone' = ANY(p.acknowledgment_required_roles)
            )
         ) AS ack_denominator,
         (SELECT COUNT(DISTINCT pa.user_id)::bigint
@@ -363,13 +1294,16 @@ WITH ack_cells AS (
            AND pa.acknowledged_at >= $2::timestamptz
            AND EXISTS (
                SELECT 1
-               FROM api_keys k
-               WHERE k.tenant_id = pa.tenant_id
-                 AND k.issued_by = pa.user_id
-                 AND k.revoked_at IS NULL
+               FROM user_roles ur
+               JOIN users u
+                 ON u.tenant_id = ur.tenant_id
+                AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+               WHERE ur.tenant_id = pa.tenant_id
+                 AND u.id = pa.user_id
+                 AND u.status = 'active'
                  AND (
-                     k.is_admin = true
-                     OR k.owner_roles && p.acknowledgment_required_roles
+                     ur.role = ANY(p.acknowledgment_required_roles)
+                     OR 'everyone' = ANY(p.acknowledgment_required_roles)
                  )
            )
         ) AS ack_numerator
@@ -384,6 +1318,12 @@ SELECT
     p.source_attribution, p.created_by, p.submitted_at, p.submitted_by,
     p.approved_at, p.approved_by, p.published_at, p.published_by,
     p.superseded_at, p.next_review_at,
+    p.historical_approver_name, p.historical_approved_at, p.source_url,
+    p.imported_by, p.imported_at, p.self_approved,
+    p.sync_drift_detected_at, p.sync_drift_body_sha256,
+    p.sync_missing_since,
+    p.sync_unreadable_since, p.sync_unreadable_reason,
+    p.sync_property_drift_detected_at, p.sync_property_drift_keys,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -422,6 +1362,19 @@ type ListPoliciesWithAckRateRow struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	ImportedBy                  *string            `json:"imported_by"`
+	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
+	SelfApproved                bool               `json:"self_approved"`
+	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
+	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
+	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
+	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
+	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
 	AckDenominator              *int64             `json:"ack_denominator"`
 	AckNumerator                *int64             `json:"ack_numerator"`
 }
@@ -440,9 +1393,8 @@ type ListPoliciesWithAckRateRow struct {
 //     the subqueries so non-published rows return NULL for both
 //     columns (the handler renders `ack_rate: null`).
 //  3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
-//     verbatim (distinct issued_by in api_keys whose owner_roles
-//     intersect the policy's acknowledgment_required_roles, OR is_admin).
-//     Revoked keys excluded.
+//     verbatim (#2586: distinct active users holding a live user_roles
+//     row the audience names, or any live role for 'everyone').
 //  4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
 //     (distinct user_ids in policy_acknowledgments for THIS policy
 //     version, acknowledged_at >= freshness_cutoff, gated on the same
@@ -451,7 +1403,7 @@ type ListPoliciesWithAckRateRow struct {
 //
 // Constitutional invariants:
 //
-//	#6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+//	#6 RLS: policies + user_roles + users + policy_acknowledgments are tenant-scoped
 //	   under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
 //	   middleware sets filters every table this query touches.
 //	#9 Manual evidence first-class: this query is uniform whether the
@@ -508,8 +1460,80 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 			&i.PublishedBy,
 			&i.SupersededAt,
 			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
 			&i.AckDenominator,
 			&i.AckNumerator,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution, sync_drift_body_sha256
+FROM policy_audit_log
+WHERE tenant_id = $1 AND policy_id = $2
+ORDER BY created_at ASC, id ASC
+`
+
+type ListPolicyAuditLogParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	PolicyID pgtype.UUID `json:"policy_id"`
+}
+
+// #1747 — the audit trail for one policy, oldest first.
+func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLogParams) ([]PolicyAuditLog, error) {
+	rows, err := q.db.Query(ctx, listPolicyAuditLog, arg.TenantID, arg.PolicyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PolicyAuditLog
+	for rows.Next() {
+		var i PolicyAuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.PolicyID,
+			&i.Action,
+			&i.Actor,
+			&i.SourceFile,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.SubjectModule,
+			&i.CreatedAt,
+			&i.PreviousNextReviewAt,
+			&i.NewNextReviewAt,
+			&i.PolicyTitle,
+			&i.PolicyVersion,
+			&i.PreviousState,
+			&i.NewState,
+			&i.BodySha256,
+			&i.Editors,
+			&i.PreviousAudience,
+			&i.NewAudience,
+			&i.PreviousLinkedControlIds,
+			&i.NewLinkedControlIds,
+			&i.PreviousSourceAttribution,
+			&i.SyncDriftBodySha256,
 		); err != nil {
 			return nil, err
 		}
@@ -524,18 +1548,18 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.
-    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
     FROM policies p0
     WHERE p0.tenant_id = $1 AND p0.id = $2
 
     UNION ALL
 
     -- Walk forward: any row whose predecessor_id is the current chain tip.
-    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at
+    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at, p.sync_drift_detected_at, p.sync_drift_body_sha256, p.sync_missing_since, p.sync_property_drift_detected_at, p.sync_property_drift_keys, p.sync_unreadable_since, p.sync_unreadable_reason
     FROM policies p
     INNER JOIN chain c ON p.predecessor_id = c.id AND p.tenant_id = c.tenant_id
 )
-SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at
+SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at, chain.sync_drift_detected_at, chain.sync_drift_body_sha256, chain.sync_missing_since, chain.sync_property_drift_detected_at, chain.sync_property_drift_keys, chain.sync_unreadable_since, chain.sync_unreadable_reason
 FROM chain
 ORDER BY chain.created_at ASC, chain.id ASC
 `
@@ -570,6 +1594,26 @@ type ListPolicyVersionChainRow struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	ImportedBy                  *string            `json:"imported_by"`
+	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
+	SelfApproved                bool               `json:"self_approved"`
+	DraftEditors                []string           `json:"draft_editors"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+	SyncedBy                    *string            `json:"synced_by"`
+	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
+	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
+	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
+	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
+	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
+	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
 }
 
 // Returns the version chain for a policy id by walking predecessor_id.
@@ -610,6 +1654,26 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 			&i.PublishedBy,
 			&i.SupersededAt,
 			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -621,35 +1685,286 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 	return items, nil
 }
 
+const listSyncedPoliciesMissingFromSource = `-- name: ListSyncedPoliciesMissingFromSource :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_page_id
+`
+
+type ListSyncedPoliciesMissingFromSourceParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	SyncSite  *string     `json:"sync_site"`
+	SyncSpace *string     `json:"sync_space"`
+}
+
+// #2853 — the published synced rows of one source whose page a run found
+// absent, for that run's report. Read after MarkSyncedPoliciesMissing in
+// the same transaction.
+func (q *Queries) ListSyncedPoliciesMissingFromSource(ctx context.Context, arg ListSyncedPoliciesMissingFromSourceParams) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listSyncedPoliciesMissingFromSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+			&i.SyncPropertyDriftDetectedAt,
+			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnreadableSyncedPolicies = `-- name: ListUnreadableSyncedPolicies :many
+SELECT id, title, owner_role, sync_unreadable_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_since IS NOT NULL
+ORDER BY sync_unreadable_since, id
+`
+
+type ListUnreadableSyncedPoliciesRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Title               string             `json:"title"`
+	OwnerRole           string             `json:"owner_role"`
+	SyncUnreadableSince pgtype.Timestamptz `json:"sync_unreadable_since"`
+}
+
+// #3000 — the published synced policies whose page the latest sync run
+// carried as unreadable, for GET /v1/needs-attention.
+func (q *Queries) ListUnreadableSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListUnreadableSyncedPoliciesRow, error) {
+	rows, err := q.db.Query(ctx, listUnreadableSyncedPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnreadableSyncedPoliciesRow
+	for rows.Next() {
+		var i ListUnreadableSyncedPoliciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.OwnerRole,
+			&i.SyncUnreadableSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPolicySyncSource = `-- name: LockPolicySyncSource :exec
+SELECT pg_advisory_xact_lock(
+    13,
+    hashtext($1::text || '|' || $2::text || '|' || $3::text)
+)
+`
+
+type LockPolicySyncSourceParams struct {
+	TenantID  string `json:"tenant_id"`
+	SyncSite  string `json:"sync_site"`
+	SyncSpace string `json:"sync_space"`
+}
+
+// #2850: serialises sync runs for one source in one tenant, so an
+// overlapping run waits for the first to commit and then finds its pages
+// unchanged instead of creating them twice. Released at the end of the
+// transaction. Namespace 13 is advisorylock.PolicySyncSource.
+func (q *Queries) LockPolicySyncSource(ctx context.Context, arg LockPolicySyncSourceParams) error {
+	_, err := q.db.Exec(ctx, lockPolicySyncSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	return err
+}
+
+const lockSyncedPolicyForSuccessor = `-- name: LockSyncedPolicyForSuccessor :one
+SELECT p.id,
+       s.id AS successor_id,
+       s.status AS successor_status
+FROM policies p
+LEFT JOIN policies s
+  ON s.tenant_id = p.tenant_id AND s.predecessor_id = p.id
+WHERE p.tenant_id = $1
+  AND p.id = $2
+FOR UPDATE OF p
+`
+
+type LockSyncedPolicyForSuccessorParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type LockSyncedPolicyForSuccessorRow struct {
+	ID              pgtype.UUID `json:"id"`
+	SuccessorID     pgtype.UUID `json:"successor_id"`
+	SuccessorStatus *string     `json:"successor_status"`
+}
+
+// #2851 — before a sync run supersedes a page's synced row, lock it and
+// report whether another row already names it as predecessor. FOR UPDATE
+// conflicts with the KEY SHARE lock a concurrent in-tool create takes
+// through the predecessor FK, so the answer cannot change before the run
+// commits. A successor (an in-tool draft of the next version) would make
+// the run's insert violate policies_predecessor_unique_when_set.
+func (q *Queries) LockSyncedPolicyForSuccessor(ctx context.Context, arg LockSyncedPolicyForSuccessorParams) (LockSyncedPolicyForSuccessorRow, error) {
+	row := q.db.QueryRow(ctx, lockSyncedPolicyForSuccessor, arg.TenantID, arg.ID)
+	var i LockSyncedPolicyForSuccessorRow
+	err := row.Scan(&i.ID, &i.SuccessorID, &i.SuccessorStatus)
+	return i, err
+}
+
+const markSyncedPoliciesMissing = `-- name: MarkSyncedPoliciesMissing :exec
+UPDATE policies
+SET sync_missing_since = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND NOT (sync_page_id = ANY($4::text[]))
+  AND sync_missing_since IS NULL
+`
+
+type MarkSyncedPoliciesMissingParams struct {
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	SyncSite       *string     `json:"sync_site"`
+	SyncSpace      *string     `json:"sync_space"`
+	PresentPageIds []string    `json:"present_page_ids"`
+}
+
+// #2853 — every published synced row of this source whose page is absent
+// from the run, not yet marked, gets sync_missing_since = now(). A row
+// already marked keeps the time it was first found missing and is not
+// rewritten. The policy itself is untouched: still published, and
+// acknowledgements continue.
+func (q *Queries) MarkSyncedPoliciesMissing(ctx context.Context, arg MarkSyncedPoliciesMissingParams) error {
+	_, err := q.db.Exec(ctx, markSyncedPoliciesMissing,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.PresentPageIds,
+	)
+	return err
+}
+
+const policyTitleVersionExists = `-- name: PolicyTitleVersionExists :one
+SELECT EXISTS (
+    SELECT 1 FROM policies
+    WHERE tenant_id = $1 AND title = $2 AND version = $3
+) AS exists
+`
+
+type PolicyTitleVersionExistsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+	Version  string      `json:"version"`
+}
+
+// #1747 — duplicate check for import: a policy with this title and version
+// already exists in the tenant (in any state).
+func (q *Queries) PolicyTitleVersionExists(ctx context.Context, arg PolicyTitleVersionExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, policyTitleVersionExists, arg.TenantID, arg.Title, arg.Version)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const publishApprovedPolicy = `-- name: PublishApprovedPolicy :one
 UPDATE policies
 SET status = 'published',
     effective_date = $3,
     published_at = now(),
     published_by = $4,
+    next_review_at = $5,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type PublishApprovedPolicyParams struct {
-	TenantID      pgtype.UUID `json:"tenant_id"`
-	ID            pgtype.UUID `json:"id"`
-	EffectiveDate pgtype.Date `json:"effective_date"`
-	PublishedBy   *string     `json:"published_by"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ID            pgtype.UUID        `json:"id"`
+	EffectiveDate pgtype.Date        `json:"effective_date"`
+	PublishedBy   *string            `json:"published_by"`
+	NextReviewAt  pgtype.Timestamptz `json:"next_review_at"`
 }
 
-// One-shot publish of an approved row that has NO predecessor (the very
-// first version). Sets status -> published, populates effective_date,
-// published_at, published_by. Predecessor_id stays NULL.
+// Publishes an approved row in place. Sets status -> published, populates
+// effective_date, published_at, published_by. predecessor_id is never
+// changed: a first version keeps NULL, and a later version (a draft
+// created with predecessor_id set) keeps the link to the row that Part 1
+// just superseded (#1747). next_review_at is the review date the publisher
+// names (#1806); NULL when none is given.
 func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, publishApprovedPolicy,
 		arg.TenantID,
 		arg.ID,
 		arg.EffectiveDate,
 		arg.PublishedBy,
+		arg.NextReviewAt,
 	)
 	var i Policy
 	err := row.Scan(
@@ -677,6 +1992,266 @@ func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApproved
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const setSyncedPolicyDrift = `-- name: SetSyncedPolicyDrift :one
+UPDATE policies
+SET sync_drift_detected_at = COALESCE(sync_drift_detected_at, now()),
+    sync_drift_body_sha256 = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_drift_body_sha256 IS DISTINCT FROM $1
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SetSyncedPolicyDriftParams struct {
+	SyncDriftBodySha256 *string     `json:"sync_drift_body_sha256"`
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	ID                  pgtype.UUID `json:"id"`
+}
+
+// #2851 — the page's body changed without a version bump. Records the
+// body hash the source holds now; sync_drift_detected_at keeps the time
+// drift was first seen, so a page edited twice without a bump still shows
+// how long it has been out of step.
+//
+// A run that sees the same drifted body again writes nothing: the
+// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+// query returns no row, which the caller reads as "already recorded".
+func (q *Queries) SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyDriftParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, setSyncedPolicyDrift, arg.SyncDriftBodySha256, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const setSyncedPolicyPropertyDrift = `-- name: SetSyncedPolicyPropertyDrift :one
+UPDATE policies
+SET sync_property_drift_detected_at = CASE
+        WHEN $1::text[] IS NULL THEN NULL
+        ELSE COALESCE(sync_property_drift_detected_at, now())
+    END,
+    sync_property_drift_keys = $1::text[],
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_property_drift_keys IS DISTINCT FROM $1::text[]
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SetSyncedPolicyPropertyDriftParams struct {
+	SyncPropertyDriftKeys []string    `json:"sync_property_drift_keys"`
+	TenantID              pgtype.UUID `json:"tenant_id"`
+	ID                    pgtype.UUID `json:"id"`
+}
+
+// #2877 — the page's properties differ from its synced row's, or match
+// again. sync_property_drift_keys is the sorted list of property names
+// that differ now, or NULL when none do, which clears the drift.
+// sync_property_drift_detected_at keeps the time drift was first seen
+// while any key differs, as body drift does.
+//
+// A run that sees the same keys again writes nothing: the IS DISTINCT
+// FROM guard leaves the row alone and the query returns no row.
+func (q *Queries) SetSyncedPolicyPropertyDrift(ctx context.Context, arg SetSyncedPolicyPropertyDriftParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, setSyncedPolicyPropertyDrift, arg.SyncPropertyDriftKeys, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const setSyncedPolicyUnreadable = `-- name: SetSyncedPolicyUnreadable :one
+UPDATE policies
+SET sync_unreadable_since = COALESCE(sync_unreadable_since, now()),
+    sync_unreadable_reason = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_reason IS DISTINCT FROM $1
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SetSyncedPolicyUnreadableParams struct {
+	SyncUnreadableReason *string     `json:"sync_unreadable_reason"`
+	TenantID             pgtype.UUID `json:"tenant_id"`
+	ID                   pgtype.UUID `json:"id"`
+}
+
+// #3000 — the run carried the page as unreadable: the connector could not
+// read its body. Records the pusher's reason; sync_unreadable_since keeps
+// the time the page was first carried unreadable. Nothing else on the
+// row changes: no body, hash, property, drift or version is written.
+//
+// A run that carries the same reason again writes nothing: the
+// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+// query returns no row, which the caller reads as "already recorded".
+func (q *Queries) SetSyncedPolicyUnreadable(ctx context.Context, arg SetSyncedPolicyUnreadableParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, setSyncedPolicyUnreadable, arg.SyncUnreadableReason, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -689,8 +2264,10 @@ SET status = 'under_review',
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
-  AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+  AND (status = 'draft'
+       OR (status = 'under_review'
+           AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SubmitPolicyForReviewParams struct {
@@ -700,6 +2277,10 @@ type SubmitPolicyForReviewParams struct {
 }
 
 // Transition: draft -> under_review. Operator action; no role gate.
+// Also re-submits an under_review policy whose submitter was recorded
+// before #1807 as a session id ('jwt:<token id>') or a credential id
+// ('key_<id>'), which approval refuses because it names no person:
+// re-submitting records the person (#2200).
 func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, submitPolicyForReview, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i Policy
@@ -728,6 +2309,100 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const supersedeImportedPolicy = `-- name: SupersedeImportedPolicy :one
+UPDATE policies
+SET status = 'superseded',
+    superseded_at = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SupersedeImportedPolicyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2854 — the page's first sync carries a different version from the
+// imported policy it takes over: the imported row is superseded, in the
+// same transaction as InsertSyncedPolicy writes the synced version as its
+// next version. It stays 'imported'. next_review_at is left as it was, as
+// SupersedeSyncedPolicy leaves it.
+func (q *Queries) SupersedeImportedPolicy(ctx context.Context, arg SupersedeImportedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, supersedeImportedPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -740,7 +2415,7 @@ SET status = 'superseded',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SupersedePolicyAtPublishParams struct {
@@ -749,11 +2424,18 @@ type SupersedePolicyAtPublishParams struct {
 }
 
 // Part 1 of the two-step Publish: marks the prior 'published' row as
-// 'superseded'. Used inside the same transaction as InsertPublishedPolicy
-// so the chain transition is atomic. Returns the updated prior row so the
+// 'superseded'. Used inside the same transaction as PublishApprovedPolicy
+// (which publishes the successor row in place) so the chain transition is
+// atomic. Returns the updated prior row so the
 // handler can audit who superseded it. Only matches when the row is
 // currently 'published' (defense-in-depth -- a chain can't supersede a
 // draft).
+//
+// next_review_at is left as it was (#2009): the successor carries its own
+// review date, and the superseded row keeps the date it was due so an
+// auditor can still see it and compare it with the successor's
+// published_at. Only a 'published' row has a review due, so the calendar
+// and the list's review_status ignore it.
 func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, supersedePolicyAtPublish, arg.TenantID, arg.ID)
 	var i Policy
@@ -782,6 +2464,459 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const supersedeSyncedPolicy = `-- name: SupersedeSyncedPolicy :one
+UPDATE policies
+SET status = 'superseded',
+    superseded_at = now(),
+    sync_drift_detected_at = NULL,
+    sync_drift_body_sha256 = NULL,
+    sync_property_drift_detected_at = NULL,
+    sync_property_drift_keys = NULL,
+    sync_missing_since = NULL,
+    sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SupersedeSyncedPolicyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2851 — a page arrived with a new declared version: its published
+// synced row is superseded, in the same transaction as InsertSyncedPolicy
+// writes the next version. Any drift recorded on it is cleared, since the
+// new version is what the page holds now. next_review_at is left as it
+// was, as SupersedePolicyAtPublish leaves it (#2009).
+func (q *Queries) SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSyncedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, supersedeSyncedPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const takeOverImportedPolicy = `-- name: TakeOverImportedPolicy :one
+UPDATE policies
+SET source_attribution = 'synced',
+    imported_by = NULL,
+    imported_at = NULL,
+    source_url = $1,
+    sync_site = $2,
+    sync_space = $3,
+    sync_page_id = $4,
+    synced_body_sha256 = $5,
+    synced_by = $6,
+    synced_at = now(),
+    sync_drift_detected_at = CASE WHEN $7::text IS NULL THEN NULL ELSE now() END,
+    sync_drift_body_sha256 = $7,
+    sync_property_drift_detected_at = CASE WHEN $8::text[] IS NULL THEN NULL ELSE now() END,
+    sync_property_drift_keys = $8::text[],
+    updated_at = now()
+WHERE tenant_id = $9
+  AND id = $10
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type TakeOverImportedPolicyParams struct {
+	SourceUrl             *string     `json:"source_url"`
+	SyncSite              *string     `json:"sync_site"`
+	SyncSpace             *string     `json:"sync_space"`
+	SyncPageID            *string     `json:"sync_page_id"`
+	SyncedBodySha256      *string     `json:"synced_body_sha256"`
+	SyncedBy              *string     `json:"synced_by"`
+	SyncDriftBodySha256   *string     `json:"sync_drift_body_sha256"`
+	SyncPropertyDriftKeys []string    `json:"sync_property_drift_keys"`
+	TenantID              pgtype.UUID `json:"tenant_id"`
+	ID                    pgtype.UUID `json:"id"`
+}
+
+// #2854 — the page's first sync carries the version an imported policy
+// already has: the imported row becomes the page's synced row in place,
+// so its acknowledgements and control links stay where they are. Its body
+// and version are not rewritten. synced_body_sha256 is the hash of the
+// body it was published with; a page body that differs is recorded as
+// drift (sync_drift_body_sha256 non-NULL), as a later run would. The
+// historical approver stays the import's. Page properties that differ
+// from the imported row's are recorded as property drift (#2877).
+// imported_by and imported_at are cleared, as policies_imported_fields_chk
+// requires off imported rows.
+func (q *Queries) TakeOverImportedPolicy(ctx context.Context, arg TakeOverImportedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, takeOverImportedPolicy,
+		arg.SourceUrl,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
+		arg.SyncedBodySha256,
+		arg.SyncedBy,
+		arg.SyncDriftBodySha256,
+		arg.SyncPropertyDriftKeys,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const updateDraftPolicy = `-- name: UpdateDraftPolicy :one
+UPDATE policies
+SET title = $1,
+    body_md = $2,
+    owner_role = $3,
+    approver_role = $4,
+    linked_control_ids = $5,
+    acknowledgment_required_roles = $6,
+    draft_editors = CASE
+        WHEN $7::text = ANY(draft_editors) THEN draft_editors
+        ELSE array_append(draft_editors, $7::text)
+    END,
+    updated_at = now()
+WHERE tenant_id = $8
+  AND id = $9
+  AND status = 'draft'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type UpdateDraftPolicyParams struct {
+	Title                       string        `json:"title"`
+	BodyMd                      string        `json:"body_md"`
+	OwnerRole                   string        `json:"owner_role"`
+	ApproverRole                string        `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string      `json:"acknowledgment_required_roles"`
+	Editor                      string        `json:"editor"`
+	TenantID                    pgtype.UUID   `json:"tenant_id"`
+	ID                          pgtype.UUID   `json:"id"`
+}
+
+// #2116 — edit a draft in place. Only a row still in 'draft' matches, so a
+// submitted, approved, published or superseded policy is never rewritten
+// here: a published policy changes through a new version (predecessor_id).
+// version, predecessor_id and source_attribution are not editable.
+func (q *Queries) UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updateDraftPolicy,
+		arg.Title,
+		arg.BodyMd,
+		arg.OwnerRole,
+		arg.ApproverRole,
+		arg.LinkedControlIds,
+		arg.AcknowledgmentRequiredRoles,
+		arg.Editor,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const updatePolicyNextReviewAt = `-- name: UpdatePolicyNextReviewAt :one
+UPDATE policies
+SET next_review_at = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type UpdatePolicyNextReviewAtParams struct {
+	NextReviewAt pgtype.Timestamptz `json:"next_review_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ID           pgtype.UUID        `json:"id"`
+}
+
+// #1806 — change the review date of a published policy in place. It is not
+// a new version: the row keeps its id, version and approval. The caller
+// writes the policy_audit_log row in the same transaction. Only the
+// published chain tip has a review due, so other states do not match.
+func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicyNextReviewAtParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updatePolicyNextReviewAt, arg.NextReviewAt, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const updateSyncedPolicyLinks = `-- name: UpdateSyncedPolicyLinks :one
+UPDATE policies
+SET linked_control_ids = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type UpdateSyncedPolicyLinksParams struct {
+	LinkedControlIds []pgtype.UUID `json:"linked_control_ids"`
+	TenantID         pgtype.UUID   `json:"tenant_id"`
+	ID               pgtype.UUID   `json:"id"`
+}
+
+// #2852 — replace a published synced policy's control links in place. It
+// is not a new version: the links are kept in security-atlas, not synced.
+// The caller writes the policy_audit_log row in the same transaction.
+// Other rows do not match.
+func (q *Queries) UpdateSyncedPolicyLinks(ctx context.Context, arg UpdateSyncedPolicyLinksParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updateSyncedPolicyLinks, arg.LinkedControlIds, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }

@@ -24,27 +24,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasControlRead reports whether the credential carries an explicit
-// control-read role signal. The control-read role set is:
-//
-//	IsAdmin            -> admin         (wildcard — control-read granted)
-//	IsApprover         -> grc_engineer  (control-read granted)
-//	len(OwnerRoles)>0  -> control_owner (control-read granted)
-//
-// This guard is deliberately STRICTER than authz.derivedRolesFor, which maps
-// a bare tenant credential to grc_engineer. The control-detail read surface
-// is the slice-041 operator/auditor UI, not a connector surface — a bare
-// push credential (no flags) has no business reading it. Requiring an
-// explicit role signal also makes AC-5 genuinely testable: the "role without
-// control-read access" is exactly a credential carrying none of the three
-// signals (the v1 representation of a viewer-only credential, which
-// credstore does not issue first-class). When slice-035's DB-backed
-// user_roles becomes the role source of truth, this should re-derive from
-// the resolved role set — see decisions log D5.
+// hasControlRead reports whether the credential holds a tenant role: any of
+// the five, by its live user_roles (authz.HasAnyTenantRole). OPA reads the
+// control-detail routes for every role, so the defense-in-depth gate admits
+// the same set. A bare push credential, or a session whose role claim names
+// a role it no longer holds (#2381), is refused. #2507 moved it off `IsAdmin
+// || IsApprover || len(OwnerRoles) > 0`, which counted that claim.
 func hasControlRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireControlRead is the guard the four handlers call FIRST — before
@@ -61,4 +51,15 @@ func requireControlRead(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// readsUnscopedEvidence reports whether cred reads a control's evidence
+// without a period bound: a tenant admin, a grc_engineer or approver, or a
+// control_owner, the roles whose rego rules admit the per-control list
+// outright. Anyone else (an auditor admitted through a period) reads it only
+// as far as the auditor hydrator's lookup reached, which resolves the
+// control by control_id alone (#2470). It fails closed: an unknown or
+// absent role is treated as scoped, which can only narrow the rows.
+func readsUnscopedEvidence(c credstore.Credential) bool {
+	return authz.IsTenantApprover(c) || authz.IsTenantControlOwner(c)
 }

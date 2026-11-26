@@ -52,7 +52,7 @@ const detailBody = {
       control_id: "ac-2",
       statement: "Acme implements account management via SSO.",
       requirement_uuid: "req-1",
-      scf_anchor_id: "SCF-IAC-06",
+      scf_anchor_id: "SCF-IAC-37",
       unmapped: false,
       is_vendor_claim: true,
       claim_status: "asserted",
@@ -116,7 +116,7 @@ test.describe("OSCAL vendor-claims view", () => {
     // The unmapped claim surfaces the slice-512 NULL-anchor flag.
     await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(1);
     await expect(page.getByTestId("claim-scf-anchor").first()).toHaveText(
-      "SCF-IAC-06",
+      "SCF-IAC-37",
     );
   });
 
@@ -184,6 +184,7 @@ test.describe("OSCAL vendor-claims view", () => {
         description: "second test anchor",
       },
     ],
+    scf_release: "test-2026.3",
   };
 
   test("AC-5 (slice 620): the unmapped claim shows the SCF-anchor picker; the mapped claim does not", async ({
@@ -238,12 +239,14 @@ test.describe("OSCAL vendor-claims view", () => {
       }),
     );
 
-    let patchBody: { scf_anchor_id?: string } | null = null;
+    let patchBody: { scf_anchor_id?: string; scf_release?: string } | null =
+      null;
     await page.route(
       `**/api/oscal/component-claims/${CLAIM_UNMAPPED}/scf-anchor`,
       async (route) => {
         patchBody = JSON.parse(route.request().postData() ?? "{}") as {
           scf_anchor_id?: string;
+          scf_release?: string;
         };
         mapped = true;
         await route.fulfill({
@@ -270,8 +273,14 @@ test.describe("OSCAL vendor-claims view", () => {
       .filter({ hasText: "TST-02" })
       .click();
 
-    // The PATCH carried the chosen anchor code.
-    await expect.poll(() => patchBody).toEqual({ scf_anchor_id: "TST-02" });
+    // The PATCH carried the chosen anchor code and the release the picker's
+    // anchors were read in (#1774).
+    await expect
+      .poll(() => patchBody)
+      .toEqual({
+        scf_anchor_id: "TST-02",
+        scf_release: "test-2026.3",
+      });
     // After the invalidated refetch returns the mapped claim, the unmapped
     // badge is gone and the picker no longer renders for that claim.
     await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(0);
@@ -337,8 +346,65 @@ test.describe("OSCAL vendor-claims view", () => {
     );
     await page.goto(`/oscal/component-definitions/${DEF_ID}`);
     await page.getByTestId("claim-reject").first().click();
+    await page.getByTestId("claim-reject-confirm-ok").click();
     await expect(page.getByTestId("disposition-error")).toContainText(
       "approver",
     );
+  });
+
+  test("#2280: Reject asks first; Cancel posts nothing, Confirm posts the reject", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/oscal/component-definitions/${DEF_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody),
+      }),
+    );
+    const posted: { disposition?: string }[] = [];
+    await page.route(
+      `**/api/oscal/component-claims/${CLAIM_MAPPED}/disposition`,
+      async (route) => {
+        posted.push(
+          JSON.parse(route.request().postData() ?? "{}") as {
+            disposition?: string;
+          },
+        );
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: CLAIM_MAPPED,
+            control_id: "ac-2",
+            is_vendor_claim: true,
+            claim_status: "rejected",
+            dispositioned_by: "grc-1",
+            dispositioned_at: "2026-06-08T12:05:00Z",
+            disposition_note: "",
+          }),
+        });
+      },
+    );
+
+    await page.goto(`/oscal/component-definitions/${DEF_ID}`);
+    await page.getByTestId("claim-reject").first().click();
+    const confirm = page.getByTestId("claim-reject-confirm");
+    await expect(confirm).toContainText("Reject the vendor claim for ac-2?");
+    await expect(page.getByTestId("claim-reject-confirm-cancel")).toBeFocused();
+
+    await page.getByTestId("claim-reject-confirm-cancel").click();
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId("claim-status-badge").first()).toHaveText(
+      "Asserted",
+    );
+    expect(posted).toEqual([]);
+
+    await page.getByTestId("claim-reject").first().click();
+    await page.getByTestId("claim-reject-confirm-ok").click();
+    await expect
+      .poll(() => posted)
+      .toEqual([{ disposition: "reject", note: "" }]);
+    await expect(confirm).toHaveCount(0);
   });
 });

@@ -70,6 +70,7 @@ func okReq() Request {
 		OscalJSON:  []byte(`{"component-definition":{}}`),
 		ImportedBy: "tester",
 		Role:       authz.RoleGRCEngineer,
+		SCFRelease: "test-2026.3",
 	}
 }
 
@@ -210,5 +211,51 @@ func TestPgUUID(t *testing.T) {
 	pg := pgUUID(id)
 	if !pg.Valid || pg.Bytes != id {
 		t.Errorf("pgUUID round-trip failed: %+v", pg)
+	}
+}
+
+// A conflicting declaration is refused before the bridge is called.
+func TestImport_SCFReleaseConflictSkipsBridge(t *testing.T) {
+	t.Parallel()
+	fb := &fakeBridge{}
+	im := NewImporter(&nilBeginner{}, fb)
+	req := okReq()
+	req.OscalJSON = []byte(`{"component-definition":{"metadata":{"props":[{"name":"scf-release","value":"a"}]}}}`)
+	req.SCFRelease = "b"
+	if _, err := im.Import(tenantCtx(t), req); !errors.Is(err, ErrSCFReleaseConflict) {
+		t.Fatalf("err = %v; want ErrSCFReleaseConflict", err)
+	}
+	if fb.called {
+		t.Fatal("bridge called despite a conflicting SCF release")
+	}
+}
+
+func TestReleaseOf(t *testing.T) {
+	t.Parallel()
+	code, rel := "IAC-37", "2026.3"
+	if got := releaseOf(nil, &rel); got != nil {
+		t.Fatalf("unmapped claim release = %v; want nil", *got)
+	}
+	if got := releaseOf(&code, &rel); got == nil || *got != rel {
+		t.Fatalf("mapped claim release = %v; want %q", got, rel)
+	}
+}
+
+// #1774: an import that declares no SCF release fails before the bridge
+// round-trip, and begins no transaction (so not even a rejection audit row
+// is written).
+func TestImport_NoSCFReleaseFailsBeforeTheBridge(t *testing.T) {
+	t.Parallel()
+	bridge := &fakeBridge{}
+	beginner := &nilBeginner{}
+	im := NewImporter(beginner, bridge)
+	req := okReq()
+	req.SCFRelease = ""
+	_, err := im.Import(tenantCtx(t), req)
+	if !errors.Is(err, ErrSCFReleaseRequired) {
+		t.Fatalf("err = %v; want ErrSCFReleaseRequired", err)
+	}
+	if bridge.called || beginner.begun {
+		t.Fatalf("bridge called=%v, tx begun=%v; want neither before the release is checked", bridge.called, beginner.begun)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -19,8 +20,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -83,6 +86,19 @@ type uploadResp struct {
 	// under the slice-608 advisory gate policy (the upload was NOT blocked, but
 	// the uploader still sees which cases are red). Nil (dropped) otherwise.
 	GateTestReport *bundletest.Report `json:"gate_test_report,omitempty"`
+	// AnchorWarning is set when the bundle's scf_anchor_id reaches no
+	// requirement in an enabled framework, so the control earns no framework
+	// credit (issue #1738). It suggests the parent anchor when that one is
+	// mapped. Non-fatal: the control is persisted either way.
+	AnchorWarning string `json:"anchor_warning,omitempty"`
+	// SCFRelease is the SCF release scf_anchor_id was bound in (#1770):
+	// the bundle's declared scf_release, or the current release when it
+	// declares none. Empty for an unanchored control.
+	SCFRelease string `json:"scf_release,omitempty"`
+	// Warnings are non-fatal notes on the upload, such as the deprecation
+	// of a control.yaml with no scf_release (#1770), or a bundle test record
+	// without evidence_kind in a two-kind bundle (#2882).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // gateRejectionResp is the 400 body returned when the slice-574 upload test-
@@ -119,7 +135,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if !cred.IsAdmin && !isMachineActor(cred) {
+	if !authz.IsTenantAdmin(cred) && !isMachineActor(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return
 	}
@@ -171,6 +187,19 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	if h.store != nil {
 		gateRunner = h.store
 	}
+	// #1859: refuse a bundle whose declared queries cannot evaluate at all
+	// (compile error, eval error, never assigns `result`). Unlike red tests,
+	// this is not subject to the tenant's gate mode: a broken query errors on
+	// every live evaluation of the control.
+	if err := dryRunQueries(ctx, gateRunner, bundle, eval.QueryDryRunTimeout); err != nil {
+		var qerr *queryDryRunError
+		if errors.As(err, &qerr) {
+			httpresp.WriteError(w, http.StatusBadRequest, "control bundle rejected: "+err.Error())
+			return
+		}
+		httperr.WriteInternal(w, r, "bundle query dry-run", err)
+		return
+	}
 	// Slice 608: resolve the per-tenant gate policy. A nil store (unit servers)
 	// or any tenant without an explicit value resolves to the strict default,
 	// preserving slice 574's global behaviour. An unrecognised stored value
@@ -204,16 +233,34 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	result, err := h.store.Upload(ctx, bundle, cred.ID)
 	if err != nil {
 		switch {
+		case errors.Is(err, control.ErrSCFReleaseRequired):
+			// #1774 — an SCF code with no scf_release. The message is the
+			// one-line fix.
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, control.ErrSCFAnchorUnknown):
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".
 			httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, control.ErrSCFReleaseUnknown), errors.Is(err, control.ErrSCFCodeNotInRelease):
+			// #1770 — the declared scf_release is not loaded, or lacks the
+			// code. The messages name which.
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, control.ErrControlChangedConcurrently):
+			// Issue #1908 — a concurrent upload superseded the version a
+			// description-only edit was updating in place.
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "persist", err)
 		}
 		return
 	}
 
+	if result.KeptReviewedAnchor {
+		// #1776: the boot seed's stock manifest was not applied over a
+		// person's approved SCF re-anchor.
+		slog.InfoContext(ctx, "control bundle upload kept the reviewed SCF re-anchor",
+			"bundle_id", result.BundleID, "control_id", result.ControlID.String())
+	}
 	status := http.StatusOK
 	if result.IsNewBundle {
 		status = http.StatusCreated
@@ -225,7 +272,22 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		IsNewBundle:    result.IsNewBundle,
 		GateWarning:    verdict.warning,
 		GateTestReport: verdict.advisoryReport,
+		SCFRelease:     result.SCFRelease,
+		Warnings:       append(result.Warnings, verdict.fixtureWarnings()...),
 	}
+	// Issue #1738: warn when the anchor earns no framework credit. The control
+	// is already persisted, so a failed lookup is logged, not returned. The
+	// bound anchor's uuid is passed when there is one, so the check reads
+	// the anchor in the bundle's declared release (#1770).
+	anchorRef := bundle.Manifest.SCFAnchorID
+	if result.AnchorID != (uuid.UUID{}) {
+		anchorRef = result.AnchorID.String()
+	}
+	anchorWarning, aerr := h.store.AnchorCoverageWarning(ctx, anchorRef)
+	if aerr != nil {
+		slog.WarnContext(ctx, "control bundle anchor coverage check failed", "bundle_id", result.BundleID, "error", aerr)
+	}
+	resp.AnchorWarning = anchorWarning
 	// SupersededID is set only when this upload actually superseded a
 	// predecessor. It is the zero UUID for an initial upload AND for a
 	// byte-identical-content no-op re-upload (nothing changed) — in both

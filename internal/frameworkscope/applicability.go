@@ -1,0 +1,517 @@
+package frameworkscope
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+)
+
+// Applicability decisions (issue #1787, Statement of Applicability #1744).
+// A decision records, per requirement of the scope revision's framework
+// version, whether the requirement is applicable or excluded. A requirement
+// with no decision is undecided, and undecided means applicable.
+
+// Decision values, mirroring the CHECK on framework_scope_applicability.
+const (
+	DecisionApplicable = "applicable"
+	DecisionExcluded   = "excluded"
+)
+
+// ActionApplicabilityUpdate is the workflow-log action for a decision change.
+const ActionApplicabilityUpdate = "applicability.update"
+
+// ActionApplicabilityCarryOver is the workflow-log action for a decision
+// copied from the prior framework version's revision (#1793).
+const ActionApplicabilityCarryOver = "applicability.carry_over"
+
+// constraintDecisionsFrozen is the constraint name the guard trigger raises
+// for a write on an activated or superseded revision.
+const constraintDecisionsFrozen = "framework_scope_applicability_frozen"
+
+var (
+	// ErrInvalidDecision is returned for a decision other than applicable or
+	// excluded. HTTP 400.
+	ErrInvalidDecision = errors.New("frameworkscope: decision must be `applicable` or `excluded`")
+	// ErrJustificationRequired is returned when an exclusion has no
+	// justification. The DB CHECK framework_scope_applicability_excluded_justified
+	// enforces the same rule. HTTP 400.
+	ErrJustificationRequired = errors.New("frameworkscope: a justification is required to exclude a requirement")
+	// ErrRequirementNotFound is returned when the requirement is not in the
+	// scope revision's framework version. HTTP 404.
+	ErrRequirementNotFound = errors.New("frameworkscope: requirement not found in the scope's framework version")
+	// ErrDecisionsFrozen is returned when a decision is written on an
+	// activated or superseded revision. Draft a new revision instead. HTTP 409.
+	ErrDecisionsFrozen = errors.New("frameworkscope: decisions on an activated or superseded scope are frozen")
+)
+
+// Decision is one recorded applicability decision.
+type Decision struct {
+	RequirementID     uuid.UUID
+	Decision          string
+	Justification     string
+	ImplementationRef string
+	UpdatedBy         string
+	UpdatedAt         time.Time
+}
+
+// RequirementApplicability is one requirement of a framework version with
+// its decision on a revision. Decision is nil when the requirement is
+// undecided.
+type RequirementApplicability struct {
+	RequirementID uuid.UUID
+	Code          string
+	Title         string
+	Decision      *Decision
+	// Contradiction is true when the requirement is excluded and at least
+	// one active tenant control reaches it through the crosswalk with a
+	// passing latest evaluation (#1789). Computed on read.
+	Contradiction bool
+}
+
+// ApplicabilityCounts tallies a revision's requirements. Undecided
+// requirements count as applicable for coverage but are reported apart so
+// the operator knows how much of the SoA is left.
+type ApplicabilityCounts struct {
+	Total      int
+	Applicable int
+	Excluded   int
+	Undecided  int
+	// Contradictions counts excluded requirements with passing controls
+	// behind them.
+	Contradictions int
+}
+
+// Applicability is the decision list for one revision. Scope is nil when an
+// as_of read finds no revision in force; every requirement is then undecided.
+type Applicability struct {
+	Scope        *FrameworkScope
+	Requirements []RequirementApplicability
+	Counts       ApplicabilityCounts
+}
+
+// SetDecisionRequest is the input for SetDecision.
+type SetDecisionRequest struct {
+	ScopeID           uuid.UUID
+	RequirementID     uuid.UUID
+	Decision          string
+	Justification     string
+	ImplementationRef string
+	// Actor is the calling credential id, recorded on the decision and the
+	// workflow log.
+	Actor string
+}
+
+// ValidateDecision is the domain check for a decision write: the decision is
+// one of the two values, and an exclusion carries a non-blank justification.
+func ValidateDecision(decision, justification string) error {
+	switch decision {
+	case DecisionApplicable:
+		return nil
+	case DecisionExcluded:
+		if strings.TrimSpace(justification) == "" {
+			return ErrJustificationRequired
+		}
+		return nil
+	default:
+		return ErrInvalidDecision
+	}
+}
+
+// SetDecision records one requirement's decision on a scope revision. On a
+// revision in review or approved, the table's reset trigger sends it back to
+// draft and clears the approval; invalidated reports that. The change is
+// written to the workflow log in the same tx.
+func (s *Store) SetDecision(ctx context.Context, req SetDecisionRequest) (Decision, FrameworkScope, bool, error) {
+	decs, scope, invalidated, err := s.SetDecisions(ctx, req.ScopeID, []DecisionInput{{
+		RequirementID:     req.RequirementID,
+		Decision:          req.Decision,
+		Justification:     req.Justification,
+		ImplementationRef: req.ImplementationRef,
+	}}, req.Actor)
+	if err != nil {
+		return Decision{}, FrameworkScope{}, false, err
+	}
+	return decs[0], scope, invalidated, nil
+}
+
+// DecisionInput is one requirement's decision in a multi-decision write.
+type DecisionInput struct {
+	RequirementID     uuid.UUID
+	Decision          string
+	Justification     string
+	ImplementationRef string
+
+	// carriedFrom is set only by CarryOverDecisions (#1793): the write is
+	// logged as applicability.carry_over and names its source.
+	carriedFrom *carrySource
+}
+
+// SetDecisions records several decisions on one scope revision as a single
+// change (#1790). Every input is validated first, and one bad input (invalid
+// decision, missing justification, requirement outside the revision's
+// framework version) writes nothing. Each decision gets its own
+// workflow-log row; on a revision in review or approved, the first row
+// carries the reset to draft.
+func (s *Store) SetDecisions(ctx context.Context, scopeID uuid.UUID, items []DecisionInput, actor string) (decs []Decision, scope FrameworkScope, invalidated bool, err error) {
+	for _, it := range items {
+		if verr := ValidateDecision(it.Decision, it.Justification); verr != nil {
+			return nil, FrameworkScope{}, false, verr
+		}
+	}
+	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		first, gerr := writableScope(ctx, q, tenantID, scopeID)
+		if gerr != nil {
+			return gerr
+		}
+		for _, it := range items {
+			if _, rerr := q.GetFrameworkRequirementInVersion(ctx, dbx.GetFrameworkRequirementInVersionParams{
+				ID:                 pgUUID(it.RequirementID),
+				FrameworkVersionID: first.FrameworkVersionID,
+			}); rerr != nil {
+				if errors.Is(rerr, pgx.ErrNoRows) {
+					return ErrRequirementNotFound
+				}
+				return fmt.Errorf("get framework_requirement: %w", rerr)
+			}
+		}
+		var last dbx.FrameworkScope
+		decs, last, err = writeDecisions(ctx, q, tenantID, first, items, actor)
+		if err != nil {
+			return err
+		}
+		scope = rowToScope(last)
+		invalidated = first.State != last.State && last.State == StateDraft
+		return nil
+	})
+	return decs, scope, invalidated, err
+}
+
+// writableScope reads the revision and refuses one whose decisions are
+// frozen.
+func writableScope(ctx context.Context, q *dbx.Queries, tenantID, scopeID uuid.UUID) (dbx.FrameworkScope, error) {
+	row, err := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(scopeID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.FrameworkScope{}, ErrNotFound
+		}
+		return dbx.FrameworkScope{}, fmt.Errorf("get framework_scope: %w", err)
+	}
+	if row.State == StateActivated || row.State == StateSuperseded {
+		return dbx.FrameworkScope{}, ErrDecisionsFrozen
+	}
+	return row, nil
+}
+
+// writeDecisions upserts validated decisions for requirements known to be in
+// the revision's version, logging each, and returns the scope row as it
+// stands after the last write (the reset trigger may have sent it back to
+// draft).
+func writeDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, before dbx.FrameworkScope, items []DecisionInput, actor string) ([]Decision, dbx.FrameworkScope, error) {
+	decs := make([]Decision, 0, len(items))
+	for _, it := range items {
+		var prior *dbx.FrameworkScopeApplicability
+		if p, perr := q.GetFrameworkScopeApplicability(ctx, dbx.GetFrameworkScopeApplicabilityParams{
+			TenantID:               pgUUID(tenantID),
+			FrameworkScopeID:       before.ID,
+			FrameworkRequirementID: pgUUID(it.RequirementID),
+		}); perr == nil {
+			prior = &p
+		} else if !errors.Is(perr, pgx.ErrNoRows) {
+			return nil, before, fmt.Errorf("get prior decision: %w", perr)
+		}
+		row, uerr := q.UpsertFrameworkScopeApplicability(ctx, dbx.UpsertFrameworkScopeApplicabilityParams{
+			TenantID:               pgUUID(tenantID),
+			FrameworkScopeID:       before.ID,
+			FrameworkRequirementID: pgUUID(it.RequirementID),
+			Decision:               it.Decision,
+			Justification:          it.Justification,
+			ImplementationRef:      it.ImplementationRef,
+			UpdatedBy:              actor,
+		})
+		if uerr != nil {
+			// The guard trigger re-checks the state under FOR SHARE, so an
+			// activation that committed after the read above lands here.
+			var pgErr *pgconn.PgError
+			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintDecisionsFrozen {
+				return nil, before, ErrDecisionsFrozen
+			}
+			return nil, before, fmt.Errorf("upsert decision: %w", uerr)
+		}
+		after, aerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       before.ID,
+		})
+		if aerr != nil {
+			return nil, before, fmt.Errorf("re-read framework_scope: %w", aerr)
+		}
+		if lerr := logDecisionChange(ctx, q, actor, before, after, prior, row, it.carriedFrom); lerr != nil {
+			return nil, before, lerr
+		}
+		decs = append(decs, rowToDecision(row))
+		before = after
+	}
+	return decs, before, nil
+}
+
+// ListDecisions returns every requirement of the revision's framework
+// version with its decision on that revision.
+func (s *Store) ListDecisions(ctx context.Context, scopeID uuid.UUID) (Applicability, error) {
+	var out Applicability
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, err := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(scopeID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get framework_scope: %w", err)
+		}
+		sc := rowToScope(row)
+		out, err = listApplicability(ctx, q, tenantID, sc.FrameworkVersionID, &sc)
+		return err
+	})
+	return out, err
+}
+
+// DecisionsAsOf returns the decisions in force at t for a framework version:
+// those of the revision active then. Decisions on an activated or superseded
+// revision are frozen, so that revision's rows are exactly what applied.
+// With no revision in force, every requirement is undecided.
+func (s *Store) DecisionsAsOf(ctx context.Context, frameworkVersionID uuid.UUID, t time.Time) (Applicability, error) {
+	var out Applicability
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var sc *FrameworkScope
+		row, err := q.GetFrameworkScopeAsOf(ctx, dbx.GetFrameworkScopeAsOfParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: pgUUID(frameworkVersionID),
+			EffectiveFrom:      pgtype.Timestamptz{Time: t, Valid: true},
+		})
+		switch {
+		case err == nil:
+			v := rowToScope(row)
+			sc = &v
+		case errors.Is(err, pgx.ErrNoRows):
+		default:
+			return fmt.Errorf("get as_of: %w", err)
+		}
+		out, err = listApplicability(ctx, q, tenantID, frameworkVersionID, sc)
+		return err
+	})
+	return out, err
+}
+
+func listApplicability(ctx context.Context, q *dbx.Queries, tenantID, frameworkVersionID uuid.UUID, sc *FrameworkScope) (Applicability, error) {
+	var scopeID pgtype.UUID
+	if sc != nil {
+		scopeID = pgUUID(sc.ID)
+	}
+	rows, err := q.ListFrameworkScopeApplicability(ctx, dbx.ListFrameworkScopeApplicabilityParams{
+		TenantID:           pgUUID(tenantID),
+		FrameworkScopeID:   scopeID,
+		FrameworkVersionID: pgUUID(frameworkVersionID),
+	})
+	if err != nil {
+		return Applicability{}, fmt.Errorf("list applicability: %w", err)
+	}
+	contradicted := map[uuid.UUID]bool{}
+	if sc != nil {
+		ids, cerr := q.ListFrameworkScopeContradictions(ctx, dbx.ListFrameworkScopeContradictionsParams{
+			TenantID:         pgUUID(tenantID),
+			FrameworkScopeID: scopeID,
+		})
+		if cerr != nil {
+			return Applicability{}, fmt.Errorf("list contradictions: %w", cerr)
+		}
+		for _, id := range ids {
+			contradicted[uuid.UUID(id.Bytes)] = true
+		}
+	}
+	out := Applicability{Scope: sc, Requirements: make([]RequirementApplicability, 0, len(rows))}
+	for _, r := range rows {
+		ra := RequirementApplicability{
+			RequirementID: uuid.UUID(r.RequirementID.Bytes),
+			Code:          r.Code,
+			Title:         r.Title,
+		}
+		out.Counts.Total++
+		if r.Decision == nil {
+			out.Counts.Undecided++
+		} else {
+			d := Decision{
+				RequirementID:     ra.RequirementID,
+				Decision:          *r.Decision,
+				Justification:     deref(r.Justification),
+				ImplementationRef: deref(r.ImplementationRef),
+				UpdatedBy:         deref(r.UpdatedBy),
+			}
+			if r.UpdatedAt.Valid {
+				d.UpdatedAt = r.UpdatedAt.Time
+			}
+			ra.Decision = &d
+			if d.Decision == DecisionExcluded {
+				out.Counts.Excluded++
+				if contradicted[ra.RequirementID] {
+					ra.Contradiction = true
+					out.Counts.Contradictions++
+				}
+			} else {
+				out.Counts.Applicable++
+			}
+		}
+		out.Requirements = append(out.Requirements, ra)
+	}
+	return out, nil
+}
+
+// logDecisionChange appends the applicability.update workflow-log row. The
+// before/after images are the scope row snapshots (so a reset to draft shows
+// in from_state/to_state and the approval columns) with the decision under
+// an `applicability` key; before's decision is null when the requirement was
+// undecided. A carried-over decision (from non-nil) is logged as
+// applicability.carry_over with its source under `carried_over_from` in
+// after.
+func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before, after dbx.FrameworkScope, prior *dbx.FrameworkScopeApplicability, row dbx.FrameworkScopeApplicability, from *carrySource) error {
+	beforeJSON, err := snapshotWithDecision(before, prior, nil)
+	if err != nil {
+		return err
+	}
+	afterJSON, err := snapshotWithDecision(after, &row, from)
+	if err != nil {
+		return err
+	}
+	action := ActionApplicabilityUpdate
+	if from != nil {
+		action = ActionApplicabilityCarryOver
+	}
+	fromState := before.State
+	if err := q.InsertFrameworkScopeWorkflowLog(ctx, dbx.InsertFrameworkScopeWorkflowLogParams{
+		TenantID:         after.TenantID,
+		FrameworkScopeID: after.ID,
+		Action:           action,
+		FromState:        &fromState,
+		ToState:          after.State,
+		Before:           beforeJSON,
+		After:            afterJSON,
+		Actor:            actor,
+	}); err != nil {
+		return fmt.Errorf("frameworkscope: write workflow log: %w", err)
+	}
+	return nil
+}
+
+func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicability, from *carrySource) ([]byte, error) {
+	base, err := snapshot(sc)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(base, &m); err != nil {
+		return nil, fmt.Errorf("frameworkscope: snapshot: %w", err)
+	}
+	if d == nil {
+		m["applicability"] = nil
+	} else {
+		m["applicability"] = map[string]any{
+			"framework_requirement_id": uuid.UUID(d.FrameworkRequirementID.Bytes),
+			"decision":                 d.Decision,
+			"justification":            d.Justification,
+			"implementation_ref":       d.ImplementationRef,
+		}
+	}
+	if from != nil {
+		m["carried_over_from"] = from
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("frameworkscope: snapshot: %w", err)
+	}
+	return b, nil
+}
+
+func rowToDecision(r dbx.FrameworkScopeApplicability) Decision {
+	d := Decision{
+		RequirementID:     uuid.UUID(r.FrameworkRequirementID.Bytes),
+		Decision:          r.Decision,
+		Justification:     r.Justification,
+		ImplementationRef: r.ImplementationRef,
+		UpdatedBy:         r.UpdatedBy,
+	}
+	if r.UpdatedAt.Valid {
+		d.UpdatedAt = r.UpdatedAt.Time
+	}
+	return d
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// FilterUndecided is the ApplicabilityFilter.Decision value that selects
+// requirements with no decision.
+const FilterUndecided = "undecided"
+
+// ErrInvalidFilter is returned for an unrecognised decision filter. HTTP 400.
+var ErrInvalidFilter = errors.New("frameworkscope: decision filter must be `applicable`, `excluded` or `undecided`")
+
+// ApplicabilityFilter narrows a decision list. The zero value keeps every
+// requirement. Decision is applicable, excluded or undecided; Contradiction,
+// when set, keeps only requirements whose contradiction flag equals it.
+type ApplicabilityFilter struct {
+	Decision      string
+	Contradiction *bool
+}
+
+// Validate reports ErrInvalidFilter for an unknown decision filter.
+func (f ApplicabilityFilter) Validate() error {
+	switch f.Decision {
+	case "", DecisionApplicable, DecisionExcluded, FilterUndecided:
+		return nil
+	default:
+		return ErrInvalidFilter
+	}
+}
+
+// Filter returns the requirements that match f. Counts are left as they
+// are: they describe the whole revision, not the filtered list.
+func (a Applicability) Filter(f ApplicabilityFilter) Applicability {
+	if f.Decision == "" && f.Contradiction == nil {
+		return a
+	}
+	out := a
+	out.Requirements = make([]RequirementApplicability, 0, len(a.Requirements))
+	for _, r := range a.Requirements {
+		if f.Contradiction != nil && r.Contradiction != *f.Contradiction {
+			continue
+		}
+		switch f.Decision {
+		case FilterUndecided:
+			if r.Decision != nil {
+				continue
+			}
+		case DecisionApplicable, DecisionExcluded:
+			if r.Decision == nil || r.Decision.Decision != f.Decision {
+				continue
+			}
+		}
+		out.Requirements = append(out.Requirements, r)
+	}
+	return out
+}

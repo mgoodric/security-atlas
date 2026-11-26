@@ -34,10 +34,14 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/scim"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -47,6 +51,9 @@ import (
 // unexported; callers reach them through purposeful methods (e.g.
 // IssueBootstrapCredential) so the surface stays small as more services land.
 type Server struct {
+	// moduleViews filters the combined views by module (#2173). Set by
+	// httpHandler before the registrars run.
+	moduleViews       *moduleaccess.Views
 	GRPC              *grpc.Server
 	credStore         *credstore.Store
 	registry          schemaregistry.Registry
@@ -55,7 +62,13 @@ type Server struct {
 	dbPool            *pgxpool.Pool
 	ingestService     *ingest.Service
 	evidencePushRate  float64
-	artifactStore     *artifact.Store
+	// evaluateRatePerMin is the per-principal limit on POST
+	// /v1/controls/{id}/evaluate (#2479); 0 uses the controlstate default.
+	evaluateRatePerMin int
+	// needsAttentionWarnRows is the large-read warning threshold for
+	// GET /v1/needs-attention (#2698); 0 uses the handler default.
+	needsAttentionWarnRows int
+	artifactStore          *artifact.Store
 	// evidencePublisher is the slice-015 substrate. When non-nil the
 	// push HTTP handler routes through JetStream; nil falls back to
 	// direct Service.Process.
@@ -90,6 +103,13 @@ type Server struct {
 	// wires it once at startup via Config.VersionFieldsFn (which is
 	// `versionFields` from cmd/atlas/version.go).
 	versionFieldsFn func() VersionFields
+	// issuerPolicy is the deployment's OIDC issuer SSRF policy
+	// (oidc.IssuerPolicyFromEnv, #2534), parsed once in New.
+	// issuerPolicyErr holds a parse failure: RunHTTP and
+	// HTTPHandlerForTests then refuse to serve, so every entry point that
+	// builds the server fails closed on a bad value (#2549).
+	issuerPolicy    netguard.Policy
+	issuerPolicyErr error
 	// Slice 073: platform_status reader/writer + bootstrap-token file
 	// path. Wired by cmd/atlas; unit servers leave them nil and the
 	// install-state routes 503.
@@ -122,6 +142,10 @@ type Server struct {
 	jwtRevoked  *revocation.Store
 	jwtIssuer   string
 	jwtAudience string
+	// jwtSuperAdmins re-reads super_admins for tokens carrying the
+	// atlas:super_admin claim, so a demote drops the claim from live
+	// tokens on their next request (#1850). Nil skips the re-check.
+	jwtSuperAdmins superadmin.Checker
 
 	// Slice 191 + 326: the migration URL originally surfaced in the
 	// retired 410 deprecation responder's body. The slice 326
@@ -141,6 +165,11 @@ type Server struct {
 	// scan. Wired by cmd/atlas/main.go when DATABASE_URL is set;
 	// nil for in-memory unit servers.
 	authPool *pgxpool.Pool
+
+	// background tracks work a handler starts and does not wait for, such
+	// as the exception Activate/Revoke re-evaluation (#2688). RunHTTP
+	// waits for it after the listener has shut down.
+	background backgroundGroup
 }
 
 // AttachAuthPool wires the BYPASSRLS migrate-role pool used by the
@@ -181,6 +210,14 @@ func (s *Server) AttachJWTValidator(signer *tokensign.Signer, revoked *revocatio
 	s.jwtRevoked = revoked
 	s.jwtIssuer = issuer
 	s.jwtAudience = audience
+}
+
+// AttachSuperAdminChecker wires the live super_admins re-check the JWT
+// middleware applies to any token carrying atlas:super_admin (#1850).
+// cmd/atlas wires it with the BYPASSRLS pool; unit and integration
+// servers that leave it unset trust the claim as minted.
+func (s *Server) AttachSuperAdminChecker(c superadmin.Checker) {
+	s.jwtSuperAdmins = c
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
@@ -283,6 +320,16 @@ type Config struct {
 	// for the slice-013 REST push endpoint. 0 disables rate limiting
 	// (used by tests). Production defaults: 100 records/second.
 	EvidencePushRate float64
+	// EvaluateRatePerMin is how many manual evaluations one principal may
+	// start per minute, per process (#2479). 0 uses
+	// controlstate.DefaultEvaluateRatePerMin. cmd/atlas reads it from
+	// ATLAS_EVALUATE_RATE_PER_MIN.
+	EvaluateRatePerMin int
+	// NeedsAttentionWarnRows is the row count past which one
+	// GET /v1/needs-attention source read logs a warning (#2698). 0 uses
+	// needsattention.DefaultWarnRows. cmd/atlas reads it from
+	// ATLAS_NEEDS_ATTENTION_WARN_ROWS.
+	NeedsAttentionWarnRows int
 	// ArtifactStore, when non-nil, wires the slice-036 S3 artifact store
 	// into the HTTP server. Routes POST /v1/artifacts:upload and
 	// GET /v1/artifacts/{id} only mount when this is populated.
@@ -331,21 +378,30 @@ func New(cfg Config) *Server {
 		),
 	)
 	evidencev1.RegisterEvidenceIngestServiceServer(grpcServer, evidence.New(cfg.IngestService, reg, idem))
-	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, admin.New(cred))
+	adminSvc := admin.New(cred)
+	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, adminSvc)
 	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
-	return &Server{
-		GRPC:              grpcServer,
-		credStore:         cred,
-		registry:          reg,
-		idemStore:         idem,
-		connectorRegistry: connReg,
-		ingestService:     cfg.IngestService,
-		evidencePushRate:  cfg.EvidencePushRate,
-		artifactStore:     cfg.ArtifactStore,
-		evidencePublisher: cfg.EvidencePublisher,
-		versionFieldsFn:   cfg.VersionFieldsFn,
+	srv := &Server{
+		GRPC:                   grpcServer,
+		credStore:              cred,
+		registry:               reg,
+		idemStore:              idem,
+		connectorRegistry:      connReg,
+		ingestService:          cfg.IngestService,
+		evidencePushRate:       cfg.EvidencePushRate,
+		evaluateRatePerMin:     cfg.EvaluateRatePerMin,
+		needsAttentionWarnRows: cfg.NeedsAttentionWarnRows,
+		artifactStore:          cfg.ArtifactStore,
+		evidencePublisher:      cfg.EvidencePublisher,
+		versionFieldsFn:        cfg.VersionFieldsFn,
 	}
+	srv.issuerPolicy, srv.issuerPolicyErr = oidc.IssuerPolicyFromEnv()
+	// #2121: the ResetBootstrap RPC runs the reset-bootstrap endpoint's
+	// code; it reads platformResetter and bootstrapTokenPath at call time,
+	// so the Attach calls cmd/atlas makes after New still take effect.
+	adminSvc.SetBootstrapResetter(grpcBootstrapResetter{s: srv})
+	return srv
 }
 
 // AttachEvidencePublisher wires the slice-015 substrate after Server
@@ -369,9 +425,13 @@ func (s *Server) AttachArtifactStore(store *artifact.Store) {
 // the in-memory credstore; the admin-credential HTTP routes
 // (POST/GET/rotate/revoke under /v1/admin/credentials) only mount when
 // this is set. cmd/atlas wires it once at startup with a BEARER_HASH_KEY-
-// backed bearer.Hasher.
+// backed bearer.Hasher. It also becomes the in-memory credstore's user
+// gate, so a key owned by a deactivated user is refused (#1915).
 func (s *Server) AttachAPIKeyStore(store *apikeystore.Store) {
 	s.apikeyStore = store
+	if store != nil && s.credStore != nil {
+		s.credStore.SetUserGate(store)
+	}
 }
 
 // AttachCredstorePersistence wires a durability backend into the
@@ -403,19 +463,45 @@ func (s *Server) AttachAuthHandler(h *authapi.Handler) {
 	s.authHandler = h
 }
 
+// ShutdownTimeout bounds how long the gRPC and HTTP servers drain in-flight
+// work once their context is canceled. Past it, gRPC hard-stops and HTTP
+// returns with handlers still running, so a stuck stream or request cannot
+// keep the process from exiting for its supervisor to restart (#2805).
+const ShutdownTimeout = 5 * time.Second
+
 // Run starts the gRPC server on addr (e.g., ":50051") and blocks until ctx
-// is canceled, at which point it gracefully stops.
+// is canceled, at which point it gracefully stops, hard-stopping after
+// ShutdownTimeout.
 func (s *Server) Run(ctx context.Context, addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("api: listen %s: %w", addr, err)
 	}
+	return s.serveGRPC(ctx, lis, ShutdownTimeout)
+}
+
+// serveGRPC serves on lis until ctx is canceled, then drains for at most
+// timeout. GracefulStop waits for every open stream to finish, so a
+// long-lived or stuck one would block it forever; Stop closes them.
+func (s *Server) serveGRPC(ctx context.Context, lis net.Listener, timeout time.Duration) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.GRPC.Serve(lis) }()
 
 	select {
 	case <-ctx.Done():
-		s.GRPC.GracefulStop()
+		stopped := make(chan struct{})
+		go func() {
+			s.GRPC.GracefulStop()
+			close(stopped)
+		}()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case <-stopped:
+		case <-timer.C:
+			s.GRPC.Stop()
+			<-stopped
+		}
 		return nil
 	case err := <-errCh:
 		return err
@@ -426,6 +512,15 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 // resolves it against the credential store, and attaches the credential to
 // context. Missing/empty/malformed/revoked tokens return Unauthenticated.
 // AdminCredentials.Issue is allowed under a bootstrap path (mock).
+//
+// An ICS feed token (credstore.Credential.CalendarOnly) is refused as
+// Unauthenticated on every RPC (#2477): it may only fetch the feed, so it
+// is no bearer for ConnectorRegistry, evidence ingest or the admin
+// services, whatever an RPC's own kind check would say.
+//
+// A policy-sync key (credstore.Credential.PolicySyncOnly) is refused as
+// PermissionDenied on every RPC (#2849): it authenticates, but may only
+// sync policies, and no RPC does that.
 func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		token, err := extractBearer(ctx)
@@ -438,6 +533,12 @@ func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 				return nil, status.Error(codes.Unauthenticated, "invalid or revoked bearer token")
 			}
 			return nil, status.Errorf(codes.Internal, "authenticate: %v", err)
+		}
+		if cred.CalendarOnly() {
+			return nil, status.Error(codes.Unauthenticated, "calendar feed tokens cannot call the API")
+		}
+		if cred.PolicySyncOnly() {
+			return nil, status.Error(codes.PermissionDenied, "a policy-sync key may only sync policies")
 		}
 		ctx = authctx.WithCredential(ctx, cred)
 		return handler(ctx, req)

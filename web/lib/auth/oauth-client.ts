@@ -19,6 +19,12 @@
 //   - The JWT cookie set by the callback route is HttpOnly + Secure +
 //     SameSite=Lax (P0-189-9) — written by the route handler, not
 //     this module.
+//   - returnTo is sanitised with safeRedirectTarget both when it is
+//     written to sessionStorage and when it is read back (#2211), so
+//     the callback's window.location.assign never sees an off-site
+//     URL even if the stored value was tampered with.
+
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 const VERIFIER_BYTES = 32;
 const STATE_BYTES = 16;
@@ -87,9 +93,10 @@ export interface InitLoginFlowParams {
   clientId: string;
   // The redirect URI registered via `atlas-cli oauth add-redirect-uri`.
   redirectUri: string;
-  // The tenant the user is signing in for. v1 single-tenant; slice
-  // 192 multi-tenant work will derive this dynamically.
-  tenantId: string;
+  // The tenant the user is signing in for. Omit it on a single-tenant
+  // install: /oauth/authorize then resolves the sole tenant (#1761). A
+  // multi-tenant install requires it.
+  tenantId?: string;
   // The URL to return the user to after successful sign-in. Stored
   // in sessionStorage; the callback route reads it on completion.
   returnTo?: string;
@@ -113,7 +120,10 @@ export async function initLoginFlow(
   sessionStorage.setItem(VERIFIER_STORAGE_KEY, verifier);
   sessionStorage.setItem(STATE_STORAGE_KEY, state);
   if (params.returnTo) {
-    sessionStorage.setItem(RETURN_TO_STORAGE_KEY, params.returnTo);
+    sessionStorage.setItem(
+      RETURN_TO_STORAGE_KEY,
+      safeRedirectTarget(params.returnTo),
+    );
   }
 
   const url = new URL("/oauth/authorize", params.issuer);
@@ -124,7 +134,9 @@ export async function initLoginFlow(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("tenant_id", params.tenantId);
+  if (params.tenantId) {
+    url.searchParams.set("tenant_id", params.tenantId);
+  }
 
   window.location.assign(url.toString());
 }
@@ -152,7 +164,9 @@ export interface CompleteLoginFlowResult {
   accessToken: string;
   tokenType: string;
   expiresIn: number;
-  returnTo: string | null;
+  // Always a same-origin path: the stored value goes through
+  // safeRedirectTarget, and a missing one becomes /dashboard.
+  returnTo: string;
 }
 
 // completeLoginFlow exchanges the code+verifier for a JWT via POST
@@ -176,7 +190,11 @@ export async function completeLoginFlow(
     throw new Error("oauth: code_verifier missing from sessionStorage");
   }
 
-  const returnTo = sessionStorage.getItem(RETURN_TO_STORAGE_KEY);
+  // Re-sanitised on read: sessionStorage is writable by any script on
+  // the origin, so the write-side check alone is not enough (#2211).
+  const returnTo = safeRedirectTarget(
+    sessionStorage.getItem(RETURN_TO_STORAGE_KEY) ?? "/dashboard",
+  );
 
   const tokenUrl = new URL("/oauth/token", params.issuer);
   const form = new URLSearchParams();

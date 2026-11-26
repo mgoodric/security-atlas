@@ -6,19 +6,32 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
 // Service implements adminv1.AdminCredentialsServiceServer.
 type Service struct {
 	adminv1.UnimplementedAdminCredentialsServiceServer
-	store *credstore.Store
+	store    *credstore.Store
+	resetter BootstrapResetter
+}
+
+// BootstrapResetter performs the first-login recovery reset for the
+// ResetBootstrap RPC (#2121). The api.Server implements it with the same
+// code the HTTP reset-bootstrap endpoint runs; it lives behind an
+// interface because that code needs the platform status and the
+// bootstrap-token path, which this package does not hold.
+type BootstrapResetter interface {
+	ResetBootstrap(ctx context.Context, req *adminv1.ResetBootstrapRequest) (*adminv1.ResetBootstrapResponse, error)
 }
 
 // New constructs the service.
@@ -26,12 +39,48 @@ func New(store *credstore.Store) *Service {
 	return &Service{store: store}
 }
 
-// Issue creates a new API key and returns the bearer token exactly once.
-func (s *Service) Issue(_ context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
+// SetBootstrapResetter wires the ResetBootstrap RPC. Without it the RPC
+// returns Unavailable.
+func (s *Service) SetBootstrapResetter(r BootstrapResetter) {
+	s.resetter = r
+}
+
+// ResetBootstrap re-arms first login for an operator locked out of it
+// (#2121). The resetter authorizes the caller: RequireAdmin, then the
+// install must have exactly one tenant.
+func (s *Service) ResetBootstrap(ctx context.Context, req *adminv1.ResetBootstrapRequest) (*adminv1.ResetBootstrapResponse, error) {
+	if s.resetter == nil {
+		return nil, status.Error(codes.Unavailable, "bootstrap reset not configured")
 	}
-	cred, bearer, err := s.store.Issue(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), req.GetTtl().AsDuration())
+	return s.resetter.ResetBootstrap(ctx, req)
+}
+
+// Issue creates a new API key and returns the bearer token exactly once.
+// A user caller is recorded as the key's minter, for attribution only
+// (#1947): the key outlives that user's access.
+func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := requestTenant(caller, req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	// A nil ttl is 0, "no expiry". A negative one is refused, matching the
+	// HTTP path's ttl_seconds >= 0 (#1906). AsDuration saturates rather
+	// than wrapping, so no upper bound is needed here (#1914 D3).
+	ttl := req.GetTtl().AsDuration()
+	if ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
+	}
+	// The predicate is persisted as JSONB and enforced at push (#2435);
+	// a legacy key=value form is converted, a malformed one refused.
+	predicate, err := scope.NormalizeCredentialPredicate(req.GetScopePredicate())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	cred, bearer, err := s.store.IssueMintedAudited(ctx, caller, tenant, predicate, req.GetKinds(), ttl)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
@@ -42,11 +91,12 @@ func (s *Service) Issue(_ context.Context, req *adminv1.IssueRequest) (*adminv1.
 }
 
 // Rotate issues a successor token and starts the predecessor's grace window.
-func (s *Service) Rotate(_ context.Context, req *adminv1.RotateRequest) (*adminv1.RotateResponse, error) {
-	if req.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id is required")
+func (s *Service) Rotate(ctx context.Context, req *adminv1.RotateRequest) (*adminv1.RotateResponse, error) {
+	caller, err := s.requireOwnKey(ctx, req.GetId())
+	if err != nil {
+		return nil, err
 	}
-	successor, bearer, predecessorExpiresAt, err := s.store.Rotate(req.GetId())
+	successor, bearer, predecessorExpiresAt, err := s.store.RotateAudited(ctx, caller, req.GetId())
 	if err != nil {
 		if errors.Is(err, credstore.ErrUnknownKey) {
 			return nil, status.Errorf(codes.NotFound, "unknown key id %q", req.GetId())
@@ -61,11 +111,12 @@ func (s *Service) Rotate(_ context.Context, req *adminv1.RotateRequest) (*adminv
 }
 
 // Revoke invalidates the key immediately.
-func (s *Service) Revoke(_ context.Context, req *adminv1.RevokeRequest) (*adminv1.RevokeResponse, error) {
-	if req.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id is required")
+func (s *Service) Revoke(ctx context.Context, req *adminv1.RevokeRequest) (*adminv1.RevokeResponse, error) {
+	caller, err := s.requireOwnKey(ctx, req.GetId())
+	if err != nil {
+		return nil, err
 	}
-	if err := s.store.Revoke(req.GetId()); err != nil {
+	if err := s.store.RevokeAudited(ctx, caller, req.GetId()); err != nil {
 		if errors.Is(err, credstore.ErrUnknownKey) {
 			return nil, status.Errorf(codes.NotFound, "unknown key id %q", req.GetId())
 		}
@@ -75,16 +126,74 @@ func (s *Service) Revoke(_ context.Context, req *adminv1.RevokeRequest) (*adminv
 }
 
 // List enumerates active credentials for a tenant. No tokens returned.
-func (s *Service) List(_ context.Context, req *adminv1.ListRequest) (*adminv1.ListResponse, error) {
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
+func (s *Service) List(ctx context.Context, req *adminv1.ListRequest) (*adminv1.ListResponse, error) {
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
 	}
-	creds := s.store.List(req.GetTenantId())
+	tenant, err := requestTenant(caller, req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	creds := s.store.List(tenant)
 	handles := make([]*adminv1.ApiKeyHandle, 0, len(creds))
 	for _, c := range creds {
 		handles = append(handles, handleFromCred(c))
 	}
 	return &adminv1.ListResponse{Handles: handles}, nil
+}
+
+// RequireAdmin is the gate every AdminCredentialsService RPC passes
+// first, the gRPC twin of the HTTP admincreds requireAdmin (#2167): the
+// caller must hold an admin credential. A missing credential is
+// Unauthenticated, a non-admin one PermissionDenied. It returns the
+// caller so the RPC can scope its work to the caller's tenant.
+func RequireAdmin(ctx context.Context) (credstore.Credential, error) {
+	caller, ok := authctx.CredentialFromContext(ctx)
+	if !ok {
+		return credstore.Credential{}, status.Error(codes.Unauthenticated, "missing credential")
+	}
+	if !caller.IsAdmin {
+		return credstore.Credential{}, status.Error(codes.PermissionDenied, "admin credential required")
+	}
+	return caller, nil
+}
+
+// requireOwnKey gates Rotate and Revoke: an admin caller, acting on a key
+// in the caller's own tenant. A key in another tenant is NotFound, as on
+// the HTTP path, so a caller learns nothing about other tenants' ids. It
+// returns the caller, whom the audit row names.
+func (s *Service) requireOwnKey(ctx context.Context, id string) (credstore.Credential, error) {
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return credstore.Credential{}, err
+	}
+	if id == "" {
+		return credstore.Credential{}, status.Error(codes.InvalidArgument, "id is required")
+	}
+	if tenant, ok := s.store.TenantOf(id); !ok || tenant != caller.TenantID {
+		return credstore.Credential{}, status.Errorf(codes.NotFound, "unknown key id %q", id)
+	}
+	return caller, nil
+}
+
+// requestTenant is the tenant an Issue or List acts in: the caller's own
+// credential tenant (#1762). Admin credentials are tenant-scoped, so a
+// tenant_id naming any other tenant is refused (#2167); naming the
+// caller's own is accepted for older clients. A caller with no tenant
+// (empty, or the all-zeros id) cannot act in any.
+func requestTenant(caller credstore.Credential, requested string) (string, error) {
+	own := caller.TenantID
+	if own == "" || own == uuid.Nil.String() {
+		if requested == "" {
+			return "", status.Error(codes.InvalidArgument, "tenant_id is required")
+		}
+		return "", status.Error(codes.PermissionDenied, "credential is not scoped to a tenant")
+	}
+	if requested != "" && requested != own {
+		return "", status.Error(codes.PermissionDenied, "tenant_id must be the calling credential's tenant")
+	}
+	return own, nil
 }
 
 func handleFromCred(c credstore.Credential) *adminv1.ApiKeyHandle {

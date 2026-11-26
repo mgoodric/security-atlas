@@ -10,7 +10,8 @@ description: |
   documented (TLS-only for confidential, encryption-at-rest mandatory
   for restricted, etc.).
 
-scf_anchor_id: DCH-01
+scf_anchor_id: DCH-04
+scf_release: test-2026.3
 control_family: DCH
 implementation_type: manual_attested
 owner_role: ciso

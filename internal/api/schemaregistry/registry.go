@@ -86,44 +86,100 @@ func New(seed []KindVersion) *InMemory {
 func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
+		// #2831: 1.1.0 adds repository and findings (rule_id, severity,
+		// suppressed), which cc7_1 detection, pi1_2 and pi1_3 read.
+		{Kind: "sast.scan_result.v1", Version: "1.1.0"},
+		// #2973: 1.2.0 adds an optional cwe list per finding, which pi1_2
+		// and pi1_3 select by alongside rule_id.
+		{Kind: "sast.scan_result.v1", Version: "1.2.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
 		{Kind: "personnel_security.workflow.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},
 		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.0.0"},
+		// #2815: the AWS connector pushes 1.1.0 (adds kms_key_id + reason).
+		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.1.0"},
+		// #2993: whether each bucket policy denies non-TLS requests.
+		{Kind: "aws.s3.bucket_tls_enforcement.v1", Version: "1.0.0"},
 		{Kind: "github.repo_protection.v1", Version: "1.0.0"},
+		// #2925: the GitHub connector pushes v2 (stable repo_id, rulesets
+		// merged in, unread protection fields omitted, not zero).
+		{Kind: "github.repo_protection.v2", Version: "2.0.0"},
+		// #2827: 2.1.0 adds required status checks, force pushes, topics
+		// and deploys_to_production.
+		{Kind: "github.repo_protection.v2", Version: "2.1.0"},
 		{Kind: "github.audit_event.v1", Version: "1.0.0"},
 		{Kind: "github.scim_user.v1", Version: "1.0.0"},
 		{Kind: "okta.mfa_policy.v1", Version: "1.0.0"},
+		// #2901: the Okta connector pushes v2 (group ids resolved against
+		// Everyone, canonical webauthn, policy status).
+		{Kind: "okta.mfa_policy.v2", Version: "2.0.0"},
 		{Kind: "okta.app_assignment.v1", Version: "1.0.0"},
+		// #2828: 1.1.0 adds classification and whether the app sign-in
+		// policy requires MFA (sign_on_policy_id, sign_on_mfa_required,
+		// reason).
+		{Kind: "okta.app_assignment.v1", Version: "1.1.0"},
+		// #2951: 1.2.0 adds session_mfa_required + session_reason, from the
+		// global session policy; sign_on_mfa_required now decides
+		// AUTH_METHOD_CHAIN rules.
+		{Kind: "okta.app_assignment.v1", Version: "1.2.0"},
 		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
+		// #2968: the 1Password connector pushes v2, read from the documented
+		// Events and Users APIs; v1's policy fields had no documented source.
+		{Kind: "1password.org_policy.v2", Version: "2.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
+		// #2912: the osquery connector pushes 1.1.0 (adds last_seen_at +
+		// reason; unread posture booleans omitted, not false).
+		{Kind: "osquery.host_posture.v1", Version: "1.1.0"},
+		// #2921: 1.2.0 adds firewall_source + screen_lock_source, read from
+		// operator-named Fleet policies.
+		{Kind: "osquery.host_posture.v1", Version: "1.2.0"},
+		// #2826: 1.3.0 adds capacity, host_role, antimalware and EDR, and
+		// makes each *_source present only alongside its value.
+		{Kind: "osquery.host_posture.v1", Version: "1.3.0"},
+		// #2936: 1.4.0 adds antimalware_definitions_updated_at, read from an
+		// operator-named Fleet report, with antimalware_definitions_source.
+		{Kind: "osquery.host_posture.v1", Version: "1.4.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
+		// #2829: 1.1.0 adds assignee_account_id, labels, priority,
+		// severity, created_at and resolved_at.
+		{Kind: "jira.ticket_evidence.v1", Version: "1.1.0"},
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
+		// #2940: 1.1.0 declares the per-path source fields the manual
+		// connector emits (row_index, payload_b64, bucket, etag,
+		// last_modified, host, remote_path, mtime).
+		{Kind: "manual.upload.v1", Version: "1.1.0"},
+		// #1751: the MCP update_control_state override evidence, now routed
+		// through ingest.Service.Process instead of a raw ledger INSERT.
+		{Kind: "manual.control_state_override.v1", Version: "1.0.0"},
+		// #1830: incident-register postmortem evidence, written through
+		// ingest.Service.ProcessInTx at incident close.
+		{Kind: "incident.postmortem.v1", Version: "1.0.0"},
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
 		// Slice 519: Azure connector AKS managed-cluster hardening posture
-		// (cloud-config / network controls: SCF CFG-02 / NET-04). ARM Reader
+		// (cloud-config / network controls: SCF CFG-04 / NET-03). ARM Reader
 		// only — never admin kubeconfig, secrets, or workload manifests.
 		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
 		// Slice 520: Azure connector NSG / firewall security-rule posture
-		// (network-segmentation controls: SCF NET-04 / NET-01). ARM Reader only
+		// (boundary-protection and segmentation controls: SCF NET-03 / NET-06 /
+		// NET-02, #2396). ARM Reader only
 		// — RULE configuration only, never flow logs, packet captures, or
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
 		// Slice 521: Azure connector Key-Vault access-policy / RBAC posture
-		// (secrets-management / least-privilege controls: SCF IAC-21 / CRY-09).
+		// (secrets-management / least-privilege controls: SCF IAC-10 / CRY-10).
 		// ARM Reader only — management-plane CONFIGURATION + access-policy /
 		// role-assignment METADATA only, NEVER a secret/key/certificate VALUE
 		// (the connector never touches the Key-Vault data plane and is never
 		// granted any data-plane permission).
 		{Kind: "azure.keyvault_access_config.v1", Version: "1.0.0"},
 		// Slice 614: Azure connector Azure-Firewall rule-collection posture
-		// (network-segmentation / boundary-protection controls: SCF NET-04 /
-		// NET-01 — the SAME anchors as the NSG kind). ARM Reader only — RULE
+		// (boundary-protection controls: SCF NET-03 / NET-02 — a central
+		// perimeter control point, so not NET-06, #2396). ARM Reader only — RULE
 		// configuration only (network + application rule collections + the
 		// rule-collection-group priority ordering), never flow logs, packet
 		// captures, traffic contents, NAT-rule secrets, threat-intel feeds, or
@@ -133,7 +189,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},
 		// Slice 523: Kubernetes connector NetworkPolicy coverage posture
-		// (network-segmentation controls: SCF NET-04 / NET-01). Read-only
+		// (network-segmentation controls: SCF NET-06 / NET-02, #2396). Read-only
 		// (get/list on networking.k8s.io/v1 networkpolicies + core namespaces) —
 		// NetworkPolicy SPEC metadata only, NEVER pod contents, container env,
 		// secrets, the peer/CIDR/port contents of a rule block, or traffic.
@@ -144,7 +200,7 @@ func DefaultSeed() []KindVersion {
 		// enforcement plane. Both fields are optional — no version bump.
 		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
 		// Slice 524: Kubernetes connector Pod-Security-Standards admission config
-		// (configuration-baseline control: SCF CFG-02). Read-only (get/list on
+		// (configuration-baseline control: SCF CFG-04). Read-only (get/list on
 		// core namespaces — NO new ClusterRole rule; reuses the base grant). PSS
 		// LABEL configuration only (the pod-security.kubernetes.io/enforce|audit|
 		// warn levels + optional pinned versions), NEVER pod specs, container env,
@@ -158,9 +214,9 @@ func DefaultSeed() []KindVersion {
 		// a Secret VALUE (.data / .stringData, raw or base64). The collector
 		// struct physically cannot hold a value; a reflection guard + a
 		// fixture-with-real-data drop test fail the build if one is added.
-		// Anchors CRY-01 (cryptographic controls) + CRY-09 (key management); the
+		// Anchors CRY-02 (cryptographic controls) + CRY-10 (key management); the
 		// spec's candidate IAC-22 is absent from the bundled SCF catalog, so
-		// CRY-09 — the closest real anchor for secret-material lifecycle — is used
+		// CRY-10 — the closest real anchor for secret-material lifecycle — is used
 		// (decisions-log D2).
 		{Kind: "k8s.secret_inventory.v1", Version: "1.0.0"},
 		// Slice 652: Kubernetes connector admission-webhook + policy-engine evidence
@@ -172,7 +228,7 @@ func DefaultSeed() []KindVersion {
 		// (gating k8s.admission_policy.v1). CONFIG metadata only — NEVER the webhook
 		// caBundle/TLS key, the policy Rego/CEL decision-logic body, or an intercepted
 		// payload (structural reflection guard + caBundle/Rego/CEL drop tests). Both
-		// anchored to CFG-02 (the same configuration-hardening anchor the PSS admission
+		// anchored to CFG-04 (the same configuration-hardening anchor the PSS admission
 		// + webhook kinds share). Read-only get,list, no wildcard, no `secrets`.
 		{Kind: "k8s.admission_webhook.v1", Version: "1.0.0"},
 		{Kind: "k8s.admission_policy.v1", Version: "1.0.0"},
@@ -184,9 +240,8 @@ func DefaultSeed() []KindVersion {
 		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
 		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
 		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
-		// routing-target HANDLE). Anchors MON-01 + IRO-09 (the spec candidate
-		// IRO-02 is absent from the bundled SCF fixture; IRO-09 is the closest
-		// present incident anchor — decisions-log D3). Read-only (Datadog
+		// routing-target HANDLE). Anchors MON-02 + IRO-06 Incident Handling
+		// (#2413). Read-only (Datadog
 		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
 		// bounded PULL over a look-back window (NOT continuous monitoring, NOT
 		// event-driven). Firing METADATA only — never the alert message body, the
@@ -194,10 +249,14 @@ func DefaultSeed() []KindVersion {
 		// record struct has no field that can hold them; a reflection guard fails
 		// the build if one is added).
 		{Kind: "monitoring.alert_firing.v1", Version: "1.0.0"},
+		// #2935: per-host memory use, 5-minute CPU p95 and disk use from a
+		// monitoring source (the Datadog metrics query API), routed by type.
+		// a1_1 reads it alongside osquery.host_posture.v1.
+		{Kind: "monitoring.host_capacity.v1", Version: "1.0.0"},
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config
-		// lacks, so it gets its own kind: MON-01 + THR-01). Read-only
+		// lacks, so it gets its own kind: MON-02 + THR-02). Read-only
 		// (security_monitoring_rules_read); RULE configuration only — never firing
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
@@ -206,7 +265,7 @@ func DefaultSeed() []KindVersion {
 		// slice-533 CC7.3 sibling. Slice 533 reads detection-rule CONFIGURATION
 		// (CC7.2: which rules exist); this reads what FIRED and how it was TRIAGED
 		// (CC7.3 incident response: rules fired + were triaged over the audit
-		// period, when, by whom): THR-01 + IRO-09. Read-only
+		// period, when, by whom): THR-02 + IRO-06. Read-only
 		// (security_monitoring_signals_read), bounded PULL over a look-back window
 		// (NOT continuous monitoring, NOT event-driven). Triage METADATA only —
 		// never the signal message body, matched log/event samples, the
@@ -217,7 +276,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 534: Grafana connector authn/authz CONFIG evidence — the
 		// deliberate slice-488 deferred authn/authz surface (P0-488-7). Proves
 		// SSO is enforced + access is role-based (SOC 2 CC6.1/CC6.2/CC6.3): SCF
-		// IAC-06 Authenticator Management / IAC-22 Least Privilege. A SIBLING
+		// IAC-37 Multi-Factor Authentication (MFA) / IAC-22 Least Privilege. A SIBLING
 		// kind to monitoring.alert_config.v1 because this is an IAM surface, not
 		// a monitoring surface. Read-only (sso-settings + access-control reads);
 		// CONFIGURATION + COUNTS only — never a SAML private key, an OAuth client
@@ -233,8 +292,8 @@ func DefaultSeed() []KindVersion {
 		// Slice 538: PagerDuty connector postmortem / retrospective METADATA —
 		// the deliberate slice-489 over-collection follow-on (P0-489-7). Proves
 		// incidents are reviewed + corrective actions tracked (SOC 2 CC7.5; the
-		// slice-372 IR continuous-improvement loop): SCF IRO-13 Root-Cause
-		// Analysis / IRO-09 Incident Reporting. META-ONLY — existence, status,
+		// slice-372 IR continuous-improvement loop): SCF IRO-14 Root Cause
+		// Analysis (RCA) & Lessons Learned. META-ONLY — existence, status,
 		// timestamps, and the corrective-action COUNT + completed/open rollup;
 		// NEVER the postmortem narrative / timeline / root-cause prose, an
 		// action-item title, customer data, or responder PII (the struct has no
@@ -246,7 +305,7 @@ func DefaultSeed() []KindVersion {
 		// bounded look-back window — the deliberate slice-489 over-collection
 		// follow-on (P0-489-7). Proves incidents are acknowledged + resolved within
 		// target windows at the PROGRAM level (SOC 2 CC7.4): SCF IRO-02 Incident
-		// Handling / MON-02 Continuous Monitoring. AGGREGATE-ONLY — the grain is the
+		// Response Operations / MON-02 Continuous Monitoring. AGGREGATE-ONLY — the grain is the
 		// service, NEVER a named responder; the connector never decodes which
 		// individual acknowledged or resolved an incident (the record struct has no
 		// field that can hold a responder identity; a reflection guard fails the
@@ -258,12 +317,12 @@ func DefaultSeed() []KindVersion {
 		// Slice 555: MDM connectors (Jamf + Intune) — shared managed-device
 		// installed-software inventory evidence kind, the deliberate slice-490
 		// over-collection follow-on (patch-/vuln-mgmt + asset inventory:
-		// SCF VPM-04 / AST-03).
+		// SCF VPM-06 / AST-04).
 		{Kind: "endpoint.software_inventory.v1", Version: "1.0.0"},
 		// Slice 556: MDM connectors (Jamf + Intune) — shared managed-device
 		// configuration-profile detail evidence kind (which compliance/config
 		// profiles are deployed + their compliance-relevant settings), evidence
-		// for configuration-management controls (SCF CFG-02 / CFG-04). Secrets
+		// for configuration-management controls (SCF CFG-04 / CHG-03). Secrets
 		// embedded in profiles (Wi-Fi PSKs, VPN shared secrets, certificate
 		// private keys, SCEP challenges, payload blobs) are structurally redacted.
 		{Kind: "endpoint.config_profile.v1", Version: "1.0.0"},
@@ -284,7 +343,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
 		// OPENENGINE-626: security-awareness training completion evidence.
 		// Manual and CSV entries are first-class; future LMS connector imports
-		// feed the same kind. Anchors HRS-04, mapped by the bundled crosswalks
+		// feed the same kind. Anchors SAT-04, mapped by the bundled crosswalks
 		// to SOC 2 CC1.4 and ISO 27001 A.6.3.
 		{Kind: "security_awareness.training_completion.v1", Version: "1.0.0"},
 		// Slice 443: Slack connector — three high-signal evidence surfaces for
@@ -296,13 +355,13 @@ func DefaultSeed() []KindVersion {
 		// platform wire stays push (invariant #3).
 		//   - workspace_member: access evidence (who has workspace access +
 		//     admin/owner role + 2FA enforcement). Anchors IAC-01 (identity &
-		//     access mgmt) + IAC-06 (authenticator mgmt — the 2FA dimension).
+		//     access mgmt) + IAC-37 (multi-factor authentication — the 2FA dimension).
 		//   - admin_audit_event: admin-action evidence from the audit-logs API.
-		//     Anchor MON-01 (continuous monitoring — same anchor as
+		//     Anchor MON-02 (continuous monitoring — same anchor as
 		//     github.audit_event.v1).
 		//   - retention_settings: data-retention evidence (message/file
-		//     retention durations + policy flags). Anchors DCH-01 (data
-		//     protection) + DCH-03 (retention).
+		//     retention durations + policy flags). Anchor DCH-27 (media &
+		//     data retention; was DCH-04 + DCH-27 until #2387).
 		{Kind: "slack.workspace_member.v1", Version: "1.0.0"},
 		{Kind: "slack.admin_audit_event.v1", Version: "1.0.0"},
 		{Kind: "slack.retention_settings.v1", Version: "1.0.0"},
@@ -317,14 +376,14 @@ func DefaultSeed() []KindVersion {
 		// on an honest interval; platform wire stays push (invariant #3).
 		//   - iam_policy_binding: access evidence (one record per project-IAM
 		//     (role, member) binding + service-account inventory facts).
-		//     Anchors IAC-21 (Privileged Account Management — the "who has what
-		//     role" surface) + IAC-15 (Account Review — feeds access review).
+		//     Anchors IAC-10 (Privileged Account Management — the "who has what
+		//     role" surface) + IAC-12 (Account Review — feeds access review).
 		//     The spec candidate IAC-22 (Least Privilege) is ABSENT from the
-		//     bundled SCF catalog fixture, so IAC-21 — the closest present
+		//     bundled SCF catalog fixture, so IAC-10 — the closest present
 		//     privileged-access anchor — is the primary (decisions-log D3).
 		//   - storage_bucket_config: bucket hardening evidence (encryption,
 		//     public-access prevention, uniform access, versioning, retention).
-		//     Anchors CRY-04 (Encryption At Rest) + NET-04 (Boundary Protection
+		//     Anchors CRY-07 (Encrypting Data At Rest) + NET-03 (Boundary Protection
 		//     — the public-access dimension); the SAME pair the analogous
 		//     azure.storage_account_config.v1 kind uses.
 		{Kind: "gcp.iam_policy_binding.v1", Version: "1.0.0"},

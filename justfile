@@ -12,9 +12,11 @@ list:
 # Build all components (Go + frontend)
 build: build-go build-frontend
 
-# Build Go binaries (atlas, atlas-cli, atlas-oscal)
+# Build Go binaries (atlas, atlas-cli, atlas-oscal). CGO_ENABLED=0 matches the
+# release and image builds (.goreleaser.yaml, deploy/docker): nothing we ship
+# needs C, and it keeps a broken system C toolchain from blocking the build.
 build-go:
-    go build ./...
+    CGO_ENABLED=0 go build ./...
 
 # Build frontend workspaces (web, sdk/typescript)
 build-frontend:
@@ -36,7 +38,7 @@ test-frontend:
     cd web && npm test --if-present
 
 # Run all linters (Go + frontend + Python)
-lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
+lint: lint-go lint-errleak lint-duphelper lint-soc2-coverage lint-frontend lint-python
 
 # Pinned golangci-lint version. Mirrors the `version:` pin on the
 # golangci-lint-action in .github/workflows/ci.yml (the required `Go · lint`
@@ -45,10 +47,10 @@ lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 # no review (slice 416; same class as slice 090's govulncheck@latest). Bump
 # this AND the ci.yml pin together in a dedicated `chore(golangci):` slice so
 # the new analyzer set lands as an auditable diff (mirrors SQLC_VERSION).
-GOLANGCI_VERSION := "v2.12.2"
+GOLANGCI_VERSION := "v2.15.0"
 
 # Verify the installed golangci-lint matches the pin. `golangci-lint version`
-# prints e.g. "golangci-lint has version 2.12.2 built with ..." — extract the
+# prints e.g. "golangci-lint has version 2.15.0 built with ..." — extract the
 # bare X.Y.Z and compare against the pin (sans leading `v`).
 golangci-version-check:
     @installed=$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
@@ -77,6 +79,10 @@ lint-errleak:
 lint-duphelper:
     go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
+# #2426 — the SOC 2 stock control kit covers >= 80% of the crosswalked TSC codes.
+lint-soc2-coverage:
+    go run ./cmd/scripts/coverage-check
+
 # Lint frontend (eslint)
 lint-frontend:
     cd web && npm run lint --if-present
@@ -93,9 +99,14 @@ fmt-go:
     gofmt -w .
     goimports -w -local "$(go list -m)" .
 
-# Format frontend (prettier)
+# Format frontend (prettier). Runs the pre-commit prettier hook, so web/ is
+# formatted by the one pinned prettier (.pre-commit-config.yaml rev). web/
+# pins no prettier of its own, and an ad-hoc `npx prettier` is the latest
+# release, which lays out unions and empty for-clauses differently and
+# would undo the hook's output (#2583). pre-commit exits 1 when it rewrites
+# files, so a second run decides: 0 once the tree is formatted.
 fmt-frontend:
-    cd web && npm run fmt --if-present
+    pre-commit run prettier --files $(git ls-files web) >/dev/null || pre-commit run prettier --files $(git ls-files web)
 
 # Format Python (ruff format)
 fmt-python:
@@ -149,21 +160,20 @@ tidy:
 # Integration tests use it.
 # ATLAS_DEV_URL is a separate ephemeral Postgres for `atlas migrate diff`.
 
-# Apply bootstrap roles, then the versioned SQL migrations in order.
-# Plain psql for slice 002 — one migration doesn't justify a versioning tool.
-# A real migration runner lands when slice N adds the second migration.
+# Apply bootstrap roles, then every forward SQL migration not yet recorded in
+# the `schema_migrations` ledger. This is the same script the compose
+# `atlas-migrate` service runs, so it is safe to re-run: files already in the
+# ledger are skipped, and a failing file exits non-zero with no ledger row.
+# A database migrated before this recipe used the ledger has no
+# `schema_migrations` rows; drop and recreate it (`just db-down && just db-up`).
 migrate-up:
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-    for f in migrations/sql/*.sql; do \
-        case "$f" in *.down.sql) ;; *) \
-            echo "applying $f"; \
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; \
-        ;; esac; \
-    done
+    REPO_ROOT="$PWD" sh deploy/docker/bootstrap/migrate.sh
 
-# Roll back: apply the latest .down.sql in reverse-timestamp order.
-migrate-down:
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
+# There is no `migrate-down`. The ledger is forward-only (as is the compose
+# `atlas-migrate` service), and the `.down.sql` files do not cover every
+# forward migration, so a rollback could not keep `schema_migrations` in step
+# with the schema. For a clean local reset, recreate the database:
+# `just db-down && just db-up && just migrate-up`.
 
 # Start a local Postgres 16 in Docker for development
 db-up:
@@ -176,6 +186,21 @@ db-up:
 # Tear down the local Postgres
 db-down:
     docker rm -f security-atlas-pg
+
+# No Docker; needs initdb/pg_ctl on PATH. Safe beside other worktrees'
+# clusters: it refuses to run SQL against a server whose data_directory is
+# not its own (#2033). Load the URLs with: eval "$(scripts/scratch-pg.sh env)"
+# Per-worktree scratch Postgres on a free port, migrated
+scratch-pg-up:
+    bash scripts/scratch-pg.sh up
+
+# Stop and delete this worktree's scratch cluster
+scratch-pg-down:
+    bash scripts/scratch-pg.sh down
+
+# Self-test: scratch-pg.sh refuses a foreign cluster and drops nothing
+scratch-pg-test:
+    bash scripts/scratch-pg_test.sh
 
 # Pinned sqlc version. The committed `internal/db/dbx/*.go` files were
 # emitted by sqlc v1.31.1; running `sqlc generate` with any other version
@@ -226,6 +251,21 @@ openapi-generate:
 openapi-drift-check:
     bash scripts/check-openapi-drift.sh
 
+# Export every declared lifecycle transition table (#2146) as JSON, one
+# document per lifecycle, to docs/lifecycles/. The in-app help's diagram
+# check (#2148) reads them. cmd/atlas-lifecycles' TestExport_MatchesCommitted
+# fails `just test` when the committed documents drift from the tables.
+lifecycles-export:
+    go run ./cmd/atlas-lifecycles --out docs/lifecycles
+
+# Pre-render the lifecycle diagrams in web/help/modules/*.md to light and
+# dark SVGs under web/public/help/diagrams/ (#2148), with the pinned Mermaid
+# devDependency in the Playwright Chromium (`npx playwright install
+# chromium` once). Commit the SVGs. web/lib/help/diagrams.test.ts fails
+# `just test` when one is stale or draws something docs/lifecycles/ does not.
+help-diagrams:
+    cd web && node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON scripts/render-help-diagrams.mjs
+
 # Reproduce the config-reference drift guard locally. Slice 430 — exits
 # non-zero when docs-site/docs/configuration.md and
 # deploy/docker/.env.example disagree (a key in the template missing from
@@ -257,6 +297,13 @@ audit-integration-enrolment:
 check-audit-log-subject-module:
     bash scripts/check-audit-log-subject-module.sh
 
+# Assert every integration test that builds api.New attaches the authz
+# engine (liveroletest.Attach), opts out with a reason, or is on the
+# shrinking backlog in scripts/harness-engine-backlog.txt. #3016.
+# Self-test: scripts/check-harness-engine_test.sh
+check-harness-engine:
+    bash scripts/check-harness-engine.sh
+
 # Assert the sharded integration matrix (scripts/integration-shards.txt) is
 # COMPLETE + DISJOINT + correctly pinned: the union of all legs == the
 # integration-tagged package set EXACTLY (no package dropped — T-1), no
@@ -270,6 +317,28 @@ check-integration-shard-coverage:
 # QA-audit finding Q-5; slice 353. Self-test: scripts/check-coverage-excludes_test.sh
 check-coverage-excludes:
     bash scripts/check-coverage-excludes.sh
+
+# Render the Helm ConfigMap under several value sets and assert the artifact
+# store keys (public endpoint, path-style). Needs helm. #1939.
+test-helm-artifacts:
+    bash scripts/test-helm-artifacts.sh
+
+# Refuse a migration whose timestamp prefix another migration already uses;
+# the prefixes that collided before the check are grandfathered. #1880.
+# Self-test: scripts/check-migration-timestamps_test.sh
+check-migration-timestamps:
+    bash scripts/check-migration-timestamps.sh
+
+# Fail when a ci.yml job with no `if:` is missing from merge-gate's needs
+# (#1887). Self-test: scripts/check-merge-gate-needs_test.sh
+check-merge-gate-needs:
+    bash scripts/check-merge-gate-needs.sh
+
+# Assert every path-filtered job in ci.yml has a stub twin with an identical
+# `name:` and the complementary `if:` on the same changes output (code, go,
+# web). #2099. Self-test: scripts/check-stub-twins_test.sh
+check-stub-twins:
+    bash scripts/check-stub-twins.sh
 
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
@@ -299,15 +368,15 @@ import-soc2 path:
 
 # Build all connector binaries
 connector-build:
-    go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
+    CGO_ENABLED=0 go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
 
 # Build the Slack connector binary (slice 443).
 connector-build-slack:
-    go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
+    CGO_ENABLED=0 go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
 
 # Build the GCP connector binary (slice 442).
 connector-build-gcp:
-    go build -o ./bin/gcp-connector ./connectors/gcp/cmd/gcp-connector
+    CGO_ENABLED=0 go build -o ./bin/gcp-connector ./connectors/gcp/cmd/gcp-connector
 
 # Trigger a connector run. Args: <vendor> <kind>. Required env vars:
 #   SECURITY_ATLAS_ENDPOINT  platform gRPC endpoint
@@ -389,7 +458,7 @@ install-script-test:
 # Print the version embedded in a locally-built atlas-cli binary.
 # Useful for verifying ldflags wiring before cutting a tag.
 print-version version:
-    go build -ldflags "-X main.version={{version}}" -o /tmp/security-atlas-cli ./cmd/atlas-cli
+    CGO_ENABLED=0 go build -ldflags "-X main.version={{version}}" -o /tmp/security-atlas-cli ./cmd/atlas-cli
     /tmp/security-atlas-cli --version
     /tmp/security-atlas-cli version
     rm /tmp/security-atlas-cli
@@ -403,7 +472,7 @@ print-version version:
 #
 # Before the first `self-host-up`, copy the env template and edit it:
 #   cp deploy/docker/.env.example deploy/docker/.env
-# See docs/SELF_HOSTING.md and docs/getting-started/first-evidence.md.
+# See docs/SELF_HOSTING.md and docs-site/docs/getting-started.md.
 
 _self_host_compose := "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
 

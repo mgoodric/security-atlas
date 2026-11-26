@@ -1,6 +1,6 @@
 // Slice 441 — pure-Go unit tests for the AI suggest/approve handler GUARD
 // branches: the role gate, the missing-tenant / missing-credential 401, the
-// nil-service 503, and the bad-uuid 400. These reach NO DB (the guards fire
+// nil-service 409, and the bad-uuid 400. These reach NO DB (the guards fire
 // before any store call), so they run without Postgres — the slice-353 Q-2
 // fast-loop convention. The happy-path DB behavior is proven in
 // internal/qaisuggest/integration_test.go (RLS + cross-tenant + approval guard).
@@ -83,13 +83,13 @@ func TestAISuggest_RoleGate(t *testing.T) {
 
 func TestAISuggest_NilServiceUnavailable(t *testing.T) {
 	t.Parallel()
-	// Service nil but caller is authorized -> 503, not a panic.
+	// Service nil but caller is authorized -> 409, not a panic.
 	h := New(nil) // New leaves suggest nil
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	w := route(h.AISuggest, reqWith(t, "POST", "/x", testTenant, &cred),
 		map[string]string{"qid": "22222222-2222-2222-2222-222222222222"})
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("nil-service: got %d, want 503", w.Code)
+	if w.Code != http.StatusConflict {
+		t.Errorf("nil-service: got %d, want 409", w.Code)
 	}
 }
 
@@ -107,9 +107,9 @@ func TestAIApprove_GuardBranches(t *testing.T) {
 	if w := route(h.AIApprove, reqWith(t, "POST", "/x", testTenant, &viewer), nil); w.Code != http.StatusForbidden {
 		t.Errorf("viewer approve: got %d, want 403", w.Code)
 	}
-	// Authorized but nil service -> 503.
-	if w := route(h.AIApprove, reqWith(t, "POST", "/x", testTenant, &cred), nil); w.Code != http.StatusServiceUnavailable {
-		t.Errorf("nil-service approve: got %d, want 503", w.Code)
+	// Authorized but nil service -> 409.
+	if w := route(h.AIApprove, reqWith(t, "POST", "/x", testTenant, &cred), nil); w.Code != http.StatusConflict {
+		t.Errorf("nil-service approve: got %d, want 409", w.Code)
 	}
 }
 
@@ -118,17 +118,17 @@ func TestAISuggest_BadUUID(t *testing.T) {
 	// With a live (non-nil) service we still reject a bad qid at the parse
 	// gate before any store call. We use a zero-value *qaisuggest.Service
 	// wrapper is not possible (unexported fields), so assert the bad-uuid
-	// branch via the nil-service handler returning 503 only AFTER a valid
+	// branch via the nil-service handler returning 409 only AFTER a valid
 	// parse — here qid is bad, so the handler must 400 before the nil check.
 	h := New(nil)
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	w := route(h.AISuggest, reqWith(t, "POST", "/x", testTenant, &cred),
 		map[string]string{"qid": "not-a-uuid"})
-	// Note: the nil-service 503 check runs BEFORE the uuid parse in the
-	// handler, so a nil-service deployment returns 503 even for a bad uuid.
+	// Note: the nil-service 409 check runs BEFORE the uuid parse in the
+	// handler, so a nil-service deployment returns 409 even for a bad uuid.
 	// That is acceptable (the route is disabled). Assert it is not a panic /
 	// 500.
-	if w.Code != http.StatusServiceUnavailable && w.Code != http.StatusBadRequest {
-		t.Errorf("bad-uuid: got %d, want 503 or 400", w.Code)
+	if w.Code != http.StatusConflict && w.Code != http.StatusBadRequest {
+		t.Errorf("bad-uuid: got %d, want 409 or 400", w.Code)
 	}
 }

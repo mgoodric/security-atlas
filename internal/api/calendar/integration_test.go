@@ -38,7 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -124,10 +124,10 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO exceptions (
 			id, tenant_id, control_id, scope_cell_predicate,
-			justification, requested_by, requested_at, expires_at, status
+			justification, requested_by, requested_at, expires_at, activated_at, status
 		)
 		VALUES ($1, $2, $3, '{}'::jsonb,
-		        'test exception', 'tester', now(), $4, 'active')
+		        'test exception', 'tester', now(), $4, now(), 'active')
 	`, uuid.New(), tenant, ctrlID, expiresAt); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
@@ -201,15 +201,22 @@ type testEnv struct {
 	// token returns 403.
 	calendarToken string
 	tenant        string
+	srv           *api.Server
 }
 
 func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles) for the
-	// Authorization-header gated routes (/v1/calendar, /v1/calendar/subscription).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	liveroletest.Attach(t, srv, app)
+	// #3016: a seeded grc_engineer with a live grant, on the real engine,
+	// for the Authorization-header gated routes (/v1/calendar,
+	// /v1/calendar/subscription). The engine filters each source by the
+	// caller's reads (#2130, #2232), and these tests list every source, so
+	// the caller reads them all. This harness used a control_owner claim
+	// with no engine, which saw risks, vendors and exceptions that a live
+	// control_owner does not (access_integration_test.go).
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	// Slice 091 path: a separate credstore opaque bearer drives the
 	// `?token=` URL parameter on /v1/calendar.ics. The owner credential
 	// has no calendar scope — the scope-mismatch test relies on that.
@@ -223,7 +230,7 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, bearer: bearer, calendarToken: calendarToken, tenant: tenant}
+	return testEnv{server: ts, bearer: bearer, calendarToken: calendarToken, tenant: tenant, srv: srv}
 }
 
 func get(t *testing.T, env testEnv, path string) (*http.Response, []byte) {
@@ -312,7 +319,7 @@ func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
 
-	ctrl := seedControlWithSCF(t, admin, tenant, "AAA-01", "Access Control Policy")
+	ctrl := seedControlWithSCF(t, admin, tenant, "MON-04", "Access Control Policy")
 	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
 
 	env := testServer(t, app, tenant)
@@ -327,7 +334,7 @@ func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 	}
 	title := events[0].(map[string]any)["title"].(string)
 
-	const wantTitle = "Exception on AAA-01 — Access Control Policy"
+	const wantTitle = "Exception on MON-04 — Access Control Policy"
 	if title != wantTitle {
 		t.Errorf("exception title = %q; want %q", title, wantTitle)
 	}
@@ -690,5 +697,21 @@ func TestCalendarICS_RejectsNonCalendarScopeToken(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("status=%d want=403 (token wrong scope)", resp.StatusCode)
+	}
+}
+
+// #3016: the harness runs the real engine. calendar.rego admits every
+// role, so the engine's refusal is for a person who holds none (every
+// grant revoked): its own "forbidden" body, which no handler returns.
+func TestCalendar_UngrantedPersonRefusedByAuthz(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	env := testServer(t, app, tenant)
+	env.bearer = liveroletest.Bearer(t, env.srv, tenant)
+	resp, body := get(t, env, "/v1/calendar")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"error":"forbidden"`) {
+		t.Fatalf("ungranted GET /v1/calendar: status %d body=%s; want 403 forbidden", resp.StatusCode, body)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,7 +43,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/identity"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -90,6 +94,10 @@ type UnifiedEntry struct {
 	RowID         uuid.UUID       `json:"row_id"`
 	SubjectModule string          `json:"subject_module"`
 	PayloadJSON   json.RawMessage `json:"payload_json"`
+	// ModuleSwitchedOff is set, on GET /v1/admin/audit-log/unified only,
+	// when the module that owns the row is switched off for the tenant
+	// now. The row is kept, not hidden (#2590).
+	ModuleSwitchedOff bool `json:"module_switched_off,omitempty"`
 }
 
 // UnifiedListResponse is the GET /v1/admin/audit-log/unified shape.
@@ -161,7 +169,8 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Slice 270: the slice 124 admin endpoint is admit-gated to
-	// {admin, auditor, grc_engineer}. Every caller that reaches this
+	// {admin, grc_engineer} by OPA (#2378) and to {admin, auditor,
+	// grc_engineer} by the probe below. Every caller that reaches this
 	// point is privileged; the SQL-layer row-visibility predicate
 	// short-circuits and behavior matches pre-slice-270.
 	params.queryParams.CallerIsPrivileged = true
@@ -170,7 +179,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// IsAdmin is on the credential; the other two require a user_roles
 	// lookup. The upstream slice-035 OPA middleware is the canonical
 	// gate; this is the second leg.
-	allowed, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
+	allowed, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "role probe", err)
 		return
@@ -185,26 +194,40 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// nine audit-log tables filters reads; the me_audit_log INSERT
 	// policy filters the audit write.
 	var (
-		entries    []unifiedlog.Entry
-		nextCursor *unifiedlog.Cursor
+		entries     []unifiedlog.Entry
+		switchedOff []bool
+		nextCursor  *unifiedlog.Cursor
 	)
+	gate := h.newPayloadGate(r, userIdentifier)
+	// #2590: rows from switched-off modules are marked, not hidden. The
+	// switches are read strictly before the transaction, so a flag-store
+	// error fails the request rather than leaving rows unmarked.
+	switches, err := h.views.Switches(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "audit log module switches", err)
+		return
+	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
 		if qErr != nil {
 			return qErr
 		}
+		// Marked before the payload gate, which can clear the request
+		// path a decision row is placed by.
+		switchedOff = markSwitchedOff(got, switches)
+		gate.apply(got)
 		// Apply the page-size cap + cursor derivation here. The aggregator
 		// was asked for (pageSize + 1) rows; if it returned more than
 		// pageSize, the (pageSize+1)-th row signals "more available" and
 		// the in-page cursor anchor is entries[pageSize-1].
-		if len(got) > unifiedPageSize {
-			anchor := got[unifiedPageSize-1]
+		if len(got) > params.pageSize {
+			anchor := got[params.pageSize-1]
 			nextCursor = &unifiedlog.Cursor{
 				OccurredAt: anchor.OccurredAt,
 				Kind:       anchor.Kind,
 				RowID:      anchor.RowID,
 			}
-			got = got[:unifiedPageSize]
+			got = got[:params.pageSize]
 		}
 		entries = got
 
@@ -263,19 +286,20 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]UnifiedEntry, 0, len(entries))
-	for _, e := range entries {
+	for i, e := range entries {
 		out = append(out, UnifiedEntry{
-			OccurredAt:    e.OccurredAt,
-			ActorID:       e.ActorID,
-			ActorName:     e.ActorName,
-			TenantID:      e.TenantID,
-			Kind:          string(e.Kind),
-			TargetType:    e.TargetType,
-			TargetID:      e.TargetID,
-			Action:        e.Action,
-			RowID:         e.RowID,
-			SubjectModule: e.SubjectModule,
-			PayloadJSON:   e.PayloadJSON,
+			OccurredAt:        e.OccurredAt,
+			ActorID:           e.ActorID,
+			ActorName:         e.ActorName,
+			TenantID:          e.TenantID,
+			Kind:              string(e.Kind),
+			TargetType:        e.TargetType,
+			TargetID:          e.TargetID,
+			Action:            e.Action,
+			RowID:             e.RowID,
+			SubjectModule:     e.SubjectModule,
+			PayloadJSON:       e.PayloadJSON,
+			ModuleSwitchedOff: switchedOff[i],
 		})
 	}
 	httpresp.WriteJSON(w, http.StatusOK, UnifiedListResponse{
@@ -285,10 +309,13 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// callerAllowedUnified is the defense-in-depth role probe. IsAdmin short-circuits
-// (admin always allowed). Otherwise we probe user_roles for either auditor or
+// callerAllowedUnified is the defense-in-depth role probe. isAdmin short-circuits
+// (admin always allowed); callers pass authz.IsTenantAdmin, so a tenant admin
+// by its live roles reads its own tenant's log (#2503 D5). Otherwise we probe user_roles for either auditor or
 // grc_engineer membership under the caller's tenant context. The query goes
-// through ApplyTenant so RLS on user_roles enforces tenant scoping.
+// through ApplyTenant so RLS on user_roles enforces tenant scoping. userID is
+// the raw credential principal; identity.RolesKey reads a "user:<uuid>" JWT
+// subject as the bare uuid role assignment stores (#2239).
 func (h *Handler) callerAllowedUnified(ctx context.Context, tenantID uuid.UUID, userID string, isAdmin bool) (bool, error) {
 	if isAdmin {
 		return true, nil
@@ -300,7 +327,7 @@ func (h *Handler) callerAllowedUnified(ctx context.Context, tenantID uuid.UUID, 
 	err := h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		got, qErr := q.HasUnifiedAuditLogRole(ctx, dbx.HasUnifiedAuditLogRoleParams{
 			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
-			UserID:   userID,
+			UserID:   identity.RolesKey(userID),
 		})
 		if qErr != nil {
 			return qErr
@@ -328,6 +355,10 @@ type parsedUnifiedParams struct {
 	// here (rather than per-handler) keeps the query-string contract in one
 	// place.
 	includeReads bool
+	// pageSize is the rows-per-page cap: `?limit=` when given (1 to
+	// unifiedPageSize), else unifiedPageSize. The dashboard's Recent
+	// activity asks for 10 (#2135).
+	pageSize int
 }
 
 func (p parsedUnifiedParams) toAuditShape() metaAuditParams {
@@ -408,10 +439,20 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 	// this; the admin handler ignores it (always shows every row).
 	includeReads := q.Get("include_reads") == "true"
 
+	// #2135: `?limit=` narrows the page; absent, a page is the cap.
+	pageSize := unifiedPageSize
+	if raw := q.Get("limit"); raw != "" {
+		n, perr := strconv.Atoi(raw)
+		if perr != nil || n < 1 || n > unifiedPageSize {
+			return parsedUnifiedParams{}, fmt.Errorf("limit must be between 1 and %d", unifiedPageSize)
+		}
+		pageSize = n
+	}
+
 	// The aggregator returns up to Limit rows; the handler asks for one
 	// more than the page size so it can detect "more available" without
 	// an extra round-trip.
-	params.Limit = unifiedPageSize + 1
+	params.Limit = pageSize + 1
 
 	return parsedUnifiedParams{
 		queryParams:  params,
@@ -419,6 +460,7 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 		toRaw:        toRaw,
 		cursorRaw:    cursorRaw,
 		includeReads: includeReads,
+		pageSize:     pageSize,
 	}, nil
 }
 

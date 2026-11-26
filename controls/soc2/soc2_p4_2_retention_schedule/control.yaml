@@ -1,0 +1,88 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p4_2_retention_schedule
+title: "Personal information retention periods are configured and enforced"
+description: |
+  Personal information is kept only as long as its purpose or a legal duty
+  needs it (TSC P4.2), and is then disposed of (TSC P4.3). Each data store
+  holding personal information has a retention period in the retention
+  schedule. Where a connector reports retention settings (for example
+  Slack workspace retention) the query checks them; the owner uploads the
+  retention-schedule review quarterly for the remaining stores.
+
+scf_anchor_id: PRI-30
+scf_release: test-2026.3
+control_family: PRI
+implementation_type: semi_automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: slack_retention_configured
+    language: rego
+    evidence_kind: slack.retention_settings.v1
+    description: "Workspace message and file retention is set to a finite period"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+  - id: retention_schedule_review_within_quarter
+    language: rego
+    evidence_kind: manual.upload.v1
+    description: "A retention-schedule review upload exists within the last 120 days (quarterly plus 30-day grace)"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+
+manual_evidence_schema:
+  type: object
+  required: [reviewed_at, reviewer, data_stores]
+  properties:
+    reviewed_at: { type: string, format: date-time }
+    reviewer: { type: string, minLength: 1 }
+    data_stores:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [store_name, retention_days, disposal_method]
+        properties:
+          store_name: { type: string }
+          retention_days: { type: integer, minimum: 1 }
+          disposal_method: { type: string }
+          last_purge_at: { type: string, format: date }

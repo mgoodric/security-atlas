@@ -18,17 +18,20 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(id)}/export-pdf`,
     {
@@ -42,6 +45,20 @@ export async function POST(
   // application/pdf — the upstream sets the right header.
   const contentType =
     upstream.headers.get("Content-Type") ?? "application/octet-stream";
+  if (!upstream.ok) {
+    // A busy or timed-out render is a 503 with Retry-After (#2786); pass
+    // the hint through.
+    const headers: Record<string, string> = { "Content-Type": contentType };
+    const ra = upstream.headers.get("Retry-After");
+    if (ra) headers["Retry-After"] = ra;
+    return new NextResponse(
+      upstreamBody(upstream.status, await upstream.text()),
+      {
+        status: upstream.status,
+        headers,
+      },
+    );
+  }
   const buf = await upstream.arrayBuffer();
   return new NextResponse(buf, {
     status: upstream.status,

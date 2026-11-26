@@ -32,6 +32,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Timestamp } from "@/components/ui/timestamp";
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type { Decision } from "@/lib/api/risk-hierarchy";
 import { cn } from "@/lib/utils";
@@ -203,12 +204,6 @@ function statusVariant(
   }
 }
 
-function formatDate(iso: string | undefined): string {
-  if (!iso) return "—";
-  // Render the date portion only; the timeline is day-granular.
-  return iso.slice(0, 10);
-}
-
 export function DecisionTimelinePanel({
   decisions,
   overdueIds,
@@ -359,8 +354,9 @@ export function DecisionTimelinePanel({
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {d.decision_maker} · decided{" "}
-                          {formatDate(d.decided_at)} · revisit{" "}
-                          {formatDate(d.revisit_by)}
+                          <Timestamp value={d.decided_at} style="date" /> ·
+                          revisit{" "}
+                          <Timestamp value={d.revisit_by} style="date" />
                         </p>
                         {(d.constraints ?? []).length > 0 ? (
                           <div className="mt-1 flex flex-wrap gap-1">

@@ -1,0 +1,508 @@
+# jira.ticket_evidence.v1 records, shaped as the Jira connector emits them
+# at schema 1.1.0 (connectors/jira/cmd/atlas-jira/cmd_run.go
+# buildJiraTicketRecord, #2829): ticket_key and status always; labels,
+# assignee_account_id, resolution and resolved_at only when Jira has a
+# value. observed_at is the connector run. `result` is the connector's
+# status verdict, which the query ignores.
+#
+# Every case pins evaluated_at 2026-11-21T12:00:00Z; 8,760 hours before it
+# is 2025-11-21T12:00:00Z. Cases without a training_completion record
+# leave that query inconclusive, so the control's state is the ticket
+# query's.
+cases:
+  - name: every-assignee-current-passes
+    description: one assignee at the inclusive 365-day boundary; an unlabelled open ticket is left out
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-1,
+            status: Done,
+            resolution: Done,
+            assignee: Mia,
+            assignee_account_id: acct-mia,
+            labels: [security-training, fy26],
+            resolved_at: "2026-03-01T10:00:00Z",
+          }
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-2,
+            status: Done,
+            resolution: Done,
+            assignee: Emma,
+            assignee_account_id: acct-emma,
+            labels: [security-training],
+            resolved_at: "2025-11-21T12:00:00Z",
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: CR-9,
+            status: In Progress,
+            assignee_account_id: acct-noah,
+            labels: [change],
+          }
+
+  - name: resolved-just-over-365d-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-2,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-emma,
+            labels: [security-training],
+            resolved_at: "2025-11-21T11:59:59Z",
+          }
+
+  - name: open-ticket-past-30-days-fails
+    description: the assignee has not completed training and the grace is over
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-3,
+            status: To Do,
+            assignee_account_id: acct-noah,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: resolved-other-than-done-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-3,
+            status: Closed,
+            resolution: "Won't Do",
+            assignee_account_id: acct-noah,
+            labels: [security-training],
+            resolved_at: "2026-11-01T00:00:00Z",
+          }
+
+  - name: one-assignee-without-current-training-fails-the-control
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-1,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-mia,
+            labels: [security-training],
+            resolved_at: "2026-03-01T10:00:00Z",
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-4,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-ava,
+            labels: [security-training],
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-3,
+            status: To Do,
+            assignee_account_id: acct-noah,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: newer-current-ticket-covers-a-stale-one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-10,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-mia,
+            labels: [security-training],
+            resolved_at: "2025-06-01T00:00:00Z",
+          }
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-11,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-mia,
+            labels: [security-training],
+            resolved_at: "2026-06-01T00:00:00Z",
+          }
+
+  - name: open-next-cycle-ticket-does-not-undo-a-current-one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-11,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-mia,
+            labels: [security-training],
+            resolved_at: "2026-01-15T00:00:00Z",
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-20,
+            status: To Do,
+            assignee_account_id: acct-mia,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: done-without-resolved-at-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-4,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-ava,
+            labels: [security-training],
+          }
+
+  - name: jira-offset-without-colon-is-inconclusive
+    description: the connector normalises Jira's +0000 offsets; an un-normalised one is not RFC 3339
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-4,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-ava,
+            labels: [security-training],
+            resolved_at: "2026-11-01T00:00:00.000+0000",
+          }
+
+  - name: resolved-more-than-an-hour-ahead-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-4,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-ava,
+            labels: [security-training],
+            resolved_at: "2026-11-21T13:00:01Z",
+          }
+
+  - name: resolved-within-the-hour-ahead-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-4,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-ava,
+            labels: [security-training],
+            resolved_at: "2026-11-21T13:00:00Z",
+          }
+
+  - name: unassigned-training-ticket-is-left-out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          { ticket_key: SEC-5, status: To Do, labels: [security-training] }
+
+  - name: unlabelled-ticket-is-left-out
+    description: vulnerability and change tickets routed to this control are not training tickets
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: VULN-1,
+            status: In Progress,
+            assignee_account_id: acct-noah,
+            labels: [vulnerability],
+            severity: critical,
+            created_at: "2026-01-01T00:00:00Z",
+          }
+
+  - name: v100-record-is-left-out
+    description: a record from a connector older than #2829 has no labels and no account id
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-1,
+            project_key: SEC,
+            status: Done,
+            resolution: Done,
+            assignee: Mia,
+          }
+
+  - name: keyless-record-is-left-out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            status: To Do,
+            assignee_account_id: acct-noah,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: latest-record-decides-reopened-ticket-fails
+    description: Done yesterday, reopened today
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+            resolved_at: "2026-11-19T00:00:00Z",
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: Reopened,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: latest-record-decides-resolved-ticket-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: In Progress,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+          }
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+            resolved_at: "2026-11-21T05:00:00Z",
+          }
+
+  - name: tie-on-observed-at-worse-record-wins
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: Done,
+            resolution: Done,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+            resolved_at: "2026-11-19T00:00:00Z",
+          }
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-6,
+            status: Reopened,
+            assignee_account_id: acct-liam,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+
+  - name: failing-ticket-query-fails-despite-current-completion
+    description: the engine's combination - any fail fails the control
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-3,
+            status: To Do,
+            assignee_account_id: acct-noah,
+            labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
+          }
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+
+  - name: open-ticket-just-under-30-days-passes
+    description: a new assignee is in grace while the ticket is younger than 720 hours
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-10-22T12:00:01Z",
+          }
+
+  - name: open-ticket-at-30-days-fails
+    description: the grace bound is exclusive; a ticket exactly 720 hours old is past it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-10-22T12:00:00Z",
+          }
+
+  - name: open-ticket-without-created-at-is-inconclusive
+    description: the grace cannot be measured
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+          }
+
+  - name: open-ticket-created-more-than-an-hour-ahead-is-inconclusive
+    description: an unreadable created_at, not a ticket in grace
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-11-21T13:00:01Z",
+          }

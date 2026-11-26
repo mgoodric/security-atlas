@@ -12,6 +12,8 @@ import (
 
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -27,16 +29,26 @@ const defaultRemediationWindow = 90 * 24 * time.Hour
 // between the database layer and the bridge layer: the sspInput /
 // assessmentInput / poamInput methods convert it to proto messages.
 type aggregate struct {
-	period       dbx.AuditPeriod
-	frozenAt     time.Time
-	scopeCells   []dbx.ScopeCell
-	controls     []dbx.ListActiveControlsWithDescriptionRow
-	policies     []dbx.Policy
-	populations  []dbx.ListPopulationsForPeriodRow
-	walkthroughs []dbx.Walkthrough
-	auditNotes   []dbx.ListAuditNotesForPeriodRow
-	failingEvals []dbx.ListFailingEvaluationsAsOfRow
-	in           ExportInput
+	period   dbx.AuditPeriod
+	frozenAt time.Time
+	// freezeRevision is the period's latest freeze revision (1 = the
+	// original freeze) and revisionHash its hash; amendReason is the
+	// admin's reason when the revision is an import amendment (#1742).
+	freezeRevision int
+	revisionHash   []byte
+	amendReason    string
+	scopeCells     []dbx.ScopeCell
+	controls       []dbx.ListActiveControlsWithDescriptionRow
+	policies       []dbx.Policy
+	populations    []dbx.ListPopulationsForPeriodRow
+	walkthroughs   []dbx.Walkthrough
+	auditNotes     []dbx.ListAuditNotesForPeriodRow
+	failingEvals   []dbx.ListFailingEvaluationsAsOfRow
+	// exceptedEvals and activatedExceptions feed the AR's risk-accepted
+	// observations (#2269); see excepted.go.
+	exceptedEvals       []dbx.ListExceptedEvaluationsAsOfRow
+	activatedExceptions []dbx.ListActivatedExceptionsForExportRow
+	in                  ExportInput
 	// controlOwner maps control_id -> owner_role, used to populate POA&M
 	// item owners (decision D3).
 	controlOwner map[uuid.UUID]string
@@ -51,12 +63,22 @@ type aggregate struct {
 	// and nothing here writes control_evaluations (the read is pure SELECT over
 	// imported_component_claims).
 	acceptedVendorClaims []dbx.ListAcceptedVendorClaimsForExportRow
+	// excludedRequirements are the requirements of the period's framework
+	// version excluded in the framework-scope revision in force at frozen_at
+	// (#1792). Rendered in the SSP as not-applicable entries; they are scope
+	// decisions and never contribute to control-satisfaction.
+	excludedRequirements []dbx.ListExcludedRequirementsAsOfForExportRow
 	// sampledEvidence maps population_id -> the DRAWN sample evidence ids,
 	// in shuffle order (slice 494, AC-1/AC-2). Read from the persisted
 	// sample_evidence rows, which were materialized at draw-time over the
 	// frozen population — so the draw is frozen-correct by construction
 	// (invariant #10) and never re-sampled from live data (D1).
 	sampledEvidence map[uuid.UUID][]uuid.UUID
+	// demoControls and demoEvidence are the controls and sampled evidence
+	// the in-place demo seed added (#2043). The SSP and AR mark them with an
+	// atlas "demo-seed" prop so an auditor never takes them for real ones.
+	demoControls demoprov.Set
+	demoEvidence demoprov.Set
 	// walkthroughAttachments maps walkthrough_id -> its attachment refs
 	// (slice 494, AC-4/AC-5). Metadata only — the attachment bytes are
 	// never read; the AR references them by hash + storage URI (D2).
@@ -122,6 +144,23 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 	agg.period = period
 	agg.frozenAt = period.FrozenAt.Time
 
+	// 1b. The latest freeze revision (#1742). An amended period's samples
+	//     already draw from it; the bundle names it so an export taken
+	//     before and after an amendment is told apart.
+	revisions, err := q.ListAuditPeriodFreezeRevisions(ctx, dbx.ListAuditPeriodFreezeRevisionsParams{
+		TenantID: pgUUID(tenantID), AuditPeriodID: period.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list freeze revisions: %w", err)
+	}
+	agg.freezeRevision, agg.revisionHash = 1, period.FrozenHash
+	if n := len(revisions); n > 0 {
+		latest := revisions[n-1]
+		agg.freezeRevision = int(latest.Revision)
+		agg.revisionHash = latest.FrozenHash
+		agg.amendReason = latest.Justification
+	}
+
 	// 2. Scope cells (SSP system-characteristics).
 	scopeCells, err := q.ListScopeCells(ctx, pgUUID(tenantID))
 	if err != nil {
@@ -142,10 +181,15 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list active controls: %w", err)
 	}
 	agg.controls = controls
+	controlIDs := make([]uuid.UUID, 0, len(controls))
 	for _, c := range controls {
 		cid := uuid.UUID(c.ID.Bytes)
 		agg.controlOwner[cid] = c.OwnerRole
 		agg.controlTitle[cid] = c.Title
+		controlIDs = append(controlIDs, cid)
+	}
+	if agg.demoControls, err = demoprov.Lookup(ctx, q, demoprov.TableControls, controlIDs); err != nil {
+		return nil, fmt.Errorf("oscal: %w", err)
 	}
 
 	// 4. Policies (SSP linked governance documents).
@@ -170,6 +214,20 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list accepted vendor claims: %w", err)
 	}
 	agg.acceptedVendorClaims = acceptedClaims
+
+	// 4c. Requirements excluded in the framework-scope revision in force at
+	//     the freeze (#1792). Bounded by frozen_at, so an exclusion recorded
+	//     on a later revision does not reach this period's SSP (invariant
+	//     #10). Same tx + tenant RLS context as every other read.
+	excluded, err := q.ListExcludedRequirementsAsOfForExport(ctx, dbx.ListExcludedRequirementsAsOfForExportParams{
+		TenantID:           pgUUID(tenantID),
+		FrameworkVersionID: period.FrameworkVersionID,
+		FrozenAt:           period.FrozenAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list excluded requirements: %w", err)
+	}
+	agg.excludedRequirements = excluded
 
 	// 5. Sample populations attached to this period (AP).
 	populations, err := q.ListPopulationsForPeriod(ctx, dbx.ListPopulationsForPeriodParams{
@@ -196,11 +254,15 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 	}
 	// Rows arrive ordered by (population_id, ordinal); appending preserves
 	// the deterministic shuffle order the auditor's sample carries (AC-9).
+	sampledIDs := make([]uuid.UUID, 0, len(sampledRows))
 	for _, r := range sampledRows {
 		popID := uuid.UUID(r.PopulationID.Bytes)
-		agg.sampledEvidence[popID] = append(
-			agg.sampledEvidence[popID], uuid.UUID(r.EvidenceRecordID.Bytes),
-		)
+		eid := uuid.UUID(r.EvidenceRecordID.Bytes)
+		agg.sampledEvidence[popID] = append(agg.sampledEvidence[popID], eid)
+		sampledIDs = append(sampledIDs, eid)
+	}
+	if agg.demoEvidence, err = demoprov.Lookup(ctx, q, demoprov.TableEvidence, sampledIDs); err != nil {
+		return nil, fmt.Errorf("oscal: %w", err)
 	}
 
 	// 6. Walkthroughs pinned to this period (AR observations).
@@ -250,6 +312,24 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list failing evaluations: %w", err)
 	}
 	agg.failingEvals = failing
+
+	// 9. Excepted cells as of the frozen horizon, and the exceptions that
+	//    may have accepted them (#2269, AR risk-accepted observations).
+	excepted, err := q.ListExceptedEvaluationsAsOf(ctx, dbx.ListExceptedEvaluationsAsOfParams{
+		TenantID:    pgUUID(tenantID),
+		EvaluatedAt: period.FrozenAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list excepted evaluations: %w", err)
+	}
+	agg.exceptedEvals = excepted
+	if len(excepted) > 0 {
+		activated, err := q.ListActivatedExceptionsForExport(ctx, pgUUID(tenantID))
+		if err != nil {
+			return nil, fmt.Errorf("oscal: list activated exceptions: %w", err)
+		}
+		agg.activatedExceptions = activated
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("oscal: commit: %w", err)
@@ -335,6 +415,7 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 			Statement:        controlStatement(c), // filled exactly once (AC-4)
 			EvaluationResult: "",                  // filled below from failingEvals/none
 			LinkedPolicyIds:  linked,
+			Demo:             a.demoControls.Has(uuid.UUID(c.ID.Bytes)),
 		})
 	}
 
@@ -363,7 +444,27 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 		// claim never contributes to platform control-satisfaction (the hard
 		// boundary). The list is empty when no claim has been accepted.
 		VendorAttestedImplementations: a.vendorAttestedImplementations(),
+		// Requirements excluded at the freeze (#1792), carried apart from
+		// ControlImplementations: an exclusion is a scope decision.
+		ExcludedRequirements: a.excludedRequirementsProto(),
 	}
+}
+
+// excludedRequirementsProto converts the requirements excluded at the freeze
+// into proto messages for the SSP (#1792). The framework namespace is the
+// framework slug and version, e.g. "iso27001-2022".
+func (a *aggregate) excludedRequirementsProto() []*oscalv1.ExcludedRequirement {
+	out := make([]*oscalv1.ExcludedRequirement, 0, len(a.excludedRequirements))
+	for _, r := range a.excludedRequirements {
+		out = append(out, &oscalv1.ExcludedRequirement{
+			Framework:        r.FrameworkSlug + "-" + r.FrameworkVersion,
+			RequirementCode:  r.RequirementCode,
+			RequirementTitle: r.RequirementTitle,
+			Justification:    r.Justification,
+			FrameworkScopeId: uuid.UUID(r.FrameworkScopeID.Bytes).String(),
+		})
+	}
+	return out
 }
 
 // vendorAttestedImplementations converts the operator-accepted vendor claims
@@ -427,6 +528,7 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 			PopulationSize:     p.RowCount,
 			SampledEvidenceIds: a.sampledFor(popID),
 			FrozenAt:           frozen,
+			DemoEvidenceIds:    a.demoSampledFor(popID),
 		})
 	}
 
@@ -479,7 +581,19 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 		Populations:     pops,
 		Walkthroughs:    wts,
 		AuditNotes:      notes,
+		ExceptedCells:   exceptedCells(a.exceptedEvals, a.activatedExceptions, a.cellsByID()),
 	}
+}
+
+// cellsByID indexes the tenant's scope cells for the excepted-cell
+// coverage check (#2269).
+func (a *aggregate) cellsByID() map[uuid.UUID]scope.Cell {
+	out := make(map[uuid.UUID]scope.Cell, len(a.scopeCells))
+	for _, sc := range a.scopeCells {
+		c := scope.CellFromRow(sc)
+		out[c.ID] = c
+	}
+	return out
 }
 
 // maxAttachmentRefsPerWalkthrough caps the attachment references the AR
@@ -489,6 +603,18 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 // dropped. Revisit once real walkthroughs exceed it; the overflow note makes
 // the cap safe to tune without a schema change.
 const maxAttachmentRefsPerWalkthrough = 50
+
+// demoSampledFor returns the population's drawn evidence ids that the
+// in-place demo seed added (#2043), in sample order, or nil when none are.
+func (a *aggregate) demoSampledFor(populationID uuid.UUID) []string {
+	var out []string
+	for _, id := range a.sampledEvidence[populationID] {
+		if a.demoEvidence.Has(id) {
+			out = append(out, id.String())
+		}
+	}
+	return out
+}
 
 // sampledFor returns the drawn sample evidence ids for a population as
 // stable strings in the deterministic shuffle order (AC-1/AC-9). A
@@ -573,8 +699,9 @@ func annotationRef(annotations []byte) string {
 
 // poamInput converts the aggregate into the POA&M proto input. Per
 // decision D3, POA&M items derive from failing control evaluations:
-// owner = control owner_role, due date = last_observed_at (or evaluated_at)
-// + defaultRemediationWindow, milestone = a single default remediation
+// owner = control owner_role, due date = last_observed_at (or the judged
+// instant, COALESCE(evaluated_as_of, evaluated_at)) +
+// defaultRemediationWindow, milestone = a single default remediation
 // milestone.
 func (a *aggregate) poamInput() *oscalv1.PoamInput {
 	items := make([]*oscalv1.PoamItem, 0, len(a.failingEvals))
@@ -589,12 +716,21 @@ func (a *aggregate) poamInput() *oscalv1.PoamInput {
 			title = controlID.String()
 		}
 
-		// Due date: prefer last_observed_at, fall back to evaluated_at,
-		// then to now — always offset by the default remediation window.
+		// Due date: prefer last_observed_at, fall back to the instant the
+		// row judged (evaluated_as_of for a replay, #3087, else
+		// evaluated_at), then to now — always offset by the default
+		// remediation window.
 		base := time.Now().UTC()
-		if ev.LastObservedAt.Valid {
+		evaluatedAsOf := ""
+		if ev.EvaluatedAsOf.Valid {
+			evaluatedAsOf = ev.EvaluatedAsOf.Time.UTC().Format(time.RFC3339)
+		}
+		switch {
+		case ev.LastObservedAt.Valid:
 			base = ev.LastObservedAt.Time
-		} else if ev.EvaluatedAt.Valid {
+		case ev.EvaluatedAsOf.Valid:
+			base = ev.EvaluatedAsOf.Time
+		case ev.EvaluatedAt.Valid:
 			base = ev.EvaluatedAt.Time
 		}
 		due := base.Add(defaultRemediationWindow).UTC().Format(time.RFC3339)
@@ -617,10 +753,11 @@ func (a *aggregate) poamInput() *oscalv1.PoamInput {
 					"audit period horizon. Remediation required.",
 				title, ev.FreshnessStatus,
 			),
-			Severity:  severity,
-			Owner:     owner,
-			DueDate:   due,
-			Milestone: "Remediate the failing control and re-evaluate with fresh evidence.",
+			Severity:      severity,
+			Owner:         owner,
+			DueDate:       due,
+			Milestone:     "Remediate the failing control and re-evaluate with fresh evidence.",
+			EvaluatedAsOf: evaluatedAsOf,
 		})
 	}
 

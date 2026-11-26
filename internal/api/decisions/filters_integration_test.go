@@ -37,8 +37,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/decision"
 )
@@ -85,8 +85,10 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	// #2556: a viewer by live role, through OPA (liveroletest). The
+	// tests here only read, and a viewer reads the decision log.
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")

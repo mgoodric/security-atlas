@@ -126,18 +126,27 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 //
 // Anti-criterion: this list must never include admin/write/delete scopes.
 // The unit test enforces it.
+//
+// The repository permissions follow GitHub's "Permissions required for
+// fine-grained personal access tokens" page, read 2026-11-21 (#2933).
 func DocumentedScopes() []Scope {
 	return []Scope{
 		{
 			Name:      "Repository: Administration",
 			Access:    "Read",
-			Gates:     "github.repo_protection.v1 (branch protection rules)",
+			Gates:     "github.repo_protection.v2: classic branch protection (GET /repos/{o}/{r}/branches/{b}/protection)",
 			TokenKind: "Fine-grained PAT",
 		},
 		{
 			Name:      "Repository: Metadata",
 			Access:    "Read",
-			Gates:     "Listing repos under the org",
+			Gates:     "Listing repos under the org; github.repo_protection.v2 rulesets (GET /repos/{o}/{r}/rules/branches/{b}, GET /repos/{o}/{r}/rulesets/{id})",
+			TokenKind: "Fine-grained PAT",
+		},
+		{
+			Name:      "Repository: Contents",
+			Access:    "Read",
+			Gates:     "Optional. github.repo_protection.v2: GET /repos/{o}/{r}/branches/{b} cross-checks a classic protection 404 that doesn't say \"Branch not protected\"; without it that repo is inconclusive",
 			TokenKind: "Fine-grained PAT",
 		},
 		{

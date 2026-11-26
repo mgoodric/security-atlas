@@ -41,10 +41,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useState } from "react";
 
-import {
-  ControlsCountBadge,
-  RisksCountBadge,
-} from "@/components/shell/sidebar-counts";
+import { badgeForHref } from "@/components/shell/nav-badges";
 import {
   Sheet,
   SheetContent,
@@ -53,33 +50,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import type { NavGroup } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
-/**
- * The serializable nav-data shape the server layout passes in. We
- * intentionally do NOT pipe the React-node `slot` of the desktop
- * `NavItem` through — that prop is built from server-mounted client
- * components (the badges) and forwarding it across the SC→CC boundary
- * for every render is wasteful. The drawer matches the slice 214
- * badge mounts to hrefs locally below.
- */
-export type MobileNavItem = {
-  href: string;
-  label: string;
-};
-
-function badgeForHref(href: string) {
-  switch (href) {
-    case "/controls":
-      return <ControlsCountBadge />;
-    case "/risks":
-      return <RisksCountBadge />;
-    default:
-      return null;
-  }
-}
-
-export function MobileSidebar({ nav }: { nav: MobileNavItem[] }) {
+export function MobileSidebar({ nav }: { nav: NavGroup[] }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -124,34 +98,50 @@ export function MobileSidebar({ nav }: { nav: MobileNavItem[] }) {
         </svg>
       </SheetTrigger>
       <SheetPortal>
-        <SheetContent side="left" data-testid="mobile-sidebar-drawer">
+        <SheetContent
+          side="left"
+          className="overflow-y-auto"
+          data-testid="mobile-sidebar-drawer"
+        >
           <SheetHeader>
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
-            {nav.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={handleNavClick}
-                  className={cn(
-                    "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-foreground/10 text-foreground"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-                  )}
-                  data-testid={`mobile-nav-link-${item.href.replace(
-                    /\//g,
-                    "_",
-                  )}`}
-                >
-                  <span>{item.label}</span>
-                  {badgeForHref(item.href)}
-                </Link>
-              );
-            })}
+          <nav className="flex flex-col gap-4" aria-label="Mobile navigation">
+            {nav.map((group) => (
+              <div
+                key={group.label}
+                role="group"
+                aria-label={group.label}
+                className="flex flex-col gap-1"
+              >
+                <p className="px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                </p>
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={handleNavClick}
+                      className={cn(
+                        "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        isActive
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                      )}
+                      data-testid={`mobile-nav-link-${item.href.replace(
+                        /\//g,
+                        "_",
+                      )}`}
+                    >
+                      <span>{item.label}</span>
+                      {badgeForHref(item.href)}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
         </SheetContent>
       </SheetPortal>

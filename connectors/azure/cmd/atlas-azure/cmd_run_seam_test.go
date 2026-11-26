@@ -139,12 +139,12 @@ func okFlags() runFlags {
 		environment:     "prod",
 		authMode:        "client-credentials",
 		subscriptionID:  "sub-1",
-		entraControl:    "scf:IAC-21",
-		storageControl:  "scf:CRY-04",
-		aksControl:      "scf:CFG-02",
-		nsgControl:      "scf:NET-04",
-		keyvaultControl: "scf:CRY-09",
-		firewallControl: "scf:NET-04",
+		entraControl:    "scf:IAC-10",
+		storageControl:  "scf:CRY-07",
+		aksControl:      "scf:CFG-04",
+		nsgControl:      "scf:NET-03",
+		keyvaultControl: "scf:CRY-10",
+		firewallControl: "scf:NET-03",
 	}
 }
 

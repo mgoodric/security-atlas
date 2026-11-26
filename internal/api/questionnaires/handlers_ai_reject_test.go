@@ -1,6 +1,6 @@
 // Slice 757 — pure-Go unit tests for the AI-reject handler GUARD branches:
 // the role gate, the missing-tenant / missing-credential 401, the nil-service
-// 503, and the bad-uuid 400. These reach NO DB (the guards fire before any
+// 409, and the bad-uuid 400. These reach NO DB (the guards fire before any
 // store call) — the slice-353 Q-2 fast-loop convention. The DB behavior
 // (discard + audit + 409/404 + cross-tenant denial) is proven in
 // handlers_ai_reject_integration_test.go.
@@ -39,10 +39,10 @@ func TestAIReject_RoleGate(t *testing.T) {
 
 func TestAIReject_NilServiceUnavailable(t *testing.T) {
 	t.Parallel()
-	// Service nil but caller is authorized -> 503, not a panic.
+	// Service nil but caller is authorized -> 409, not a panic.
 	h := New(nil)
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
-	if w := route(h.AIReject, reqWith(t, "POST", "/x", testTenant, &cred), nil); w.Code != http.StatusServiceUnavailable {
-		t.Errorf("nil-service: got %d, want 503", w.Code)
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
+	if w := route(h.AIReject, reqWith(t, "POST", "/x", testTenant, &cred), nil); w.Code != http.StatusConflict {
+		t.Errorf("nil-service: got %d, want 409", w.Code)
 	}
 }

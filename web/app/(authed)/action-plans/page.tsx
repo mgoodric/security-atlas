@@ -28,6 +28,8 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   ACTION_PLAN_STATUSES,
   fetchActionPlansList,
@@ -35,7 +37,9 @@ import {
   type ActionPlansListResponse,
 } from "@/lib/api/action-plans";
 
-import { dateLabel, statusLabel, statusPillClass } from "./status";
+import { statusLabel, statusPillClass } from "./status";
+import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 const ALL = "__all__";
 
@@ -117,13 +121,11 @@ function ActionPlansPageInner() {
       id: "owner_id",
       header: "Owner",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          title={row.owner_id}
-          data-testid="action-plans-row-owner"
-        >
-          {row.owner_id.slice(0, 8)}…
-        </span>
+        <Person
+          id={row.owner_id}
+          className="text-xs text-muted-foreground"
+          testId="action-plans-row-owner"
+        />
       ),
     },
     {
@@ -134,7 +136,7 @@ function ActionPlansPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="action-plans-row-due-date"
         >
-          {dateLabel(row.due_date)}
+          <Timestamp value={row.due_date} style="date" />
         </span>
       ),
     },
@@ -174,13 +176,18 @@ function ActionPlansPageInner() {
     />
   );
 
-  const subtitle =
-    "Forward-looking remediation commitments · owner, due date, linked risks + controls";
+  // #2151 — the header names the page's key term.
+  const subtitle = (
+    <>
+      Forward-looking <Term id="action-plan">remediation commitments</Term> ·
+      owner, due date, linked risks + controls
+    </>
+  );
 
   if (plansQ.isLoading) {
     return (
       <ListPage
-        title="Action Plans"
+        title={pageTitle("/action-plans")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -194,7 +201,11 @@ function ActionPlansPageInner() {
 
   if (plansQ.isError) {
     return (
-      <ListPage title="Action Plans" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/action-plans")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="action-plans-load-error">
           <AlertTitle>Could not load action plans</AlertTitle>
           <AlertDescription>{(plansQ.error as Error).message}</AlertDescription>
@@ -205,7 +216,7 @@ function ActionPlansPageInner() {
 
   return (
     <ListPage
-      title="Action Plans"
+      title={pageTitle("/action-plans")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

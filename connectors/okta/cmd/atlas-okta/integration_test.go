@@ -67,9 +67,12 @@ func fakeOktaServer(t *testing.T) *httptest.Server {
 				"status": "ACTIVE",
 				"type": "MFA_ENROLL",
 				"settings": {"factors": {"okta_verify": {"enroll": {"self": "REQUIRED"}}}},
-				"conditions": {"people": {"groups": {"include": ["everyone"]}}}
+				"conditions": {"people": {"groups": {"include": ["00g1everyone00000001"]}}}
 			}
 		]`))
+	})
+	mux.HandleFunc("/api/v1/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id": "00g1everyone00000001", "type": "BUILT_IN", "profile": {"name": "Everyone"}}]`))
 	})
 	mux.HandleFunc("/api/v1/apps", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"id": "app1", "label": "Slack", "status": "ACTIVE", "signOnMode": "SAML_2_0"}]`))
@@ -156,7 +159,7 @@ func TestRun_PushesAllThreeKinds(t *testing.T) {
 	if len(states) != 1 || states[0].Result != oktapolicy.ResultPass {
 		t.Fatalf("unexpected states: %+v", states)
 	}
-	mfaRec, err := buildMFAPolicyRecord(states[0], "example", "prod", "scf:IAC-06")
+	mfaRec, err := buildMFAPolicyRecord(states[0], "example", "prod", "scf:IAC-37")
 	if err != nil {
 		t.Fatalf("buildMFAPolicyRecord: %v", err)
 	}
@@ -186,7 +189,7 @@ func TestRun_PushesAllThreeKinds(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].AssignedGroupCount != 2 {
 		t.Fatalf("unexpected assignments: %+v", assignments)
 	}
-	appRec, err := buildAppAssignmentRecord(assignments[0], "example", "prod", "scf:IAC-21")
+	appRec, err := buildAppAssignmentRecord(assignments[0], "example", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildAppAssignmentRecord: %v", err)
 	}
@@ -231,8 +234,8 @@ func TestRun_AllEmittersDedupe(t *testing.T) {
 		FactorsAllowed: []string{"push"}, Result: oktapolicy.ResultPass,
 		ObservedAt: fixed,
 	}
-	r1, _ := buildMFAPolicyRecord(pol, "example", "prod", "scf:IAC-06")
-	r2, _ := buildMFAPolicyRecord(pol, "example", "prod", "scf:IAC-06")
+	r1, _ := buildMFAPolicyRecord(pol, "example", "prod", "scf:IAC-37")
+	r2, _ := buildMFAPolicyRecord(pol, "example", "prod", "scf:IAC-37")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first mfa push: %v", err)
@@ -251,8 +254,8 @@ func TestRun_AllEmittersDedupe(t *testing.T) {
 		AssignedGroupIDs: []string{"g1"}, AssignedGroupCount: 1,
 		ObservedAt: fixed,
 	}
-	r3, _ := buildAppAssignmentRecord(a, "example", "prod", "scf:IAC-21")
-	r4, _ := buildAppAssignmentRecord(a, "example", "prod", "scf:IAC-21")
+	r3, _ := buildAppAssignmentRecord(a, "example", "prod", "scf:IAC-10")
+	r4, _ := buildAppAssignmentRecord(a, "example", "prod", "scf:IAC-10")
 	rec3, err := client.Push(context.Background(), r3)
 	if err != nil {
 		t.Fatalf("first app push: %v", err)

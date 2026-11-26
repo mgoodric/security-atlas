@@ -29,9 +29,10 @@
 //     - `since`: preset window key (`24h` / `7d` / `30d` / `audit`),
 //       mapped to an RFC3339 cutoff client-side via `sinceCutoff`.
 
-import type { Anchor } from "@/lib/api/anchors";
+import type { AnchorWithState } from "@/lib/api/anchors";
 import type { ScopeCell } from "@/lib/api/controls-list";
 import type { EvidenceResultEnum } from "@/lib/api/evidence";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 /**
  * The "all values" sentinel. Used as the default filter value on the
@@ -43,7 +44,7 @@ export const ALL = "all" as const;
 export const NONE = "" as const;
 
 export type EvidenceFilters = {
-  /** Selected control anchor id (UUID), or `NONE` for "no control filter"
+  /** Selected tenant control id (UUID), or `NONE` for "no control filter"
    *  (tenant-wide list). Post-slice-106 the page is happy to render a
    *  tenant-wide list when `NONE`. */
   controlId: string;
@@ -58,15 +59,16 @@ export type EvidenceFilters = {
   /**
    * Slice 234 — scope cell UUID narrowing, or `ALL` for no narrowing.
    * Server-side intersection via the new `scope_cell_id` query param;
-   * the BFF forwards to upstream and the SQL predicate runs on
-   * `evidence_records.scope_id`. Out-of-tenant cell ids return zero
-   * rows naturally under RLS (no 404 leak).
+   * the BFF forwards to upstream and the SQL predicate matches the
+   * record's pushed scope (`scope_canonical`) against the cell's
+   * dimensions (#2771). Out-of-tenant cell ids return zero rows.
    */
   scopeCellId: string;
   /**
    * Slice 234 — Since preset key. One of `SINCE_PRESET_KEYS` or `ALL`.
    * The page maps the key to an RFC3339 `since` cutoff via
-   * `sinceCutoff` and forwards it on the wire. The "audit" preset
+   * `sinceCutoff` and forwards it on the wire; `ALL` sends
+   * `ALL_TIME_SINCE` (#2794). The "audit" preset
    * resolves to the active audit period's `period_start`; when no
    * active period exists the option still renders but the page reuses
    * the upstream default window (last 30 days).
@@ -81,7 +83,10 @@ export const DEFAULT_FILTERS: EvidenceFilters = {
   sourceActorType: ALL,
   sourceActorId: ALL,
   scopeCellId: ALL,
-  since: ALL,
+  // #2794: the default is the last 30 days, the window the default load
+  // always read. "All time" (ALL) is an explicit choice, so an ordinary
+  // page load never reads the tenant's whole ledger.
+  since: "30d",
 };
 
 /**
@@ -105,7 +110,7 @@ export function isDefault(filters: EvidenceFilters): boolean {
     filters.sourceActorType === ALL &&
     filters.sourceActorId === ALL &&
     filters.scopeCellId === ALL &&
-    filters.since === ALL
+    filters.since === DEFAULT_FILTERS.since
   );
 }
 
@@ -121,7 +126,8 @@ export function setFilter(
 }
 
 /**
- * Clear all filters back to the default (no narrowing on any axis).
+ * Clear all filters back to the default (no narrowing on any axis
+ * except the default Since window, the last 30 days).
  */
 export function clearFilters(): EvidenceFilters {
   return { ...DEFAULT_FILTERS };
@@ -132,15 +138,22 @@ export function clearFilters(): EvidenceFilters {
  * Slice 106: the first option is "All controls" (NONE — meaning the
  * tenant-wide path), rather than the slice-099 "Select a control…"
  * gate. The rest are anchors sorted by scf_id for stable ordering.
+ *
+ * #2771: the option value is the tenant control behind the anchor
+ * (`control_id`), because `GET /v1/evidence?control_id=` matches the
+ * tenant control id, not the SCF anchor id. An anchor with no tenant
+ * control has no evidence to narrow to and is left out.
  */
 export function buildControlOptions(
-  anchors: Anchor[],
+  anchors: AnchorWithState[],
 ): { value: string; label: string }[] {
-  const sorted = [...anchors].sort((a, b) => a.scf_id.localeCompare(b.scf_id));
+  const sorted = anchors
+    .filter((a) => typeof a.control_id === "string" && a.control_id !== "")
+    .sort((a, b) => a.scf_id.localeCompare(b.scf_id));
   return [
     { value: NONE, label: "All controls" },
     ...sorted.map((a) => ({
-      value: a.id,
+      value: a.control_id as string,
       label: `${a.scf_id} · ${a.name}`,
     })),
   ];
@@ -163,7 +176,10 @@ export const RESULT_VALUES: EvidenceResultEnum[] = [
 export function buildResultOptions(): { value: string; label: string }[] {
   return [
     { value: ALL, label: "All results" },
-    ...RESULT_VALUES.map((r) => ({ value: r, label: r })),
+    ...RESULT_VALUES.map((r) => ({
+      value: r,
+      label: enumLabel("EvidenceResult", r),
+    })),
   ];
 }
 
@@ -213,9 +229,14 @@ export type EvidenceSource = {
  * Value shape: `<actor_type>|<actor_id>` (the composite key); label
  * shape: `<actor_type> · <actor_id>` (same as the table cell renderer
  * in `sourceSummary`). Rows missing either component are skipped.
+ *
+ * #2385: `actorName` turns an actor ID into the text the label shows,
+ * so a person reads by name (the page passes resolvePerson's text). The
+ * value keeps the raw ID: it is the filter, never visible text.
  */
 export function buildSourceOptions(
   sources: EvidenceSource[],
+  actorName: (actorId: string) => string = (id) => id,
 ): { value: string; label: string }[] {
   const tuples = new Set<string>();
   for (const s of sources) {
@@ -228,7 +249,7 @@ export function buildSourceOptions(
     { value: ALL, label: "All sources" },
     ...sorted.map((v) => {
       const [t, id] = v.split(SOURCE_DELIM);
-      return { value: v, label: `${t} · ${id}` };
+      return { value: v, label: `${t} · ${actorName(id)}` };
     }),
   ];
 }
@@ -257,6 +278,15 @@ export function scopeCellLabel(cell: ScopeCell): string {
 export const SCOPE_CELL_CAP = 50;
 
 /**
+ * #2771 — shown while the Scope pill narrows. A record is in a cell when
+ * the scope it was pushed with covers every one of the cell's
+ * dimensions; records pushed before scope capture carry no scope and are
+ * never matched, so the operator is told rather than left to wonder.
+ */
+export const SCOPE_FILTER_HINT =
+  "Scope matches the scope each record was pushed with. Records pushed before scope capture have none, so no Scope filter matches them.";
+
+/**
  * Build the Scope pill option list from the tenant's scope cells.
  * First option is ALL ("All cells"); the rest are at most
  * `SCOPE_CELL_CAP` cells in input order.
@@ -282,12 +312,18 @@ export const SINCE_PRESET_KEYS = ["24h", "7d", "30d", "audit"] as const;
 export type SincePresetKey = (typeof SINCE_PRESET_KEYS)[number];
 
 /**
- * Build the Since pill option list. First option is ALL ("All time"
- * — really the upstream default window, last 30 days; the label is
- * "All time" because honestly conveying "default window" in a single
- * dropdown label would be more confusing than the operator-friendly
- * "All time"). The "audit" option label adjusts to include the active
- * audit period name when one is supplied.
+ * The `since` the page sends for "All time". Without it the handler
+ * applies its 30-day default window (`defaultWindow` in
+ * internal/api/controldetail/pagination.go), so "All time" would hide
+ * older records (#2794).
+ */
+export const ALL_TIME_SINCE = "1970-01-01T00:00:00Z";
+
+/**
+ * Build the Since pill option list. First option is ALL ("All time",
+ * sent as `ALL_TIME_SINCE`); the default selection is "30d"
+ * (`DEFAULT_FILTERS.since`). The "audit" option label adjusts to
+ * include the active audit period name when one is supplied.
  */
 export function buildSinceOptions(
   activeAuditPeriodName?: string,
@@ -380,7 +416,9 @@ export function toFetchOptions(
   if (filters.scopeCellId !== ALL) {
     out.scopeCellID = filters.scopeCellId;
   }
-  if (filters.since !== ALL && resolvedSince) {
+  if (filters.since === ALL) {
+    out.since = ALL_TIME_SINCE;
+  } else if (resolvedSince) {
     out.since = resolvedSince;
   }
   return out;

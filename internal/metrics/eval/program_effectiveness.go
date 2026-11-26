@@ -20,12 +20,14 @@ func (e *programEffectivenessEvaluator) Name() string { return "program_effectiv
 func (e *programEffectivenessEvaluator) Compute(ctx context.Context) (Result, error) {
 	// DISTINCT ON (control_id, scope_cell_id) picks the LATEST evaluation
 	// per (control, scope_cell). Aggregation then counts pass rate over
-	// that set. The query honors RLS via the caller's tenant GUC.
+	// that set. The query honors RLS via the caller's tenant GUC. A replay
+	// of an earlier instant (evaluated_as_of set) is not live state (#3071).
 	const query = `
 		WITH latest AS (
 			SELECT DISTINCT ON (control_id, scope_cell_id)
 				control_id, scope_cell_id, result
 			FROM control_evaluations
+			WHERE evaluated_as_of IS NULL
 			ORDER BY control_id, scope_cell_id, evaluated_at DESC
 		)
 		SELECT
@@ -37,11 +39,15 @@ func (e *programEffectivenessEvaluator) Compute(ctx context.Context) (Result, er
 	if err := e.pool.QueryRow(ctx, query).Scan(&total, &passing); err != nil {
 		return Result{}, fmt.Errorf("program_effectiveness: query: %w", err)
 	}
+	return programEffectivenessResult(total, passing), nil
+}
+
+func programEffectivenessResult(total, passing int) Result {
 	if total == 0 {
-		return Result{Value: 0, Dimensions: map[string]string{"sample": "empty"}}, nil
+		return noData("No control evaluations recorded", nil)
 	}
 	return Result{
 		Value:      float64(passing) / float64(total),
 		Dimensions: map[string]string{"sample": "all_controls"},
-	}, nil
+	}
 }

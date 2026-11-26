@@ -4,10 +4,18 @@
 //
 //   - Fleet API mode (developer docs at fleetdm.com/docs/rest-api/rest-api).
 //     Two-call pull: GET /api/v1/fleet/hosts (paginated list) +
-//     GET /api/v1/fleet/hosts/{id} (per-host detail, including the disk
-//     encryption + MDM enrolment fields not returned in the list). The
-//     per-host call is what surfaces the boolean policy fields the
-//     evidence schema declares — the list endpoint alone is not enough.
+//     GET /api/v1/fleet/hosts/{id} (per-host detail). The documented
+//     Get host response carries `disk_encryption_enabled` (omitted when
+//     Fleet does not know it), `mdm.enrollment_status`, `seen_time` and
+//     `policies[]`. It carries no firewall or screen-lock field (#2912).
+//     Those two are read only from operator-written Fleet policies named
+//     in FleetPolicies: a policy's `response` of "pass" or "fail" becomes
+//     true or false, and anything else leaves the field unread (#2921).
+//     The anti-malware definitions date is read from one column of an
+//     operator-named Fleet report (a saved query whose per-host results
+//     Fleet stores): GET /api/v1/fleet/hosts/{id}/reports finds the report
+//     by exact name, GET /api/v1/fleet/hosts/{id}/reports/{report_id}
+//     returns the host's rows (#2936).
 //
 //   - Local osqueryd extension socket mode. The connector dials a
 //     Unix-domain socket and submits a Thrift-shaped osquery SQL query.
@@ -18,10 +26,14 @@
 //
 // The package emits canonical HostPosture values; the cmd layer translates
 // each to an evidencev1.EvidenceRecord with the existing slice-014
-// osquery.host_posture.v1 schema (host_uuid, hostname, platform,
+// osquery.host_posture.v1 schema at 1.2.0 (host_uuid, hostname, platform,
 // os_version, disk_encryption_enabled, screen_lock_enabled,
-// firewall_enabled, mdm_enrolled). The 1.0.0 schema declares
-// additionalProperties:false so this package emits only those fields.
+// firewall_enabled, mdm_enrolled, last_seen_at, reason, firewall_source,
+// screen_lock_source; 1.3.0 adds disk_used_percent, host_role(_source),
+// antimalware_protected/_source and edr_healthy/_source). The schema
+// declares additionalProperties:false so this package emits only those
+// fields. A posture field the connector did not read is nil and is left
+// out of the payload, never sent as false (#2912).
 package osqueryposture
 
 import (
@@ -31,6 +43,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -50,15 +63,66 @@ const (
 // HostPosture is one record the cmd layer turns into an evidence record.
 // Field names map 1:1 to the osquery.host_posture.v1 schema declared by
 // slice 014. Nothing outside the schema's declared properties is emitted.
+//
+// The four posture booleans are tri-state: nil means the connector could
+// not read the value (the detail fetch failed, or the source has no such
+// field), and the cmd layer omits it from the payload. A payload-reading
+// check must not see an unread firewall as a firewall that is off (#2912).
 type HostPosture struct {
 	HostUUID              string
 	Hostname              string
 	Platform              string // "darwin", "linux", "windows"
 	OSVersion             string
-	DiskEncryptionEnabled bool
-	ScreenLockEnabled     bool
-	FirewallEnabled       bool
-	MDMEnrolled           bool
+	DiskEncryptionEnabled *bool
+	ScreenLockEnabled     *bool
+	FirewallEnabled       *bool
+	MDMEnrolled           *bool
+
+	// FirewallSource and ScreenLockSource name where FirewallEnabled and
+	// ScreenLockEnabled were read from, e.g. "fleet_policy:<name>". Empty
+	// when the matching boolean is nil, or when the source is the local
+	// osquery row.
+	FirewallSource   string
+	ScreenLockSource string
+
+	// DiskUsedPercent is the share of the host's disk in use, 0-100. Fleet:
+	// 100 minus percent_disk_space_available, read only when Fleet also
+	// reports a non-zero gigs_total_disk_space. nil when not read. Fleet's
+	// host API has no memory-use or CPU-use field, so the connector emits
+	// neither (#2826).
+	DiskUsedPercent *float64
+
+	// HostRole is "production" when the host carries the operator-named
+	// production Fleet label, and empty (not read) otherwise; HostRoleSource
+	// is then "fleet_label:<name>".
+	HostRole       string
+	HostRoleSource string
+
+	// AntimalwareProtected and EDRHealthy are read only from operator-named
+	// Fleet policies, like firewall and screen lock: Fleet's host API has no
+	// antimalware or EDR field. The policy's query holds what "protected"
+	// and "healthy" mean (engine, definitions age, agent health). nil when
+	// not read; the *Source fields name the policy.
+	AntimalwareProtected *bool
+	AntimalwareSource    string
+	EDRHealthy           *bool
+	EDRSource            string
+
+	// AntimalwareDefinitionsUpdatedAt is when the host's anti-malware
+	// definitions were last updated, read from one column of an
+	// operator-named Fleet report; AntimalwareDefinitionsSource is then
+	// "fleet_report:<name>". Zero when not read. The value is only as good
+	// as the operator's query (#2936).
+	AntimalwareDefinitionsUpdatedAt time.Time
+	AntimalwareDefinitionsSource    string
+
+	// LastSeen is when the host last checked in with Fleet (Fleet's
+	// `seen_time`). Zero when unknown. It is not ObservedAt: Fleet lists
+	// offline hosts too, so the pull time says only that the connector
+	// ran, and ingest rejects an observed_at more than 24h from receipt
+	// (internal/evidence/ingest MaxObservedAtSkew), so an offline host's
+	// last-seen time cannot be the record's observed_at.
+	LastSeen time.Time
 
 	// Result + Reason are computed by evaluate(). Result derives from the
 	// minimum-baseline rule defined below; the evaluator (slice 015) owns
@@ -82,24 +146,102 @@ type HostListEntry struct {
 	ComputerName string `json:"computer_name"`
 	Platform     string `json:"platform"`
 	OSVersion    string `json:"os_version"`
+	// SeenTime is Fleet's last check-in time (RFC 3339, e.g.
+	// "2021-08-19T21:14:58Z"). Read from the list so a host whose detail
+	// fetch fails still reports when it was last seen.
+	SeenTime string `json:"seen_time"`
 }
 
-// HostDetail is the per-host detail response. Field names map to the
-// schema's declared booleans. JSON tags allow direct decode from Fleet's
-// nested {"host": {...}} envelope via rawHostDetail.
+// HostDetail is the per-host detail response, decoded from Fleet's
+// {"host": {...}} envelope via rawHostDetail. Only fields the documented
+// Get host response carries are declared: there is no firewall or
+// screen-lock field, and MDM enrolment is the nested
+// mdm.enrollment_status string, not a boolean.
 type HostDetail struct {
-	ID                    uint64 `json:"id"`
-	UUID                  string `json:"uuid"`
-	Hostname              string `json:"hostname"`
-	ComputerName          string `json:"computer_name"`
-	Platform              string `json:"platform"`
-	OSVersion             string `json:"os_version"`
-	DiskEncryptionEnabled bool   `json:"disk_encryption_enabled"`
-	// Fleet's REST payload uses "screenlock_enabled"; the schema we emit
-	// uses "screen_lock_enabled". The tag here matches the wire shape.
-	ScreenLockEnabled bool `json:"screenlock_enabled"`
-	FirewallEnabled   bool `json:"firewall_enabled"`
-	MDMEnrolled       bool `json:"mdm_enrolled"`
+	ID           uint64 `json:"id"`
+	UUID         string `json:"uuid"`
+	Hostname     string `json:"hostname"`
+	ComputerName string `json:"computer_name"`
+	Platform     string `json:"platform"`
+	OSVersion    string `json:"os_version"`
+	SeenTime     string `json:"seen_time"`
+	// DiskEncryptionEnabled is nil when Fleet omits the key, which its
+	// docs say happens when it doesn't know the status, and for Linux
+	// hosts reporting an unencrypted root volume.
+	DiskEncryptionEnabled *bool        `json:"disk_encryption_enabled"`
+	MDM                   *HostMDM     `json:"mdm"`
+	Policies              []HostPolicy `json:"policies"`
+	// PercentDiskSpaceAvailable and GigsTotalDiskSpace are the documented
+	// Get host disk keys (example values 71 and 246). A zero or missing
+	// total is taken as "Fleet has no disk reading yet", not a full disk.
+	PercentDiskSpaceAvailable *float64    `json:"percent_disk_space_available"`
+	GigsTotalDiskSpace        *float64    `json:"gigs_total_disk_space"`
+	Labels                    []HostLabel `json:"labels"`
+}
+
+// HostLabel is the subset of one Get host `labels[]` entry the connector
+// reads.
+type HostLabel struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+}
+
+// HostPolicy is the subset of one Get host `policies[]` entry the
+// connector reads. Response examples in Fleet's docs: "pass", "fail", and
+// "" (no result reported for that host).
+type HostPolicy struct {
+	ID       uint64 `json:"id"`
+	Name     string `json:"name"`
+	Response string `json:"response"`
+}
+
+// FleetPolicies names the operator's Fleet policies (and the one label)
+// that answer posture questions Fleet's host API has no field for. An empty
+// name means the field is not read. The operator writes and maintains the
+// policies and the label; the connector only reads each host's policy
+// response and label membership (#2921, #2826).
+type FleetPolicies struct {
+	Firewall    string
+	ScreenLock  string
+	Antimalware string
+	EDR         string
+	// ProductionLabel is a Fleet label, not a policy: a host carrying it is
+	// host_role "production".
+	ProductionLabel string
+	// DefinitionsReport and DefinitionsColumn name a Fleet report (a saved
+	// query) and the column of its results that holds the anti-malware
+	// definitions date. Both or neither; empty means not read (#2936).
+	DefinitionsReport string
+	DefinitionsColumn string
+}
+
+// HostReportSummary is the subset of one "List host's reports" entry
+// (GET /api/v1/fleet/hosts/{id}/reports) the connector reads.
+type HostReportSummary struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+}
+
+// HostReportData is the subset of "Get host's report data"
+// (GET /api/v1/fleet/hosts/{id}/reports/{report_id}) the connector reads:
+// one entry per result row, each a column-name to string-value map. Fleet
+// documents an empty results array when the host has no stored results.
+type HostReportData struct {
+	Results []HostReportRow `json:"results"`
+}
+
+// HostReportRow is one result row of a host's report data. Fleet's examples
+// show every column value as a JSON string (osquery returns text); a value
+// of any other JSON type is read as unread, not converted.
+type HostReportRow struct {
+	Columns map[string]any `json:"columns"`
+}
+
+// HostMDM is the subset of Fleet's host `mdm` object the connector reads.
+type HostMDM struct {
+	// EnrollmentStatus examples in Fleet's docs: "On (manual)",
+	// "On (automatic)", "Pending".
+	EnrollmentStatus string `json:"enrollment_status"`
 }
 
 // FleetAPI is the narrow Fleet surface Pull depends on. The concrete REST
@@ -107,6 +249,10 @@ type HostDetail struct {
 type FleetAPI interface {
 	ListHosts(ctx context.Context) ([]HostListEntry, error)
 	GetHost(ctx context.Context, id uint64) (*HostDetail, error)
+	// ListHostReports lists the reports Fleet holds for one host whose
+	// name matches the search keywords; the caller matches names exactly.
+	ListHostReports(ctx context.Context, hostID uint64, name string) ([]HostReportSummary, error)
+	GetHostReport(ctx context.Context, hostID, reportID uint64) (*HostReportData, error)
 }
 
 // LocalQueryer is the narrow local-osqueryd surface Pull depends on when
@@ -117,8 +263,9 @@ type LocalQueryer interface {
 
 // PullFromFleet lists every host and fetches per-host detail. Errors
 // fetching one host's detail are recorded as Result=Inconclusive on that
-// row rather than aborting the whole run.
-func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]HostPosture, error) {
+// row rather than aborting the whole run. pol names the Fleet policies
+// firewall and screen lock are read from; the zero value reads neither.
+func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time, pol FleetPolicies) ([]HostPosture, error) {
 	if api == nil {
 		return nil, errors.New("osqueryposture: FleetAPI is nil")
 	}
@@ -142,6 +289,7 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]H
 			Hostname:   firstNonEmpty(h.Hostname, h.ComputerName),
 			Platform:   normalizePlatform(h.Platform),
 			OSVersion:  h.OSVersion,
+			LastSeen:   parseSeenTime(h.SeenTime),
 			ObservedAt: now(),
 		}
 		detail, err := api.GetHost(ctx, h.ID)
@@ -151,8 +299,21 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]H
 			out = append(out, row)
 			continue
 		}
-		fillFromDetail(&row, detail)
+		fillFromDetail(&row, detail, pol)
 		row.Result, row.Reason = evaluate(row)
+		if pol.DefinitionsReport != "" && pol.DefinitionsColumn != "" {
+			t, note, err := definitionsUpdatedAt(ctx, api, h.ID, pol.DefinitionsReport, pol.DefinitionsColumn, row.ObservedAt)
+			if err != nil {
+				note = err.Error()
+			}
+			if note != "" {
+				row.Reason += "; antimalware definitions report: " + note
+			}
+			if err == nil && !t.IsZero() {
+				row.AntimalwareDefinitionsUpdatedAt = t
+				row.AntimalwareDefinitionsSource = "fleet_report:" + pol.DefinitionsReport
+			}
+		}
 		out = append(out, row)
 	}
 	return out, nil
@@ -171,7 +332,9 @@ func PullFromLocal(ctx context.Context, q LocalQueryer, now func() time.Time) ([
 	// os_version exposes platform + version; disk_encryption exposes
 	// encrypted on darwin/linux; screenlock + alf (macOS app firewall)
 	// approximate the schema booleans. The query joins these so we get
-	// one row per local host. Tests inject the row directly.
+	// one row per local host. A NULL column (table absent on the
+	// platform, or no joined row) stays unread. Tests inject the row
+	// directly.
 	rows, err := q.Query(ctx, localPostureSQL)
 	if err != nil {
 		return nil, fmt.Errorf("local osqueryd query: %w", err)
@@ -191,6 +354,8 @@ func PullFromLocal(ctx context.Context, q LocalQueryer, now func() time.Time) ([
 			ScreenLockEnabled:     parseBool(r["screen_lock_enabled"]),
 			FirewallEnabled:       parseBool(r["firewall_enabled"]),
 			MDMEnrolled:           parseBool(r["mdm_enrolled"]),
+			DiskUsedPercent:       parsePercent(r["disk_used_percent"]),
+			LastSeen:              now(),
 			ObservedAt:            now(),
 		}
 		row.Result, row.Reason = evaluate(row)
@@ -208,35 +373,49 @@ SELECT
   s.computer_name             AS computer_name,
   o.platform                  AS platform,
   o.version                   AS os_version,
-  COALESCE(d.encrypted, '0')  AS disk_encryption_enabled,
-  COALESCE(sc.enabled, '0')   AS screen_lock_enabled,
-  COALESCE(a.global_state, '0') AS firewall_enabled,
-  COALESCE(m.enrolled, '0')   AS mdm_enrolled
+  d.encrypted                 AS disk_encryption_enabled,
+  sc.enabled                  AS screen_lock_enabled,
+  a.global_state              AS firewall_enabled,
+  m.enrolled                  AS mdm_enrolled,
+  CASE WHEN mt.blocks > 0
+       THEN ROUND(100.0 * (mt.blocks - mt.blocks_available) / mt.blocks, 1)
+  END                         AS disk_used_percent
 FROM system_info s
 LEFT JOIN os_version o
 LEFT JOIN disk_encryption d ON d.name = s.hostname
 LEFT JOIN screenlock sc
 LEFT JOIN alf a
 LEFT JOIN mdm m
+LEFT JOIN mounts mt ON mt.path = '/'
 LIMIT 1;
 `
 
 // evaluate computes pass/fail. v1 baseline: disk encryption AND screen
-// lock both enabled = PASS. Either off = FAIL. Inconclusive when both
-// booleans came back unset and the platform is unknown. The connector
-// keeps this rule shallow; the evaluator owns the policy ladder.
+// lock both observed enabled = PASS. Either observed off = FAIL. Anything
+// unread and nothing observed off = INCONCLUSIVE, with the unread fields
+// named in the reason. In Fleet mode screen lock is read only from a
+// named Fleet policy, so without --screenlock-policy a Fleet host is FAIL
+// (disk encryption off) or INCONCLUSIVE, never PASS.
+// The connector keeps this rule shallow; the evaluator owns the policy
+// ladder.
 func evaluate(p HostPosture) (Result, string) {
 	switch {
-	case p.DiskEncryptionEnabled && p.ScreenLockEnabled:
-		return ResultPass, "disk_encryption+screen_lock"
-	case !p.DiskEncryptionEnabled && !p.ScreenLockEnabled && p.Platform == "":
-		return ResultInconclusive, "no platform / no booleans"
-	case !p.DiskEncryptionEnabled:
+	case isFalse(p.DiskEncryptionEnabled):
 		return ResultFail, "disk_encryption_disabled"
-	default:
+	case isFalse(p.ScreenLockEnabled):
 		return ResultFail, "screen_lock_disabled"
+	case p.DiskEncryptionEnabled == nil && p.ScreenLockEnabled == nil:
+		return ResultInconclusive, "disk_encryption and screen_lock not reported"
+	case p.DiskEncryptionEnabled == nil:
+		return ResultInconclusive, "disk_encryption not reported"
+	case p.ScreenLockEnabled == nil:
+		return ResultInconclusive, "screen_lock not reported"
+	default:
+		return ResultPass, "disk_encryption+screen_lock"
 	}
 }
+
+func isFalse(b *bool) bool { return b != nil && !*b }
 
 // ---- Fleet REST client ----
 
@@ -325,6 +504,68 @@ func (c *FleetClient) GetHost(ctx context.Context, id uint64) (*HostDetail, erro
 	return &out, nil
 }
 
+// ListHostReports calls GET /api/v1/fleet/hosts/{id}/reports with the
+// report name as the `query` search keywords. Fleet's search is not an
+// exact match, so the caller filters by name.
+//
+// It follows `meta.has_next_results` page by page (`page` is 0-based, as in
+// Fleet's other list endpoints; unverified against a live Fleet), and stops
+// with an error after maxReportPages rather than loop on a server that
+// never reports the last page.
+func (c *FleetClient) ListHostReports(ctx context.Context, hostID uint64, name string) ([]HostReportSummary, error) {
+	base := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports?per_page=100&query=" + url.QueryEscape(name)
+	var out []HostReportSummary
+	for page := 0; page < maxReportPages; page++ {
+		var raw struct {
+			Reports []HostReportSummary `json:"reports"`
+			Meta    struct {
+				HasNextResults bool `json:"has_next_results"`
+			} `json:"meta"`
+		}
+		if err := c.getJSON(ctx, base+"&page="+strconv.Itoa(page), &raw); err != nil {
+			return nil, err
+		}
+		out = append(out, raw.Reports...)
+		if !raw.Meta.HasNextResults {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("more than %d pages of reports match %q", maxReportPages, name)
+}
+
+// maxReportPages bounds ListHostReports' paging (100 reports a page).
+const maxReportPages = 50
+
+// GetHostReport calls GET /api/v1/fleet/hosts/{id}/reports/{report_id}.
+func (c *FleetClient) GetHostReport(ctx context.Context, hostID, reportID uint64) (*HostReportData, error) {
+	u := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports/" + strconv.FormatUint(reportID, 10)
+	var out HostReportData
+	if err := c.getJSON(ctx, u, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FleetClient) getJSON(ctx context.Context, u string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	c.Creds.Apply(req)
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return &APIError{Status: res.StatusCode, Retry: res.Header.Get("Retry-After"), Body: drain(res.Body)}
+	}
+	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
+		return fmt.Errorf("decode %s: %w", u, err)
+	}
+	return nil
+}
+
 // ErrHostNotFound is the sentinel Fleet returns when a host has been
 // removed between the list call and the detail call.
 var ErrHostNotFound = errors.New("osqueryposture: fleet host not found")
@@ -352,7 +593,7 @@ func (e *APIError) Error() string {
 
 // ---- helpers ----
 
-func fillFromDetail(p *HostPosture, d *HostDetail) {
+func fillFromDetail(p *HostPosture, d *HostDetail, pol FleetPolicies) {
 	if d == nil {
 		return
 	}
@@ -368,11 +609,226 @@ func fillFromDetail(p *HostPosture, d *HostDetail) {
 	if d.Platform != "" {
 		p.Platform = normalizePlatform(d.Platform)
 	}
+	if t := parseSeenTime(d.SeenTime); !t.IsZero() {
+		p.LastSeen = t
+	}
 	p.DiskEncryptionEnabled = d.DiskEncryptionEnabled
-	p.ScreenLockEnabled = d.ScreenLockEnabled
-	p.FirewallEnabled = d.FirewallEnabled
-	p.MDMEnrolled = d.MDMEnrolled
+	if d.MDM != nil {
+		p.MDMEnrolled = mdmEnrolled(d.MDM.EnrollmentStatus)
+	}
+	// Screen lock and firewall: the Get host response has no such field,
+	// so they are read only from the operator's named policies, and stay
+	// nil (unread) otherwise.
+	if v := policyResponse(d.Policies, pol.Firewall); v != nil {
+		p.FirewallEnabled = v
+		p.FirewallSource = "fleet_policy:" + pol.Firewall
+	}
+	if v := policyResponse(d.Policies, pol.ScreenLock); v != nil {
+		p.ScreenLockEnabled = v
+		p.ScreenLockSource = "fleet_policy:" + pol.ScreenLock
+	}
+	// Antimalware and EDR: likewise no Get host field (#2826).
+	if v := policyResponse(d.Policies, pol.Antimalware); v != nil {
+		p.AntimalwareProtected = v
+		p.AntimalwareSource = "fleet_policy:" + pol.Antimalware
+	}
+	if v := policyResponse(d.Policies, pol.EDR); v != nil {
+		p.EDRHealthy = v
+		p.EDRSource = "fleet_policy:" + pol.EDR
+	}
+	p.DiskUsedPercent = diskUsedPercent(d)
+	if pol.ProductionLabel != "" && hasLabel(d.Labels, pol.ProductionLabel) {
+		p.HostRole = "production"
+		p.HostRoleSource = "fleet_label:" + pol.ProductionLabel
+	}
 }
+
+// diskUsedPercent derives disk use from Fleet's percent_disk_space_available.
+// It is nil when Fleet omits the percentage, when gigs_total_disk_space is
+// missing or zero (no disk reading yet, which would otherwise read as a
+// full disk), or when the percentage is outside 0-100.
+func diskUsedPercent(d *HostDetail) *float64 {
+	if d.PercentDiskSpaceAvailable == nil || d.GigsTotalDiskSpace == nil || *d.GigsTotalDiskSpace <= 0 {
+		return nil
+	}
+	avail := *d.PercentDiskSpaceAvailable
+	if avail < 0 || avail > 100 {
+		return nil
+	}
+	used := 100 - avail
+	return &used
+}
+
+// hasLabel reports whether the host carries a label with exactly this name.
+func hasLabel(labels []HostLabel, name string) bool {
+	for _, l := range labels {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// policyResponse reads the named policy's result for one host: "pass" is
+// true and "fail" is false. An empty name, no policy of that name, or any
+// other response (Fleet reports "" when the host has no result for the
+// policy) is nil, never a guess. Names match exactly. If more than one
+// policy carries the name (a global and a team policy, say) and their
+// results disagree, the result is nil too.
+func policyResponse(policies []HostPolicy, name string) *bool {
+	if name == "" {
+		return nil
+	}
+	var out *bool
+	for _, pl := range policies {
+		if pl.Name != name {
+			continue
+		}
+		var v bool
+		switch pl.Response {
+		case "pass":
+			v = true
+		case "fail":
+			v = false
+		default:
+			return nil
+		}
+		if out != nil && *out != v {
+			return nil
+		}
+		out = boolPtr(v)
+	}
+	return out
+}
+
+// definitionsUpdatedAt reads the anti-malware definitions date from one
+// column of the operator's named Fleet report for one host, and a note for
+// the record's reason whenever something was not read.
+//
+//   - No report of exactly that name, two of that name, or no result rows:
+//     zero time, unread, with a note saying which.
+//   - Several rows: the oldest readable date, so a host with two engines is
+//     judged by its most out-of-date one. Rows whose column is missing, not
+//     a date, in epoch milliseconds, or more than an hour after now are
+//     skipped and counted in the note. They can only make the pushed date
+//     newer than the truth if the skipped row was the oldest, and without
+//     them the host would carry no date and be judged on the policy alone,
+//     which is no stricter (#2936 review).
+//
+// An API error is returned so the caller can name it in the reason.
+func definitionsUpdatedAt(ctx context.Context, api FleetAPI, hostID uint64, report, column string, now time.Time) (time.Time, string, error) {
+	reports, err := api.ListHostReports(ctx, hostID, report)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	var id uint64
+	matches := 0
+	for _, r := range reports {
+		if r.Name == report {
+			id = r.ID
+			matches++
+		}
+	}
+	switch {
+	case matches == 0:
+		return time.Time{}, fmt.Sprintf("no report named %q on this host", report), nil
+	case matches > 1:
+		return time.Time{}, fmt.Sprintf("%d reports named %q; not read", matches, report), nil
+	}
+	data, err := api.GetHostReport(ctx, hostID, id)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	if data == nil || len(data.Results) == 0 {
+		return time.Time{}, "no result rows", nil
+	}
+	var oldest time.Time
+	var bad []string
+	for i, row := range data.Results {
+		v, _ := row.Columns[column].(string)
+		t, why := parseDefinitionsTime(v, now)
+		if why != "" {
+			bad = append(bad, fmt.Sprintf("row %d %s", i+1, why))
+			continue
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	var note string
+	if len(bad) > 0 {
+		note = fmt.Sprintf("%d of %d rows unread (%s)", len(bad), len(data.Results), strings.Join(bad, "; "))
+	}
+	return oldest, note, nil
+}
+
+// maxEpochSeconds separates epoch seconds from milliseconds: 1e11 seconds is
+// the year 5138, while a current date in milliseconds is about 1.7e12.
+const maxEpochSeconds = 1e11
+
+// parseDefinitionsTime reads a report column as a date, or says why it
+// could not. osquery returns every column as a string; two shapes are
+// accepted: RFC 3339 (with a zone) and whole Unix epoch seconds, the shape
+// osquery's own time columns use. Zero, a negative number, a number over
+// maxEpochSeconds (milliseconds, most likely) and a date more than an hour
+// after now are unread; so is anything else.
+func parseDefinitionsTime(s string, now time.Time) (time.Time, string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, "missing or not a string"
+	}
+	var t time.Time
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		switch {
+		case n <= 0:
+			return time.Time{}, "not a positive epoch"
+		case n > maxEpochSeconds:
+			return time.Time{}, "epoch over 1e11 (milliseconds?)"
+		}
+		t = time.Unix(n, 0).UTC()
+	} else {
+		var perr error
+		t, perr = time.Parse(time.RFC3339Nano, s)
+		if perr != nil {
+			return time.Time{}, "not RFC 3339 or epoch seconds"
+		}
+		t = t.UTC()
+	}
+	if t.After(now.Add(time.Hour)) {
+		return time.Time{}, "more than 1 h in the future"
+	}
+	return t, ""
+}
+
+// mdmEnrolled maps Fleet's mdm.enrollment_status to a boolean. "On (...)"
+// is enrolled; "Off" and "Pending" are not; anything else, including an
+// empty string, is unread rather than guessed.
+func mdmEnrolled(status string) *bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case s == "on" || strings.HasPrefix(s, "on "):
+		return boolPtr(true)
+	case s == "off" || s == "pending":
+		return boolPtr(false)
+	default:
+		return nil
+	}
+}
+
+// parseSeenTime parses Fleet's RFC 3339 seen_time. An empty or
+// unparsable value is unknown (zero), never the pull time.
+func parseSeenTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // normalizePlatform collapses Fleet/osquery vendor strings to the
 // canonical {"darwin", "linux", "windows"} set the schema documents.
@@ -393,14 +849,32 @@ func normalizePlatform(in string) string {
 }
 
 // parseBool accepts the common osquery-row boolean shapes: "1", "true",
-// "yes" (case-insensitive). Everything else is false.
-func parseBool(s string) bool {
+// "yes", "on" are true; "0", "false", "no", "off" are false
+// (case-insensitive). Anything else, including an empty (NULL) column,
+// is unread.
+func parseBool(s string) *bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "1", "true", "yes", "on":
-		return true
+		return boolPtr(true)
+	case "0", "false", "no", "off":
+		return boolPtr(false)
 	default:
-		return false
+		return nil
 	}
+}
+
+// parsePercent reads an osquery-row percentage. An empty (NULL) column, a
+// non-number, or a value outside 0-100 is unread.
+func parsePercent(s string) *float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v < 0 || v > 100 {
+		return nil
+	}
+	return &v
 }
 
 func firstNonEmpty(a, b string) string {

@@ -1,10 +1,10 @@
 // Slice 151 — Playwright E2E for the /risks/new control-link
-// multi-select.
+// multi-select. Since #2087 the picker is the shared
+// `EntityMultiPicker` (components/ui/entity-picker.tsx).
 //
 // Un-quarantined by slice 351 (AC-4, disposition (a)). The legacy
 // `test.skip(!PLAYWRIGHT_RUN_QUARANTINED)` + commented bodies were the
-// slice-082-era placeholder. The `ControlMultiSelect` component +
-// validation ship; no underlying product bug. Rewritten as a LIVE
+// slice-082-era placeholder. The control picker + validation ship; no underlying product bug. Rewritten as a LIVE
 // mocked spec per the `questionnaires.spec.ts` `route.fulfill`
 // convention (anti-criterion P0-4).
 //
@@ -25,6 +25,7 @@
 // tokens.
 
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
 
 const CONTROL_ACCESS_ID = "33333333-3333-3333-3333-3333000ac001";
 const CONTROL_OTHER_ID = "33333333-3333-3333-3333-3333000bk002";
@@ -38,7 +39,7 @@ function controlsBody() {
         id: CONTROL_ACCESS_ID,
         title: "Logical access controls",
         control_family: "IAC",
-        scf_id: "IAC-06",
+        scf_id: "IAC-37",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },
@@ -46,7 +47,7 @@ function controlsBody() {
         id: CONTROL_OTHER_ID,
         title: "Backup integrity verification",
         control_family: "BCD",
-        scf_id: "BCD-11",
+        scf_id: "BCD-32",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },
@@ -72,9 +73,9 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
 
-    // Slice 663: the opening default treatment is now "avoid" (the
-    // fresh-tenant-safe default with no required satellite field), so the
-    // picker is hidden on first paint.
+    // #1746: the opening default treatment is "untreated" (no decision
+    // yet, no required satellite field), so the picker is hidden on
+    // first paint.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toHaveCount(0);
@@ -117,7 +118,7 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // Slice 663: explicitly select mitigate (no longer the opening
     // default). With no controls selected → submit is blocked
     // client-side with the required-error.
@@ -131,7 +132,7 @@ test.describe("/risks/new control-link multi-select", () => {
     expect(postFired).toBe(false);
   });
 
-  test("filter narrows the picker; selecting a control posts linked_control_ids and the row appears (AC-5 + AC-6)", async ({
+  test("filter narrows the picker; selecting a control posts linked_control_ids and lands on the new risk (AC-5 + AC-6)", async ({
     authedPage: page,
   }) => {
     let created = false;
@@ -196,22 +197,23 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // Slice 663: mitigate is no longer the opening default — select it
     // so the control picker renders.
     await page.getByTestId("risks-create-treatment").selectOption("mitigate");
 
-    // Picker is now visible. Wait for the controls list.
-    await expect(
-      page.getByTestId("risks-create-control-multi-select"),
-    ).toBeVisible({ timeout: 30_000 });
+    // Picker is now visible: the shared entity picker (#2087), listing
+    // controls. Wait for the controls list.
+    const picker = page.getByTestId("risks-create-control-multi-select");
+    await expect(picker).toBeVisible({ timeout: 30_000 });
+    await expect(picker).toHaveAttribute("data-entity-picker", "control");
     await expect(
       page.getByTestId("risks-create-control-multi-select-list"),
     ).toBeVisible({ timeout: 30_000 });
 
     // Filter narrows to the "access" control only.
     await page
-      .getByTestId("risks-create-control-multi-select-filter")
+      .getByTestId("risks-create-control-multi-select-search")
       .fill("access");
     await expect(
       page.getByTestId(
@@ -247,13 +249,9 @@ test.describe("/risks/new control-link multi-select", () => {
 
     expect(postedLinkedIds).toEqual([CONTROL_ACCESS_ID]);
 
-    // Routed back; the new row appears.
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // #2089 create convention: lands on the new risk.
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
   });
 });

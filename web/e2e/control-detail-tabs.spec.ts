@@ -1,11 +1,12 @@
 // Slice 254 — Playwright E2E for the control-detail tab strip.
 //
-// The slice ships a sticky seven-tab strip on `/controls/{id}`:
-// Overview / Evidence / Mappings / Effective scope / Policies /
-// Risks / History. Tab state is URL-bound (`?tab=<key>`) so deep
-// links resolve directly into the requested tab. The spec asserts:
+// The slice shipped a sticky seven-tab strip on `/controls/{id}`.
+// #2140 cut it to three: Overview (the state strip and the Evidence,
+// Coverage and Linked sections), Framework map (the graph) and History.
+// Tab state is URL-bound (`?tab=<key>`) so deep links resolve directly
+// into the requested tab. The spec asserts:
 //
-//   - AC-1: seven tabs render in mockup order with the right labels.
+//   - the three tabs render in order with the right labels.
 //   - AC-8: clicking a tab updates the URL to `?tab=<key>`; refresh
 //     on the deep-linked URL lands back on the same tab; clicking
 //     Overview (the default) strips the param entirely.
@@ -87,6 +88,7 @@
 // so future debuggers don't re-diagnose THIS class of bug as a
 // race condition.
 
+import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 
@@ -148,7 +150,7 @@ test.describe("control detail tab strip (slice 254)", () => {
           },
           anchor: {
             id: "11111111-1111-1111-1111-111111110001",
-            scf_id: "SCF:IAC-06",
+            scf_id: "SCF:IAC-37",
             family: "IAC",
             name: "Multi-Factor Authentication",
             description: "MFA spine anchor",
@@ -409,7 +411,7 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
   });
 
-  test("AC-1: renders the seven tabs in mockup order with the right labels", async ({
+  test("renders the three tabs in order with the right labels (#2140)", async ({
     authedPage: page,
   }) => {
     // Slice 275 — wait for the coverage response BEFORE asserting the
@@ -418,52 +420,18 @@ test.describe("control detail tab strip (slice 254)", () => {
     const tablist = page.getByTestId("control-tabs");
     await expect(tablist).toBeVisible({ timeout: 30_000 });
 
-    // The tab strip is the seven labels in mockup order. We assert
-    // both the label text and the testid suffix so a regression that
-    // renames a key without renaming the label (or vice-versa) fails
-    // here, not silently.
+    await expect(tablist.getByRole("tab")).toHaveText([
+      "Overview",
+      "Framework map",
+      "History",
+    ]);
     await expect(page.getByTestId("control-tab-overview")).toHaveText(
-      /^Overview/,
+      "Overview",
     );
-    await expect(page.getByTestId("control-tab-evidence")).toContainText(
-      "Evidence",
+    await expect(page.getByTestId("control-tab-map")).toHaveText(
+      "Framework map",
     );
-    await expect(page.getByTestId("control-tab-mappings")).toContainText(
-      "Mappings",
-    );
-    await expect(page.getByTestId("control-tab-scope")).toContainText(
-      "Effective scope",
-    );
-    await expect(page.getByTestId("control-tab-policies")).toContainText(
-      "Policies",
-    );
-    await expect(page.getByTestId("control-tab-risks")).toContainText("Risks");
-    await expect(page.getByTestId("control-tab-history")).toHaveText(
-      /^History/,
-    );
-  });
-
-  test("AC-2: count chips render the mocked-payload counts", async ({
-    authedPage: page,
-  }) => {
-    // Slice 275 — coverage-response gate (see gotoControlDetail) +
-    // 30s timeout on the first auto-waiting assertion so the Overview
-    // panel has space to mount on slow CI runners. The chips render
-    // off subsequent useQuery payloads; each chip's per-assertion
-    // toHaveText below auto-waits on its own polling cycle.
-    await gotoControlDetail(page);
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
-      timeout: 30_000,
-    });
-
-    // 3 evidence records · 2 mapped requirements · 12 effective-scope
-    // cells (one framework_version in the mock) · 2 policies · 1
-    // risk. History has no chip per the mockup.
-    await expect(page.getByTestId("control-tab-evidence-chip")).toHaveText("3");
-    await expect(page.getByTestId("control-tab-mappings-chip")).toHaveText("2");
-    await expect(page.getByTestId("control-tab-scope-chip")).toHaveText("12");
-    await expect(page.getByTestId("control-tab-policies-chip")).toHaveText("2");
-    await expect(page.getByTestId("control-tab-risks-chip")).toHaveText("1");
+    await expect(page.getByTestId("control-tab-history")).toHaveText("History");
   });
 
   test("AC-8: clicking a tab updates `?tab=<key>` and renders that tab's panel", async ({
@@ -477,15 +445,22 @@ test.describe("control detail tab strip (slice 254)", () => {
       timeout: 30_000,
     });
 
-    // Click Evidence — URL updates, Evidence panel renders.
-    await page.getByTestId("control-tab-evidence").click();
-    await expect(page).toHaveURL(/\?tab=evidence$/);
-    await expect(page.getByTestId("evidence-tab-panel")).toBeVisible();
+    // Click Framework map — URL updates, the graph renders.
+    await page.getByTestId("control-tab-map").click();
+    await expect(page).toHaveURL(/\?tab=map$/);
+    await expect(page.getByTestId("ucf-viz-section")).toBeVisible();
+    // The map tab is swept too (#2397): the route sweep only sees the
+    // default Overview tab.
+    expectNoSeriousAxe(
+      await seriousAxeViolations(page),
+      "/controls/[id] Framework map tab",
+    );
 
-    // Click Mappings — URL updates, Mappings panel renders.
-    await page.getByTestId("control-tab-mappings").click();
-    await expect(page).toHaveURL(/\?tab=mappings$/);
-    await expect(page.getByTestId("mappings-tab-panel")).toBeVisible();
+    // Click History — URL updates, the evaluation history renders.
+    await page.getByTestId("control-tab-history").click();
+    await expect(page).toHaveURL(/\?tab=history$/);
+    await expect(page.getByTestId("history-tab-panel")).toBeVisible();
+    await expect(page.getByTestId("audit-log-entry")).toHaveCount(1);
 
     // Click Overview — param is stripped (canonical URL stays clean).
     await page.getByTestId("control-tab-overview").click();
@@ -496,16 +471,16 @@ test.describe("control detail tab strip (slice 254)", () => {
   test("AC-8: refresh on a tab-deep-linked URL lands on that tab", async ({
     authedPage: page,
   }) => {
-    // Slice 275 — deep-link directly to the Policies tab; the helper
-    // both navigates and gates on the coverage round-trip.
-    await gotoControlDetail(page, { tab: "policies" });
-    // The Policies panel renders without first showing Overview — the
+    // Deep-link directly to the History tab; the helper both navigates
+    // and gates on the coverage round-trip.
+    await gotoControlDetail(page, { tab: "history" });
+    // The History panel renders without first showing Overview — the
     // URL is the source of truth.
-    await expect(page.getByTestId("policies-tab-panel")).toBeVisible({
+    await expect(page.getByTestId("history-tab-panel")).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.getByTestId("control-tab-panel-overview")).toHaveCount(0);
-    await expect(page.getByTestId("control-tab-policies")).toHaveAttribute(
+    await expect(page.getByTestId("control-tab-history")).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -519,31 +494,34 @@ test.describe("control detail tab strip (slice 254)", () => {
     );
     await page.reload();
     await reloadCoverage;
-    await expect(page.getByTestId("policies-tab-panel")).toBeVisible({
+    await expect(page.getByTestId("history-tab-panel")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByTestId("control-tab-policies")).toHaveAttribute(
+    await expect(page.getByTestId("control-tab-history")).toHaveAttribute(
       "aria-selected",
       "true",
     );
   });
 
-  test("AC-8: unrecognised `?tab=<garbage>` falls through to Overview", async ({
+  test("AC-8: an unrecognised or retired `?tab=` falls through to Overview", async ({
     authedPage: page,
   }) => {
-    // Slice 275 — coverage-response gate via the helper.
-    await gotoControlDetail(page, { tab: "foo" });
-    // Default tab is Overview when the param is unrecognised.
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(page.getByTestId("control-tab-overview")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    // #2140 retired the Evidence, Mappings, Effective scope, Policies and
+    // Risks tabs into the overview, so an old link lands there.
+    for (const tab of ["foo", "policies", "mappings"]) {
+      await gotoControlDetail(page, { tab });
+      await expect(
+        page.getByTestId("control-tab-panel-overview"),
+        `?tab=${tab}`,
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("control-tab-overview")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    }
   });
 
-  test("AC-9: keyboard Tab navigation walks through the seven tab buttons in DOM order", async ({
+  test("AC-9: keyboard Tab navigation walks through the tab buttons in DOM order", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
@@ -554,44 +532,29 @@ test.describe("control detail tab strip (slice 254)", () => {
       timeout: 30_000,
     });
 
-    // Focus the first tab explicitly. From there, six Tab presses
-    // walk through the remaining six tab buttons in mockup order.
     await page.getByTestId("control-tab-overview").focus();
     await expect(page.getByTestId("control-tab-overview")).toBeFocused();
 
-    const remaining = [
-      "control-tab-evidence",
-      "control-tab-mappings",
-      "control-tab-scope",
-      "control-tab-policies",
-      "control-tab-risks",
-      "control-tab-history",
-    ];
-    for (const id of remaining) {
+    for (const id of ["control-tab-map", "control-tab-history"]) {
       await page.keyboard.press("Tab");
       await expect(page.getByTestId(id)).toBeFocused();
     }
   });
 
-  test("AC-3 + AC-7: Overview panel preserves the pre-tab layout (P0-254-3)", async ({
+  test("the overview holds the strip and the Evidence, Coverage and Linked sections (#2140)", async ({
     authedPage: page,
   }) => {
     // Slice 275 — coverage-response gate via the helper.
     await gotoControlDetail(page);
-    // The Overview panel still hosts: KPI strip, Coverage table,
-    // UCF graph, Evidence stream card, Freshness, Effective scope
-    // summary, Policies, Risks, Audit log. Slice 254 anti-criterion
-    // P0-254-3 — the Overview tab's data layout is preserved verbatim.
-    await expect(page.getByTestId("kpi-strip")).toBeVisible({
+    await expect(page.getByTestId("control-state-strip")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByTestId("coverage-section")).toBeVisible();
-    await expect(page.getByTestId("ucf-viz-section")).toBeVisible();
     await expect(page.getByTestId("evidence-stream-section")).toBeVisible();
-    await expect(page.getByTestId("freshness-section")).toBeVisible();
+    await expect(page.getByTestId("coverage-section")).toBeVisible();
     await expect(page.getByTestId("effective-scope-section")).toBeVisible();
     await expect(page.getByTestId("policies-section")).toBeVisible();
     await expect(page.getByTestId("risks-section")).toBeVisible();
-    await expect(page.getByTestId("audit-log-section")).toBeVisible();
+    // The graph is on the Framework map tab, not here.
+    await expect(page.getByTestId("ucf-viz-section")).toHaveCount(0);
   });
 });

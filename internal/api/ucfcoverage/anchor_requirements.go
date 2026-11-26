@@ -6,13 +6,12 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // ===== /v1/anchors/{id}/requirements =====
@@ -23,16 +22,21 @@ import (
 //
 // Path forms accepted:
 //   - UUID — direct scf_anchors.id lookup
-//   - scf_id (e.g., "IAC-06") — natural key lookup
+//   - scf_id (e.g., "IAC-37") — natural key lookup
 //
 // Query parameters:
 //   - ?framework_version=slug:version — pin the response to one
 //     framework_version (e.g. `soc2:2017`). When the param is absent,
 //     every framework version is included.
+//   - ?scf_release=<label> — resolve an scf_id within that SCF release
+//     (#1770). Absent, an scf_id resolves in the current release and a
+//     UUID in whichever release holds it. `scf_release` in the response
+//     names the release the anchor was read from.
 //
 // Returns:
-//   - 200 { anchor, requirements[] }
-//   - 404 when the anchor id doesn't resolve
+//   - 200 { anchor, requirements[], scf_release }
+//   - 404 when the anchor id doesn't resolve, the scf_release is not
+//     loaded, or the scf_id is not in that release
 //   - 401 when bearer auth is missing
 //
 // Backwards-compat: the response key `requirements` matches the
@@ -42,13 +46,16 @@ import (
 // supersets of the in-memory shape.
 func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	anchor, ok, err := h.lookupAnchor(ctx, chi.URLParam(r, "id"))
-	if err != nil {
-		httperr.WriteInternal(w, r, "lookup anchor", err)
+	anchor, rel, err := scfrelease.Resolve(ctx, h.q, r.URL.Query().Get("scf_release"), chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		return
-	}
-	if !ok {
+	case errors.Is(err, scfrelease.ErrNoCurrentRelease):
 		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
+		return
+	case err != nil:
+		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
 
@@ -61,59 +68,32 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 				"anchor":       anchorWireFromRow(anchor),
 				"requirements": []requirementForAnchorWire{},
+				"scf_release":  rel.Version,
 			})
 
 			return
 		}
-		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
-			ScfAnchorID:        anchor.ID,
-			FrameworkVersionID: fv.ID,
-		})
+		got, err := h.listRequirementsForAnchor(ctx, anchor.ID, &fv.ID)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list requirements for anchor (pinned)", err)
 			return
 		}
-		out = mapPinnedRequirements(got)
+		out = got
 	} else {
-		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
-		// framework's CURRENT version — never bleed a legacy/superseded
-		// version's requirements (P0-484-5).
-		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, anchor.ID)
+		got, err := h.listRequirementsForAnchor(ctx, anchor.ID, nil)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list requirements for anchor (current)", err)
 			return
 		}
-		out = mapCurrentVersionRequirements(got)
+		out = got
 	}
 
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"anchor":       anchorWireFromRow(anchor),
 		"requirements": out,
+		"scf_release":  rel.Version,
 	})
 
-}
-
-// lookupAnchor resolves the {id} path segment to a scf_anchors row,
-// supporting UUID and bare scf_id forms.
-func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (dbx.ScfAnchor, bool, error) {
-	if uid, err := uuid.Parse(idOrSCFID); err == nil {
-		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return dbx.ScfAnchor{}, false, nil
-		}
-		if err != nil {
-			return dbx.ScfAnchor{}, false, err
-		}
-		return row, true, nil
-	}
-	row, err := h.q.GetSCFAnchorBySCFID(ctx, idOrSCFID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return dbx.ScfAnchor{}, false, nil
-	}
-	if err != nil {
-		return dbx.ScfAnchor{}, false, err
-	}
-	return row, true, nil
 }
 
 // anchorWireFromRow maps a bare scf_anchors row to the anchorWire JSON
@@ -127,6 +107,43 @@ func anchorWireFromRow(a dbx.ScfAnchor) anchorWire {
 		Name:        a.Title,
 		Description: a.Description,
 	}
+}
+
+// listRequirementsForAnchor is the reverse traversal both
+// /v1/anchors/{id}/requirements and /v1/controls/{id}/coverage read: every
+// requirement the anchor satisfies, in one framework version when
+// frameworkVersionID is set, else in each framework's CURRENT version
+// (slice 484, AC-5 / ADR 0019 §4: absent a pin, never bleed a
+// legacy/superseded version's requirements, P0-484-5).
+//
+// It reads inside the request's tenant GUC: effective_fw_to_scf_edges
+// carries the caller tenant's active overlay edges (#1798), which RLS
+// hides without it.
+func (h *Handler) listRequirementsForAnchor(ctx context.Context, anchorID pgtype.UUID, frameworkVersionID *pgtype.UUID) ([]requirementForAnchorWire, error) {
+	var out []requirementForAnchorWire
+	err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if frameworkVersionID != nil {
+			got, err := q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
+				ScfAnchorID:        anchorID,
+				FrameworkVersionID: *frameworkVersionID,
+			})
+			out = mapPinnedRequirements(got)
+			return err
+		}
+		got, err := q.ListRequirementsForAnchorCurrentVersions(ctx, anchorID)
+		out = mapCurrentVersionRequirements(got)
+		return err
+	})
+	if err != nil {
+		return out, err
+	}
+	var overlays []*overlayWire
+	for _, x := range out {
+		if x.Overlay != nil {
+			overlays = append(overlays, x.Overlay)
+		}
+	}
+	return out, h.nameOverlays(ctx, overlays)
 }
 
 // mapCurrentVersionRequirements maps the slice-484 default (current-version-only)
@@ -150,8 +167,10 @@ func mapCurrentVersionRequirements(rows []dbx.ListRequirementsForAnchorCurrentVe
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
-			MappingTier:            string(x.MappingTier),
+			MappingTier:            tierFor(x.Origin, string(x.MappingTier)),
+			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
+			Overlay:                overlayFrom(x.Origin, x.OverlaySourceRef, x.OverlayCreatedBy, x.OverlayCreatedAt),
 		})
 	}
 	return out
@@ -174,8 +193,10 @@ func mapPinnedRequirements(rows []dbx.ListRequirementsForAnchorByFrameworkVersio
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
-			MappingTier:            string(x.MappingTier),
+			MappingTier:            tierFor(x.Origin, string(x.MappingTier)),
+			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
+			Overlay:                overlayFrom(x.Origin, x.OverlaySourceRef, x.OverlayCreatedBy, x.OverlayCreatedAt),
 		})
 	}
 	return out

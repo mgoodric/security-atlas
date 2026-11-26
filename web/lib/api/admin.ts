@@ -6,7 +6,7 @@
 // (decision D1: the admin domain IS one domain).
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 // ===== Slice 060 — Admin settings (API keys + features) =====
 //
@@ -33,6 +33,15 @@ export type AdminCredential = {
   is_approver: boolean;
   owner_roles: string[];
   rotated_from?: string | null;
+  // IssuedAt + TTL; absent for a key that never expires.
+  expires_at?: string | null;
+  // The admin who minted the key, for attribution only (#1947).
+  minted_by?: string | null;
+  // The admin-chosen name for the key (#2384); absent when it has none.
+  label?: string | null;
+  // Why the key exists when it is not an ordinary key (#2849):
+  // "policy-sync" (may only sync policies) or "bootstrap-recovery".
+  purpose?: string | null;
 };
 
 export type AdminCredentialListResponse = { items: AdminCredential[] };
@@ -44,6 +53,8 @@ export type AdminCredentialIssueRequest = {
   is_admin: boolean;
   is_approver: boolean;
   owner_roles: string[];
+  // Optional name for the key (#2384); trimmed, at most 100 characters.
+  label?: string;
 };
 
 export type AdminCredentialIssueResponse = {
@@ -53,6 +64,7 @@ export type AdminCredentialIssueResponse = {
   last4: string;
   issued_at: string;
   expires_at?: string;
+  label?: string;
 };
 
 export type AdminCredentialRotateResponse = {
@@ -62,10 +74,14 @@ export type AdminCredentialRotateResponse = {
   predecessor_expires_at: string;
 };
 
+// listAdminCredentials lists the tenant's keys. With mintedBy (#1953) the
+// upstream narrows to the live keys that user minted.
 export async function listAdminCredentials(
   bearer: string,
+  mintedBy?: string,
 ): Promise<AdminCredential[]> {
-  const res = await apiFetch(`/v1/admin/credentials`, bearer);
+  const qs = mintedBy ? `?minted_by=${encodeURIComponent(mintedBy)}` : "";
+  const res = await apiFetch(`/v1/admin/credentials${qs}`, bearer);
   const body = (await res.json()) as AdminCredentialListResponse;
   return body.items;
 }
@@ -129,6 +145,15 @@ export type FeatureFlag = {
   last_changed_by?: string;
   last_changed_at?: string | null;
   has_override: boolean;
+  /** #2171: the module the flag belongs to, from the server's registry. */
+  module?: string;
+  module_name?: string;
+  /** True for the module's own switch; false for a feature inside it. */
+  module_switch?: boolean;
+  /** True when the module is core: always on, with no switch of its own. */
+  module_core?: boolean;
+  /** A feature's display name. */
+  feature_name?: string;
 };
 
 export type FeatureFlagListResponse = { items: FeatureFlag[] };
@@ -180,7 +205,10 @@ export async function patchFeatureFlag(
 export type SuperAdminRow = {
   user_id: string;
   granted_at: string;
-  granted_via: "bootstrap_first_install" | "manual_grant";
+  granted_via:
+    | "bootstrap_first_install"
+    | "manual_grant"
+    | "single_tenant_upgrade";
   display_name?: string | null;
   email?: string | null;
 };
@@ -208,13 +236,7 @@ export async function grantSuperAdmin(
     body: JSON.stringify({ user_id: userID }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as SuperAdminRow;
@@ -232,13 +254,7 @@ export async function demoteSuperAdmin(
     },
   );
   if (!res.ok && res.status !== 204) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
 }
@@ -294,13 +310,7 @@ export async function createAdminTenant(
     body: JSON.stringify(req),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as CreateTenantResponse;
@@ -335,6 +345,10 @@ export type AdminUserRow = {
   display_name: string;
   status: string;
   roles: string[];
+  // #2172: the member's module access, within-tenant list only: null for
+  // all modules, else the optional-module keys. Ignored for admins and
+  // auditors.
+  module_access?: string[] | null;
   // Cross-tenant (super_admin) only:
   tenant_id?: string;
   idp_issuer?: string;
@@ -421,13 +435,7 @@ export async function assignAdminUser(
     body: JSON.stringify(req),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AssignUserResponse;
@@ -446,13 +454,7 @@ export async function revokeAdminUser(
     body: JSON.stringify(req),
   });
   if (!res.ok && res.status !== 204) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
 }
@@ -465,9 +467,15 @@ export async function revokeAdminUser(
 //   POST   /v1/admin/demo/seed       -> seed summary
 //   POST   /v1/admin/demo/teardown   -> {tenant_slug, status: "deleted"}
 //
-// 503 from /seed or /teardown means the env-var gate is unset. The
-// frontend distinguishes the "feature disabled" 503 (banner) from
-// the "transient" 5xx (error toast) via the /status probe.
+// 409 {code: "feature_not_enabled"} from /seed or /teardown means the
+// env-var gate is unset (#2730; a 503 before). The frontend shows the
+// "feature disabled" banner from the /status probe; a 409 that races it
+// shows its wording in the error Alert, and a 5xx shows the status line.
+//
+// One 503 is not a failure: {code: "teardown_busy"} with Retry-After means
+// the teardown gave up waiting for the audit_periods lock, rolled back and
+// deleted nothing (#3094). The BFF passes the code and Retry-After through
+// and the page tells the operator to retry (#3096).
 
 export type DemoStatusResponse = {
   enabled: boolean;
@@ -496,13 +504,7 @@ export async function getAdminDemoStatus(
     headers: { Authorization: `Bearer ${bearer}` },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as DemoStatusResponse;
@@ -519,13 +521,7 @@ export async function postAdminDemoSeed(
     },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as DemoSeedResponse;
@@ -542,16 +538,39 @@ export async function postAdminDemoTeardown(
     },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
+    const msg = await upstreamErrorMessage(res.clone());
+    let code: string | undefined;
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
+      code = ((await res.json()) as { code?: string }).code;
     } catch {
-      // fall through
+      /* body not JSON — no code */
     }
-    throw new APIError(res.status, msg);
+    throw new DemoTeardownError(
+      res.status,
+      msg,
+      code,
+      res.headers.get("Retry-After") ?? undefined,
+    );
   }
   return (await res.json()) as DemoTeardownResponse;
+}
+
+// DEMO_TEARDOWN_BUSY is the code on the teardown's lock-timeout 503.
+export const DEMO_TEARDOWN_BUSY = "teardown_busy";
+
+// DemoTeardownError is an APIError that also carries the upstream
+// Retry-After, so the BFF can pass it through on teardown_busy.
+export class DemoTeardownError extends APIError {
+  retryAfter?: string;
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    retryAfter?: string,
+  ) {
+    super(status, message, code);
+    this.retryAfter = retryAfter;
+  }
 }
 
 // ===== Slice 063 — Admin SSO config (binds to slice 062 backend) =====
@@ -559,6 +578,7 @@ export async function postAdminDemoTeardown(
 // Wire shape mirrors `internal/api/adminsso/handler.go`:
 //   GET   /v1/admin/sso   -> AdminSSOConfig sans client_secret (404 = unset)
 //   PATCH /v1/admin/sso   -> upsert; empty client_secret => leave existing
+//   DELETE /v1/admin/sso  -> AdminSSODeleteResult (#2760)
 //
 // client_secret is NEVER returned from GET. The UI keeps the input
 // password-typed and treats an empty submit as "leave existing" per
@@ -571,8 +591,22 @@ export type AdminSSOConfig = {
   client_id: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  // #1944 D3: let a sign-in whose ID token omits email_verified link to a
+  // SCIM-provisioned user by email. Off (strict) by default.
+  trust_unverified_email_for_link: boolean;
   created_at: string;
   updated_at: string;
+  // #2760: what DELETE would remove. GET only; absent on a PATCH response.
+  mapping_count?: number;
+  derived_role_count?: number;
+};
+
+// #2760: DELETE /v1/admin/sso response.
+export type AdminSSODeleteResult = {
+  config_id: string;
+  mapping_count: number;
+  revoked_role_count: number;
+  affected_user_count: number;
 };
 
 export type AdminSSOPatchRequest = {
@@ -581,6 +615,7 @@ export type AdminSSOPatchRequest = {
   client_secret?: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  trust_unverified_email_for_link?: boolean;
 };
 
 // getAdminSSO returns the tenant's primary IdP config, or null if none
@@ -613,13 +648,7 @@ export async function patchAdminSSO(
   if (!res.ok) {
     // Bubble up the upstream JSON body's `error` field for UI display
     // (slice 062 always returns {error: string} on non-2xx).
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON; fall back to status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AdminSSOConfig;

@@ -166,4 +166,80 @@ describe("GET /api/audit-log/export", () => {
     expect(headers?.Authorization).toBe("Bearer test-bearer-token");
     expect(headers?.Cookie).toBeUndefined();
   });
+
+  // #2430: the Activity page's "my activity" filter sends actor=me. The
+  // BFF resolves it from GET /v1/me under the caller's own bearer.
+  test("resolves actor=me to the caller's user_id from /v1/me", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ user_id: "00000000-0000-0000-0000-000000001111" }),
+      )
+      .mockResolvedValueOnce(
+        new Response("ok", {
+          status: 200,
+          headers: { "Content-Type": "text/csv; charset=utf-8" },
+        }),
+      );
+
+    const res = await GET(
+      makeReq(
+        "?format=csv&from=2026-05-11T00:00:00Z&to=2026-05-18T00:00:00Z&actor=me",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[0][0])).toBe("http://atlas:8080/v1/me");
+    const meHeaders = fetchSpy.mock.calls[0][1]?.headers as
+      | Record<string, string>
+      | undefined;
+    expect(meHeaders?.Authorization).toBe("Bearer test-bearer-token");
+    const upstream = new URL(String(fetchSpy.mock.calls[1][0]));
+    expect(upstream.pathname).toBe("/v1/admin/audit-log/export");
+    expect(upstream.searchParams.get("actor")).toBe(
+      "00000000-0000-0000-0000-000000001111",
+    );
+    expect(upstream.searchParams.get("format")).toBe("csv");
+  });
+
+  test("refuses with 502 and no export when actor=me cannot be resolved", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ error: "unauthenticated" }, { status: 401 }),
+      );
+
+    const res = await GET(
+      makeReq(
+        "?format=csv&from=2026-05-11T00:00:00Z&to=2026-05-18T00:00:00Z&actor=me",
+      ),
+    );
+    expect(res.status).toBe(502);
+    // Only the /v1/me lookup ran; the export was never requested, so it
+    // cannot widen to every actor.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toBe("http://atlas:8080/v1/me");
+  });
+
+  test("forwards any other actor verbatim without a /v1/me lookup", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("ok", {
+        status: 200,
+        headers: { "Content-Type": "text/csv; charset=utf-8" },
+      }),
+    );
+
+    const res = await GET(
+      makeReq(
+        "?format=csv&from=2026-05-11T00:00:00Z&to=2026-05-18T00:00:00Z&actor=key_foo",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const upstream = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(upstream.searchParams.get("actor")).toBe("key_foo");
+  });
 });

@@ -12,10 +12,11 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Query keys the BFF will forward to upstream GET /v1/action-plans.
-const FORWARD_PARAMS = ["status", "limit", "cursor"];
+const FORWARD_PARAMS = ["status", "q", "limit", "cursor"];
 
 export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
@@ -37,7 +38,7 @@ export async function GET(req: Request): Promise<Response> {
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   const body = await upstream.text();
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });
@@ -60,7 +61,7 @@ export async function POST(req: Request): Promise<Response> {
     cache: "no-store",
   });
   const body = await upstream.text();
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

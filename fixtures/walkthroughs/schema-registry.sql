@@ -33,7 +33,7 @@ VALUES (
       "x-evidence-kind": "demo.encryption_state.v1"
     }$json$::jsonb,
     'platform',
-    ARRAY['CRY-05'],
+    ARRAY['CRY-07'],
     'demo-operator@example.invalid'
 )
 ON CONFLICT DO NOTHING;

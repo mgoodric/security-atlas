@@ -20,16 +20,20 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -77,6 +81,11 @@ type sampleExportRow struct {
 	WindowEnd          time.Time
 	PopulationFrozenAt string // RFC3339 when populations.frozen_at is set
 	PopulationRowCount int64
+	// DemoEvidenceCount is how many of the sample's drawn evidence records
+	// the in-place demo seed added (#2153, via demoprov). The OSCAL AR marks
+	// the same records; this keeps an auditor working from the CSV from
+	// reading demo evidence as real.
+	DemoEvidenceCount int
 }
 
 func NewSamplesExportHandler(pool *pgxpool.Pool) *SamplesExportHandler {
@@ -239,6 +248,11 @@ func parseSamplesExportFormat(r *http.Request) (export.Format, error) {
 
 // samplesExportHeader is the canonical column set. INCLUDES
 // audit_period_id (joined from populations) per slice doc.
+//
+// demo_evidence_count (#2153) is the last column, so earlier columns keep
+// their positions, as the controls and evidence exports' `demo` column did
+// (#2043 D5). A sample is a draw of N records, so it counts the demo ones
+// rather than carrying one true/false.
 func samplesExportHeader() []string {
 	return []string{
 		"id",
@@ -253,6 +267,7 @@ func samplesExportHeader() []string {
 		"window_end",
 		"population_frozen_at",
 		"population_row_count",
+		"demo_evidence_count",
 	}
 }
 
@@ -272,6 +287,7 @@ func samplesToRowIter(rows []sampleExportRow) iter.Seq[[]string] {
 				r.WindowEnd.UTC().Format(time.RFC3339),
 				r.PopulationFrozenAt,
 				fmt.Sprintf("%d", r.PopulationRowCount),
+				strconv.Itoa(r.DemoEvidenceCount),
 			}
 			if !yield(row) {
 				return
@@ -385,15 +401,71 @@ func (h *SamplesExportHandler) listSamplesDirect(ctx context.Context, limit int)
 	if rs.Err() != nil {
 		return nil, false, fmt.Errorf("iterate sample rows: %w", rs.Err())
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, false, fmt.Errorf("commit: %w", err)
-	}
+	rs.Close()
 
 	exceeded := len(out) >= limit
 	if exceeded {
 		out = out[:limit]
 	}
+	// An over-cap export is refused, so its demo counts are never read.
+	if !exceeded {
+		if err := countDemoEvidence(ctx, tx, tenantID, out); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit: %w", err)
+	}
 	return out, exceeded, nil
+}
+
+// countDemoEvidence sets each row's DemoEvidenceCount: how many of the
+// sample's drawn evidence records (sample_evidence) the in-place demo seed
+// added (#2153). It reads in the caller's tenant transaction, and asks
+// demoprov which records are demo, the same lookup the OSCAL AR uses.
+func countDemoEvidence(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, rows []sampleExportRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	sampleIDs := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		sampleIDs[i] = r.ID
+	}
+	rs, err := tx.Query(ctx, `
+		SELECT sample_id, evidence_record_id
+		FROM sample_evidence
+		WHERE tenant_id = $1 AND sample_id = ANY($2::uuid[])
+	`, tenantID, sampleIDs)
+	if err != nil {
+		return fmt.Errorf("query sample evidence: %w", err)
+	}
+	type member struct{ sample, evidence uuid.UUID }
+	members, err := pgx.CollectRows(rs, func(r pgx.CollectableRow) (member, error) {
+		var m member
+		err := r.Scan(&m.sample, &m.evidence)
+		return m, err
+	})
+	if err != nil {
+		return fmt.Errorf("scan sample evidence: %w", err)
+	}
+	evidenceIDs := make([]uuid.UUID, len(members))
+	for i, m := range members {
+		evidenceIDs[i] = m.evidence
+	}
+	demo, err := demoprov.Lookup(ctx, dbx.New(tx), demoprov.TableEvidence, evidenceIDs)
+	if err != nil {
+		return err
+	}
+	perSample := make(map[uuid.UUID]int, len(rows))
+	for _, m := range members {
+		if demo.Has(m.evidence) {
+			perSample[m.sample]++
+		}
+	}
+	for i := range rows {
+		rows[i].DemoEvidenceCount = perSample[rows[i].ID]
+	}
+	return nil
 }
 
 // ===== Meta-audit =====
@@ -447,8 +519,13 @@ func (h *SamplesExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
+// samplesHasProgramRead reports whether the credential may read the samples
+// export: a tenant approver by its live roles (authz.IsTenantApprover), as
+// OPA reads it for admin and grc_engineer only. #2507 moved it off `IsAdmin
+// || IsApprover || len(OwnerRoles) > 0`, which counted a session's role
+// claim (#2381) and admitted roles OPA refuses here.
 func samplesHasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantApprover(c)
 }
 
 // ===== Counting writer / shared helpers =====

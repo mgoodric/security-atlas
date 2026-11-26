@@ -207,23 +207,14 @@ func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
 	}
 }
 
-// resetBootstrapFixtures clears `tenants` and `users` rows that the
-// slice-210 BootstrapTenantID tests touch. Run as both setup and
-// cleanup so each subtest sees a known-empty state. Uses the migrate
-// pool because RLS would hide most rows from atlas_app.
-//
-// TRUNCATE CASCADE handles all FK dependencies in one shot (notably
-// `local_credentials.user_id REFERENCES users ON DELETE CASCADE`,
-// `super_admins.user_id` if present, etc.) without having to
-// enumerate every table that may or may not exist in the current
-// migration set.
-func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
-	t.Helper()
-	ctx := context.Background()
-	if _, err := admin.Exec(ctx, `TRUNCATE TABLE tenants, users RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("reset tenants + users (TRUNCATE CASCADE): %v", err)
-	}
-}
+// The BootstrapTenantID and TenantCount tests below need an install with no
+// tenants and no users but their own. They used to TRUNCATE tenants and
+// users CASCADE on the shared database, which deleted every other suite's
+// tenants, users and everything cascading from them (#3094). Each now reads
+// and writes empty copies of the two tables through
+// dbtest.NewShadowMigratePool, and the shared tables are not touched. The
+// RequiresWritePool test is the exception: it seeds and deletes one row of
+// its own in public.tenants (#3096).
 
 // TestStatus_BootstrapTenantID_RequiresWritePool guards the
 // fix-forward 2026-05-23 invariant: the method MUST use the writePool
@@ -233,30 +224,47 @@ func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
 // rows without a tenant GUC set, and the unauth install-state
 // surface has none.
 //
-// Concretely: seed a tenants row, then construct a Status with
-// writePool=nil but readPool=app. Assert (uuid.Nil, nil) is returned
+// Concretely: seed a tenants row in the shared public table, confirm
+// atlas_app cannot see it (RLS, no tenant GUC), then construct a Status
+// with writePool=nil but readPool=app. Assert (uuid.Nil, nil) is returned
 // — anything else (an error OR a returned UUID) means the method
 // regressed back to readPool-based RLS-vulnerable behavior.
+//
+// Unlike its siblings this test does not use a shadow pool: the RLS check
+// needs the row where atlas_app reads, in public.tenants. It seeds one row
+// with a fresh id and deletes only that row (#3096), so no other suite's
+// tenants are touched.
 func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	resetBootstrapFixtures(t, admin)
-	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
+	ctx := context.Background()
 
-	// Seed a tenants row that atlas_app cannot see due to RLS.
-	want := uuid.MustParse("f0000000-0000-4000-8000-000000000001")
-	_, err := admin.Exec(context.Background(),
-		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, 'Default Tenant', TRUE)`,
-		want)
-	if err != nil {
+	seeded := uuid.New()
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, TRUE)`,
+		seeded, "status-requires-write-pool-"+seeded.String()); err != nil {
 		t.Fatalf("seed tenants row: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, seeded); err != nil {
+			t.Errorf("delete seeded tenant %s: %v", seeded, err)
+		}
+	})
+
+	// The RLS precondition: atlas_app, with no tenant GUC, cannot see it.
+	var visible int
+	if err := app.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id = $1`, seeded).Scan(&visible); err != nil {
+		t.Fatalf("app read of seeded tenant: %v", err)
+	}
+	if visible != 0 {
+		t.Fatalf("atlas_app sees %d seeded tenants rows without a tenant GUC; want 0 (RLS)", visible)
 	}
 
 	// Construct Status with writePool=nil. The method must NOT try to
 	// read via readPool (where RLS hides the row), and must return
 	// (uuid.Nil, nil) for graceful degradation.
 	s := platform.NewStatus(app, nil)
-	got, err := s.BootstrapTenantID(context.Background())
+	got, err := s.BootstrapTenantID(ctx)
 	if err != nil {
 		t.Fatalf("BootstrapTenantID with nil writePool: err = %v; want nil (graceful degradation)", err)
 	}
@@ -273,10 +281,8 @@ func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
 // Verifies the writePool path (the only correct path — atlas_app
 // readPool would see zero rows due to RLS without a tenant GUC).
 func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
+	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
 	app := dbtest.NewAppPool(t)
-	resetBootstrapFixtures(t, admin)
-	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
 	want := uuid.MustParse("d0000000-0000-4000-8000-000000000001")
 	_, err := admin.Exec(context.Background(),
@@ -301,10 +307,8 @@ func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
 // the oldest user's tenant_id. This is the path the live atlas-edge
 // instance (pre-slice-210 seed.sql) walks until its next re-bootstrap.
 func TestStatus_BootstrapTenantID_FallbackToUsers(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
+	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
 	app := dbtest.NewAppPool(t)
-	resetBootstrapFixtures(t, admin)
-	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
 	want := uuid.MustParse("e0000000-0000-4000-8000-000000000001")
 	// Insert a users row with NO matching tenants row (the pre-slice-210
@@ -335,10 +339,8 @@ func TestStatus_BootstrapTenantID_FallbackToUsers(t *testing.T) {
 // state: no tenants, no users. Returns (uuid.Nil, nil) so the
 // install-state handler omits the field gracefully.
 func TestStatus_BootstrapTenantID_NoBootstrapAtAll(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
+	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
 	app := dbtest.NewAppPool(t)
-	resetBootstrapFixtures(t, admin)
-	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
 	s := platform.NewStatus(app, admin)
 	got, err := s.BootstrapTenantID(context.Background())
@@ -347,5 +349,49 @@ func TestStatus_BootstrapTenantID_NoBootstrapAtAll(t *testing.T) {
 	}
 	if got != uuid.Nil {
 		t.Fatalf("BootstrapTenantID = %s; want uuid.Nil", got)
+	}
+}
+
+// TestStatus_TenantCount counts every tenant through the BYPASSRLS write
+// pool (#1851), excluding the all-zeros row (#1885): the reset-bootstrap
+// gate reads it to decide whether a tenant admin key may stand in for
+// super_admin.
+func TestStatus_TenantCount(t *testing.T) {
+	admin := dbtest.NewShadowMigratePool(t, "tenants", "users")
+	app := dbtest.NewAppPool(t)
+
+	s := platform.NewStatus(app, admin)
+
+	// The all-zeros tenant is not a tenant (#1885): with only that row the
+	// install has zero tenants, and it never counts toward the total below.
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name) VALUES ($1, $2)`,
+		uuid.Nil, "all-zeros"); err != nil {
+		t.Fatalf("seed all-zeros tenant: %v", err)
+	}
+	if got, err := s.TenantCount(context.Background()); err != nil || got != 0 {
+		t.Fatalf("TenantCount with only the all-zeros row = %d, %v; want 0, nil", got, err)
+	}
+
+	for i, id := range []string{
+		"e0000000-0000-4000-8000-000000000001",
+		"e0000000-0000-4000-8000-000000000002",
+	} {
+		if _, err := admin.Exec(context.Background(),
+			`INSERT INTO tenants (id, name) VALUES ($1, $2)`,
+			uuid.MustParse(id), "tenant "+id); err != nil {
+			t.Fatalf("seed tenant: %v", err)
+		}
+		got, err := s.TenantCount(context.Background())
+		if err != nil {
+			t.Fatalf("TenantCount: %v", err)
+		}
+		if got != i+1 {
+			t.Fatalf("TenantCount = %d, want %d", got, i+1)
+		}
+	}
+
+	if _, err := platform.NewStatus(app, nil).TenantCount(context.Background()); err == nil {
+		t.Fatalf("TenantCount with nil writePool succeeded; want ErrWriteNotConfigured")
 	}
 }

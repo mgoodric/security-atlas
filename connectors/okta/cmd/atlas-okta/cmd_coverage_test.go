@@ -97,6 +97,7 @@ func TestMapPolicyResult(t *testing.T) {
 		{"pass", oktapolicy.ResultPass, evidencev1.Result_RESULT_PASS},
 		{"fail", oktapolicy.ResultFail, evidencev1.Result_RESULT_FAIL},
 		{"inconclusive", oktapolicy.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"na", oktapolicy.ResultNA, evidencev1.Result_RESULT_NA},
 		{"unspecified-default", oktapolicy.Result("unknown-sentinel"), evidencev1.Result_RESULT_UNSPECIFIED},
 	}
 	for _, tc := range cases {
@@ -619,8 +620,8 @@ func TestDoRun_FailsOnMissingOktaToken(t *testing.T) {
 		org:              "example",
 		environment:      "prod",
 		oktaBaseURL:      "https://example.okta.com",
-		mfaPolicyControl: "scf:IAC-06",
-		appAssignControl: "scf:IAC-21",
+		mfaPolicyControl: "scf:IAC-37",
+		appAssignControl: "scf:IAC-10",
 		userLifeControl:  "scf:IAC-22",
 	})
 	if err == nil {

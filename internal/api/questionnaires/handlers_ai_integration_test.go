@@ -139,7 +139,7 @@ func aiReq(t *testing.T, tenant, body string, params map[string]string) *http.Re
 		t.Fatalf("WithTenant: %v", err)
 	}
 	ctx = authctx.WithCredential(ctx, credstore.Credential{
-		ID: "key_grc_engineer", TenantID: tenant, IsApprover: true,
+		ID: "key_grc_engineer", TenantID: tenant, IsAdmin: true,
 	})
 	rctx := chi.NewRouteContext()
 	for k, v := range params {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
@@ -79,6 +80,23 @@ func (b *Bundle) ValidateEvidenceKinds(_ context.Context, reg SchemaRegistry) er
 	return nil
 }
 
+// UnkindedQueryWarnings returns one warning for each evidence query that
+// declares no evidence_kind (#2818, ADR 0028 decision 5). Such a query is
+// still accepted and evaluates over every record its control receives, as
+// all queries did before #2818; a query that reads payload fields can then
+// misread a record of another kind. Upload returns these as warnings and
+// `atlas-cli controls validate` prints them; neither fails.
+func (m *Manifest) UnkindedQueryWarnings() []string {
+	var out []string
+	for i, q := range m.EvidenceQueries {
+		if q.EvidenceKind != "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("evidence_queries[%d] (%s) declares no evidence_kind, so it evaluates every record the control receives, of any kind; declare the kind it reads", i, q.ID))
+	}
+	return out
+}
+
 // registryKnowsKind probes the slice-014 cache for any registered semver of
 // the kind. The bundle author hasn't pinned one, so we accept the kind iff
 // at least one semver is registered. We try the v1 canonical "1.0.0" first
@@ -90,17 +108,42 @@ func (b *Bundle) ValidateEvidenceKinds(_ context.Context, reg SchemaRegistry) er
 // map — there's no "kind exists in any semver" query exposed. We do the
 // minimal viable check without forcing a new interface method. Future
 // slices can extend SchemaRegistry with a Kinds() listing.
+//
+// A kind whose `.v<N>` suffix names a later major (`okta.mfa_policy.v2`,
+// #2901) registers its baseline at "N.0.0", so that is probed instead of
+// "1.0.0".
 func registryKnowsKind(reg SchemaRegistry, kind string) bool {
-	// Canonical first guess: the v1 baseline most platform schemas register.
-	if reg.IsRegistered(kind, "1.0.0") {
+	major := kindMajor(kind)
+	// Canonical first guess: the baseline of the kind's major, "1.0.0" for
+	// most platform schemas.
+	if reg.IsRegistered(kind, major+".0.0") {
 		return true
 	}
 	// Some platform schemas register under "1.0" (slice 014 supports both).
-	if reg.IsRegistered(kind, "1.0") {
+	if reg.IsRegistered(kind, major+".0") {
 		return true
 	}
 	// Empty-version probe — slice 014's InMemory.IsRegistered returns false
 	// for empty version, so this never accidentally passes; it's a sentinel
 	// for a future "exists?" check.
 	return reg.IsRegistered(kind, "")
+}
+
+// kindMajor returns the major version a kind's `.v<N>` suffix names, or
+// "1" for a kind without one.
+func kindMajor(kind string) string {
+	i := strings.LastIndex(kind, ".v")
+	if i < 0 || i+2 == len(kind) {
+		return "1"
+	}
+	n := kind[i+2:]
+	for _, r := range n {
+		if r < '0' || r > '9' {
+			return "1"
+		}
+	}
+	if n = strings.TrimLeft(n, "0"); n == "" {
+		return "1"
+	}
+	return n
 }

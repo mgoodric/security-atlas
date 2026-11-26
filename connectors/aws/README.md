@@ -2,18 +2,32 @@
 
 The flagship connector (slice 004) and the canonical worked example the
 [connector-authoring guide](../../docs-site/docs/connector-authoring.md)
-links to. Emits one evidence kind:
+links to. Emits two evidence kinds, one per `run --kind`:
 
 | Kind                                | Profile | Source                                                                          |
 | ----------------------------------- | ------- | ------------------------------------------------------------------------------- |
 | `aws.s3.bucket_encryption_state.v1` | push    | `s3:ListBuckets` + `s3:GetBucketLocation` + `s3:GetBucketEncryption` per bucket |
+| `aws.s3.bucket_tls_enforcement.v1`  | push    | `s3:ListBuckets` + `s3:GetBucketLocation` + `s3:GetBucketPolicy` per bucket     |
 
-The connector lists every visible bucket, resolves its region, and reports
-default server-side-encryption posture (`pass` when SSE is configured,
-`fail` when absent, `inconclusive` when a per-bucket lookup errors). Each
-bucket becomes one `aws.s3.bucket_encryption_state.v1` record. Additional
-kinds (EC2 security-group state, etc.) arrive with later AWS slices; slice
-004 ships exactly this one.
+The connector lists every visible bucket and resolves its region. For
+`aws.s3.bucket_encryption_state.v1` (the default) it reports default
+server-side-encryption posture (`pass` when SSE is configured, `fail` when
+absent, `inconclusive` when a per-bucket lookup errors).
+
+For `aws.s3.bucket_tls_enforcement.v1` (#2993) it reads the bucket policy
+and reports whether it denies requests not sent over TLS. `pass` means the
+policy has Deny statements for every principal (`"*"` or `{"AWS": "*"}`)
+and every S3 action (`s3:*` or `*`), on the bucket and its objects, whose
+only condition is `Bool` `aws:SecureTransport` `"false"`: the statement in
+the S3 user guide's "Restrict access to only HTTPS requests" example.
+`fail` means the bucket has no policy (`NoSuchBucketPolicy`) or its policy
+has no such statement. `inconclusive` means the region or policy could not
+be read, or the policy is not valid JSON. A statement written any other way
+(a wildcard ARN pattern, `NotPrincipal`, a second condition that narrows the
+deny) is read as not denying, so it fails rather than passes.
+
+Each bucket becomes one record of the kind asked for. Run the connector
+once per kind.
 
 ## Auth — least-privilege read-only IAM via STS AssumeRole
 
@@ -35,6 +49,7 @@ more.
 | `s3:ListBuckets`                      | `s3:ListAllMyBuckets`               | Read/List | Enumerating buckets to inspect                                                   |
 | `s3:GetBucketLocation`                | `s3:GetBucketLocation`              | Read      | Region resolution per bucket (re-targets the regional S3 client)                 |
 | `s3:GetBucketEncryption`              | `s3:GetEncryptionConfiguration`     | Read      | `aws.s3.bucket_encryption_state.v1` (the SSE posture itself)                     |
+| `s3:GetBucketPolicy`                  | `s3:GetBucketPolicy`                | Read      | `aws.s3.bucket_tls_enforcement.v1` (the bucket policy the TLS check reads)       |
 | `organizations:ListTagsForResource`\* | `organizations:ListTagsForResource` | Read      | Optional — infers the `environment` scope tag from the account `Environment` tag |
 
 \* The Organizations call is **optional**. If the role cannot reach
@@ -62,7 +77,8 @@ own account id and bucket constraints):
       "Action": [
         "s3:ListAllMyBuckets",
         "s3:GetBucketLocation",
-        "s3:GetEncryptionConfiguration"
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPolicy"
       ],
       "Resource": "*"
     }
@@ -102,6 +118,14 @@ aws-connector run \
   --role-arn arn:aws:iam::<ACCOUNT_ID>:role/security-atlas-aws-readonly \
   --region us-east-1 \
   --environment prod
+
+# Same, for whether each bucket policy denies non-TLS requests.
+aws-connector run --kind aws.s3.bucket_tls_enforcement.v1 \
+  --endpoint platform.example.com:443 \
+  --token "$SECURITY_ATLAS_TOKEN" \
+  --role-arn arn:aws:iam::<ACCOUNT_ID>:role/security-atlas-aws-readonly \
+  --region us-east-1 \
+  --environment prod
 ```
 
 | Flag            | Subcommand | Required | Default                             | Notes                                                                                   |
@@ -112,10 +136,10 @@ aws-connector run \
 | `--role-arn`    | `run`      | yes      | —                                   | IAM role ARN to assume (no static keys supported)                                       |
 | `--region`      | `run`      | yes      | —                                   | primary AWS region; S3 calls re-target per bucket via `GetBucketLocation`               |
 | `--environment` | `run`      | no       | —                                   | environment scope tag; fallback when `Organizations:ListTagsForResource` is unavailable |
-| `--kind`        | `run`      | no       | `aws.s3.bucket_encryption_state.v1` | slice 004 supports exactly this kind                                                    |
-| `--control-id`  | `run`      | no       | `scf:CRY-04`                        | control id attached to each emitted record                                              |
+| `--kind`        | `run`      | no       | `aws.s3.bucket_encryption_state.v1` | or `aws.s3.bucket_tls_enforcement.v1`                                                   |
+| `--control-id`  | `run`      | no       | empty                               | provenance only: the kind is routed by type to every control that queries it (#2924)    |
 
-`register` announces `name=aws-connector`, `supported_kinds=[aws.s3.bucket_encryption_state.v1]`,
+`register` announces `name=aws-connector`, `supported_kinds=[aws.s3.bucket_encryption_state.v1, aws.s3.bucket_tls_enforcement.v1]`,
 and `profiles_supported=[push]` to `ConnectorRegistryService.Register`.
 
 ## Scope minimums
@@ -134,7 +158,10 @@ where `<version>` is the build's module version (or `dev` under `go run`).
 
 ## Idempotency
 
-Each record's `idempotency_key = sha256(bucket_arn | hour_truncated_observed_at)`.
+Each encryption record's `idempotency_key = sha256(bucket_arn | hour_truncated_observed_at)`;
+a TLS record's is `sha256(aws.s3.bucket_tls_enforcement.v1 | bucket_arn | hour_truncated_observed_at)`.
+The ledger keeps keys unique per tenant across kinds, so without the kind
+the two records for one bucket and hour would collapse into one.
 `observed_at` is truncated to the UTC hour, so two runs within the same hour
 for the same bucket collapse to one ledger row; a run that crosses an hour
 boundary writes a fresh record. `source_attribution.session_id` is left
@@ -145,14 +172,15 @@ between dedup retries.
 
 - Requires a write/admin IAM policy → REJECTED. The documented policy is
   read-only (`sts:GetCallerIdentity`, `s3:ListAllMyBuckets`,
-  `s3:GetBucketLocation`, `s3:GetEncryptionConfiguration`); no `Put`,
+  `s3:GetBucketLocation`, `s3:GetEncryptionConfiguration`,
+  `s3:GetBucketPolicy`); no `Put`,
   `Delete`, `iam:*`, `AdministratorAccess`, or `*:*`.
 - Static access keys → REJECTED. `--role-arn` is required; `Assume` refuses
   to fall back to env-var or profile-baked static credentials
   (`aws.AnonymousCredentials` is wired as the base provider).
 - Mutates AWS state → REJECTED. The connector has no write code path; the
-  only S3 methods invoked are `ListBuckets` / `GetBucketEncryption`
-  (+ `GetBucketLocation` for region resolution).
+  only S3 methods invoked are `ListBuckets` / `GetBucketEncryption` /
+  `GetBucketPolicy` (+ `GetBucketLocation` for region resolution).
 - Emits un-scoped records → REJECTED. `run` fails loudly when it can resolve
   neither the account `Environment` tag nor a `--environment` flag, rather
   than pushing a record with an empty `environment` dimension.

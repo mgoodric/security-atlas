@@ -13,34 +13,124 @@
 // control -> anchor -> requirement; this component has no code path that
 // draws a requirement-to-requirement edge. Anti-criterion P0-2:
 // out-of-scope requirements are rendered dashed/greyed, never hidden.
+//
+// #2096 — labels are never truncated. Every node label wraps onto as many
+// lines as it needs (lib/ucf-graph-text.ts) and each node is sized to its
+// lines. Anchor-to-requirement edges are elbows whose last leg runs
+// horizontally into the requirement node; the edge label sits above that
+// leg, in a gutter wide enough for the longest label, so no edge label
+// crosses a node. Labels are org- and catalog-supplied text, so they render
+// only as React text children of SVG <text>/<tspan>, never as markup.
 
 import type {
   ControlCoverage,
   CoverageRequirement,
 } from "@/lib/api/control-detail";
 import { strmStyle } from "@/components/control/strm";
+import {
+  CHAR_EM,
+  type CharEm,
+  estimateTextWidth,
+  wrapText,
+} from "@/lib/ucf-graph-text";
 
-const VIEW_W = 800;
-const NODE_W = 190;
-const NODE_H = 40;
+const MARGIN_X = 20;
+const CONTROL_W = 200;
+const ANCHOR_W = 170;
+const REQ_W = 250;
+const PAD_X = 12;
+const PAD_Y = 10;
 const ROW_GAP = 12;
-const CONTROL_X = 20;
-const ANCHOR_X = 305;
-const ANCHOR_W = 140;
-const ANCHOR_H = 88;
-const REQ_X = 590;
+const LINE_HEIGHT = 1.4;
+// Horizontal run out of the anchor before an edge turns toward its row.
+const ELBOW_RUN = 16;
+// Clearance between an edge label and the node or elbow beside it.
+const LABEL_CLEARANCE = 10;
+const EDGE_LABEL_SIZE = 9;
 // Vertical space reserved beneath the node area for the legend row.
 const LEGEND_BAND = 48;
 
-// requirementStackHeight is the total height of the right-hand column of
-// requirement node rows.
-function requirementStackHeight(reqCount: number): number {
-  return Math.max(reqCount, 1) * (NODE_H + ROW_GAP) - ROW_GAP;
+type Line = {
+  text: string;
+  size: number;
+  weight?: number;
+  mono?: boolean;
+  fill: string;
+};
+
+type Block = {
+  text: string;
+  size: number;
+  em: CharEm;
+  weight?: number;
+  mono?: boolean;
+  fill: string;
+};
+
+// layoutLines wraps each block to the node's inner width.
+function layoutLines(blocks: Block[], nodeW: number): Line[] {
+  const inner = nodeW - 2 * PAD_X;
+  return blocks.flatMap((b) =>
+    wrapText(b.text, inner, b.size, b.em).map((text) => ({
+      text,
+      size: b.size,
+      weight: b.weight,
+      mono: b.mono,
+      fill: b.fill,
+    })),
+  );
 }
 
-function vizHeight(reqCount: number): number {
-  const nodeArea = Math.max(requirementStackHeight(reqCount), ANCHOR_H + 40);
-  return nodeArea + LEGEND_BAND;
+function linesHeight(lines: Line[]): number {
+  return lines.reduce((h, l) => h + l.size * LINE_HEIGHT, 0) + 2 * PAD_Y;
+}
+
+// NodeText renders wrapped lines inside a node whose top-left is (x, y).
+function NodeText({
+  lines,
+  x,
+  y,
+  w,
+  align,
+}: {
+  lines: Line[];
+  x: number;
+  y: number;
+  w: number;
+  align: "start" | "middle";
+}) {
+  const tx = align === "middle" ? x + w / 2 : x + PAD_X;
+  return (
+    <>
+      {lines.map((l, i) => {
+        const lineTop = lines
+          .slice(0, i)
+          .reduce((t, prev) => t + prev.size * LINE_HEIGHT, y + PAD_Y);
+        return (
+          <text
+            key={i}
+            x={tx}
+            y={lineTop + l.size}
+            textAnchor={align}
+            fontSize={l.size}
+            fontWeight={l.weight}
+            fontFamily={l.mono ? "monospace" : undefined}
+            fill={l.fill}
+            data-testid="ucf-viz-node-text"
+          >
+            {l.text}
+          </text>
+        );
+      })}
+    </>
+  );
+}
+
+function edgeLabel(req: CoverageRequirement, outOfScope: boolean): string {
+  const style = strmStyle(req.relationship_type);
+  return `${style.label} · ${req.strength.toFixed(2)}${
+    outOfScope ? " · out-of-scope" : ""
+  }`;
 }
 
 export function UcfMiniViz({
@@ -66,126 +156,158 @@ export function UcfMiniViz({
     );
   }
 
-  const height = vizHeight(requirements.length);
-  const stackH = requirementStackHeight(requirements.length);
-  const stackTop = (height - LEGEND_BAND - stackH) / 2;
-  const centerY = (height - LEGEND_BAND) / 2;
-  const anchorY = centerY - ANCHOR_H / 2;
-  const controlY = centerY - NODE_H / 2;
-
-  const reqRow = (req: CoverageRequirement, i: number) => {
-    const y = stackTop + i * (NODE_H + ROW_GAP);
-    const style = strmStyle(req.relationship_type);
+  // ---- node contents ----
+  const controlLines = layoutLines(
+    [
+      {
+        text: control.title,
+        size: 11,
+        em: CHAR_EM.sansBold,
+        weight: 600,
+        fill: "rgb(49 46 129)",
+      },
+      {
+        text: control.bundle_id,
+        size: 10,
+        em: CHAR_EM.mono,
+        mono: true,
+        fill: "rgb(79 70 229)",
+      },
+    ],
+    CONTROL_W,
+  );
+  const anchorLines = layoutLines(
+    [
+      {
+        text: anchor.scf_id,
+        size: 11,
+        em: CHAR_EM.mono,
+        weight: 700,
+        mono: true,
+        fill: "rgb(146 64 14)",
+      },
+      { text: anchor.name, size: 10, em: CHAR_EM.sans, fill: "rgb(146 64 14)" },
+      {
+        text: "semantic anchor",
+        size: 9,
+        em: CHAR_EM.sans,
+        fill: "rgb(120 53 15)",
+      },
+    ],
+    ANCHOR_W,
+  );
+  const rows = requirements.map((req) => {
     const outOfScope = outOfScopeFvIds.has(req.framework_version_id);
-    const edgeStroke = outOfScope ? "rgb(148 163 184)" : style.stroke;
-    return (
-      <g key={req.edge_id} data-testid="ucf-viz-requirement">
-        <line
-          x1={ANCHOR_X + ANCHOR_W}
-          y1={centerY}
-          x2={REQ_X}
-          y2={y + NODE_H / 2}
-          stroke={edgeStroke}
-          strokeWidth={outOfScope ? 1.5 : 2}
-          strokeDasharray={outOfScope ? "3 3" : undefined}
-          data-strm={req.relationship_type}
-          data-out-of-scope={outOfScope ? "true" : "false"}
-        />
-        <text
-          x={(ANCHOR_X + ANCHOR_W + REQ_X) / 2}
-          y={(centerY + y + NODE_H / 2) / 2 - 4}
-          textAnchor="middle"
-          fontSize={9}
-          fontFamily="monospace"
-          fill={edgeStroke}
-        >
-          {req.relationship_type} · {req.strength.toFixed(2)}
-          {outOfScope ? " · out-of-scope" : ""}
-        </text>
-        <rect
-          x={REQ_X}
-          y={y}
-          width={NODE_W}
-          height={NODE_H}
-          rx={6}
-          fill={outOfScope ? "rgb(248 250 252)" : "white"}
-          stroke="rgb(226 232 240)"
-          strokeDasharray={outOfScope ? "3 3" : undefined}
-        />
-        <text
-          x={REQ_X + 10}
-          y={y + 16}
-          fontSize={10}
-          fontWeight={600}
-          fill={outOfScope ? "rgb(100 116 139)" : "rgb(15 23 42)"}
-        >
-          {`${req.framework_name} · ${req.code}`.slice(0, 30)}
-        </text>
-        <text x={REQ_X + 10} y={y + 30} fontSize={9} fill="rgb(100 116 139)">
-          {req.title.slice(0, 34)}
-        </text>
-      </g>
+    const lines = layoutLines(
+      [
+        {
+          text: `${req.framework_name} · ${req.code}`,
+          size: 10,
+          em: CHAR_EM.sansBold,
+          weight: 600,
+          fill: outOfScope ? "rgb(100 116 139)" : "rgb(15 23 42)",
+        },
+        {
+          text: req.title,
+          size: 9,
+          em: CHAR_EM.sans,
+          fill: "rgb(100 116 139)",
+        },
+      ],
+      REQ_W,
     );
-  };
+    return {
+      req,
+      outOfScope,
+      lines,
+      h: linesHeight(lines),
+      label: edgeLabel(req, outOfScope),
+    };
+  });
+
+  // ---- horizontal layout: gutters sized to the labels they hold ----
+  const anchoredAtW = estimateTextWidth("anchored_at", 9, CHAR_EM.mono);
+  const controlX = MARGIN_X;
+  const anchorX = controlX + CONTROL_W + anchoredAtW + 2 * LABEL_CLEARANCE;
+  const elbowX = anchorX + ANCHOR_W + ELBOW_RUN;
+  const widestEdgeLabel = Math.max(
+    0,
+    ...rows.map((r) =>
+      estimateTextWidth(r.label, EDGE_LABEL_SIZE, CHAR_EM.mono),
+    ),
+  );
+  const reqX = elbowX + widestEdgeLabel + 2 * LABEL_CLEARANCE;
+  const viewW = reqX + REQ_W + MARGIN_X;
+
+  // ---- vertical layout ----
+  const controlH = linesHeight(controlLines);
+  const anchorH = linesHeight(anchorLines);
+  const stackH =
+    rows.length === 0
+      ? 40
+      : rows.reduce((h, r) => h + r.h, 0) + (rows.length - 1) * ROW_GAP;
+  const nodeArea = Math.max(stackH, anchorH + 40, controlH + 40);
+  const height = nodeArea + LEGEND_BAND;
+  const centerY = nodeArea / 2;
+  const anchorY = centerY - anchorH / 2;
+  const controlY = centerY - controlH / 2;
+
+  const stackTop = (nodeArea - stackH) / 2;
+  const placed = rows.map((r, i) => ({
+    ...r,
+    y: rows.slice(0, i).reduce((y, prev) => y + prev.h + ROW_GAP, stackTop),
+  }));
 
   return (
     <svg
       data-testid="ucf-mini-viz"
-      viewBox={`0 0 ${VIEW_W} ${height}`}
+      viewBox={`0 0 ${viewW} ${height}`}
       className="h-auto w-full"
       role="img"
       aria-label={`UCF graph neighborhood for ${control.title}`}
     >
+      {/* #2374 — the accessible name for assistive tech that reads the
+          SVG title, and the hover tooltip. */}
+      <title>{`UCF graph neighborhood for ${control.title}`}</title>
       {/* control node */}
       <g data-testid="ucf-viz-control">
         <rect
-          x={CONTROL_X}
+          x={controlX}
           y={controlY}
-          width={NODE_W}
-          height={NODE_H}
+          width={CONTROL_W}
+          height={controlH}
           rx={8}
           fill="rgb(238 242 255)"
           stroke="rgb(99 102 241)"
           strokeWidth={2}
+          data-testid="ucf-viz-node"
         />
-        <text
-          x={CONTROL_X + NODE_W / 2}
-          y={controlY + 17}
-          textAnchor="middle"
-          fontSize={11}
-          fontWeight={600}
-          fill="rgb(49 46 129)"
-        >
-          {control.title.slice(0, 26)}
-        </text>
-        <text
-          x={CONTROL_X + NODE_W / 2}
-          y={controlY + 31}
-          textAnchor="middle"
-          fontSize={10}
-          fontFamily="monospace"
-          fill="rgb(79 70 229)"
-        >
-          {control.bundle_id}
-        </text>
+        <NodeText
+          lines={controlLines}
+          x={controlX}
+          y={controlY}
+          w={CONTROL_W}
+          align="middle"
+        />
       </g>
 
       {/* control -> anchor edge */}
       <line
-        x1={CONTROL_X + NODE_W}
+        x1={controlX + CONTROL_W}
         y1={centerY}
-        x2={ANCHOR_X}
+        x2={anchorX}
         y2={centerY}
         stroke="rgb(99 102 241)"
         strokeWidth={2}
       />
       <text
-        x={(CONTROL_X + NODE_W + ANCHOR_X) / 2}
+        x={(controlX + CONTROL_W + anchorX) / 2}
         y={centerY - 6}
         textAnchor="middle"
         fontSize={9}
         fontFamily="monospace"
         fill="rgb(100 116 139)"
+        data-testid="ucf-viz-edge-label"
       >
         anchored_at
       </text>
@@ -193,50 +315,29 @@ export function UcfMiniViz({
       {/* SCF anchor node */}
       <g data-testid="ucf-viz-anchor">
         <rect
-          x={ANCHOR_X}
+          x={anchorX}
           y={anchorY}
           width={ANCHOR_W}
-          height={ANCHOR_H}
+          height={anchorH}
           rx={10}
           fill="rgb(255 247 237)"
           stroke="rgb(245 158 11)"
           strokeWidth={2}
+          data-testid="ucf-viz-node"
         />
-        <text
-          x={ANCHOR_X + ANCHOR_W / 2}
-          y={anchorY + 24}
-          textAnchor="middle"
-          fontSize={11}
-          fontWeight={700}
-          fontFamily="monospace"
-          fill="rgb(146 64 14)"
-        >
-          {anchor.scf_id}
-        </text>
-        <text
-          x={ANCHOR_X + ANCHOR_W / 2}
-          y={anchorY + 42}
-          textAnchor="middle"
-          fontSize={10}
-          fill="rgb(146 64 14)"
-        >
-          {anchor.name.slice(0, 18)}
-        </text>
-        <text
-          x={ANCHOR_X + ANCHOR_W / 2}
-          y={anchorY + 64}
-          textAnchor="middle"
-          fontSize={9}
-          fill="rgb(120 53 15)"
-        >
-          semantic anchor
-        </text>
+        <NodeText
+          lines={anchorLines}
+          x={anchorX}
+          y={anchorY}
+          w={ANCHOR_W}
+          align="middle"
+        />
       </g>
 
       {/* framework requirement nodes + edges */}
-      {requirements.length === 0 ? (
+      {placed.length === 0 ? (
         <text
-          x={REQ_X + NODE_W / 2}
+          x={reqX + REQ_W / 2}
           y={centerY}
           textAnchor="middle"
           fontSize={10}
@@ -245,7 +346,49 @@ export function UcfMiniViz({
           no mapped framework requirements
         </text>
       ) : (
-        requirements.map(reqRow)
+        placed.map(({ req, outOfScope, lines, h, y, label }) => {
+          const style = strmStyle(req.relationship_type);
+          const edgeStroke = outOfScope ? "rgb(148 163 184)" : style.stroke;
+          const rowCenter = y + h / 2;
+          return (
+            <g key={req.edge_id} data-testid="ucf-viz-requirement">
+              <path
+                d={`M ${
+                  anchorX + ANCHOR_W
+                } ${centerY} H ${elbowX} V ${rowCenter} H ${reqX}`}
+                fill="none"
+                stroke={edgeStroke}
+                strokeWidth={outOfScope ? 1.5 : 2}
+                strokeDasharray={outOfScope ? "3 3" : undefined}
+                data-strm={req.relationship_type}
+                data-out-of-scope={outOfScope ? "true" : "false"}
+              />
+              <text
+                x={reqX - LABEL_CLEARANCE}
+                y={rowCenter - 5}
+                textAnchor="end"
+                fontSize={EDGE_LABEL_SIZE}
+                fontFamily="monospace"
+                fill={edgeStroke}
+                data-testid="ucf-viz-edge-label"
+              >
+                {label}
+              </text>
+              <rect
+                x={reqX}
+                y={y}
+                width={REQ_W}
+                height={h}
+                rx={6}
+                fill={outOfScope ? "rgb(248 250 252)" : "white"}
+                stroke="rgb(226 232 240)"
+                strokeDasharray={outOfScope ? "3 3" : undefined}
+                data-testid="ucf-viz-node"
+              />
+              <NodeText lines={lines} x={reqX} y={y} w={REQ_W} align="start" />
+            </g>
+          );
+        })
       )}
 
       {/* legend */}

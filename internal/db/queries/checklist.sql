@@ -12,7 +12,11 @@
 -- role-split inputs (owner_role + applicability_expr), its scf linkage (scf_id
 -- for the SCF-anchor citation), and a `has_evidence` flag (AC-6: a control with
 -- zero evidence rows is rendered as a "no evidence yet" gap, never as
--- satisfied). RLS scopes the read to the tenant; the WHERE tenant_id clause is
+-- satisfied). #2878: has_evidence applies the same control-evidence rule as
+-- every other ledger reader (ListControlsWithLatestEvidence): control_id,
+-- control_ref, plus the tenant's control-free records of a kind in
+-- unbound_kinds (routed.ControlFreeKinds) that the control's evidence_queries
+-- declare. RLS scopes the read to the tenant; the WHERE tenant_id clause is
 -- belt-and-suspenders. Ordered for stable rendering.
 SELECT
     c.id,
@@ -24,7 +28,12 @@ SELECT
     c.control_family,
     EXISTS (
         SELECT 1 FROM evidence_records e
-        WHERE e.tenant_id = c.tenant_id AND e.control_id = c.id
+        WHERE e.tenant_id = c.tenant_id
+          AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
+              OR (e.control_id IS NULL
+                  AND e.evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+                  AND c.evidence_queries @> jsonb_build_array(
+                        jsonb_build_object('evidence_kind', e.evidence_kind))))
     ) AS has_evidence
 FROM controls c
 WHERE c.tenant_id = $1

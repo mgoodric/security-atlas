@@ -10,7 +10,8 @@
 //	AC-4  (P0) RLS isolation — tenant A's Tier / profile / selections / gap
 //	      NEVER appear for tenant B; deny-on-missing-context.
 //	R     the assessment audit row is written (who/when/which CSF version).
-//	E     the role cut — a viewer cannot edit; grc_engineer + admin can.
+//	E     the role cut (#2540): every route as a user session per role, with
+//	      live roles through OPA — every role reads; grc_engineer + admin edit.
 //
 // Run with:
 //
@@ -33,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -43,10 +45,18 @@ type testEnv struct {
 	bearer string
 }
 
+// newServer runs the platform router as production does: OPA and the authz
+// middleware resolve a session's roles from its user's live user_roles
+// (#2505), so a role claim alone grants nothing.
 func newServer(t *testing.T, app *pgxpool.Pool, claims jwt.AtlasClaims) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
 	bearer := srv.IssueTestJWT(t, claims)
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -57,19 +67,40 @@ func newServer(t *testing.T, app *pgxpool.Pool, claims jwt.AtlasClaims) testEnv 
 	return testEnv{server: ts, bearer: bearer}
 }
 
-// engineerServer mints a grc_engineer credential (the edit role).
-func engineerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"}))
+// sessionServer mints a user's session in tenant: an active users row, a
+// user_roles row per live role, and a JWT whose subject is "user:<uuid>"
+// and whose role claim is claimRoles. The session's roles are the live
+// rows, not the claim (#2496).
+func sessionServer(t *testing.T, admin, app *pgxpool.Pool, tenant string, claimRoles, liveRoles []string) testEnv {
+	t.Helper()
+	ctx := context.Background()
+	user := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO users (id, tenant_id, email, display_name, status)
+		VALUES ($1, $2, $3, $3, 'active')
+	`, user, tenant, user.String()+"@csf.test"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	for _, role := range liveRoles {
+		if _, err := admin.Exec(ctx, `
+			INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2540')
+		`, tenant, user.String(), role); err != nil {
+			t.Fatalf("seed user_roles %q: %v", role, err)
+		}
+	}
+	claims := testjwt.OwnerFor(uuid.MustParse(tenant), claimRoles)
+	claims.Subject = "user:" + user.String()
+	return newServer(t, app, claims)
 }
 
-// viewerServer mints a baseline viewer credential (no edit role).
-func viewerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.ViewerFor(uuid.MustParse(tenant)))
+// roleServer mints a session for a user holding role, claimed and live.
+func roleServer(t *testing.T, admin, app *pgxpool.Pool, tenant, role string) testEnv {
+	return sessionServer(t, admin, app, tenant, []string{role}, []string{role})
 }
 
-// adminServer mints an admin credential (edit-capable via the admin wildcard).
-func adminServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.AdminFor(uuid.MustParse(tenant)))
+// engineerServer mints a grc_engineer session (the edit role).
+func engineerServer(t *testing.T, admin, app *pgxpool.Pool, tenant string) testEnv {
+	return roleServer(t, admin, app, tenant, "grc_engineer")
 }
 
 func do(t *testing.T, env testEnv, method, path, body string) (*http.Response, map[string]any) {
@@ -101,22 +132,30 @@ func do(t *testing.T, env testEnv, method, path, body string) (*http.Response, m
 // tenant_id NULL).
 func seedCSFVersion(t *testing.T, admin *pgxpool.Pool) (fvID uuid.UUID, reqIDs []uuid.UUID) {
 	t.Helper()
+	// The CSF routes accept only a version of the nist_csf framework (#2065).
+	// frameworks' UNIQUE (tenant_id, slug) treats NULL tenants as distinct,
+	// so this global fixture sits beside the bundled nist_csf catalog row; it
+	// is told apart by its id and removed on cleanup.
+	return seedFrameworkVersion(t, admin, "nist_csf", "NIST CSF (slice-515 test)", "2.0")
+}
+
+// seedFrameworkVersion inserts a global framework + framework_version + two
+// requirement rows and returns the version id + requirement ids.
+func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool, slug, name, version string) (fvID uuid.UUID, reqIDs []uuid.UUID) {
+	t.Helper()
 	ctx := context.Background()
 	fwID := uuid.New()
 	fvID = uuid.New()
-	// A unique slug per test run avoids collisions with the bundled nist_csf
-	// catalog and with parallel tests.
-	slug := "nist_csf_t515_" + uuid.NewString()[:8]
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO frameworks (id, tenant_id, slug, name, issuer)
-		VALUES ($1, NULL, $2, 'NIST CSF 2.0 (slice-515 test)', 'NIST')
-	`, fwID, slug); err != nil {
+		VALUES ($1, NULL, $2, $3, 'test')
+	`, fwID, slug, name); err != nil {
 		t.Fatalf("seed framework: %v", err)
 	}
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
-		VALUES ($1, NULL, $2, '2.0', 'current')
-	`, fvID, fwID); err != nil {
+		VALUES ($1, NULL, $2, $3, 'current')
+	`, fvID, fwID, version); err != nil {
 		t.Fatalf("seed framework_version: %v", err)
 	}
 	for _, code := range []string{"GV.OC-01", "PR.AA-01"} {
@@ -150,6 +189,8 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"csf_profile_selections",
 		"csf_profiles",
 		"csf_tier_ratings",
+		"user_roles",
+		"users",
 	)
 }
 
@@ -160,7 +201,7 @@ func TestTier_SetReadReRate(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
 	tenant := freshTenant(t, admin)
-	env := engineerServer(t, app, tenant)
+	env := engineerServer(t, admin, app, tenant)
 	q := "?framework_version=" + fvID.String()
 
 	resp, body := do(t, env, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier2_risk_informed","rationale":"baseline"}`)
@@ -199,7 +240,7 @@ func TestTier_InvalidRejected(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
 	tenant := freshTenant(t, admin)
-	env := engineerServer(t, app, tenant)
+	env := engineerServer(t, admin, app, tenant)
 	resp, _ := do(t, env, http.MethodPut, "/v1/csf/tier?framework_version="+fvID.String(), `{"tier":"tier5_godmode"}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("invalid tier status = %d, want 400", resp.StatusCode)
@@ -213,7 +254,7 @@ func TestTier_WritesAuditRow(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
 	tenant := freshTenant(t, admin)
-	env := engineerServer(t, app, tenant)
+	env := engineerServer(t, admin, app, tenant)
 
 	do(t, env, http.MethodPut, "/v1/csf/tier?framework_version="+fvID.String(), `{"tier":"tier3_repeatable"}`)
 
@@ -236,7 +277,7 @@ func TestProfileSelectionsAndGap(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	fvID, reqIDs := seedCSFVersion(t, admin)
 	tenant := freshTenant(t, admin)
-	env := engineerServer(t, app, tenant)
+	env := engineerServer(t, admin, app, tenant)
 	q := "?framework_version=" + fvID.String()
 
 	// Current profile: GV.OC-01 partial.
@@ -302,37 +343,110 @@ func TestProfileSelectionsAndGap(t *testing.T) {
 
 // ===== E: role cut =====
 
-func TestRoleCut_ViewerCannotEdit_EngineerAndAdminCan(t *testing.T) {
+// csfRoute is one /v1/csf call; write routes need the edit role.
+type csfRoute struct {
+	method, path, body string
+	write              bool
+}
+
+// csfRoutes is every /v1/csf route, the writes in an order in which each
+// succeeds for an editor (set, then clear, the selection it set).
+func csfRoutes(q, reqID string) []csfRoute {
+	sel := `{"requirement_id":"` + reqID + `","target_outcome":"fully"}`
+	return []csfRoute{
+		{http.MethodGet, "/v1/csf/tier" + q, "", false},
+		{http.MethodGet, "/v1/csf/profiles/target" + q, "", false},
+		{http.MethodGet, "/v1/csf/profiles/current" + q, "", false},
+		{http.MethodGet, "/v1/csf/gap" + q, "", false},
+		{http.MethodPut, "/v1/csf/tier" + q, `{"tier":"tier2_risk_informed"}`, true},
+		{http.MethodPut, "/v1/csf/profiles/target" + q, "", true},
+		{http.MethodPut, "/v1/csf/profiles/current" + q, "", true},
+		{http.MethodPut, "/v1/csf/profiles/target/selections" + q, sel, true},
+		{http.MethodDelete, "/v1/csf/profiles/target/selections/" + reqID + q, "", true},
+	}
+}
+
+// TestRoleMatrix_EveryCSFRoute (#2540) drives every /v1/csf route as a user
+// session for each tenant role, through OPA and the authz middleware with
+// live roles: every role reads; grc_engineer and admin write; viewer,
+// auditor and control_owner are refused every write, and the refusals leave
+// no audit row.
+func TestRoleMatrix_EveryCSFRoute(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	fvID, _ := seedCSFVersion(t, admin)
+	fvID, reqIDs := seedCSFVersion(t, admin)
 	tenant := freshTenant(t, admin)
-	q := "?framework_version=" + fvID.String()
+	routes := csfRoutes("?framework_version="+fvID.String(), reqIDs[0].String())
 
-	// Viewer cannot set a Tier (403) but can read (200).
-	viewer := viewerServer(t, app, tenant)
-	resp, _ := do(t, viewer, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier2_risk_informed"}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("viewer PUT tier = %d, want 403", resp.StatusCode)
+	for _, tc := range []struct {
+		role     string
+		canWrite bool
+	}{
+		{"admin", true},
+		{"grc_engineer", true},
+		{"control_owner", false},
+		{"auditor", false},
+		{"viewer", false},
+	} {
+		env := roleServer(t, admin, app, tenant, tc.role)
+		before := countAudit(t, admin, tenant)
+		for _, r := range routes {
+			want := http.StatusOK
+			if r.write && !tc.canWrite {
+				want = http.StatusForbidden
+			}
+			if resp, _ := do(t, env, r.method, r.path, r.body); resp.StatusCode != want {
+				t.Errorf("%s %s %s = %d, want %d", tc.role, r.method, r.path, resp.StatusCode, want)
+			}
+		}
+		if after := countAudit(t, admin, tenant); !tc.canWrite && after != before {
+			t.Errorf("%s: refused writes left %d audit rows, want 0", tc.role, after-before)
+		}
 	}
-	resp, _ = do(t, viewer, http.MethodGet, "/v1/csf/tier"+q, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("viewer GET tier = %d, want 200", resp.StatusCode)
-	}
+}
 
-	// grc_engineer can edit.
-	eng := engineerServer(t, app, tenant)
-	resp, _ = do(t, eng, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier2_risk_informed"}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("engineer PUT tier = %d, want 200", resp.StatusCode)
-	}
+// TestRoleCut_LiveRolesNotTheClaim: a session's roles are its user's live
+// user_roles rows, whatever its claim names (#2496, #2523).
+func TestRoleCut_LiveRolesNotTheClaim(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	fvID, reqIDs := seedCSFVersion(t, admin)
+	tenant := freshTenant(t, admin)
+	routes := csfRoutes("?framework_version="+fvID.String(), reqIDs[0].String())
+	engineerClaim := []string{"grc_engineer"}
 
-	// admin can edit (the admin wildcard inside HasOwnerRole).
-	adm := adminServer(t, app, tenant)
-	resp, _ = do(t, adm, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier4_adaptive"}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("admin PUT tier = %d, want 200", resp.StatusCode)
+	// A grc_engineer claim over a live viewer role reads and cannot write.
+	demoted := sessionServer(t, admin, app, tenant, engineerClaim, []string{"viewer"})
+	// A grc_engineer claim with no live role is refused everything.
+	revoked := sessionServer(t, admin, app, tenant, engineerClaim, nil)
+	// A viewer claim over a live grc_engineer role writes.
+	promoted := sessionServer(t, admin, app, tenant, []string{"viewer"}, engineerClaim)
+
+	for _, r := range routes {
+		wantDemoted := http.StatusOK
+		if r.write {
+			wantDemoted = http.StatusForbidden
+		}
+		if resp, _ := do(t, demoted, r.method, r.path, r.body); resp.StatusCode != wantDemoted {
+			t.Errorf("claim grc_engineer, live viewer: %s %s = %d, want %d", r.method, r.path, resp.StatusCode, wantDemoted)
+		}
+		if resp, _ := do(t, revoked, r.method, r.path, r.body); resp.StatusCode != http.StatusForbidden {
+			t.Errorf("claim grc_engineer, no live role: %s %s = %d, want 403", r.method, r.path, resp.StatusCode)
+		}
+		if resp, _ := do(t, promoted, r.method, r.path, r.body); resp.StatusCode != http.StatusOK {
+			t.Errorf("claim viewer, live grc_engineer: %s %s = %d, want 200", r.method, r.path, resp.StatusCode)
+		}
 	}
+}
+
+func countAudit(t *testing.T, admin *pgxpool.Pool, tenant string) int {
+	t.Helper()
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM csf_assessment_audit WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	return n
 }
 
 // ===== AC-4 (P0): RLS isolation =====
@@ -352,13 +466,13 @@ func TestRLS_CrossTenantIsolation(t *testing.T) {
 	q := "?framework_version=" + fvID.String()
 
 	// Tenant A builds an assessment: a Tier + a current selection.
-	envA := engineerServer(t, app, tenantA)
+	envA := engineerServer(t, admin, app, tenantA)
 	do(t, envA, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier3_repeatable","rationale":"A-only"}`)
 	do(t, envA, http.MethodPut, "/v1/csf/profiles/current/selections"+q,
 		`{"requirement_id":"`+reqIDs[0].String()+`","target_outcome":"fully","note":"A-secret"}`)
 
 	// Tenant B reads the SAME framework_version — sees NONE of tenant A's state.
-	envB := engineerServer(t, app, tenantB)
+	envB := engineerServer(t, admin, app, tenantB)
 
 	resp, body := do(t, envB, http.MethodGet, "/v1/csf/tier"+q, "")
 	if resp.StatusCode != http.StatusOK {
@@ -441,5 +555,76 @@ func TestRLS_DenyOnMissingContext(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("RLS leaked %d rows with no tenant context set; want 0 (deny-on-missing-context)", n)
+	}
+}
+
+// ===== #2065: only NIST CSF framework versions are assessable =====
+
+// TestFrameworkVersion_NonCSFRefused asserts every CSF route refuses an ISO
+// 27001 framework_version with a 400, on reads and writes alike, and writes
+// nothing for it; a CSF version is accepted and the gap view carries its
+// real framework name and version for the page title.
+func TestFrameworkVersion_NonCSFRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	isoID, isoReqs := seedFrameworkVersion(t, admin, "iso27001", "ISO/IEC 27001 (#2065 test)", "2022")
+	csfID, _ := seedCSFVersion(t, admin)
+	tenant := freshTenant(t, admin)
+	env := engineerServer(t, admin, app, tenant)
+	iso := "?framework_version=" + isoID.String()
+
+	cases := []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/csf/tier" + iso, ""},
+		{http.MethodPut, "/v1/csf/tier" + iso, `{"tier":"tier2_risk_informed"}`},
+		{http.MethodGet, "/v1/csf/profiles/current" + iso, ""},
+		{http.MethodPut, "/v1/csf/profiles/current" + iso, ""},
+		{http.MethodPut, "/v1/csf/profiles/target/selections" + iso,
+			`{"requirement_id":"` + isoReqs[0].String() + `","target_outcome":"fully"}`},
+		{http.MethodDelete, "/v1/csf/profiles/target/selections/" + isoReqs[0].String() + iso, ""},
+		{http.MethodGet, "/v1/csf/gap" + iso, ""},
+	}
+	for _, c := range cases {
+		resp, body := do(t, env, c.method, c.path, c.body)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s %s status = %d, want 400", c.method, c.path, resp.StatusCode)
+			continue
+		}
+		if msg, _ := body["error"].(string); !strings.Contains(msg, "not a NIST CSF version") {
+			t.Errorf("%s %s error = %q, want it to say the version is not NIST CSF", c.method, c.path, msg)
+		}
+	}
+
+	var n int
+	if err := admin.QueryRow(context.Background(), `
+		SELECT (SELECT count(*) FROM csf_tier_ratings WHERE framework_version_id = $1)
+		     + (SELECT count(*) FROM csf_profiles WHERE framework_version_id = $1)
+	`, isoID).Scan(&n); err != nil {
+		t.Fatalf("count iso assessment rows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d CSF assessment rows written against an ISO version; want 0", n)
+	}
+
+	resp, body := do(t, env, http.MethodGet, "/v1/csf/gap?framework_version="+csfID.String(), "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CSF gap status = %d, want 200", resp.StatusCode)
+	}
+	if body["framework_name"] != "NIST CSF (slice-515 test)" || body["framework_version"] != "2.0" {
+		t.Fatalf("gap label = %v %v, want the seeded CSF name and version 2.0",
+			body["framework_name"], body["framework_version"])
+	}
+}
+
+// TestFrameworkVersion_UnknownNotFound asserts a framework_version id that
+// does not exist is a 404, not an empty assessment.
+func TestFrameworkVersion_UnknownNotFound(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := engineerServer(t, admin, app, tenant)
+
+	resp, _ := do(t, env, http.MethodGet, "/v1/csf/gap?framework_version="+uuid.NewString(), "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown version status = %d, want 404", resp.StatusCode)
 	}
 }

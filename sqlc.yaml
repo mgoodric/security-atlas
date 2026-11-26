@@ -58,6 +58,8 @@ sql:
       - "migrations/sql/20260520020000_audit_log_subject_module.sql"
       - "migrations/sql/20260521000000_questionnaire_tracer.sql"
       - "migrations/sql/20260521010000_tenants_rename.sql"
+      - "migrations/sql/20260521020000_super_admins.sql"
+      - "migrations/sql/20260521030000_super_admins_full.sql"
       - "migrations/sql/20260606010000_oscal_imported_catalogs.sql"
       - "migrations/sql/20260608000000_oscal_imported_profiles.sql"
       - "migrations/sql/20260607000000_ai_generations.sql"
@@ -90,6 +92,116 @@ sql:
       - "migrations/sql/20260730000000_vendor_commercial_fields.sql"
       - "migrations/sql/20260802000000_change_management.sql"
       - "migrations/sql/20260804000000_incident_register.sql"
+      - "migrations/sql/20260809000001_risk_acceptance_status.sql"
+      - "migrations/sql/20260814000000_api_keys_purpose.sql"
+      - "migrations/sql/20260815000000_framework_scope_workflow_log.sql"
+      - "migrations/sql/20260816000000_risk_audit_log.sql"
+      - "migrations/sql/20260819000000_policy_import.sql"
+      - "migrations/sql/20260820000000_control_manifest_revisions.sql"
+      - "migrations/sql/20260821000000_effective_fw_to_scf_edges.sql"
+      - "migrations/sql/20260822000000_framework_scope_applicability.sql"
+      - "migrations/sql/20260825000000_controls_external_refs.sql"
+      - "migrations/sql/20260903000000_policy_review_dates.sql"
+      - "migrations/sql/20260904000000_control_anchor_fit.sql"
+      - "migrations/sql/20260906000000_framework_requirement_points_of_focus.sql"
+      - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
+      - "migrations/sql/20260920000000_oidc_identity_link_audit.sql"
+      - "migrations/sql/20260921000000_policy_draft_discard.sql"
+      - "migrations/sql/20260923000000_risk_categories.sql"
+      - "migrations/sql/20260924000000_demo_seed_rows.sql"
+      - "migrations/sql/20260926000000_scf_anchor_legacy_scf_id.sql"
+      - "migrations/sql/20261012000000_taxonomy_audit_log.sql"
+      - "migrations/sql/20261014000000_fw_to_scf_edges_crosswalk_source.sql"
+      - "migrations/sql/20261015000000_risk_review_cadence.sql"
+      - "migrations/sql/20261018000000_vendor_initial_review_window.sql"
+      - "migrations/sql/20261024000000_taxonomy_audit_log_themes.sql"
+      - "migrations/sql/20261028000000_component_claim_scf_release.sql"
+      - "migrations/sql/20261029000000_fw_to_scf_overlay_edges.sql"
+      - "migrations/sql/20261031000000_self_approval.sql"
+      - "migrations/sql/20261101000000_control_evaluation_excepted.sql"
+      - "migrations/sql/20261106000000_effective_edges_overlay_union.sql"
+      - "migrations/sql/20261108000000_policy_transition_audit.sql"
+      # The control import tables (#1779-#1781), which the #1782 approval
+      # migration alters; the unified audit log reads its audit table.
+      - "migrations/sql/20260907000000_control_import_batches.sql"
+      - "migrations/sql/20260925000000_control_import_candidates.sql"
+      - "migrations/sql/20260930000000_control_import_llm_rerank.sql"
+      - "migrations/sql/20261010000000_control_import_candidates_row_fk.sql"
+      - "migrations/sql/20261107000000_control_import_approval.sql"
+      - "migrations/sql/20261117000000_users_theme.sql"
+      - "migrations/sql/20261119000000_scf_remap_proposals.sql"
+      - "migrations/sql/20261122000000_vendor_review_due_date.sql"
+      - "migrations/sql/20261125000000_drop_risk_category_enum.sql"
+      # #2113: exceptions gain revoked_by / revoked_at.
+      - "migrations/sql/20261127000000_exception_revoke.sql"
+      - "migrations/sql/20261128000000_scf_remap_proposals_rebind_record.sql"
+      - "migrations/sql/20261201000000_scf_remap_decisions.sql"
+      # #1803: overlay edges carry over with an approved framework-version migration.
+      - "migrations/sql/20261204000000_overlay_edges_version_carry_over.sql"
+      # #2105: risks gain the acceptance record (proposal, approval, self-approved).
+      - "migrations/sql/20261206000000_risk_acceptance_transitions.sql"
+      # #2107: the risk open/closed lifecycle.
+      - "migrations/sql/20261212000000_risk_lifecycle.sql"
+      # #2145: first-visit onboarding hint dismissals, per user.
+      - "migrations/sql/20261213000000_onboarding_hint_dismissals.sql"
+      # #2136: posture targets per framework version, and their audit log.
+      - "migrations/sql/20261214000000_framework_posture_targets.sql"
+      # #2026: framework_requirements.points_of_focus must be a JSON array.
+      - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
+      # #2446: policy draft editors, and edit / body-hash audit rows.
+      - "migrations/sql/20261222000000_policy_draft_editors.sql"
+      # #2109: action plans verified from their controls' evaluations.
+      - "migrations/sql/20261223000000_action_plan_verify_from_evidence.sql"
+      # #2129: risk and vendor owners are users (owner_user_id).
+      - "migrations/sql/20261226000000_risk_vendor_owner_users.sql"
+      # #2172: module access for each member, and its audit log.
+      - "migrations/sql/20261230000000_member_module_access.sql"
+      # #2479: who triggered a manual evaluation.
+      - "migrations/sql/20261238000000_control_evaluation_triggered_by.sql"
+      # #2329: which credential made a me_audit_log change.
+      - "migrations/sql/20261252000000_me_audit_log_actor_principal.sql"
+      # #2358: stock controls the boot seed held back behind a reviewed re-anchor.
+      - "migrations/sql/20261256000000_stock_control_holdbacks.sql"
+      # #2078: framework_scopes.activated_at, read by the as-of queries.
+      - "migrations/sql/20261258000000_framework_scope_activated_at.sql"
+      # #2450: vendor owner changes, in their own audit log.
+      - "migrations/sql/20261260000000_vendor_audit_log.sql"
+      # #2384: an optional admin-chosen label on an API key.
+      - "migrations/sql/20261265000000_api_keys_label.sql"
+      # #2618: Idempotency-Key -> exception for POST /v1/exceptions.
+      - "migrations/sql/20261270000000_exception_idempotency_keys.sql"
+      # #2760: which source derived each group-derived role.
+      - "migrations/sql/20261272000000_user_role_group_sources.sql"
+      # #2588: policy_audit_log records generic audiences mapped to everyone.
+      - "migrations/sql/20261273000000_policy_audience_generic_to_everyone.sql"
+      # #2849: api_keys.purpose gains policy-sync.
+      - "migrations/sql/20261275000000_api_keys_purpose_policy_sync.sql"
+      # #2838: risks.external_ref, the organisation's own risk ID.
+      - "migrations/sql/20261278000000_risks_external_ref.sql"
+      - "migrations/sql/20261279000000_policy_sync.sql"
+      # #2851: drift on synced policies.
+      - "migrations/sql/20261281000000_policy_sync_drift.sql"
+      # #2852: control-link changes on synced policies, audited.
+      - "migrations/sql/20261284000000_policy_controls_updated.sql"
+      # #2853: missing pages on synced policies.
+      - "migrations/sql/20261287000000_policy_sync_missing.sql"
+      # #2854: sync takes over imported policies.
+      - "migrations/sql/20261289000000_policy_sync_takeover.sql"
+      # #2877: property drift on synced policies.
+      - "migrations/sql/20261297000000_policy_sync_property_drift.sql"
+      - "migrations/sql/20261290000000_evidence_routed_kinds.sql"
+      # #2910: the drifted page hash on an in-place sync takeover.
+      - "migrations/sql/20261298000000_policy_audit_sync_drift.sql"
+      # #2973: a routing cutover per late-routed kind.
+      - "migrations/sql/20261304000000_evidence_routing_kind_cutover.sql"
+      # #3000: unreadable pages on synced policies.
+      - "migrations/sql/20261305000000_policy_sync_unreadable.sql"
+      # #1742: historical evidence import, and audit-period freeze revisions.
+      - "migrations/sql/20261306000000_evidence_historical_import.sql"
+      # #3056: the instant a replay row judged.
+      - "migrations/sql/20261308000000_control_evaluation_evaluated_as_of.sql"
+      # #3066: the control set each freeze hashed.
+      - "migrations/sql/20261311000000_audit_period_frozen_controls.sql"
     queries: "internal/db/queries"
     gen:
       go:
@@ -99,3 +211,4 @@ sql:
         emit_pointers_for_null_types: true
         emit_interface: true
         emit_json_tags: true
+        emit_all_enum_values: true

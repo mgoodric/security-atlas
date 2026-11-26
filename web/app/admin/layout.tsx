@@ -1,37 +1,42 @@
 // Slice 060 — admin section shell + RBAC gate.
 //
-// AC-7: all /admin/* routes are gated by slice 035's `admin` role (which
-// for the purposes of slice 060 binds to slice 034's `cred.IsAdmin` flag
-// — the user-role grant table is not yet wired into the admin section).
+// AC-7: all /admin/* routes are gated on `is_admin` (the JWT middleware
+// maps it from `atlas:super_admin` only) or, since #2503 (Matt,
+// 2026-11-17), `is_tenant_admin`: a tenant admin by its live roles manages
+// its own organisation's tenant-scoped pages (SSO, Users, Audit). The platform pages
+// wrap their children in `<PlatformAdminGate>`, which admits `is_admin`
+// alone. See docs/audit-log/2503-tenant-admin-pages-decisions.md.
 // Non-admin signed-in users see a 403 explanation page, NOT a 404, so
 // they can tell "this exists, I just can't reach it." Per the slice spec.
 //
 // The gate runs server-side on every render so a stale client-side cache
-// can't bypass it. It reads `is_admin` off the caller's own /v1/me record
-// on the platform (OE-549 — previously via a self-fetch of the BFF's
-// /api/admin/me, which is a thin proxy to that same endpoint).
+// can't bypass it. It reads `is_admin` and `is_tenant_admin` off the
+// caller's own /v1/me record on the platform (OE-549 — previously via a
+// self-fetch of the BFF's /api/admin/me, which is a thin proxy to that
+// same endpoint).
 //
 // Why two layouts (this + (authed)/layout.tsx)? Because the admin pages
 // live OUTSIDE the (authed) route group — the slice spec calls the path
 // `/admin/*` literally, not `/(authed)/admin/*`. We re-use the same
-// TopBar + Sidebar shell here.
+// `<AppShell>` here (#2080 — previously a hand-rolled TopBar + Sidebar
+// copy without the skip link or the mobile drawer).
 
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import Link from "next/link";
 
-import { Sidebar } from "@/components/shell/sidebar";
-import { TopBar } from "@/components/shell/topbar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AdminForbiddenPanel } from "@/components/admin/admin-forbidden";
+import { AdminSectionNav } from "@/components/admin/admin-section-nav";
+import { AppShell } from "@/components/shell/app-shell";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { fetchAdminMe, fetchDemoSeedEnabled } from "@/lib/api/self.server";
+import { pageTitle } from "@/lib/page-titles";
+
+// A plain `title` string here would also stop the root template applying
+// to the admin subpages' own titles, so the section repeats the template.
+export const metadata: Metadata = {
+  title: { default: pageTitle("/admin"), template: "%s · security-atlas" },
+};
 
 // OE-549: both probes below used to self-fetch this app's own BFF routes
 // at an origin rebuilt from the request Host header. That address does
@@ -42,13 +47,16 @@ import { fetchAdminMe, fetchDemoSeedEnabled } from "@/lib/api/self.server";
 // through the same stable internal base the rest of the app uses
 // (`apiBaseURL()` -> ATLAS_HTTP_URL). See `lib/api/self.server.ts`.
 
-async function isAdmin(bearer: string): Promise<boolean> {
-  // Read `is_admin` off the caller's own /v1/me record. Fail-closed: a
-  // 403, an unparseable body, or a transport error denies. Denying is
-  // the correct posture AND strictly safer than the pre-OE-549 behavior,
-  // which let the transport error escape and crashed the route.
+type AdminAccess = "platform" | "tenant" | "none";
+
+async function adminAccess(bearer: string): Promise<AdminAccess> {
+  // Fail-closed: a 403, an unparseable body, or a transport error denies.
+  // Denying is the correct posture AND strictly safer than the pre-OE-549
+  // behavior, which let the transport error escape and crashed the route.
   const me = await fetchAdminMe(bearer);
-  return me.is_admin;
+  if (me.is_admin) return "platform";
+  if (me.is_tenant_admin) return "tenant";
+  return "none";
 }
 
 // Slice 278 — probe the demo-seed env-var gate so the breadcrumb
@@ -68,123 +76,25 @@ export default async function AdminLayout({
   if (!bearer) {
     redirect("/login?from=/admin");
   }
-  const admin = await isAdmin(bearer);
-  // Only probe demo-seed enabled when the caller is admin — non-admins
-  // never see the section anyway, and the probe would 403.
-  const demoEnabled = admin ? await isDemoSeedEnabled(bearer) : false;
+  const access = await adminAccess(bearer);
+  // Only probe demo-seed enabled for a super-admin: the demo page is a
+  // platform page, and the probe would 403 for anyone else.
+  const demoEnabled =
+    access === "platform" ? await isDemoSeedEnabled(bearer) : false;
 
   return (
-    <div className="flex h-screen flex-col">
-      <TopBar />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {admin ? (
-            <AdminBreadcrumb demoEnabled={demoEnabled}>
-              {children}
-            </AdminBreadcrumb>
-          ) : (
-            <ForbiddenPanel />
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function AdminBreadcrumb({
-  children,
-  demoEnabled,
-}: {
-  children: React.ReactNode;
-  demoEnabled: boolean;
-}) {
-  return (
-    <div className="space-y-4">
-      <nav
-        aria-label="Admin sections"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-      >
-        <Link href="/admin" className="hover:text-foreground">
-          Admin
-        </Link>
-        <span>·</span>
-        <Link href="/admin/sso" className="hover:text-foreground">
-          SSO
-        </Link>
-        <Link href="/admin/users" className="hover:text-foreground">
-          Users
-        </Link>
-        <Link href="/admin/api-keys" className="hover:text-foreground">
-          API keys
-        </Link>
-        <Link href="/admin/features" className="hover:text-foreground">
-          Features
-        </Link>
-        <Link href="/admin/audit" className="hover:text-foreground">
-          Audit
-        </Link>
-        <Link href="/admin/super-admins" className="hover:text-foreground">
-          Super admins
-        </Link>
-        <Link href="/admin/tenants" className="hover:text-foreground">
-          Tenants
-        </Link>
-        {demoEnabled ? (
-          <Link href="/admin/demo" className="hover:text-foreground">
-            Demo
-          </Link>
-        ) : null}
-      </nav>
-      {children}
-    </div>
-  );
-}
-
-function ForbiddenPanel() {
-  // AC-7: 403 message, NOT a 404. The page exists; this user lacks the
-  // role. Tone matches the rest of the product — operator-friendly,
-  // no error-code yelling.
-  return (
-    <div className="mx-auto max-w-2xl space-y-6 py-12">
-      <Alert variant="destructive">
-        <AlertTitle>This section is admin-only</AlertTitle>
-        <AlertDescription>
-          Your account is signed in but does not carry the{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">admin</code>{" "}
-          role. Contact your tenant admin to request access. The admin section
-          covers SSO setup, user role assignment, API key lifecycle, feature
-          flag toggles, and the unified audit log.
-        </AlertDescription>
-      </Alert>
-      <Card>
-        <CardHeader>
-          <CardTitle>Where to go from here</CardTitle>
-          <CardDescription>
-            Most day-to-day program work lives outside this section.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p>
-            <Link href="/dashboard" className="font-medium underline">
-              Dashboard
-            </Link>{" "}
-            — program overview, controls, evidence freshness.
-          </p>
-          <p>
-            <Link href="/controls" className="font-medium underline">
-              Controls
-            </Link>{" "}
-            — the day-to-day surface for control owners.
-          </p>
-          <p>
-            <Link href="/catalog/scf" className="font-medium underline">
-              Catalog
-            </Link>{" "}
-            — SCF anchor browser (open to all signed-in users).
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <AppShell>
+      {access === "none" ? (
+        <AdminForbiddenPanel variant="section" />
+      ) : (
+        <div className="space-y-4">
+          <AdminSectionNav
+            demoEnabled={demoEnabled}
+            platform={access === "platform"}
+          />
+          {children}
+        </div>
+      )}
+    </AppShell>
   );
 }

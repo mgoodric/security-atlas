@@ -1,36 +1,90 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc8_1_configuration_change_control
-title: "Infrastructure changes go through reviewed pull requests"
+title: "Repositories require an approving review before merge"
 description: |
   The configuration-change-control half of TSC CC8.1: infrastructure
-  changes (Terraform, Kubernetes manifests, IAM policy JSON) are
-  modified only via reviewed pull requests on the IaC repository. The
-  query asserts that the dedicated IaC repos have branch protection
-  with required reviews AND that the repo is tagged
-  `iac: true` so future automation can target it deterministically.
+  changes (Terraform, Kubernetes manifests, IAM policy JSON) are made only
+  through reviewed pull requests on the IaC repositories. The intended
+  test is that every repo tagged `iac` has branch protection with required
+  reviews.
 
-scf_anchor_id: CFG-04
-control_family: CFG
+  What runs today: a SQL query over the payloads of the GitHub connector's
+  `github.repo_protection.v2` records, one per repository's default branch
+  per connector run. The connector merges classic branch protection with
+  every active repository and organization ruleset, so a branch protected
+  only by a ruleset counts. The query takes each repository's latest
+  in-window record, keyed by its stable `repo_id`, so a rename does not
+  split one repository in two. Records without a numeric `repo_id` are
+  left out. Only repositories whose `topics` include `iac` are checked,
+  and each must have `required_reviews` of at least 1. A repository whose
+  `topics` are read and lack `iac` is out of scope.
+
+  One IaC repository whose latest record requires no approving review
+  fails the control, and so does a mistyped field. An IaC repository
+  whose `required_reviews` is omitted, because the connector could not
+  read its protection, leaves the control inconclusive unless another
+  repository fails it. A repository whose `topics` are omitted (the
+  listing gave none, or a 2.0.0 record from a connector older than #2827)
+  may be an IaC repository: it passes only if it requires an approving
+  review anyway, and is otherwise inconclusive. When two records for one
+  repository tie on `observed_at`, the worse verdict decides, and a tie
+  between an in-scope and an out-of-scope record keeps the repository in
+  scope. No in-scope repository, or no in-window v2 record, leaves the
+  control inconclusive, including when only `github.repo_protection.v1`
+  records arrived: v1 records are not read. The connector's per-record
+  verdict is not used.
+
+  Only the records the control receives are checked: a repository that
+  never reported is not seen, which waits on an inventory (#2834).
+
+scf_anchor_id: CHG-03
+scf_release: test-2026.3
+control_family: CHG
 implementation_type: automated
 owner_role: security-engineering
 lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: iac_repos_require_reviewed_prs
-    language: rego
-    evidence_kind: github.repo_protection.v1
-    description: "IaC repos require reviewed PRs and have iac:true tag"
+  - id: every_repo_requires_approving_review
+    language: sql
+    evidence_kind: github.repo_protection.v2
+    description: "Every repository topic-tagged iac has a latest protection record requiring at least one approving review"
     expression: |
-      package atlas.controls.soc2.cc8_1_cfg
-
-      default allow := false
-
-      allow if {
-        every r in input.repos {
-          r.topics[_] == "iac"
-          some p in r.protection_rules
-          p.branch == r.default_branch
-          p.required_pull_request_reviews.required_approving_review_count >= 1
-        }
-      }
+      SELECT CASE
+               WHEN count(verdict) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT repo, min(verdict) AS verdict
+        FROM (
+          SELECT repo,
+                 CASE
+                   WHEN topics IS NULL THEN greatest(review, 1)
+                   WHEN jsonb_typeof(topics) <> 'array' THEN review
+                   WHEN topics @> '["iac"]'::jsonb THEN review
+                 END AS verdict,
+                 rank() OVER (PARTITION BY repo ORDER BY observed_at DESC) AS recency
+          FROM (
+            SELECT payload->'repo_id' AS repo,
+                   observed_at,
+                   payload->'topics' AS topics,
+                   CASE
+                     WHEN payload->'required_reviews' IS NULL THEN 1
+                     WHEN jsonb_typeof(payload->'required_reviews') <> 'number' THEN 0
+                     WHEN (payload->'required_reviews')::numeric < 1 THEN 0
+                     ELSE 2
+                   END AS review
+            FROM evidence
+            WHERE CASE
+                    WHEN jsonb_typeof(payload->'repo_id') = 'number'
+                      THEN (payload->'repo_id')::numeric >= 1
+                    ELSE false
+                  END
+          ) AS checked
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY repo
+      ) AS per_repo

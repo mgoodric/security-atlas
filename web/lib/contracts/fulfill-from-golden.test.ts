@@ -51,7 +51,6 @@ const ALL_ENDPOINTS: GoldenEndpoint[] = [
   "demo-status",
   "framework-posture",
   "activity",
-  "upcoming",
   "freshness",
   "drift",
 ];
@@ -72,7 +71,7 @@ describe("fulfillFromGolden helper (slice 394)", () => {
 
   test("readGoldenVariant returns the recorded body for a known variant", () => {
     const body = readGoldenVariant("install-state", "post_first_install");
-    expect(body).toEqual({ first_install: false });
+    expect(body).toEqual({ first_install: false, single_tenant: false });
   });
 
   test("readGoldenVariant returns the empty-set variant for a dashboard route", () => {
@@ -99,7 +98,10 @@ describe("fulfillFromGolden helper (slice 394)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].status).toBe(200);
     expect(calls[0].contentType).toBe("application/json");
-    expect(JSON.parse(calls[0].body!)).toEqual({ first_install: true });
+    expect(JSON.parse(calls[0].body!)).toEqual({
+      first_install: true,
+      single_tenant: false,
+    });
   });
 
   test("fulfillFromGolden honors an explicit status (escape hatch)", async () => {

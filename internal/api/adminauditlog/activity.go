@@ -60,11 +60,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
 // activitySurfaceTag is the value written into `metaAuditParams.Surface`
@@ -106,8 +109,14 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	// Caller's stable identity for both the SQL-layer row-visibility
 	// predicate AND the meta-audit row. Prefer the resolved user_id
 	// (slice-108 IssuedBy → UserID bridge); fall back to the credential
-	// id when no user row resolves (bootstrap-key shape).
+	// id when no user row resolves (bootstrap-key shape). A JWT session's
+	// "user:<uuid>" subject resolves to the bare uuid me_audit_log.user_id
+	// holds, so the caller's own me-rows match and the meta-audit row
+	// records the user rather than the nil uuid (#2239).
 	userIdentifier := cred.UserID
+	if u, ok := credstore.CallerUserID(cred); ok {
+		userIdentifier = u.String()
+	}
 	if userIdentifier == "" {
 		userIdentifier = cred.ID
 	}
@@ -125,7 +134,7 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	// CallerIsPrivileged=true short-circuits the SQL row-visibility
 	// predicate; CallerIsPrivileged=false enables the predicate
 	// (hides feature_flag rows + restricts me-rows to the caller).
-	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
+	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "role probe", err)
 		return
@@ -156,25 +165,35 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		entries    []unifiedlog.Entry
 		nextCursor *unifiedlog.Cursor
 	)
+	gate := h.newPayloadGate(r, userIdentifier)
+	// #2173: resolved before the transaction, like the payload gate, so
+	// filtering rows reads nothing while the transaction holds a
+	// connection.
+	viewer, err := h.views.For(r)
+	var modules moduleaccess.ModuleSet
+	if err == nil {
+		modules, err = viewer.Modules()
+	}
+	if err != nil {
+		moduleaccess.WriteError(w, r, "activity module access", err)
+		return
+	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
-		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
+		// #2590: the page is cut after rows from hidden modules are
+		// skipped, so it is full whenever more visible rows exist and
+		// the cursor is set only when they do. #2477: filter by module
+		// before the payload gate, which can clear the request path a
+		// decision row is placed by.
+		var qErr error
+		entries, nextCursor, qErr = activityPage(params.queryParams, params.pageSize, modules,
+			func(p unifiedlog.QueryParams) ([]unifiedlog.Entry, error) {
+				got, _, err := unifiedlog.Query(ctx, q, p)
+				return got, err
+			})
 		if qErr != nil {
 			return qErr
 		}
-		// Apply the page-size cap + cursor derivation here (mirrors
-		// UnifiedList — the aggregator returns up to Limit rows, and
-		// the handler asks for one more than the page size to detect
-		// "more available" without an extra round-trip).
-		if len(got) > unifiedPageSize {
-			anchor := got[unifiedPageSize-1]
-			nextCursor = &unifiedlog.Cursor{
-				OccurredAt: anchor.OccurredAt,
-				Kind:       anchor.Kind,
-				RowID:      anchor.RowID,
-			}
-			got = got[:unifiedPageSize]
-		}
-		entries = got
+		gate.apply(entries)
 
 		// Meta-audit: one row per successful query, surface-tagged so
 		// forensic review can split slice 124 vs slice 270 traffic.

@@ -1,0 +1,428 @@
+{
+  "$comment": "User-facing term list (#2144). Plain-language definitions shown by <Term> tooltips in the app and published as the docs site's Terms page. A `glossary` link names the developer GLOSSARY.md entry by its heading anchor; the term's `name` must match that entry's heading or one of its bold terms. Checked by web/lib/help/terms.test.ts.",
+  "terms": [
+    {
+      "id": "residual-risk",
+      "name": "Residual risk",
+      "short": "How much risk is left once your controls are counted. It starts at the inherent severity and comes down as the linked controls prove effective, on the same 1–25 scale.",
+      "long": "Residual risk is the inherent severity multiplied by (1 − control effectiveness). Effectiveness comes from each linked control's recent evidence, not from how the control is described, so a control that keeps failing its checks lowers effectiveness and raises the residual. Two risks with the same inherent severity can have different residuals, because they have different controls. A new risk shows \"Pending evaluation\" until its controls have been evaluated."
+    },
+    {
+      "id": "inherent-severity",
+      "name": "Inherent severity",
+      "short": "How serious a risk is before any controls: likelihood times impact on a 5×5 grid, from 1 to 25.",
+      "long": "Inherent severity is the risk's raw exposure. Likelihood and impact are each scored 1–5, and their product falls into a band: Low (1–7), Medium (8–14) or High (15–25). It doesn't change when you link controls; the effect of controls shows up in the residual risk instead."
+    },
+    {
+      "id": "treatment",
+      "name": "Risk treatment",
+      "short": "The decision about what to do with a risk: mitigate, transfer, accept or avoid it. Until someone decides, it's untreated.",
+      "long": "Every new risk starts untreated. Mitigate means reducing the risk with controls or planned work, so it needs at least one linked control or action plan. Transfer means shifting it to a third party, such as an insurer, and needs a reference to the policy or contract. Accept means living with it, and needs an acceptance status. Avoid means stopping the activity that creates the risk.",
+      "glossary": "GLOSSARY.md#risk-treatment-1746"
+    },
+    {
+      "id": "acceptance",
+      "name": "Acceptance status",
+      "short": "Where a decision to accept a risk stands. A proposed acceptance is waiting for sign-off; an approved one names who accepted the risk and until when.",
+      "long": "Acceptance status applies only when a risk's treatment is accept. A proposed acceptance still counts as an open risk. Only an approved acceptance, with an accepter and an expiry date, stops the risk counting as open exposure, and only until that date.",
+      "glossary": "GLOSSARY.md#risk-treatment-1746"
+    },
+    {
+      "id": "anchor",
+      "name": "SCF anchor",
+      "short": "The control in the Secure Controls Framework (SCF) that one of your controls maps to. Framework credit flows through the anchor.",
+      "long": "Framework requirements are mapped to SCF controls, and each of your controls points at one SCF anchor. That's how a single control satisfies requirements in several frameworks at once, without being copied for each. A control's anchor fit says whether the anchor covers it exactly, partly, or not at all."
+    },
+    {
+      "id": "crosswalk",
+      "name": "Crosswalk",
+      "short": "The published mapping between a framework's requirements and SCF controls. It's how a SOC 2 or ISO 27001 requirement finds the controls that satisfy it.",
+      "long": "Crosswalk mappings come with the framework catalogs, not from your organisation. Each mapping says how a requirement relates to an SCF control (for example, equal to it, or a subset of it) and how strongly. Requirements always map to SCF controls, never directly to another framework's requirements."
+    },
+    {
+      "id": "org-mapping",
+      "name": "Org mapping",
+      "short": "A mapping your organisation makes itself, from a framework requirement to an SCF anchor, where the published crosswalk doesn't cover it.",
+      "long": "An org mapping is your organisation's own claim that a requirement is met through a particular SCF anchor. It sits alongside the published crosswalk rather than changing it, and is labelled as yours so an auditor can tell the two apart."
+    },
+    {
+      "id": "framework-scope",
+      "name": "Framework scope",
+      "short": "The part of your organisation a framework applies to, such as the systems in a PCI cardholder data environment. A control counts for a framework only where the two overlap.",
+      "long": "Each framework has its own scope: PCI, HIPAA and SOC 2 usually cover different systems. A control's effective scope for a framework is where the control applies and the framework's scope applies. A framework scope is kept as revisions; once a revision is activated it can't be changed apart from its name, and any other change makes a new revision. A framework with no activated scope shows \"Scope not set\" instead of a posture."
+    },
+    {
+      "id": "statement-of-applicability",
+      "name": "Statement of Applicability",
+      "short": "The list of a framework's requirements with a decision for each: applicable, or excluded with a reason. ISO 27001 requires one.",
+      "long": "The Statement of Applicability (SoA) is recorded on the framework scope. An excluded requirement doesn't count against that framework's posture. If a working control sits behind an exclusion, the SoA flags the contradiction so you can check the exclusion is right. You can export the SoA as CSV or xlsx."
+    },
+    {
+      "id": "verified",
+      "name": "Verified",
+      "short": "The last step of an action plan: the completed work is shown to have closed the gap.",
+      "long": "A plan with linked controls is verified by the platform, once every linked control passes its latest evaluation, and goes back to completed by itself if one stops passing. Excepted is not a pass. A plan with no linked controls is verified by hand by an admin, never by the plan's owner. If the work turns out not to have closed the gap, a completed plan is reopened to in progress.",
+      "glossary": "GLOSSARY.md#action-plan-completed-and-verified-2108-2109"
+    },
+    {
+      "id": "completed",
+      "name": "Completed",
+      "short": "An action plan whose work is done but not yet checked. The next step is verifying that the work closed the gap.",
+      "long": "Completed means the plan's owner reports the work as finished. It isn't the end of the lifecycle: a completed plan is either verified, or reopened to in progress if verification shows the gap is still there.",
+      "glossary": "GLOSSARY.md#action-plan-completed-and-verified-2108-2109"
+    },
+    {
+      "id": "self-approved",
+      "name": "Self-approved",
+      "short": "Marks a record that was approved by the same person who requested it. That's possible only when an admin has turned on Allow self-approval for the organisation.",
+      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. Even with it on, only a person approves: an API key, OAuth client or other machine credential never does. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible.",
+      "glossary": "GLOSSARY.md#self-approval-2101"
+    },
+    {
+      "id": "owner",
+      "name": "Owner",
+      "short": "The person accountable for a record, such as a risk's treatment owner or an action plan's owner. They're the one asked when it needs attention.",
+      "long": "An owner is a named person. Controls are different: they're owned by a role rather than a person (see owner role), so ownership survives people changing jobs."
+    },
+    {
+      "id": "owner-role",
+      "name": "Owner role",
+      "short": "The role that owns a control, such as it or security, rather than a named person. Your organisation's role assignments decide who that is.",
+      "long": "A control's owner role is set in its definition. The people who hold that role are the ones responsible for the control's evidence and attestations, and they change when your role assignments change, without editing the control."
+    },
+    {
+      "id": "attestation",
+      "name": "Attestation",
+      "short": "Evidence a person records by hand, stating that a control was carried out, for checks no tool can make automatically. It counts the same as automated evidence.",
+      "long": "A manual attestation goes into the same evidence record as automated evidence and follows the same freshness rules, so it has to be renewed before it goes stale. You attest that the control passed or failed, and a fail needs a reason. Only the latest attestation counts, so a later pass clears an earlier fail. An attestation can be backdated but not dated in the future. Acknowledging a policy is also an attestation: you confirm that you've read the current version, and you're asked again when a new version is published or after a year.",
+      "glossary": "GLOSSARY.md#attestation-2111"
+    },
+    {
+      "id": "evidence-freshness",
+      "name": "Evidence freshness",
+      "short": "Whether a control's latest evidence is recent enough to rely on. Each control's freshness class sets how old its evidence can get before it's stale.",
+      "long": "Freshness is separate from the evidence result. A control whose last result was a pass, but whose evidence has gone stale, doesn't count as passing. Stale evidence is flagged, never deleted, so an audit can still look back at it. A control with no evidence in its window has no result yet, which isn't the same as failing.",
+      "glossary": "GLOSSARY.md#evidence-freshness--drift-slice-016"
+    },
+    {
+      "id": "posture",
+      "name": "Posture",
+      "short": "How well one framework is covered by your controls, with how fresh their evidence is and the 90-day trend. Each framework has its own posture.",
+      "long": "Posture is worked out separately for each framework version, so a strong SOC 2 posture says nothing about ISO 27001. Requirements excluded in the Statement of Applicability don't count. A framework with no activated framework scope shows \"Scope not set\" instead of a percentage."
+    },
+    {
+      "id": "excepted",
+      "name": "Excepted",
+      "short": "A control result meaning an active exception waives the control where it applies. It is never a pass.",
+      "long": "While an approved exception is active, every part of your scope it covers shows the control as Excepted, whatever the evidence says. When the exception ends, by expiry or revocation, the control is re-evaluated and shows its normal result again. Excepted is never shown or counted as a pass. In a framework's posture an excepted control still counts as covered, and the share of requirements covered only by exception is shown separately, so a waiver never reads as a control that has proved itself.",
+      "glossary": "GLOSSARY.md#exception-slice-021"
+    },
+    {
+      "id": "roll-up",
+      "name": "Roll-up",
+      "short": "A risk that summarises other risks linked under it. Roll-ups are left out of register counts and top risks, so nothing is counted twice.",
+      "long": "A roll-up's severity is worked out from its children each time you look, and sits beside the severity it was given itself. When the children add up to more than that, the roll-up is flagged for review. The register can show roll-ups with \"Show roll-ups\"."
+    },
+    {
+      "id": "audit-period",
+      "name": "Audit period",
+      "short": "The window of time an auditor reviews for one framework, such as SOC 2 2026 Q2. Freezing it fixes which evidence the audit can draw on.",
+      "long": "Each audit period belongs to one framework version, so a SOC 2 and an ISO 27001 audit over the same quarter are separate. A period starts open. When it's frozen, samples are drawn only from evidence observed up to the moment of freezing.",
+      "glossary": "GLOSSARY.md#auditperiod-slice-028"
+    },
+    {
+      "id": "freeze",
+      "name": "Freeze",
+      "short": "Locking something so it can't change. A frozen audit period only uses evidence observed up to the freeze; an activated framework-scope revision can't be changed apart from its name.",
+      "long": "Freezing an audit period is final: it can't be unfrozen or edited, and the app records a fingerprint of exactly what was frozen. Live work carries on as normal; only the audit's view stops moving. Framework scopes work the same way: once a revision is activated, only its name can change, and anything else means making a new revision, so you can always see the scope that was in force at a given date."
+    },
+    {
+      "id": "tenant",
+      "name": "Tenant",
+      "short": "One organisation's separate space in security-atlas, with its own controls, risks, evidence, people and settings. Most installs have just one, shown as your organisation.",
+      "long": "Nothing in one tenant can be seen from another: the database itself keeps them apart. A person can belong to several tenants and switch between them from the header, and holds separate roles in each one. An install has a single tenant unless whoever runs it opts in to multi-tenant."
+    },
+    {
+      "id": "multi-tenant",
+      "name": "Multi-tenant",
+      "short": "An install that holds more than one tenant, such as a consultant running programmes for several clients. It's off unless whoever runs the install opts in.",
+      "long": "A new install has one tenant. To add a second, whoever runs the deployment turns on the multi-tenant setting (ATLAS_ALLOW_MULTI_TENANT=true) and restarts it; a super admin then creates the tenant on the Tenants page. Until a second tenant exists, the app hides the tenant picker and the Tenants and Super admins links, and calls the one tenant your organisation."
+    },
+    {
+      "id": "role",
+      "name": "Role",
+      "short": "What a person may do in a tenant: admin, GRC engineer, control owner, auditor or viewer. A person can hold several, and holds them separately in each tenant.",
+      "long": "Admins configure the tenant and assign roles. GRC engineers author controls, mappings and policies. Control owners keep the controls they own up to date and attest to manual ones. Auditors read what their audit period covers and annotate samples. Viewers read dashboards and controls and change nothing. A role says what you can do; the modules switched on for the tenant say where."
+    },
+    {
+      "id": "super-admin",
+      "name": "Super admin",
+      "short": "A person who manages the install as a whole: every Admin page, creating tenants, and granting or demoting other super admins. It isn't a role inside a tenant.",
+      "long": "Super admin sits above the tenants. On its own it gives no right to work in a tenant's programme: a super admin still needs a role in a tenant to read or change its records. A new install's first administrator becomes its first super admin, and the last remaining super admin can't be demoted, so an install is never left without one."
+    },
+    {
+      "id": "api-key",
+      "name": "API key",
+      "short": "A credential a program uses instead of a person signing in, such as a connector pushing evidence or the command-line tool. Its secret is shown once, when it's issued.",
+      "long": "A key acts with the access it was issued with, and a key issued with admin privileges can manage the tenant. A machine credential never approves anything, whatever it holds. A key expires after the number of days set when it was issued. Rotating it gives a new secret while the old one keeps working for a grace period, 7 days by default, so the program can switch over without a gap. Revoking it stops it at once."
+    },
+    {
+      "id": "sso",
+      "name": "Single sign-on (SSO)",
+      "short": "Signing in with your organisation's existing identity provider, such as Okta, Google or Entra ID, instead of a separate security-atlas password.",
+      "long": "security-atlas trusts your identity provider to say who someone is, over the OpenID Connect (OIDC) standard; it never issues identities itself. Each tenant has one identity provider. Which roles a person holds is still decided in security-atlas, on the Users page."
+    },
+    {
+      "id": "module",
+      "name": "Module",
+      "short": "A top-level area of the product, such as Risk, Policies or Questionnaires. Core modules are always on; an optional module can be switched off for the whole tenant.",
+      "long": "The core modules, which the rest depends on, are Controls, Evidence, Frameworks and the SCF catalog, Scopes and framework scopes, Audit periods, Dashboard, and Settings & admin. The optional ones are Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions and Board reporting. A feature is a smaller switch inside a module, and is only on while its module is.",
+      "glossary": "GLOSSARY.md#modules-in-design"
+    },
+    {
+      "id": "switched-off",
+      "name": "Switched off",
+      "short": "An optional module hidden from everyone in the tenant: its pages leave the sidebar and can't be opened. Its data is kept, and switching it back on brings everything back.",
+      "long": "Switching a module off deletes nothing. Its records, their history and the module's feature settings stay as they were, so switching it on again restores the module as you left it.",
+      "glossary": "GLOSSARY.md#modules-in-design"
+    },
+    {
+      "id": "population",
+      "name": "Sample population",
+      "short": "The set of evidence an auditor can sample from for one control: the control's evidence in a scope, over a window of time.",
+      "long": "A population is defined by a control, the part of your organisation it covers, and a time window. In a frozen audit period the population only holds evidence observed up to the freeze, so evidence that arrives later can't slip into the audit."
+    },
+    {
+      "id": "sample",
+      "name": "Sample",
+      "short": "A handful of evidence records drawn from a population for an auditor to test. The draw uses a seed, so the same seed always picks the same records.",
+      "long": "Auditors rarely look at every record. They draw a sample of a set size from the population and record a result and notes against each record they test. Because the draw is repeatable from its seed, anyone can check later that the sample wasn't picked by hand."
+    },
+    {
+      "id": "assigned-auditor",
+      "name": "Assigned auditor",
+      "short": "A person with the auditor role who has been given one audit period. They see that period's samples, populations and the evidence in them, and can draw samples.",
+      "long": "An admin assigns auditors on the audit period's page, one period at a time. An auditor can read controls, policies and framework scopes across the organisation, but samples, populations and evidence only for the periods they are assigned to. Auditors can't freeze a period or change your controls."
+    },
+    {
+      "id": "oscal",
+      "name": "OSCAL",
+      "short": "The Open Security Controls Assessment Language: a NIST standard file format for security plans, assessments and control claims. security-atlas exports audits in it and imports vendor claims from it.",
+      "long": "OSCAL lets security tools and auditors exchange records without retyping them. security-atlas exports a frozen audit period as an OSCAL bundle (system security plan, assessment plan and results, and plan of action and milestones) with a signed manifest. It reads vendors' OSCAL component definitions as vendor claims."
+    },
+    {
+      "id": "board-pack",
+      "name": "Board pack",
+      "short": "A quarterly report for your board: posture, top risks, coverage trend, open findings and asks of the board. Each section is approved before the pack is published, and a published pack never changes.",
+      "long": "A board pack is generated as a draft from your live data as of a quarter-end date. Its narrative is written from fixed templates, not by AI. An approver edits and approves each section, then publishes the pack, which freezes it so the board always sees the version that was presented."
+    },
+    {
+      "id": "csf-tier",
+      "name": "CSF tier",
+      "short": "How rigorous and risk-informed your security programme is, on the NIST Cybersecurity Framework's four steps: Partial, Risk Informed, Repeatable and Adaptive.",
+      "long": "A tier describes how the programme is run as a whole, not how many controls you have. It is a judgement your organisation records with a short rationale; the CSF doesn't say every organisation must reach Tier 4."
+    },
+    {
+      "id": "csf-profile",
+      "name": "CSF profile",
+      "short": "A list of NIST CSF outcomes with how far each is achieved. The Current profile is where you are today; the Target profile is where you mean to be.",
+      "long": "Each outcome, called a Subcategory, is marked not targeted, partial, largely or fully. Comparing the two profiles shows the gap: a Subcategory whose target is above its current level is work still to do, and one already at or above its target is met."
+    },
+    {
+      "id": "vendor-claim",
+      "name": "Vendor claim",
+      "short": "A vendor's own statement that their product meets a control, imported from their OSCAL file. It is the vendor's word, not evidence security-atlas has checked.",
+      "long": "Each claim names a control and the vendor's explanation. You can accept it, reject it, or mark that you need more information. Accepting records that you rely on the vendor's statement and includes it, labelled as vendor-attested, in your OSCAL security plan export. It doesn't make any of your controls pass."
+    },
+    {
+      "id": "policy-acknowledgment",
+      "name": "Policy acknowledgment",
+      "short": "A person's record that they have read the published version of a policy. It counts for that version only and lasts a year.",
+      "long": "Each policy lists the roles whose members must acknowledge it. When a new version is published, or a year has passed, earlier acknowledgments no longer count and the person is asked again. Each acknowledgment is kept as evidence, so an auditor can see who read which version and when."
+    },
+    {
+      "id": "vendor-criticality",
+      "name": "Vendor criticality",
+      "short": "How much harm a vendor could do to you if it failed or was breached: low, medium or high.",
+      "long": "Criticality is your organisation's own judgement, usually based on what data the vendor holds and how much of your product depends on it. It helps you decide how often to review each vendor and which reviews to do first."
+    },
+    {
+      "id": "review-cadence",
+      "name": "Review cadence",
+      "short": "How often a vendor must be reviewed: monthly, quarterly, every six months or yearly. The next review is due one cadence after the last.",
+      "long": "A vendor that has never been reviewed is due its first review a set time after it was added. Once the due date passes, the vendor shows as overdue until a review is recorded."
+    },
+    {
+      "id": "dpa",
+      "name": "Data processing agreement (DPA)",
+      "short": "A contract in which a vendor commits to how it will handle personal data it processes for you. Privacy laws such as GDPR require one with such vendors.",
+      "long": "The vendor register records whether a DPA is signed and when. A missing DPA with a vendor that holds personal data is a gap an auditor or a customer will ask about."
+    },
+    {
+      "id": "personnel-checklist",
+      "name": "Personnel checklist",
+      "short": "The security steps for one person joining (onboarding) or leaving (offboarding), each item recorded when done. Offboarding is due within 24 hours.",
+      "long": "Onboarding covers approving and granting access; offboarding covers revoking access and ending sessions. Each completed item is kept as evidence for your access controls. The checklist records the work; it doesn't grant or remove access itself."
+    },
+    {
+      "id": "questionnaire",
+      "name": "Security questionnaire",
+      "short": "A list of questions a customer sends to check how you protect their data before they buy, usually as a spreadsheet.",
+      "long": "Common questionnaires repeat the same topics in different words. Answering each question from your controls, policies and evidence, with citations, keeps your answers consistent and lets you reuse them for the next customer."
+    },
+    {
+      "id": "prior-answer",
+      "name": "Prior answer",
+      "short": "An answer you gave to an earlier questionnaire question linked to the same SCF anchor, offered as a starting point for a new one.",
+      "long": "Answers you save to the library are matched to new questions through their SCF anchor, so a question worded differently by another customer still finds your earlier answer. Using one copies its text; you can still edit it."
+    },
+    {
+      "id": "scf",
+      "name": "Secure Controls Framework (SCF)",
+      "short": "A free catalog of about 1,400 security controls, mapped to more than 200 frameworks. security-atlas uses it as the common language between frameworks.",
+      "long": "Instead of mapping every framework to every other framework, each framework's requirements are mapped to SCF controls. Your controls point at SCF controls, called anchors, so a control earns credit in every framework whose requirements map to its anchor."
+    },
+    {
+      "id": "strm",
+      "name": "STRM relationship",
+      "short": "How a framework requirement relates to an SCF control in a mapping: equal, a subset, a superset, or overlapping. Each mapping also carries a strength.",
+      "long": "STRM (set theory relationship mapping) comes from NIST IR 8477, the method the SCF uses for its crosswalks. A subset means the requirement asks for less than the SCF control covers; a superset means it asks for more."
+    },
+    {
+      "id": "evaluation",
+      "name": "Control evaluation",
+      "short": "The check that reads a control's current evidence and works out its result: pass, fail, not applicable, inconclusive or excepted.",
+      "long": "Evaluation runs when new evidence arrives, on a schedule, when someone chooses Evaluate now on a control, and when an exception on the control starts, ends or is revoked. It only reads evidence and never changes it, and every run is kept, so you can see what a control's result was on any past date. A control with no current evidence is inconclusive, which is not the same as failing.",
+      "glossary": "GLOSSARY.md#control-evaluation-slice-012"
+    },
+    {
+      "id": "evidence-ledger",
+      "name": "Evidence ledger",
+      "short": "The permanent record of every piece of evidence your organisation has collected. Records are added to it, never edited or deleted.",
+      "long": "Each record says what was observed, when, by which tool or person, and for which control and part of your scope, with a fingerprint (hash) of its content. Because nothing in the ledger changes, an auditor can check what you knew on any past date, and a mistake in evaluation is fixed by evaluating again rather than by editing evidence."
+    },
+    {
+      "id": "exception",
+      "name": "Exception",
+      "short": "An approved, time-limited decision to accept that a control is not met in part of your scope. While it is active, the control shows as Excepted there.",
+      "long": "An exception needs a reason and an end date no more than a year after it was requested, and it never renews by itself. Someone requests it, an approver (normally a different person) approves or denies it, and an approved exception takes effect once it is activated. It ends when it expires or when an approver revokes it, and every step is logged.",
+      "glossary": "GLOSSARY.md#exception-slice-021"
+    },
+    {
+      "id": "implementation-checklist",
+      "name": "Implementation checklist",
+      "short": "A to-do list, per team, of the work needed to put your in-scope controls in place. It is an AI-assisted draft until each team's section is approved.",
+      "long": "Each control goes to a team (infrastructure, engineering or security) by its owner role, by a fixed rule rather than by the AI. The AI writes the tasks and cites the control behind each one. Controls that match no team are listed separately, so none drop out. Only approved sections can be exported."
+    },
+    {
+      "id": "action-plan",
+      "name": "Action plan",
+      "short": "A commitment to fix a gap: the work, its owner and its due date, linked to the risks it reduces and the controls it puts right.",
+      "long": "A plan moves from draft to in progress, possibly through blocked, to completed and then verified. Completed means the owner says the work is done; verified means it is shown to have closed the gap. A risk treated by mitigation can point to an action plan instead of a control."
+    },
+    {
+      "id": "fair",
+      "name": "FAIR",
+      "short": "A way of scoring a risk as the loss you can expect in dollars a year, instead of on the 5×5 grid. FAIR values are never put into Low, Medium or High bands.",
+      "long": "FAIR (Factor Analysis of Information Risk) estimates how often a loss is likely and how large it would be, and combines them into an annualised loss exposure. The register shows FAIR risks in dollars and, when sorted by severity, lists them after the 5×5 risks. A FAIR risk cannot be linked under a roll-up, which needs a 5×5 score."
+    },
+    {
+      "id": "org-unit",
+      "name": "Org unit",
+      "short": "A part of your organisation, such as a business unit, department or team. Org units form a tree, and each risk can belong to one.",
+      "long": "Org units let you see risk the way your organisation is built: which teams carry which risks, and where the same problem appears in several places. They are separate from scope, which describes the systems and data a control applies to."
+    },
+    {
+      "id": "theme",
+      "name": "Theme",
+      "short": "A tag on a risk, such as access control or tech debt, that cuts across categories and org units. A risk can carry several.",
+      "long": "Ten built-in themes are shared by every organisation and cannot be renamed or deleted. You can add your own beside them. The same theme turning up in several teams is often a sign of one larger risk, which you can record as a roll-up.",
+      "glossary": "GLOSSARY.md#theme-1811"
+    },
+    {
+      "id": "decision",
+      "name": "Decision",
+      "short": "A record of a trade-off someone made, such as deferring a piece of work, with who decided, why, and when to look at it again.",
+      "long": "A decision is broader than an exception: an exception waives one control for a time, while a decision records the reasoning behind a choice. Decisions are always made and recorded by a person. Once a decision's revisit date passes, it is marked overdue until someone acts on it.",
+      "glossary": "GLOSSARY.md#decision-log-slice-055"
+    },
+    {
+      "id": "needs-attention",
+      "name": "Needs attention",
+      "short": "One list of the work that needs someone now, most urgent first: failing controls, waiting approvals, overdue reviews, then what is due in the next two weeks.",
+      "long": "For you keeps what you own and what waits for your approval. Everyone, open to admins and GRC engineers, shows the whole organisation and adds controls and open risks that have no owner yet. Each item links to the page where you act on it."
+    },
+    {
+      "id": "approver",
+      "name": "Approver",
+      "short": "Someone who may approve exceptions, risk acceptances, policies and framework scopes. Today that means admins and GRC engineers.",
+      "long": "An approver still can't approve their own request unless the organisation allows self-approval. Only a person approves: an API key or other machine credential never does."
+    },
+    {
+      "id": "second-person-rule",
+      "name": "Second-person rule",
+      "short": "The person who asks for an approval cannot also give it. Someone else must approve.",
+      "long": "It applies to exceptions, risk acceptances, policies and framework scopes, so every commitment is checked by two people. A small team can relax it by turning on Allow self-approval; a record approved that way is marked Self-approved."
+    },
+    {
+      "id": "calendar-subscription",
+      "name": "Calendar subscription",
+      "short": "A personal, read-only link that lets Google, Apple or Outlook Calendar show your compliance dates and keep them up to date.",
+      "long": "The link carries its own access, so anyone who has it can read the events it lists. Keep it private, as you would a password."
+    },
+    {
+      "id": "board-kpi",
+      "name": "Board KPI",
+      "short": "One of the few top-level numbers that tell the board whether security is improving. Each is fed by program and team metrics.",
+      "long": "A board KPI has a value over time and, usually, a target. Following its cascade shows which program and team metrics drive it, so a change at the top can be traced to the work underneath."
+    },
+    {
+      "id": "metric-cascade",
+      "name": "Cascade",
+      "short": "The tree of metrics under a board KPI: the program metrics that feed it, and the team metrics that feed those.",
+      "long": "The cascade lets you see why a top-level number moved, by walking down to the metric that changed."
+    },
+    {
+      "id": "metric-target",
+      "name": "Target",
+      "short": "The value a metric should reach, with optional warning and critical levels. The metric's badge turns green, yellow or red against them.",
+      "long": "Green means the latest value meets the target, yellow that it falls short but is above warning, and red that it passes critical. The colour comes from the numbers alone. Only admins set targets."
+    },
+    {
+      "id": "activity-log",
+      "name": "Activity log",
+      "short": "The append-only record of who did what and when in your organisation. Nobody can edit or delete an entry.",
+      "long": "It is how you answer who approved something or when a control changed, and it is what auditors rely on. GRC engineers, auditors and super admins see every event; everyone else sees the organisation's shared events and their own account activity."
+    },
+    {
+      "id": "evidence-horizon",
+      "name": "Evidence horizon",
+      "short": "The moment an audit period was frozen. Its populations and samples hold only evidence observed up to then.",
+      "long": "Until a period is frozen, sampling draws from current evidence and there is no horizon. Freezing sets it once, for good, so evidence that arrives during fieldwork can't slip into the audit while your live programme carries on."
+    },
+    {
+      "id": "walkthrough",
+      "name": "Walkthrough",
+      "short": "A recorded explanation of how a control actually runs, with an optional attachment, kept for the auditor to read.",
+      "long": "Auditors often ask someone to walk them through a control rather than only sample its evidence. A walkthrough records that narrative against the control, with any screenshot or document attached. Its content is hashed, so a later change to the record is detectable."
+    },
+    {
+      "id": "requirement",
+      "name": "Requirement",
+      "short": "One line of a framework, such as a single SOC 2 criterion or ISO 27001 clause, that an auditor checks you against.",
+      "long": "Requirements are not met by controls written for them one by one. Each requirement maps to SCF anchors, through the published crosswalk or your own org mappings, and the controls on those anchors provide its coverage."
+    },
+    {
+      "id": "coverage-strength",
+      "name": "Coverage strength",
+      "short": "How well your controls cover a requirement, from 0 to 1: a mapping's strength times your best control's effectiveness, on the best path.",
+      "long": "For each SCF anchor the requirement maps to, the mapping's strength is multiplied by the effectiveness of your best evaluated control on that anchor. The requirement takes the highest of these, so one strong path is enough and a weaker alternative doesn't drag it down."
+    },
+    {
+      "id": "confidence-band",
+      "name": "Confidence band",
+      "short": "Coverage strength put into words: uncovered, weak (below 0.5), partial (0.5 up to 0.8) or strong (0.8 and above).",
+      "long": "A requirement with no contributing control is uncovered. A requirement your framework scope excludes shows as excluded instead of a band, with the justification from the Statement of Applicability."
+    }
+  ]
+}
