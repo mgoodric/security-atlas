@@ -62,6 +62,12 @@ updates:
       tanstack:
         patterns:
           - "@tanstack/*"
+      # #3100 — @vitest/coverage-v8 pins vitest as an exact peer, so the
+      # two must move in one PR (#2629 bumped vitest alone).
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       # Slice 693 — catch-all for remaining npm minor/patch bumps.
       npm-minor-patch:
         patterns:

@@ -96,6 +96,11 @@ describe("validateRevokeBody (pure)", () => {
       "tenant_id is required",
     );
   });
+  test("requires UUID tenant_id", () => {
+    expect(validateRevokeBody({ user_id: USER_ID, tenant_id: "x" })).toBe(
+      "tenant_id must be a UUID",
+    );
+  });
   test("accepts a valid revoke", () => {
     expect(
       validateRevokeBody({ user_id: USER_ID, tenant_id: TENANT_ID }),

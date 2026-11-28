@@ -152,6 +152,10 @@ export default defineConfig({
         // (e.g. components/calendar/link-for.ts) — see vitest
         // `include` block for the discipline.
         "components/**/*.ts",
+        // #3100: vitest 5 matches these globs against the path from the
+        // project root, so `lib/**/*.ts` no longer picks up
+        // e2e-audit/lib/** as it did under vitest 4. Named here to keep it.
+        "e2e-audit/lib/**/*.ts",
       ],
       exclude: [
         "**/*.test.ts",
